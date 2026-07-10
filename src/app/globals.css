@@ -1,0 +1,151 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  /* Sharp geometric: zero border radius globally */
+  --radius-sm: 0px;
+  --radius-md: 0px;
+  --radius-lg: 0px;
+  --radius-xl: 0px;
+}
+
+/* Dark mode is the default. Light mode is opt-in via `.light` on <html>. */
+:root, .dark {
+  --radius: 0px;
+  /* zinc-950 background, zinc-900 cards, zinc-800 borders */
+  --background: oklch(0.13 0 0);            /* zinc-950 */
+  --foreground: oklch(0.97 0 0);            /* zinc-100 */
+  --card: oklch(0.17 0 0);                  /* zinc-900 */
+  --card-foreground: oklch(0.97 0 0);
+  --popover: oklch(0.17 0 0);
+  --popover-foreground: oklch(0.97 0 0);
+  --primary: oklch(0.78 0.18 152);          /* emerald-400 — strong accent */
+  --primary-foreground: oklch(0.13 0 0);
+  --secondary: oklch(0.21 0 0);             /* zinc-800 */
+  --secondary-foreground: oklch(0.97 0 0);
+  --muted: oklch(0.21 0 0);
+  --muted-foreground: oklch(0.65 0 0);      /* zinc-400 */
+  --accent: oklch(0.24 0 0);
+  --accent-foreground: oklch(0.97 0 0);
+  --destructive: oklch(0.62 0.22 25);       /* red-500 */
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 12%);
+  --ring: oklch(0.78 0.18 152);
+  --chart-1: oklch(0.78 0.18 152);          /* emerald */
+  --chart-2: oklch(0.70 0.18 80);           /* amber */
+  --chart-3: oklch(0.65 0.20 250);          /* sky */
+  --chart-4: oklch(0.62 0.22 25);           /* red */
+  --chart-5: oklch(0.70 0.20 305);          /* violet */
+  --sidebar: oklch(0.15 0 0);
+  --sidebar-foreground: oklch(0.97 0 0);
+  --sidebar-primary: oklch(0.78 0.18 152);
+  --sidebar-primary-foreground: oklch(0.13 0 0);
+  --sidebar-accent: oklch(0.21 0 0);
+  --sidebar-accent-foreground: oklch(0.97 0 0);
+  --sidebar-border: oklch(1 0 0 / 8%);
+  --sidebar-ring: oklch(0.78 0.18 152);
+  --success: oklch(0.78 0.18 152);
+  --success-foreground: oklch(0.13 0 0);
+  --warning: oklch(0.78 0.16 75);
+  --warning-foreground: oklch(0.13 0 0);
+}
+
+.light {
+  --radius: 0px;
+  --background: oklch(0.98 0 0);
+  --foreground: oklch(0.13 0 0);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.13 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.13 0 0);
+  --primary: oklch(0.55 0.18 152);
+  --primary-foreground: oklch(0.98 0 0);
+  --secondary: oklch(0.94 0 0);
+  --secondary-foreground: oklch(0.13 0 0);
+  --muted: oklch(0.94 0 0);
+  --muted-foreground: oklch(0.45 0 0);
+  --accent: oklch(0.94 0 0);
+  --accent-foreground: oklch(0.13 0 0);
+  --destructive: oklch(0.55 0.22 25);
+  --border: oklch(0.85 0 0);
+  --input: oklch(0.85 0 0);
+  --ring: oklch(0.55 0.18 152);
+  --sidebar: oklch(0.96 0 0);
+  --sidebar-foreground: oklch(0.13 0 0);
+  --sidebar-primary: oklch(0.55 0.18 152);
+  --sidebar-primary-foreground: oklch(0.98 0 0);
+  --sidebar-accent: oklch(0.94 0 0);
+  --sidebar-accent-foreground: oklch(0.13 0 0);
+  --sidebar-border: oklch(0.85 0 0);
+  --sidebar-ring: oklch(0.55 0.18 152);
+  --success: oklch(0.55 0.18 152);
+  --success-foreground: oklch(0.98 0 0);
+  --warning: oklch(0.55 0.16 75);
+  --warning-foreground: oklch(0.98 0 0);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+    /* Hard-override every Tailwind/shadcn rounded-* utility to 0 so the
+       dark sharp-geometric design system is enforced globally. */
+    border-radius: 0 !important;
+  }
+  html { color-scheme: dark; }
+  body {
+    @apply bg-background text-foreground;
+    font-feature-settings: "tnum" 1, "cv11" 1;
+  }
+  /* Monospace numeric cells: any element with `data-num` will use the mono
+     font and tabular-nums. Used everywhere money/qty/dates appear. */
+  [data-num] {
+    font-family: var(--font-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.01em;
+  }
+}
+
+/* Custom scrollbar for the dense tables / long lists. */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: oklch(0.15 0 0); }
+::-webkit-scrollbar-thumb { background: oklch(0.28 0 0); }
+::-webkit-scrollbar-thumb:hover { background: oklch(0.35 0 0); }

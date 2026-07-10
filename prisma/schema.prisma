@@ -1,0 +1,183 @@
+// Accounting-First Garments ERP — Phase 1 schema
+// All money values are stored as BigInt minor units (paisas) to satisfy
+// the "integer minor units" rule and avoid floating-point drift.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// =================== Identity & Access ===================
+// We use NextAuth (credentials provider) backed by Prisma in place of
+// Supabase Auth. The `User` table is the auth identity; `Profile` is the
+// 1:1 business-side record that carries role + business linkage. There is
+// no duplicated standalone `users` auth table.
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  name         String?
+  passwordHash String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  profile      Profile?
+}
+
+model Profile {
+  id          String   @id @default(cuid())
+  userId      String   @unique
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  businessId  String
+  business    Business @relation(fields: [businessId], references: [id])
+  roleId      String
+  role        Role     @relation(fields: [roleId], references: [id])
+  displayName String
+  phone       String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([businessId])
+  @@index([roleId])
+}
+
+model Role {
+  id          String   @id @default(cuid())
+  businessId  String
+  business    Business @relation(fields: [businessId], references: [id])
+  name        String
+  isSystem    Boolean  @default(false)
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  profiles    Profile[]
+  permissions RolePermission[]
+
+  @@unique([businessId, name])
+}
+
+model Permission {
+  id              String           @id @default(cuid())
+  code            String           @unique
+  module          String
+  description     String?
+  rolePermissions RolePermission[]
+
+  @@index([module])
+}
+
+model RolePermission {
+  id           String      @id @default(cuid())
+  roleId       String
+  role         Role        @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permissionId String
+  permission   Permission  @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@unique([roleId, permissionId])
+}
+
+// =================== Business ===================
+
+model Business {
+  id         String   @id @default(cuid())
+  name       String
+  legalName  String?
+  phone      String?
+  address    String?
+  currency   String   @default("PKR")
+  timezone   String   @default("Asia/Karachi")
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  profiles         Profile[]
+  roles            Role[]
+  accountCategories AccountCategory[]
+  accounts         Account[]
+  businessAccounts BusinessAccount[]
+  auditLogs        AuditLog[]
+}
+
+// =================== Chart of Accounts ===================
+
+model AccountCategory {
+  id         String   @id @default(cuid())
+  businessId String
+  business   Business @relation(fields: [businessId], references: [id])
+  code       String
+  name       String
+  type       String
+
+  accounts Account[]
+
+  @@unique([businessId, code])
+}
+
+model Account {
+  id                 String           @id @default(cuid())
+  businessId         String
+  business           Business         @relation(fields: [businessId], references: [id])
+  code               String
+  name               String
+  categoryId         String
+  category           AccountCategory  @relation(fields: [categoryId], references: [id])
+  parentId           String?
+  parent             Account?         @relation("AccountHierarchy", fields: [parentId], references: [id])
+  children           Account[]        @relation("AccountHierarchy")
+  isActive           Boolean          @default(true)
+  isBusinessAccount  Boolean          @default(false)
+  isPartyAccount     Boolean          @default(false)
+  partyType          String?
+  // Server-maintained cache in paisas; always derived from voucher lines.
+  // In Phase 1 (no vouchers yet) it stays 0 for newly-created business accounts.
+  balanceCache       BigInt           @default(0)
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+
+  businessAccount BusinessAccount?
+
+  @@unique([businessId, code])
+  @@index([categoryId])
+  @@index([parentId])
+  @@index([businessId, isBusinessAccount])
+}
+
+model BusinessAccount {
+  id            String   @id @default(cuid())
+  businessId    String
+  business      Business @relation(fields: [businessId], references: [id])
+  accountId     String   @unique
+  account       Account  @relation(fields: [accountId], references: [id])
+  name          String
+  type          String
+  accountHolder String?
+  bankName      String?
+  accountNumber String?
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([businessId])
+  @@index([type])
+}
+
+// =================== Audit Log ===================
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  businessId String
+  business   Business @relation(fields: [businessId], references: [id])
+  userId     String?
+  action     String
+  entity     String
+  entityId   String?
+  details    String?
+  timestamp  DateTime @default(now())
+
+  @@index([businessId, timestamp])
+  @@index([entity, entityId])
+}

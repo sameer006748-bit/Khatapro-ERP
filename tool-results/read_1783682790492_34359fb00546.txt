@@ -1,0 +1,1452 @@
+     1→# MASTER BUILD PROMPT — Accounting-First Garments ERP / PWA
+     2→
+     3→**Target agent:** GLM 5.2
+     4→**Recommended reasoning:** High / Extra High
+     5→**Project status:** Greenfield / blank repo
+     6→**Stack:** Next.js App Router + TypeScript strict + Tailwind CSS + shadcn/ui + Supabase Postgres/Auth/RLS
+     7→**Market:** Pakistani SMB — retail / wholesale / garments / kapra business
+     8→**Currency:** PKR
+     9→**Timezone:** Asia/Karachi
+    10→**Deployment target:** Vercel free tier
+    11→
+    12→---
+    13→
+    14→## ROLE
+    15→
+    16→You are the lead full-stack engineer building a production-grade, accounting-first ERP/PWA for a Pakistani garments business.
+    17→
+    18→This is a brand-new repository. Nothing exists yet.
+    19→
+    20→You will build in **10 strict sequential phases**. You are NOT allowed to start Phase N+1 until Phase N has been verified working in a real browser and the user explicitly approves moving forward.
+    21→
+    22→Lint passing, `tsc` passing, and `build` succeeding are necessary but NOT sufficient. They do not prove the feature works. Every phase must end with a real browser click-through test log.
+    23→
+    24→If something is broken, say so plainly. Do not claim completion unless you actually verified it.
+    25→
+    26→---
+    27→
+    28→## EXECUTION GATE — READ BEFORE CODING
+    29→
+    30→**Start with Phase 1 only.**
+    31→
+    32→Do not implement Phase 2 or any later phase until the user reviews the Phase 1 browser test log and explicitly approves the next phase.
+    33→
+    34→This applies to every phase:
+    35→- Build one phase only.
+    36→- Verify it in a real browser.
+    37→- Report files changed, what was built, and exact click-through test results.
+    38→- Stop.
+    39→- Wait for user approval before continuing.
+    40→
+    41→Do not batch multiple phases into one run.
+    42→
+    43→---
+    44→
+    45→## ABSOLUTE CORE RULE
+    46→
+    47→Normal users must never manually create debit/credit journal entries during day-to-day work.
+    48→
+    49→Users only interact with business forms:
+    50→
+    51→- Counter Sale Bill
+    52→- Online Sale Bill
+    53→- OFC / Out-of-City Sale Bill
+    54→- Purchase Bill
+    55→- Expense Batch
+    56→- Receipt Voucher
+    57→- Payment Voucher
+    58→- Contra Entry
+    59→- Petty Cash
+    60→- Journal Voucher — Accountant/Owner only, for manual adjustment
+    61→
+    62→Every business form automatically generates a balanced double-entry voucher through:
+    63→
+    64→- `vouchers`
+    65→- `voucher_lines`
+    66→
+    67→Accounting is invisible infrastructure. The user fills a business form; the system posts the accounting.
+    68→
+    69→Double-entry must be enforced at the server/database layer, not only in UI.
+    70→
+    71→Do NOT try to enforce voucher balance using a simple Postgres row-level CHECK constraint, because voucher balancing requires aggregate validation across multiple `voucher_lines`.
+    72→
+    73→Voucher posting must happen only through a server-side transaction/RPC such as `post_voucher()`.
+    74→
+    75→---
+    76→
+    77→## TECH STACK
+    78→
+    79→Use:
+    80→
+    81→- Next.js 14+ App Router
+    82→- TypeScript strict mode
+    83→- Tailwind CSS
+    84→- shadcn/ui
+    85→- Supabase Postgres
+    86→- Supabase Auth
+    87→- Supabase RLS
+    88→- Vercel free tier
+    89→
+    90→RLS must be designed from Phase 1. Do not retrofit RLS later.
+    91→
+    92→Never expose service-role keys to the browser.
+    93→
+    94→For permission checks that need to query roles/permissions, use carefully designed `SECURITY DEFINER` helper functions where needed to avoid recursive RLS policy bugs.
+    95→
+    96→PWA installability is required, but full offline accounting writes/sync are NOT required in MVP. The app requires a live connection to post accounting data.
+    97→
+    98→Do not build unsafe offline financial writes without conflict-resolution design.
+    99→
+   100→---
+   101→
+   102→## DESIGN SYSTEM
+   103→
+   104→Do not build a generic soft SaaS UI.
+   105→
+   106→Required design:
+   107→
+   108→- Dark mode as default
+   109→- Sharp geometric rectangular layout
+   110→- Zero or near-zero border radius
+   111→- Override shadcn rounded corners globally
+   112→- One strong accent color on dark neutral-gray background
+   113→- Desktop: sharp grid-line structure, dense tables, sidebar navigation
+   114→- Mobile: card-based, big touch targets, bottom navigation, minimal tables
+   115→- Monospace font for all numeric/business values:
+   116→  - amounts
+   117→  - balances
+   118→  - quantities
+   119→  - invoice numbers
+   120→  - dates in tables
+   121→  - ledger figures
+   122→- Sans-serif font for normal labels/text
+   123→
+   124→Mobile and desktop UI must be meaningfully different:
+   125→- Mobile = fast, touch-first, one-hand use
+   126→- Desktop = accounting/reporting/dashboard-heavy
+   127→
+   128→---
+   129→
+   130→## MVP SCOPE
+   131→
+   132→For MVP, build as a **single-business ERP per deployment**.
+   133→
+   134→Still add `business_id` to all business-data tables so the schema can become multi-tenant later without redesign.
+   135→
+   136→Do not build multi-tenant UI/logic now.
+   137→
+   138→All business dates, daily closings, reports, invoice dates, and dashboard date filters use Pakistan local business timezone: `Asia/Karachi`.
+   139→
+   140→Store timestamps in UTC, but group “today”, “this month”, closing dates, and reports by Asia/Karachi.
+   141→
+   142→All money columns must use:
+   143→- Postgres `numeric(14,2)`, or
+   144→- integer minor units
+   145→
+   146→Never use `float`, `double`, or raw JavaScript floating-point math for financial totals.
+   147→
+   148→Use decimal-safe arithmetic or server-side numeric calculations.
+   149→
+   150→---
+   151→
+   152→## DATABASE — CORE TABLES
+   153→
+   154→Design migrations with proper:
+   155→- types
+   156→- foreign keys
+   157→- indexes
+   158→- RLS policies
+   159→- audit fields
+   160→- `business_id`
+   161→- `created_at`
+   162→- `updated_at`
+   163→- `created_by`
+   164→- `updated_by` where relevant
+   165→
+   166→This is not exhaustive DDL, but the relationships are mandatory.
+   167→
+   168→---
+   169→
+   170→### Identity & Access
+   171→
+   172→Use Supabase `auth.users` for authentication.
+   173→
+   174→Create:
+   175→
+   176→- `profiles`
+   177→  - linked 1:1 with `auth.users.id`
+   178→  - stores role/user profile data
+   179→  - no standalone duplicated `users` auth table
+   180→
+   181→- `roles`
+   182→- `permissions`
+   183→
+   184→Permissions must be stored as data, not hardcoded across components.
+   185→
+   186→Permissions must support:
+   187→- module-level access
+   188→- report-level access
+   189→- create/edit/delete/cancel/export/print access
+   190→- account balance visibility
+   191→
+   192→Examples:
+   193→- `can_view_sales`
+   194→- `can_create_sales`
+   195→- `can_edit_products`
+   196→- `can_view_trial_balance`
+   197→- `can_export_reports`
+   198→- `can_view_account_balances`
+   199→
+   200→Owner/Admin can customize permissions later via UI.
+   201→
+   202→#### First Owner Bootstrap
+   203→
+   204→Phase 1 must include safe first-owner bootstrap:
+   205→
+   206→- First registered user becomes Owner/Admin only if no owner exists yet.
+   207→- After an owner exists, public self-registration must not create privileged users.
+   208→- Further users must be created/invited by Owner/Admin.
+   209→
+   210→Gate must test this.
+   211→
+   212→---
+   213→
+   214→### Chart of Accounts
+   215→
+   216→Create:
+   217→
+   218→- `account_categories`
+   219→  - Asset
+   220→  - Liability
+   221→  - Equity
+   222→  - Income
+   223→  - Expense
+   224→
+   225→- `accounts`
+   226→  - sub-accounts under categories
+   227→  - every financial balance must be represented here
+   228→
+   229→Phase 1 must seed a sensible default Chart of Accounts for garments SMB:
+   230→
+   231→- Cash
+   232→- Petty Cash
+   233→- Bank
+   234→- Easypaisa
+   235→- JazzCash
+   236→- Inventory
+   237→- Customers Receivable
+   238→- Vendors Payable
+   239→- Sales
+   240→- Sales Returns
+   241→- Purchases / COGS
+   242→- Expenses
+   243→- Salesman Commission Expense
+   244→- Rider Payable
+   245→- Owner Capital
+   246→- Owner Drawings
+   247→- Opening Balance Equity
+   248→
+   249→Owner can add/edit more later.
+   250→
+   251→---
+   252→
+   253→### Business Accounts
+   254→
+   255→Create:
+   256→
+   257→- `business_accounts`
+   258→
+   259→Supported types:
+   260→
+   261→- Cash
+   262→- Petty Cash
+   263→- Bank
+   264→- Easypaisa
+   265→- JazzCash
+   266→- Wallet
+   267→- Custom / Other
+   268→
+   269→Important rule:
+   270→
+   271→Every `business_account` MUST correspond 1:1 with a ledger account in `accounts` under Asset.
+   272→
+   273→Do not build business accounts as an isolated balance system.
+   274→
+   275→Every payment method selected on a form must resolve to a real ledger account that voucher lines can post against.
+   276→
+   277→Each business account has:
+   278→- own ledger
+   279→- opening balance through Opening Voucher
+   280→- running balance derived from voucher lines
+   281→- active/inactive status
+   282→- optional account holder/bank/account number fields
+   283→
+   284→---
+   285→
+   286→### Accounting Engine
+   287→
+   288→Create:
+   289→
+   290→- `vouchers`
+   291→- `voucher_lines`
+   292→
+   293→Every sale, purchase, expense, receipt, payment, contra, journal, opening balance, return, cancel/void, and adjustment creates a voucher.
+   294→
+   295→Voucher posting only through server-side `post_voucher()` RPC.
+   296→
+   297→`post_voucher()` must:
+   298→
+   299→- run in a transaction
+   300→- insert voucher header
+   301→- insert voucher lines
+   302→- validate total debit = total credit
+   303→- reject the entire transaction if unbalanced
+   304→- write audit log
+   305→- return voucher id
+   306→
+   307→Direct client inserts into `voucher_lines` must be blocked by RLS.
+   308→
+   309→Do not allow manually edited balance fields to drift from ledger.
+   310→
+   311→Balance columns may exist only as recalculable/cache fields protected by server-side logic.
+   312→
+   313→---
+   314→
+   315→### Opening Balances
+   316→
+   317→Opening balances must be posted through a balanced Opening Voucher.
+   318→
+   319→Do not store opening balances only as display fields.
+   320→
+   321→Opening Voucher opposite side posts to:
+   322→
+   323→- Opening Balance Equity / Owner Capital
+   324→
+   325→This applies to:
+   326→
+   327→- business accounts
+   328→- vendors
+   329→- customers
+   330→- salesmen
+   331→- riders
+   332→- inventory if used
+   333→
+   334→Trial Balance must be balanced from day one.
+   335→
+   336→---
+   337→
+   338→### Parties
+   339→
+   340→Create:
+   341→
+   342→- `vendors`
+   343→- `customers`
+   344→- `salesmen`
+   345→- `riders`
+   346→
+   347→Every vendor/customer/salesman/rider must have a linked ledger account in `accounts`.
+   348→
+   349→Their balances must be derived from `voucher_lines`.
+   350→
+   351→Do not use manually updated balance columns as source of truth.
+   352→
+   353→---
+   354→
+   355→### Products & Stock
+   356→
+   357→Create:
+   358→
+   359→- `product_categories`
+   360→- `products`
+   361→- `stock_movements`
+   362→
+   363→Product MVP fields:
+   364→
+   365→- item name
+   366→- category
+   367→- unit = piece
+   368→- sale price
+   369→- purchase price
+   370→- opening stock
+   371→- `is_temporary`
+   372→- active/inactive
+   373→
+   374→Negative stock is allowed.
+   375→
+   376→Temporary products are allowed during fast sale entry.
+   377→
+   378→Temporary products must be mergeable/editable later.
+   379→
+   380→Stock movements must log every:
+   381→- stock in
+   382→- stock out
+   383→- sale
+   384→- purchase
+   385→- return
+   386→- adjustment
+   387→- merge/cleanup where relevant
+   388→
+   389→Do not block a sale due to insufficient stock.
+   390→
+   391→Negative Stock Report and Pending Stock Entry Report are first-class features.
+   392→
+   393→---
+   394→
+   395→### Stock Costing / COGS
+   396→
+   397→For MVP, use weighted average cost for stock valuation and COGS.
+   398→
+   399→If negative stock is sold before purchase cost exists:
+   400→
+   401→- mark profit as estimated
+   402→- do not show confident final profit
+   403→- once purchase is entered, recalculate/finalize COGS/profit for that item
+   404→
+   405→Do not use FIFO/LIFO in MVP.
+   406→
+   407→---
+   408→
+   409→### Transactions
+   410→
+   411→Create:
+   412→
+   413→- `invoices`
+   414→- `invoice_items`
+   415→- `purchases`
+   416→- `purchase_items`
+   417→- `expenses`
+   418→- `expense_lines`
+   419→- `receipts`
+   420→- `payments`
+   421→- `payment_allocations`
+   422→- `sales_returns`
+   423→- `salesman_commissions`
+   424→
+   425→#### Invoice Number Rule
+   426→
+   427→Counter Sale, Online Sale, and OFC Sale share ONE invoice sequence.
+   428→
+   429→Examples:
+   430→
+   431→- INV-0001 Counter
+   432→- INV-0002 Online
+   433→- INV-0003 OFC
+   434→- INV-0004 Counter
+   435→
+   436→Invoice number generation must be concurrency-safe.
+   437→
+   438→Use:
+   439→- Postgres sequence, or
+   440→- locked counter table
+   441→
+   442→Generate invoice number inside the same transaction that creates the invoice.
+   443→
+   444→Never generate invoice number in the client.
+   445→
+   446→#### Payment Allocations
+   447→
+   448→`payment_allocations` links receipts/payments to invoices, purchases, vendors, customers, riders, or salesmen.
+   449→
+   450→This table is required for:
+   451→
+   452→- partial payment tracking
+   453→- receivables
+   454→- payables
+   455→- salesman commission
+   456→- rider COD settlement
+   457→- duplicate prevention
+   458→
+   459→Salesman commission must be calculated from collected/allocated payment amounts, not raw invoice totals.
+   460→
+   461→Commission calculation must be idempotent.
+   462→
+   463→Re-processing the same payment must never duplicate commission.
+   464→
+   465→Use unique constraints where needed, such as allocation id + salesman id.
+   466→
+   467→---
+   468→
+   469→### Operational
+   470→
+   471→Create:
+   472→
+   473→- `daily_closings`
+   474→- `audit_logs`
+   475→- `ai_chat_logs`
+   476→
+   477→Daily closing must snapshot:
+   478→
+   479→- Cash
+   480→- Petty Cash
+   481→- Bank
+   482→- Easypaisa
+   483→- JazzCash
+   484→- all custom business accounts
+   485→- sales
+   486→- purchases
+   487→- expenses
+   488→- receipts
+   489→- payments
+   490→- rider COD
+   491→- salesman commission
+   492→- cash short/extra
+   493→
+   494→Business-day grouping is Asia/Karachi, not UTC.
+   495→
+   496→If actual counted cash does not match system cash:
+   497→
+   498→- record Cash Short or Cash Extra explicitly
+   499→- never silently adjust books to force a match
+   500→
+   501→---
+   502→
+   503→## FINANCIAL DOCUMENT SAFETY
+   504→
+   505→Posted financial documents must not be hard-deleted.
+   506→
+   507→This applies to:
+   508→
+   509→- invoices
+   510→- vouchers
+   511→- purchases
+   512→- receipts
+   513→- payments
+   514→- expenses
+   515→- contra entries
+   516→- journal vouchers
+   517→
+   518→After posting:
+   519→
+   520→- delete = cancel/void
+   521→- cancel/void posts reversing voucher
+   522→- original record stays
+   523→- full audit log required
+   524→
+   525→Editing a posted invoice/voucher must either:
+   526→
+   527→- create adjustment/reversal voucher pair, or
+   528→- require Owner/Admin permission and full audit trail
+   529→
+   530→---
+   531→
+   532→## MODULE SPECS — FINAL PRODUCT
+   533→
+   534→These specs describe the final product.
+   535→
+   536→Do not build every module in Phase 1 just because it is described here. Build only the scope listed in each phase.
+   537→
+   538→---
+   539→
+   540→### 1. Setup Module
+   541→
+   542→Final setup area includes:
+   543→
+   544→- business profile
+   545→- account categories
+   546→- sub accounts
+   547→- business accounts
+   548→- product categories
+   549→- products
+   550→- vendors
+   551→- customers
+   552→- salesmen
+   553→- riders
+   554→- users
+   555→- roles
+   556→- permissions
+   557→- opening balances
+   558→
+   559→---
+   560→
+   561→### 2. Sales Module
+   562→
+   563→Three bill types:
+   564→
+   565→- Counter Sale
+   566→- Online Sale
+   567→- OFC / Out-of-City Sale
+   568→
+   569→All share one invoice serial sequence.
+   570→
+   571→#### Counter Sale
+   572→
+   573→- customer optional
+   574→- salesman required
+   575→- multiple items
+   576→- temporary item allowed
+   577→- negative stock allowed
+   578→- multiple payment methods allowed
+   579→- partial payment allowed
+   580→- change/refund through different account allowed
+   581→
+   582→Required example:
+   583→
+   584→Bill = Rs. 8,000  
+   585→Customer pays Rs. 10,000 cash  
+   586→Rs. 2,000 change returned via JazzCash
+   587→
+   588→System must post correctly:
+   589→
+   590→- Cash received: 10,000
+   591→- JazzCash paid out: 2,000
+   592→- Sales recognized: 8,000
+   593→
+   594→Balanced voucher, not a fudged single line.
+   595→
+   596→#### Salesman Commission
+   597→
+   598→- default commission = 5%
+   599→- override allowed per salesman
+   600→- commission accrues only after payment collection
+   601→- commission based on `payment_allocations`
+   602→- no duplicate commission on re-processing
+   603→- sales return does not reverse already-accrued commission unless explicitly enabled later
+   604→
+   605→#### Sales Returns
+   606→
+   607→Build as a real minimal module, not a stub.
+   608→
+   609→Return must:
+   610→
+   611→- reverse/adjust original sale
+   612→- update stock
+   613→- post reversing/adjustment voucher
+   614→- keep audit trail
+   615→- not reverse already-accrued commission by default
+   616→
+   617→---
+   618→
+   619→### 3. Online Sale / COD
+   620→
+   621→Online sale is mostly COD.
+   622→
+   623→Flow:
+   624→
+   625→- create order
+   626→- customer name/phone/address required
+   627→- items
+   628→- rider assignment
+   629→- statuses:
+   630→  - Pending
+   631→  - Assigned
+   632→  - Out for Delivery
+   633→  - Delivered
+   634→  - Returned
+   635→- rider collects COD
+   636→- rider submits COD later/daily
+   637→
+   638→Rider ledger tracks:
+   639→
+   640→- COD assigned
+   641→- COD delivered
+   642→- COD submitted
+   643→- COD pending
+   644→- delivery charges
+   645→
+   646→Critical delivery charge rule:
+   647→
+   648→Rider delivery charge belongs to rider unless configured otherwise.
+   649→
+   650→Customer may pay product amount + delivery charge together to rider.
+   651→
+   652→Posting must split:
+   653→
+   654→- business sale revenue = product amount only
+   655→- rider earning/settlement = delivery charge
+   656→
+   657→Never merge rider delivery charge into company sales revenue.
+   658→
+   659→---
+   660→
+   661→### 4. OFC / Out-of-City Sale
+   662→
+   663→OFC orders are fully advance-paid.
+   664→
+   665→Fields:
+   666→
+   667→- customer name
+   668→- phone
+   669→- city
+   670→- address
+   671→- items
+   672→- advance received account
+   673→- courier/vendor
+   674→- delivery/courier charge
+   675→- dispatch status
+   676→
+   677→Customer delivery charge and courier actual cost must remain separate.
+   678→
+   679→Courier actual cost is recorded as real expense/vendor payable/payment.
+   680→
+   681→If customer delivery charge is higher than courier cost, profit is visible in reports.
+   682→
+   683→Do not net them together at entry time.
+   684→
+   685→---
+   686→
+   687→### 5. Purchase / Vendor Module
+   688→
+   689→Supplier is required.
+   690→
+   691→Features:
+   692→
+   693→- purchase bill
+   694→- items
+   695→- multiple payment accounts
+   696→- partial payment
+   697→- supplier payable
+   698→- supplier advance
+   699→- supplier return
+   700→- replacement/adjustment
+   701→- vendor ledger
+   702→
+   703→Vendor ledger shows:
+   704→
+   705→- opening balance
+   706→- purchases
+   707→- payments
+   708→- returns
+   709→- advances
+   710→- net payable/receivable
+   711→
+   712→---
+   713→
+   714→### 6. Expenses Module
+   715→
+   716→Expense batch form:
+   717→
+   718→- multiple line items
+   719→- one payment account per batch
+   720→- that payment account credited once for net total
+   721→- date can have multiple batches if different accounts paid expenses
+   722→
+   723→Example:
+   724→
+   725→10 July — Expenses (Cash) — Rs. 15,000
+   726→
+   727→Expands to:
+   728→
+   729→- rent
+   730→- packing
+   731→- tea
+   732→- fuel
+   733→- other
+   734→
+   735→---
+   736→
+   737→### 7. Accounting / Voucher Module
+   738→
+   739→Includes:
+   740→
+   741→- Payment Voucher
+   742→- Receipt Voucher
+   743→- Journal Voucher
+   744→- Petty Cash
+   745→- Contra Entry
+   746→
+   747→Contra example:
+   748→
+   749→Cash → JazzCash Rs. 10,000
+   750→
+   751→Posts:
+   752→
+   753→- JazzCash debit 10,000
+   754→- Cash credit 10,000
+   755→
+   756→---
+   757→
+   758→### 8. Reports Module
+   759→
+   760→Required reports:
+   761→
+   762→- Trial Balance
+   763→- Ledger Drill-down
+   764→- Day Book
+   765→- Journal Book
+   766→- Cash Book
+   767→- Bank/Wallet Ledger
+   768→- Petty Cash Report
+   769→- Sales Report
+   770→- Purchase Report
+   771→- Vendor Ledger
+   772→- Customer Ledger
+   773→- Salesman Commission Report
+   774→- Rider COD Report
+   775→- Stock Report
+   776→- Negative Stock Report
+   777→- Pending Stock Entry Report
+   778→- Receivables Report
+   779→- Payables Report
+   780→- Profit & Loss
+   781→- Income Statement
+   782→- Balance Sheet
+   783→- Daily Closing Report
+   784→
+   785→Trial Balance is summary.
+   786→
+   787→Clicking an account opens full debit/credit ledger detail.
+   788→
+   789→P&L/COGS must use weighted average cost and visibly flag estimated figures caused by negative-stock sales awaiting purchase cost.
+   790→
+   791→All date filters and groupings use Asia/Karachi.
+   792→
+   793→---
+   794→
+   795→### 9. Invoice Printing
+   796→
+   797→Primary format:
+   798→
+   799→- Half A4 invoice
+   800→- two invoices on one A4 page
+   801→- print top half only
+   802→- print bottom half only
+   803→- reprint
+   804→- PDF export
+   805→
+   806→This supports the garments trade workflow where invoice pages are physically cut in half and remaining half may be reused.
+   807→
+   808→---
+   809→
+   810→## ROLES & PERMISSIONS
+   811→
+   812→Default roles:
+   813→
+   814→| Role | Default Access |
+   815→|---|---|
+   816→| Owner/Admin | Full access |
+   817→| Accountant | Sales, Purchases, Vouchers, Petty Cash, Contra, Journal, Trial Balance, Balance Sheet, P&L, Ledgers, Reports, Closing |
+   818→| Salesman | Sale bill creation, own sales, own commission, optional limited stock view |
+   819→| Rider | Assigned orders, delivery status, COD submission, own rider ledger |
+   820→
+   821→Owner/Admin must be able to customize permissions per role/user.
+   822→
+   823→Permissions must be enforced at:
+   824→- UI layer
+   825→- API/RPC layer
+   826→- RLS/database layer
+   827→
+   828→Do not only hide UI.
+   829→
+   830→A user who cannot view a report must also be blocked from querying the data behind that report.
+   831→
+   832→---
+   833→
+   834→## MOBILE PWA UX
+   835→
+   836→Mobile app must be designed for Owner, Accountant, Salesman, and Rider.
+   837→
+   838→Mobile requirements:
+   839→
+   840→- installable PWA
+   841→- no unsafe offline writes in MVP
+   842→- bottom navigation
+   843→- big touch targets
+   844→- fast sale entry
+   845→- quick item search
+   846→- quick temporary item add
+   847→- quick payment buttons
+   848→- one-hand use
+   849→- minimal tables
+   850→- card-based layout
+   851→
+   852→Mobile homes:
+   853→
+   854→Owner/Accountant:
+   855→- New Sale
+   856→- Online Order
+   857→- OFC Order
+   858→- Purchase
+   859→- Expense
+   860→- Receipt
+   861→- Payment
+   862→- Reports
+   863→
+   864→Salesman:
+   865→- New Bill
+   866→- My Sales
+   867→- My Commission
+   868→
+   869→Rider:
+   870→- My Orders
+   871→- Delivered
+   872→- Returned
+   873→- COD Submit
+   874→
+   875→---
+   876→
+   877→## WEB / DESKTOP UX
+   878→
+   879→Desktop is for Owner/Accountant.
+   880→
+   881→Desktop requirements:
+   882→
+   883→- sidebar navigation
+   884→- full dashboard
+   885→- dense tables
+   886→- filters
+   887→- ledger drill-down
+   888→- reports
+   889→- PDF export
+   890→- Excel export
+   891→- invoice printing
+   892→- permission management
+   893→- closing reports
+   894→
+   895→---
+   896→
+   897→## AI ASSISTANT — PHASE 10 ONLY
+   898→
+   899→Use Gemini 2.5 Flash.
+   900→
+   901→AI is read-only in Phase 10.
+   902→
+   903→AI must never write directly to the database in this phase.
+   904→
+   905→AI-assisted actions with owner approval are future scope.
+   906→
+   907→Gemini API key must be server-only. Never expose API keys to browser.
+   908→
+   909→AI must respect the current user’s permissions.
+   910→
+   911→Owner can ask full-business questions.
+   912→
+   913→Salesman can only ask permitted own-data questions.
+   914→
+   915→Rider can only ask permitted rider-order/COD questions.
+   916→
+   917→AI should answer questions like:
+   918→
+   919→- “Black cotton ka stock kitna hai?”
+   920→- “Aaj Ali salesman ki sale kitni hui?”
+   921→- “JazzCash balance kitna hai?”
+   922→- “Rider Ahmed ke paas COD pending kitna hai?”
+   923→- “Is month ka profit batao.”
+   924→- “Trial Balance match kyun nahi ho raha?”
+   925→- “Negative stock mein kya kya items hain?”
+   926→
+   927→AI can:
+   928→- explain reports
+   929→- summarize ledgers
+   930→- guide forms
+   931→- suggest duplicate/temporary item merges
+   932→- answer business-data questions using live data
+   933→
+   934→AI cannot:
+   935→- create entries
+   936→- edit records
+   937→- delete records
+   938→- post vouchers
+   939→- change permissions
+   940→- bypass RLS
+   941→
+   942→---
+   943→
+   944→## PHASE SCOPE CLARIFICATION
+   945→
+   946→Module Specs describe the final product, not Phase 1 scope.
+   947→
+   948→In each phase, implement only the scope explicitly listed under that phase.
+   949→
+   950→Do not pull later-phase screens into earlier phases just because they are mentioned in Module Specs.
+   951→
+   952→Phase 2 may include a minimal internal Journal Voucher test form only to verify `post_voucher()`. The full user-facing voucher module is Phase 6.
+   953→
+   954→Phase 3 does not depend on the Sales module. Negative stock in Phase 3 must be tested through manual stock movement/stock adjustment, not sale invoice. Sale-based negative stock is tested again in Phase 4.
+   955→
+   956→Phase 4 builds:
+   957→- Counter Sale fully
+   958→- shared invoice serial
+   959→- multiple payments
+   960→- partial payments
+   961→- payment allocations
+   962→- salesman commission allocation
+   963→- basic Online/OFC order creation shells
+   964→- invoice printing
+   965→- basic sales return
+   966→
+   967→Full rider assignment, COD submission, rider ledger, and rider delivery-charge settlement are Phase 7.
+   968→
+   969→Phase 7 completes Online COD workflow:
+   970→- rider assignment
+   971→- delivered/returned status
+   972→- COD submission
+   973→- rider ledger
+   974→- rider delivery charge handling
+   975→
+   976→---
+   977→
+   978→# IMPLEMENTATION — 10 STRICT SEQUENTIAL PHASES
+   979→
+   980→---
+   981→
+   982→## Phase 1 — Foundation
+   983→
+   984→Build only:
+   985→
+   986→- Next.js project setup
+   987→- TypeScript strict
+   988→- Tailwind + shadcn/ui
+   989→- dark sharp design system
+   990→- Supabase client/server setup
+   991→- auth/login
+   992→- profiles
+   993→- roles
+   994→- permissions data model
+   995→- RLS scaffolding
+   996→- `SECURITY DEFINER` permission helper functions where needed
+   997→- first-owner bootstrap flow
+   998→- seeded default Chart of Accounts
+   999→- business accounts
+  1000→- account categories
+  1001→- sub-account opening shell
+  1002→- basic role-based dashboard shell
+  1003→- Asia/Karachi date handling utilities
+  1004→
+  1005→Gate:
+  1006→
+  1007→1. Register first user.
+  1008→2. Confirm first user becomes Owner/Admin.
+  1009→3. Attempt public second registration after owner exists and confirm it does not become Owner/Admin.
+  1010→4. Owner/Admin creates or assigns second user role.
+  1011→5. Log in as Owner/Admin, Accountant, Salesman, Rider.
+  1012→6. Confirm each role lands on correct home screen.
+  1013→7. Confirm each role sees only permitted nav items.
+  1014→8. Create a business account.
+  1015→9. Confirm business account creates linked ledger account.
+  1016→10. Confirm business account appears with zero balance ledger.
+  1017→11. Confirm default Chart of Accounts is present.
+  1018→12. Confirm Asia/Karachi date grouping utility works for records near midnight.
+  1019→13. Run lint, tsc, build.
+  1020→14. Provide browser test log.
+  1021→
+  1022→Stop after Phase 1. Wait for user approval.
+  1023→
+  1024→---
+  1025→
+  1026→## Phase 2 — Accounting Engine
+  1027→
+  1028→Build:
+  1029→
+  1030→- `vouchers`
+  1031→- `voucher_lines`
+  1032→- `post_voucher()` RPC
+  1033→- balanced voucher validation
+  1034→- RLS blocking direct `voucher_lines` inserts
+  1035→- minimal internal Journal Voucher test form
+  1036→- Trial Balance
+  1037→- ledger drill-down
+  1038→- Opening Voucher posting
+  1039→- audit logs
+  1040→
+  1041→Gate:
+  1042→
+  1043→1. Try unbalanced Journal Voucher through RPC.
+  1044→2. Confirm it is rejected.
+  1045→3. Post balanced Journal Voucher.
+  1046→4. Confirm Trial Balance updates.
+  1047→5. Confirm ledger drill-down shows entry.
+  1048→6. Attempt direct insert into `voucher_lines`.
+  1049→7. Confirm RLS blocks it.
+  1050→8. Enter opening balance for test vendor.
+  1051→9. Confirm it posted through Opening Voucher against Opening Balance Equity.
+  1052→10. Confirm it is not just a stored display number.
+  1053→11. Run lint, tsc, build.
+  1054→12. Provide browser test log.
+  1055→
+  1056→Stop. Wait for approval.
+  1057→
+  1058→---
+  1059→
+  1060→## Phase 3 — Products & Stock
+  1061→
+  1062→Build:
+  1063→
+  1064→- product categories
+  1065→- products
+  1066→- opening stock
+  1067→- stock movements
+  1068→- manual stock adjustment
+  1069→- temporary items
+  1070→- product merge/edit foundation
+  1071→- negative stock support
+  1072→- Negative Stock Report
+  1073→- Pending Stock Entry Report
+  1074→
+  1075→Gate:
+  1076→
+  1077→1. Create product with opening stock 0.
+  1078→2. Create manual stock-out adjustment of 5 pieces.
+  1079→3. Confirm stock becomes -5.
+  1080→4. Confirm action is allowed.
+  1081→5. Confirm item appears on Negative Stock Report.
+  1082→6. Create purchase/stock-in adjustment of 20 pieces.
+  1083→7. Confirm stock becomes 15.
+  1084→8. Create temporary item and confirm it can be edited/marked for merge.
+  1085→9. Run lint, tsc, build.
+  1086→10. Provide browser test log.
+  1087→
+  1088→Stop. Wait for approval.
+  1089→
+  1090→---
+  1091→
+  1092→## Phase 4 — Sales
+  1093→
+  1094→Build:
+  1095→
+  1096→- Counter Sale fully
+  1097→- shared invoice sequence
+  1098→- basic Online Sale shell
+  1099→- basic OFC Sale shell
+  1100→- invoice items
+  1101→- multiple payment methods
+  1102→- partial payment
+  1103→- payment allocations
+  1104→- salesman commission from collected allocation
+  1105→- commission idempotency
+  1106→- sale-based negative stock
+  1107→- basic sales return
+  1108→- half-A4 invoice print/PDF
+  1109→- cancel/void workflow for posted invoice
+  1110→
+  1111→Gate:
+  1112→
+  1113→1. Create Counter Sale invoice.
+  1114→2. Confirm invoice number generated server-side.
+  1115→3. Create Counter, Online shell, OFC shell and confirm invoice sequence remains shared.
+  1116→4. Fire two sale creation requests at effectively same time from two tabs/rapid submit.
+  1117→5. Confirm no duplicate invoice number.
+  1118→6. Run Rs. 8,000 bill / Rs. 10,000 cash / Rs. 2,000 JazzCash change case.
+  1119→7. Confirm voucher posts correctly:
+  1120→   - Cash debit 10,000
+  1121→   - JazzCash credit 2,000
+  1122→   - Sales credit 8,000
+  1123→   - balanced total
+  1124→8. Create credit/partial payment sale.
+  1125→9. Confirm commission only calculates on collected amount.
+  1126→10. Re-trigger same payment event.
+  1127→11. Confirm commission does not duplicate.
+  1128→12. Sell product beyond stock.
+  1129→13. Confirm sale is allowed and stock goes negative.
+  1130→14. Create basic sales return.
+  1131→15. Confirm stock adjusts and reversing voucher posts.
+  1132→16. Confirm commission is not reversed by default.
+  1133→17. Print/export half-A4 invoice.
+  1134→18. Run lint, tsc, build.
+  1135→19. Provide browser test log.
+  1136→
+  1137→Stop. Wait for approval.
+  1138→
+  1139→---
+  1140→
+  1141→## Phase 5 — Purchase & Vendor
+  1142→
+  1143→Build:
+  1144→
+  1145→- vendors
+  1146→- purchase bill
+  1147→- purchase items
+  1148→- multiple payment accounts
+  1149→- partial payment
+  1150→- supplier payable
+  1151→- supplier advance
+  1152→- supplier return
+  1153→- replacement/adjustment
+  1154→- vendor ledger
+  1155→- purchase stock-in
+  1156→- weighted average cost update
+  1157→
+  1158→Gate:
+  1159→
+  1160→1. Create supplier.
+  1161→2. Create purchase on partial payment.
+  1162→3. Confirm vendor ledger shows payable balance.
+  1163→4. Pay part of supplier balance from one business account.
+  1164→5. Confirm ledger and business account balance update.
+  1165→6. Create supplier advance.
+  1166→7. Confirm vendor ledger handles advance.
+  1167→8. Create supplier return/replacement.
+  1168→9. Confirm stock and ledger adjust.
+  1169→10. Confirm weighted average cost updates.
+  1170→11. Run lint, tsc, build.
+  1171→12. Provide browser test log.
+  1172→
+  1173→Stop. Wait for approval.
+  1174→
+  1175→---
+  1176→
+  1177→## Phase 6 — Vouchers & Expenses
+  1178→
+  1179→Build:
+  1180→
+  1181→- Payment Voucher
+  1182→- Receipt Voucher
+  1183→- full Journal Voucher UI
+  1184→- Petty Cash
+  1185→- Contra Entry
+  1186→- Expense Batch
+  1187→- Day Book collapsed/expanded expense view
+  1188→- no hard delete for posted vouchers
+  1189→- cancel/reverse voucher flow
+  1190→
+  1191→Gate:
+  1192→
+  1193→1. Run Cash → JazzCash contra entry.
+  1194→2. Confirm JazzCash ledger debits and Cash ledger credits.
+  1195→3. Create multi-line expense batch from Cash.
+  1196→4. Confirm Cash is credited once for net total.
+  1197→5. Confirm Day Book shows one collapsed batch row.
+  1198→6. Expand batch and confirm line details.
+  1199→7. Create Receipt Voucher.
+  1200→8. Create Payment Voucher.
+  1201→9. Create Journal Voucher.
+  1202→10. Try to delete posted voucher.
+  1203→11. Confirm app uses cancel/reverse flow, not hard delete.
+  1204→12. Run lint, tsc, build.
+  1205→13. Provide browser test log.
+  1206→
+  1207→Stop. Wait for approval.
+  1208→
+  1209→---
+  1210→
+  1211→## Phase 7 — Rider & COD
+  1212→
+  1213→Build:
+  1214→
+  1215→- rider setup
+  1216→- online order rider assignment
+  1217→- status flow
+  1218→- delivered/returned
+  1219→- COD received
+  1220→- COD submitted
+  1221→- rider ledger
+  1222→- rider delivery charge handling
+  1223→- rider mobile home
+  1224→
+  1225→Gate:
+  1226→
+  1227→1. Create online COD order.
+  1228→2. Assign rider.
+  1229→3. Mark out for delivery.
+  1230→4. Mark delivered.
+  1231→5. Submit COD.
+  1232→6. Confirm business sale amount and rider delivery charge remain separate ledger threads.
+  1233→7. Confirm rider ledger shows:
+  1234→   - COD assigned
+  1235→   - COD delivered
+  1236→   - COD submitted
+  1237→   - COD pending
+  1238→   - delivery charges
+  1239→8. Mark another order returned.
+  1240→9. Confirm ledger/status correct.
+  1241→10. Log in as Rider.
+  1242→11. Confirm rider only sees assigned orders and own ledger.
+  1243→12. Run lint, tsc, build.
+  1244→13. Provide browser test log.
+  1245→
+  1246→Stop. Wait for approval.
+  1247→
+  1248→---
+  1249→
+  1250→## Phase 8 — Reports
+  1251→
+  1252→Build:
+  1253→
+  1254→- Trial Balance
+  1255→- Ledger Drill-down
+  1256→- Day Book
+  1257→- Journal Book
+  1258→- Cash Book
+  1259→- Bank/Wallet Ledger
+  1260→- Petty Cash Report
+  1261→- Sales Report
+  1262→- Purchase Report
+  1263→- Vendor Ledger
+  1264→- Customer Ledger
+  1265→- Salesman Commission Report
+  1266→- Rider COD Report
+  1267→- Stock Report
+  1268→- Negative Stock Report
+  1269→- Pending Stock Entry Report
+  1270→- Receivables Report
+  1271→- Payables Report
+  1272→- Profit & Loss
+  1273→- Income Statement
+  1274→- Balance Sheet
+  1275→- Daily Closing Report
+  1276→
+  1277→Gate:
+  1278→
+  1279→1. Cross-check Trial Balance totals reconcile with Phases 2–7 activity.
+  1280→2. Open Trial Balance account drill-down.
+  1281→3. Confirm debit/credit entries match source vouchers.
+  1282→4. Check P&L.
+  1283→5. Confirm estimated profit flag appears where negative stock cost is pending.
+  1284→6. Check Balance Sheet.
+  1285→7. Confirm Assets = Liabilities + Equity.
+  1286→8. Check Cash/Bank/Wallet ledgers.
+  1287→9. Check Salesman Commission Report.
+  1288→10. Check Rider COD Report.
+  1289→11. Check Vendor/Customer ledgers.
+  1290→12. Confirm date filters use Asia/Karachi.
+  1291→13. Export at least one report to PDF/Excel if implemented in this phase.
+  1292→14. Run lint, tsc, build.
+  1293→15. Provide browser test log.
+  1294→
+  1295→Stop. Wait for approval.
+  1296→
+  1297→---
+  1298→
+  1299→## Phase 9 — Mobile/Web Polish + PWA
+  1300→
+  1301→Build:
+  1302→
+  1303→- installable PWA
+  1304→- manifest
+  1305→- service worker
+  1306→- mobile-first final polish
+  1307→- distinct desktop layout
+  1308→- role-based mobile home screens
+  1309→- fast-entry forms
+  1310→- bottom navigation
+  1311→- desktop sidebar
+  1312→- print/export polish
+  1313→- half-A4 invoice refinements
+  1314→- permission UI refinement
+  1315→
+  1316→No unsafe offline accounting writes.
+  1317→
+  1318→Gate:
+  1319→
+  1320→1. Test Owner/Admin mobile home at real mobile width.
+  1321→2. Test Accountant mobile home.
+  1322→3. Test Salesman mobile home.
+  1323→4. Test Rider mobile home.
+  1324→5. Test desktop Owner/Accountant layout.
+  1325→6. Confirm mobile uses bottom nav.
+  1326→7. Confirm desktop uses sidebar.
+  1327→8. Confirm PWA install prompt/manifest works.
+  1328→9. Confirm posting accounting data requires live connection.
+  1329→10. Print top-half invoice.
+  1330→11. Print bottom-half invoice.
+  1331→12. Print two invoices on one A4.
+  1332→13. Run lint, tsc, build.
+  1333→14. Provide browser test log.
+  1334→
+  1335→Stop. Wait for approval.
+  1336→
+  1337→---
+  1338→
+  1339→## Phase 10 — AI Assistant
+  1340→
+  1341→Build:
+  1342→
+  1343→- Gemini 2.5 Flash integration
+  1344→- server-only API key
+  1345→- business-aware chat
+  1346→- permission-aware data access
+  1347→- stock queries
+  1348→- ledger queries
+  1349→- report explanations
+  1350→- Trial Balance explanation
+  1351→- duplicate/temporary item merge suggestions
+  1352→- AI chat logs
+  1353→
+  1354→AI is read-only.
+  1355→
+  1356→No database writes by AI.
+  1357→
+  1358→Gate:
+  1359→
+  1360→Ask AI:
+  1361→
+  1362→1. “Black cotton ka stock kitna hai?”
+  1363→2. “Aaj Ali salesman ki sale kitni hui?”
+  1364→3. “JazzCash balance kitna hai?”
+  1365→4. “Rider Ahmed ke paas COD pending kitna hai?”
+  1366→5. “Is month ka profit batao.”
+  1367→6. “Trial Balance match kyun nahi ho raha?”
+  1368→7. “Negative stock mein kya kya items hain?”
+  1369→
+  1370→Then confirm:
+  1371→
+  1372→8. Answers match actual database data.
+  1373→9. Salesman cannot ask owner-only business-wide data.
+  1374→10. Rider cannot ask full reports.
+  1375→11. AI cannot write to any table.
+  1376→12. AI cannot bypass permissions.
+  1377→13. Run lint, tsc, build.
+  1378→14. Provide browser test log.
+  1379→
+  1380→Stop and report final project status.
+  1381→
+  1382→---
+  1383→
+  1384→## VERIFICATION PROTOCOL
+  1385→
+  1386→After every phase:
+  1387→
+  1388→1. Run lint.
+  1389→2. Run TypeScript check.
+  1390→3. Run production build.
+  1391→4. Run the app in a real browser.
+  1392→5. Manually click through all new flows.
+  1393→6. Write a test log:
+  1394→   - what you clicked
+  1395→   - what you expected
+  1396→   - what actually happened
+  1397→7. If a bug appears, fix it and retest.
+  1398→8. Do not report complete without test log.
+  1399→9. Do not start next phase without user approval.
+  1400→
+  1401→---
+  1402→
+  1403→## ANTI-PATTERNS — NEVER DO THESE
+  1404→
+  1405→- Do not enforce role access only in UI.
+  1406→- Do not bypass RLS for convenience.
+  1407→- Do not expose service-role keys to browser.
+  1408→- Do not build `business_accounts` disconnected from `accounts`.
+  1409→- Do not give vendors/customers/salesmen/riders manual balance fields as source of truth.
+  1410→- Do not store opening balances as display-only numbers.
+  1411→- Do not create standalone `users` table duplicating Supabase Auth.
+  1412→- Do not use raw JS floating-point math for money.
+  1413→- Do not use float/double for money columns.
+  1414→- Do not attempt voucher balancing with row-level CHECK constraint.
+  1415→- Do not allow direct client inserts into `voucher_lines`.
+  1416→- Do not generate invoice numbers in the client.
+  1417→- Do not give each sale type separate invoice counter.
+  1418→- Do not block sales due to insufficient stock.
+  1419→- Do not merge rider delivery charges into company sales revenue.
+  1420→- Do not calculate salesman commission at invoice time.
+  1421→- Do not calculate commission from raw invoice totals.
+  1422→- Do not allow duplicate commission from re-processed payments.
+  1423→- Do not hard-delete posted invoices/vouchers.
+  1424→- Do not silently adjust cash short/extra.
+  1425→- Do not show final profit where COGS is still estimated.
+  1426→- Do not build offline accounting writes in MVP.
+  1427→- Do not build multi-tenant UI in MVP.
+  1428→- Do not skip `business_id`.
+  1429→- Do not batch phases.
+  1430→- Do not claim “done” without browser verification.
+  1431→
+  1432→---
+  1433→
+  1434→## HOW TO REPORT PROGRESS
+  1435→
+  1436→At the end of each phase, report:
+  1437→
+  1438→1. Phase number and status
+  1439→2. Files changed
+  1440→3. Migrations added/changed
+  1441→4. What was built
+  1442→5. What was intentionally not built yet
+  1443→6. Browser verification test log
+  1444→7. Lint/tsc/build result
+  1445→8. Any known issues
+  1446→9. Whether you are stopping for approval
+  1447→
+  1448→If something affects money, stock, permissions, or voucher correctness and is genuinely ambiguous, ask before guessing.
+  1449→
+  1450→For normal UI/details that do not affect accounting correctness, make the standard SMB-accounting sensible choice and keep moving.
+  1451→
+  1452→Now begin **Phase 1 only**.
