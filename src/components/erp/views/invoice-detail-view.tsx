@@ -46,6 +46,8 @@ export function InvoiceDetailView({ invoiceId }: { invoiceId: string }) {
     queryKey: ['invoice', invoiceId],
     queryFn: () => fetch(`/api/sales/${invoiceId}`).then(r => r.json()),
     enabled: !!invoiceId,
+    retry: 1,
+    retryDelay: 500,
   })
 
   const returnMut = useMutation({
@@ -71,8 +73,27 @@ export function InvoiceDetailView({ invoiceId }: { invoiceId: string }) {
   })
 
   if (!invoiceId) return null
-  if (q.isLoading) return <div className="card-3d p-8 text-sm text-muted-foreground">Loading invoice…</div>
-  if (q.isError || !q.data?.invoice) return <div className="card-3d p-8 text-center text-destructive">Invoice not found.</div>
+  if (q.isLoading) return (
+    <div className="card-3d p-8 text-center">
+      <div className="animate-pulse text-sm text-muted-foreground">Loading invoice…</div>
+    </div>
+  )
+  if (q.isError || !q.data?.invoice) {
+    const errorData = q.data as any
+    const errorMsg = errorData?.error === 'FORBIDDEN'
+      ? 'You do not have permission to view this invoice.'
+      : errorData?.error === 'UNAUTHORIZED'
+      ? 'Please sign in again.'
+      : q.isError
+      ? 'Unable to load invoice. Please try again.'
+      : 'Invoice not found.'
+    return (
+      <div className="card-3d p-8 text-center">
+        <p className="text-sm text-destructive mb-4">{errorMsg}</p>
+        <Button variant="outline" size="sm" className="press-sm" onClick={() => q.refetch()}>Retry</Button>
+      </div>
+    )
+  }
 
   const inv = q.data.invoice
   const outstanding = BigInt(inv.total) - BigInt(inv.paidAmount)
