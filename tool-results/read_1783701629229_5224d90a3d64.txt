@@ -1,0 +1,664 @@
+     1→-- ============================================================================
+     2→-- KhataPro ERP — Phase 4 Sales Module Migration
+     3→-- Target: Supabase Postgres
+     4→--
+     5→-- This migration adds the sales module:
+     6→--   - salesmen (party accounts linked to accounts table)
+     7→--   - customers (party accounts)
+     8→--   - invoices (shared invoice sequence: INV-0001, INV-0002, ...)
+     9→--   - invoice_items (line items)
+    10→--   - payment_allocations (links payments to invoices)
+    11→--   - salesman_commissions (idempotent, based on collected amount)
+    12→--   - sales_returns (reversing vouchers, no hard delete)
+    13→--
+    14→-- Design rules from the master prompt:
+    15→--   * Shared invoice sequence across Counter / Online / OFC.
+    16→--   * Invoice numbers generated server-side, concurrency-safe.
+    17→--   * Every sale posts a balanced voucher via post_voucher().
+    18→--   * Sale creates stock movements (adjustment_out / temporary_item).
+    19→--   * Negative stock allowed.
+    20→--   * Commission accrues only on collected/allocated amount, not invoice total.
+    21→--   * Commission is idempotent — re-processing same payment never duplicates.
+    22→--   * Sales return posts reversing voucher, does NOT reverse commission.
+    23→--   * No hard delete for posted invoices.
+    24→--
+    25→-- Money columns use numeric(20,0) = BigInt paisas (consistent with vouchers).
+    26→-- ============================================================================
+    27→
+    28→-- ----------------------------------------------------------------------------
+    29→-- 1. salesmen — party accounts linked to the accounts table.
+    30→-- ----------------------------------------------------------------------------
+    31→create table if not exists public.salesmen (
+    32→  id             text primary key default gen_random_uuid()::text,
+    33→  business_id    text not null references public.business(id) on delete cascade,
+    34→  account_id     text not null unique references public.accounts(id) on delete restrict,
+    35→  name           text not null,
+    36→  phone          text,
+    37→  commission_pct numeric(5,2) not null default 5.00,  -- override per salesman
+    38→  is_active      boolean not null default true,
+    39→  created_at     timestamptz not null default now(),
+    40→  updated_at     timestamptz not null default now()
+    41→);
+    42→create index if not exists salesmen_biz_idx on public.salesmen(business_id);
+    43→
+    44→-- ----------------------------------------------------------------------------
+    45→-- 2. customers — party accounts linked to the accounts table.
+    46→-- ----------------------------------------------------------------------------
+    47→create table if not exists public.customers (
+    48→  id             text primary key default gen_random_uuid()::text,
+    49→  business_id    text not null references public.business(id) on delete cascade,
+    50→  account_id     text not null unique references public.accounts(id) on delete restrict,
+    51→  name           text not null,
+    52→  phone          text,
+    53→  address        text,
+    54→  city           text,
+    55→  is_active      boolean not null default true,
+    56→  created_at     timestamptz not null default now(),
+    57→  updated_at     timestamptz not null default now()
+    58→);
+    59→create index if not exists customers_biz_idx on public.customers(business_id);
+    60→
+    61→-- ----------------------------------------------------------------------------
+    62→-- 3. invoices — shared invoice sequence.
+    63→--    invoice_type: COUNTER | ONLINE | OFC
+    64→-- ----------------------------------------------------------------------------
+    65→create table if not exists public.invoices (
+    66→  id              text primary key default gen_random_uuid()::text,
+    67→  business_id     text not null references public.business(id) on delete cascade,
+    68→  invoice_no      text not null,
+    69→  invoice_type    text not null,  -- COUNTER | ONLINE | OFC
+    70→  invoice_date    date not null default (now() at time zone 'Asia/Karachi')::date,
+    71→  -- Party references (nullable for counter sales without customer)
+    72→  customer_id     text references public.customers(id) on delete set null,
+    73→  salesman_id     text references public.salesmen(id) on delete set null,
+    74→  -- Online / OFC fields (nullable for counter)
+    75→  customer_name   text,
+    76→  customer_phone  text,
+    77→  customer_address text,
+    78→  customer_city   text,
+    79→  -- Totals in paisas
+    80→  subtotal        numeric(20,0) not null default 0,
+    81→  discount        numeric(20,0) not null default 0,
+    82→  total           numeric(20,0) not null default 0,
+    83→  paid_amount     numeric(20,0) not null default 0,
+    84→  -- Voucher link
+    85→  voucher_id      text references public.vouchers(id) on delete set null,
+    86→  -- Cancel/void
+    87→  is_cancelled    boolean not null default false,
+    88→  cancelled_at    timestamptz,
+    89→  cancel_voucher_id text references public.vouchers(id) on delete set null,
+    90→  -- Return tracking
+    91→  is_returned     boolean not null default false,
+    92→  return_voucher_id text references public.vouchers(id) on delete set null,
+    93→  -- Metadata
+    94→  memo            text,
+    95→  created_by      uuid,
+    96→  created_at      timestamptz not null default now(),
+    97→  updated_at      timestamptz not null default now(),
+    98→  unique (business_id, invoice_no)
+    99→);
+   100→create index if not exists invoices_biz_date_idx on public.invoices(business_id, invoice_date desc);
+   101→create index if not exists invoices_type_idx on public.invoices(business_id, invoice_type);
+   102→create index if not exists invoices_salesman_idx on public.invoices(salesman_id);
+   103→create index if not exists invoices_customer_idx on public.invoices(customer_id);
+   104→
+   105→-- ----------------------------------------------------------------------------
+   106→-- 4. invoice_items
+   107→-- ----------------------------------------------------------------------------
+   108→create table if not exists public.invoice_items (
+   109→  id            text primary key default gen_random_uuid()::text,
+   110→  business_id   text not null references public.business(id) on delete cascade,
+   111→  invoice_id    text not null references public.invoices(id) on delete cascade,
+   112→  product_id    text references public.products(id) on delete set null,
+   113→  product_name  text not null,
+   114→  qty           integer not null,
+   115→  unit_price    numeric(20,0) not null,  -- paisas
+   116→  line_total    numeric(20,0) not null,  -- paisas
+   117→  is_temporary  boolean not null default false,
+   118→  stock_movement_id text references public.stock_movements(id) on delete set null,
+   119→  created_at    timestamptz not null default now()
+   120→);
+   121→create index if not exists invoice_items_invoice_idx on public.invoice_items(invoice_id);
+   122→create index if not exists invoice_items_product_idx on public.invoice_items(product_id);
+   123→
+   124→-- ----------------------------------------------------------------------------
+   125→-- 5. payment_allocations — links payments to invoices.
+   126→--    Each row = one payment method's contribution to one invoice.
+   127→-- ----------------------------------------------------------------------------
+   128→create table if not exists public.payment_allocations (
+   129→  id              text primary key default gen_random_uuid()::text,
+   130→  business_id     text not null references public.business(id) on delete cascade,
+   131→  invoice_id      text not null references public.invoices(id) on delete cascade,
+   132→  -- Which business account received the payment
+   133→  account_id      text not null references public.accounts(id) on delete restrict,
+   134→  -- Amount in paisas
+   135→  amount          numeric(20,0) not null,
+   136→  -- For change/refund: negative amount or is_change=true
+   137→  is_change       boolean not null default false,
+   138→  -- Voucher link (the payment may be part of the sale voucher or a separate receipt)
+   139→  voucher_id      text references public.vouchers(id) on delete set null,
+   140→  allocation_date date not null default (now() at time zone 'Asia/Karachi')::date,
+   141→  created_by      uuid,
+   142→  created_at      timestamptz not null default now()
+   143→);
+   144→create index if not exists payment_allocations_invoice_idx on public.payment_allocations(invoice_id);
+   145→create index if not exists payment_allocations_account_idx on public.payment_allocations(account_id);
+   146→
+   147→-- ----------------------------------------------------------------------------
+   148→-- 6. salesman_commissions — idempotent, based on collected amount.
+   149→--    Unique constraint on (allocation_id, salesman_id) prevents duplicates.
+   150→-- ----------------------------------------------------------------------------
+   151→create table if not exists public.salesman_commissions (
+   152→  id              text primary key default gen_random_uuid()::text,
+   153→  business_id     text not null references public.business(id) on delete cascade,
+   154→  salesman_id     text not null references public.salesmen(id) on delete cascade,
+   155→  invoice_id      text not null references public.invoices(id) on delete cascade,
+   156→  allocation_id   text not null references public.payment_allocations(id) on delete cascade,
+   157→  -- Commission = collected_amount * commission_pct / 100
+   158→  collected_amount numeric(20,0) not null,  -- paisas
+   159→  commission_pct  numeric(5,2) not null,
+   160→  commission_amount numeric(20,0) not null,  -- paisas
+   161→  -- Idempotency: one commission per (allocation, salesman)
+   162→  created_at      timestamptz not null default now(),
+   163→  unique (allocation_id, salesman_id)
+   164→);
+   165→create index if not exists commissions_salesman_idx on public.salesman_commissions(salesman_id);
+   166→create index if not exists commissions_invoice_idx on public.salesman_commissions(invoice_id);
+   167→
+   168→-- ----------------------------------------------------------------------------
+   169→-- 7. sales_returns — reversing vouchers, no hard delete.
+   170→-- ----------------------------------------------------------------------------
+   171→create table if not exists public.sales_returns (
+   172→  id              text primary key default gen_random_uuid()::text,
+   173→  business_id     text not null references public.business(id) on delete cascade,
+   174→  original_invoice_id text not null references public.invoices(id) on delete restrict,
+   175→  return_voucher_id   text references public.vouchers(id) on delete set null,
+   176→  return_date     date not null default (now() at time zone 'Asia/Karachi')::date,
+   177→  total           numeric(20,0) not null,  -- paisas returned
+   178→  reason          text,
+   179→  created_by      uuid,
+   180→  created_at      timestamptz not null default now()
+   181→);
+   182→create index if not exists sales_returns_invoice_idx on public.sales_returns(original_invoice_id);
+   183→
+   184→-- ----------------------------------------------------------------------------
+   185→-- 8. next_invoice_no() — concurrency-safe shared invoice sequence.
+   186→--    Uses an advisory lock so parallel calls serialize.
+   187→--    Returns 'INV-0001', 'INV-0002', etc.
+   188→-- ----------------------------------------------------------------------------
+   189→create or replace function public.next_invoice_no(p_business_id text)
+   190→returns text
+   191→language plpgsql
+   192→security definer
+   193→set search_path = public
+   194→as $$
+   195→declare
+   196→  v_next int;
+   197→  v_no text;
+   198→begin
+   199→  -- Advisory lock keyed to a constant + business hash so different businesses
+   200→  -- don't block each other (single-business MVP, but future-proof).
+   201→  perform pg_advisory_xact_lock(987654321, hashtext(p_business_id));
+   202→  -- Find the max invoice number for this business and increment.
+   203→  select coalesce(max(cast(replace(invoice_no, 'INV-', '') as integer)), 0) + 1
+   204→    into v_next
+   205→    from public.invoices
+   206→    where business_id = p_business_id;
+   207→  v_no := 'INV-' || lpad(v_next::text, 4, '0');
+   208→  return v_no;
+   209→end;
+   210→$$;
+   211→
+   212→-- ----------------------------------------------------------------------------
+   213→-- 9. post_sale() — the main RPC that posts a complete sale.
+   214→--    Creates invoice + items + payment allocations + stock movements +
+   215→--    balanced voucher + commission (if salesman + collected amount).
+   216→--    SECURITY DEFINER so it can insert into all tables atomically.
+   217→-- ----------------------------------------------------------------------------
+   218→create or replace function public.post_sale(
+   219→  p_business_id    text,
+   220→  p_invoice_type   text,   -- COUNTER | ONLINE | OFC
+   221→  p_invoice_date   date,
+   222→  p_items          jsonb,  -- [{product_id, product_name, qty, unit_price, is_temporary}, ...]
+   223→  p_payments       jsonb,  -- [{account_id, amount, is_change}, ...]
+   224→  p_salesman_id    text default null,
+   225→  p_customer_id    text default null,
+   226→  p_customer_name  text default null,
+   227→  p_customer_phone text default null,
+   228→  p_customer_address text default null,
+   229→  p_customer_city  text default null,
+   230→  p_memo           text default null,
+   231→  p_created_by     uuid default null
+   232→)
+   233→returns text  -- the new invoice id
+   234→language plpgsql
+   235→security definer
+   236→set search_path = public
+   237→as $$
+   238→declare
+   239→  v_invoice_id    text;
+   240→  v_invoice_no    text;
+   241→  v_subtotal      numeric(20,0) := 0;
+   242→  v_total         numeric(20,0) := 0;
+   243→  v_paid          numeric(20,0) := 0;
+   244→  v_change        numeric(20,0) := 0;
+   245→  v_item          jsonb;
+   246→  v_payment       jsonb;
+   247→  v_line_total    numeric(20,0);
+   248→  v_qty           integer;
+   249→  v_unit_price    numeric(20,0);
+   250→  v_product_id    text;
+   251→  v_voucher_id    text;
+   252→  v_voucher_lines jsonb := '[]'::jsonb;
+   253→  v_sales_account text;
+   254→  v_stock_sm_id   text;
+   255→  v_alloc_id      text;
+   256→  v_comm_pct      numeric(5,2);
+   257→  v_comm_amount   numeric(20,0);
+   258→begin
+   259→  -- Validate invoice type.
+   260→  if p_invoice_type not in ('COUNTER', 'ONLINE', 'OFC') then
+   261→    raise exception 'Invalid invoice_type: %', p_invoice_type;
+   262→  end if;
+   263→
+   264→  -- Validate at least 1 item.
+   265→  if jsonb_array_length(p_items) < 1 then
+   266→    raise exception 'Invoice must have at least 1 item';
+   267→  end if;
+   268→
+   269→  -- Generate the shared invoice number (concurrency-safe).
+   270→  v_invoice_no := public.next_invoice_no(p_business_id);
+   271→
+   272→  -- Compute subtotal from items.
+   273→  for v_item in select * from jsonb_array_elements(p_items)
+   274→  loop
+   275→    v_qty := (v_item->>'qty')::integer;
+   276→    v_unit_price := coalesce((v_item->>'unit_price')::numeric, 0);
+   277→    v_line_total := v_qty * v_unit_price;
+   278→    v_subtotal := v_subtotal + v_line_total;
+   279→  end loop;
+   280→
+   281→  v_total := v_subtotal;
+   282→
+   283→  -- Compute paid amount and change from payments.
+   284→  for v_payment in select * from jsonb_array_elements(p_payments)
+   285→  loop
+   286→    if coalesce((v_payment->>'is_change')::boolean, false) then
+   287→      v_change := v_change + coalesce((v_payment->>'amount')::numeric, 0);
+   288→    else
+   289→      v_paid := v_paid + coalesce((v_payment->>'amount')::numeric, 0);
+   290→    end if;
+   291→  end loop;
+   292→
+   293→  -- Find the Sales account (code 4010) for this business.
+   294→  select id into v_sales_account
+   295→  from public.accounts
+   296→  where business_id = p_business_id and code = '4010' and is_active = true;
+   297→  if not found then
+   298→    raise exception 'Sales account (4010) not found';
+   299→  end if;
+   300→
+   301→  -- Build voucher lines.
+   302→  -- Line 1: Credit Sales by total.
+   303→  v_voucher_lines := v_voucher_lines || jsonb_build_object(
+   304→    'account_id', v_sales_account,
+   305→    'debit', '0',
+   306→    'credit', v_total::text,
+   307→    'memo', 'Sale ' || v_invoice_no
+   308→  );
+   309→
+   310→  -- Lines 2..N: Debit each payment account by its amount (non-change).
+   311→  for v_payment in select * from jsonb_array_elements(p_payments)
+   312→  loop
+   313→    if not coalesce((v_payment->>'is_change')::boolean, false) then
+   314→      v_voucher_lines := v_voucher_lines || jsonb_build_object(
+   315→        'account_id', v_payment->>'account_id',
+   316→        'debit', coalesce((v_payment->>'amount')::numeric, 0)::text,
+   317→        'credit', '0',
+   318→        'memo', 'Payment received ' || v_invoice_no
+   319→      );
+   320→    end if;
+   321→  end loop;
+   322→
+   323→  -- Lines for change: Credit the change account.
+   324→  for v_payment in select * from jsonb_array_elements(p_payments)
+   325→  loop
+   326→    if coalesce((v_payment->>'is_change')::boolean, false) then
+   327→      v_voucher_lines := v_voucher_lines || jsonb_build_object(
+   328→        'account_id', v_payment->>'account_id',
+   329→        'debit', '0',
+   330→        'credit', coalesce((v_payment->>'amount')::numeric, 0)::text,
+   331→        'memo', 'Change given ' || v_invoice_no
+   332→      );
+   333→    end if;
+   334→  end loop;
+   335→
+   336→  -- Post the voucher via post_voucher (balanced validation enforced).
+   337→  v_voucher_id := public.post_voucher(
+   338→    p_business_id,
+   339→    'SI',  -- Sale Invoice
+   340→    p_invoice_date,
+   341→    p_memo,
+   342→    v_voucher_lines,
+   343→    null,
+   344→    null,
+   345→    p_created_by
+   346→  );
+   347→
+   348→  -- Insert the invoice header.
+   349→  insert into public.invoices (
+   350→    business_id, invoice_no, invoice_type, invoice_date,
+   351→    customer_id, salesman_id,
+   352→    customer_name, customer_phone, customer_address, customer_city,
+   353→    subtotal, discount, total, paid_amount,
+   354→    voucher_id, memo, created_by
+   355→  ) values (
+   356→    p_business_id, v_invoice_no, p_invoice_type, p_invoice_date,
+   357→    p_customer_id, p_salesman_id,
+   358→    p_customer_name, p_customer_phone, p_customer_address, p_customer_city,
+   359→    v_subtotal, 0, v_total, v_paid,
+   360→    v_voucher_id, p_memo, p_created_by
+   361→  ) returning id into v_invoice_id;
+   362→
+   363→  -- Insert invoice items + create stock movements.
+   364→  for v_item in select * from jsonb_array_elements(p_items)
+   365→  loop
+   366→    v_qty := (v_item->>'qty')::integer;
+   367→    v_unit_price := coalesce((v_item->>'unit_price')::numeric, 0);
+   368→    v_line_total := v_qty * v_unit_price;
+   369→    v_product_id := v_item->>'product_id';
+   370→
+   371→    -- Create stock movement if product_id is real (not temporary).
+   372→    v_stock_sm_id := null;
+   373→    if v_product_id is not null and v_product_id <> '' then
+   374→      v_stock_sm_id := public.create_stock_movement(
+   375→        p_business_id,
+   376→        v_product_id,
+   377→        'adjustment_out',
+   378→        v_qty,
+   379→        'Sale ' || v_invoice_no,
+   380→        p_invoice_date,
+   381→        p_created_by
+   382→      );
+   383→    end if;
+   384→
+   385→    insert into public.invoice_items (
+   386→      business_id, invoice_id, product_id, product_name, qty, unit_price,
+   387→      line_total, is_temporary, stock_movement_id
+   388→    ) values (
+   389→      p_business_id, v_invoice_id, v_product_id,
+   390→      v_item->>'product_name',
+   391→      v_qty, v_unit_price, v_line_total,
+   392→      coalesce((v_item->>'is_temporary')::boolean, false),
+   393→      v_stock_sm_id
+   394→    );
+   395→  end loop;
+   396→
+   397→  -- Insert payment allocations + commission.
+   398→  for v_payment in select * from jsonb_array_elements(p_payments)
+   399→  loop
+   400→    if not coalesce((v_payment->>'is_change')::boolean, false) then
+   401→      insert into public.payment_allocations (
+   402→        business_id, invoice_id, account_id, amount, is_change, voucher_id, created_by
+   403→      ) values (
+   404→        p_business_id, v_invoice_id,
+   405→        v_payment->>'account_id',
+   406→        coalesce((v_payment->>'amount')::numeric, 0),
+   407→        false,
+   408→        v_voucher_id,
+   409→        p_created_by
+   410→      ) returning id into v_alloc_id;
+   411→
+   412→      -- Commission: only if salesman assigned + amount > 0.
+   413→      if p_salesman_id is not null and coalesce((v_payment->>'amount')::numeric, 0) > 0 then
+   414→        select commission_pct into v_comm_pct
+   415→        from public.salesmen
+   416→        where id = p_salesman_id and business_id = p_business_id;
+   417→        if found then
+   418→          v_comm_amount := round(coalesce((v_payment->>'amount')::numeric, 0) * v_comm_pct / 100);
+   419→          -- Idempotent: unique (allocation_id, salesman_id) prevents duplicates.
+   420→          insert into public.salesman_commissions (
+   421→            business_id, salesman_id, invoice_id, allocation_id,
+   422→            collected_amount, commission_pct, commission_amount
+   423→          ) values (
+   424→            p_business_id, p_salesman_id, v_invoice_id, v_alloc_id,
+   425→            coalesce((v_payment->>'amount')::numeric, 0),
+   426→            v_comm_pct, v_comm_amount
+   427→          ) on conflict (allocation_id, salesman_id) do nothing;
+   428→        end if;
+   429→      end if;
+   430→    end if;
+   431→  end loop;
+   432→
+   433→  -- Audit entry.
+   434→  insert into public.audit_logs (business_id, user_id, action, entity, entity_id, details)
+   435→  values (p_business_id, p_created_by, 'POST_SALE', 'invoice', v_invoice_id,
+   436→    jsonb_build_object(
+   437→      'invoice_no', v_invoice_no,
+   438→      'invoice_type', p_invoice_type,
+   439→      'total', v_total,
+   440→      'paid', v_paid,
+   441→      'change', v_change,
+   442→      'voucher_id', v_voucher_id
+   443→    ));
+   444→
+   445→  return v_invoice_id;
+   446→end;
+   447→$$;
+   448→
+   449→-- ----------------------------------------------------------------------------
+   450→-- 10. post_sales_return() — reverses a sale.
+   451→--     Posts reversing voucher, restores stock, does NOT reverse commission.
+   452→-- ----------------------------------------------------------------------------
+   453→create or replace function public.post_sales_return(
+   454→  p_business_id   text,
+   455→  p_invoice_id    text,
+   456→  p_return_date   date,
+   457→  p_reason        text default null,
+   458→  p_created_by    uuid default null
+   459→)
+   460→returns text  -- the sales_return id
+   461→language plpgsql
+   462→security definer
+   463→set search_path = public
+   464→as $$
+   465→declare
+   466→  v_invoice     public.invoices%rowtype;
+   467→  v_items       public.invoice_items%rowtype;
+   468→  v_voucher_id  text;
+   469→  v_voucher_lines jsonb := '[]'::jsonb;
+   470→  v_sales_account text;
+   471→  v_return_id   text;
+   472→  v_stock_sm_id text;
+   473→begin
+   474→  -- Load the original invoice.
+   475→  select * into v_invoice from public.invoices
+   476→  where id = p_invoice_id and business_id = p_business_id;
+   477→
+   478→  if not found then
+   479→    raise exception 'Invoice not found: %', p_invoice_id;
+   480→  end if;
+   481→
+   482→  if v_invoice.is_returned then
+   483→    raise exception 'Invoice already returned';
+   484→  end if;
+   485→
+   486→  -- Find Sales account (4010).
+   487→  select id into v_sales_account
+   488→  from public.accounts
+   489→  where business_id = p_business_id and code = '4010';
+   490→  if not found then
+   491→    raise exception 'Sales account (4010) not found';
+   492→  end if;
+   493→
+   494→  -- Build REVERSING voucher lines (swap debit/credit from original sale).
+   495→  -- Original: Debit payment accounts, Credit Sales.
+   496→  -- Reversal: Debit Sales, Credit payment accounts.
+   497→  v_voucher_lines := v_voucher_lines || jsonb_build_object(
+   498→    'account_id', v_sales_account,
+   499→    'debit', v_invoice.total::text,
+   500→    'credit', '0',
+   501→    'memo', 'Sales return reversal: ' || v_invoice.invoice_no
+   502→  );
+   503→
+   504→  -- Credit each original payment account (reverse the debit).
+   505→  for v_items in select * from public.invoice_items where invoice_id = p_invoice_id
+   506→  loop
+   507→    -- We don't have the original payment accounts stored per-item, so we
+   508→    -- reverse against the payment_allocations.
+   509→    null;
+   510→  end loop;
+   511→
+   512→  -- Reverse payment allocations.
+   513→  for v_items in
+   514→    select pa.* from public.payment_allocations pa
+   515→    where pa.invoice_id = p_invoice_id and pa.is_change = false
+   516→  loop
+   517→    v_voucher_lines := v_voucher_lines || jsonb_build_object(
+   518→      'account_id', v_items.account_id,
+   519→      'debit', '0',
+   520→      'credit', v_items.amount::text,
+   521→      'memo', 'Return refund: ' || v_invoice.invoice_no
+   522→    );
+   523→  end loop;
+   524→
+   525→  -- Post the reversing voucher.
+   526→  v_voucher_id := public.post_voucher(
+   527→    p_business_id,
+   528→    'SR',  -- Sales Return
+   529→    p_return_date,
+   530→    'Return: ' || v_invoice.invoice_no,
+   531→    v_voucher_lines,
+   532→    p_invoice_id,
+   533→    'sales_return',
+   534→    p_created_by
+   535→  );
+   536→
+   537→  -- Restore stock for each item.
+   538→  for v_items in select * from public.invoice_items where invoice_id = p_invoice_id
+   539→  loop
+   540→    if v_items.product_id is not null then
+   541→      v_stock_sm_id := public.create_stock_movement(
+   542→        p_business_id,
+   543→        v_items.product_id,
+   544→        'adjustment_in',
+   545→        v_items.qty,
+   546→        'Return: ' || v_invoice.invoice_no,
+   547→        p_return_date,
+   548→        p_created_by
+   549→      );
+   550→    end if;
+   551→  end loop;
+   552→
+   553→  -- Create the sales_return record.
+   554→  insert into public.sales_returns (
+   555→    business_id, original_invoice_id, return_voucher_id, return_date, total, reason, created_by
+   556→  ) values (
+   557→    p_business_id, p_invoice_id, v_voucher_id, p_return_date, v_invoice.total, p_reason, p_created_by
+   558→  ) returning id into v_return_id;
+   559→
+   560→  -- Mark invoice as returned.
+   561→  update public.invoices
+   562→  set is_returned = true, return_voucher_id = v_voucher_id, updated_at = now()
+   563→  where id = p_invoice_id;
+   564→
+   565→  -- Audit.
+   566→  insert into public.audit_logs (business_id, user_id, action, entity, entity_id, details)
+   567→  values (p_business_id, p_created_by, 'POST_SALES_RETURN', 'invoice', p_invoice_id,
+   568→    jsonb_build_object('return_id', v_return_id, 'voucher_id', v_voucher_id, 'reason', p_reason));
+   569→
+   570→  return v_return_id;
+   571→end;
+   572→$$;
+   573→
+   574→-- ============================================================================
+   575→-- Row-Level Security
+   576→-- ============================================================================
+   577→
+   578→alter table public.salesmen              enable row level security;
+   579→alter table public.customers             enable row level security;
+   580→alter table public.invoices              enable row level security;
+   581→alter table public.invoice_items         enable row level security;
+   582→alter table public.payment_allocations   enable row level security;
+   583→alter table public.salesman_commissions  enable row level security;
+   584→alter table public.sales_returns         enable row level security;
+   585→
+   586→-- salesmen: readable by members; managed by can_manage_setup.
+   587→drop policy if exists salesmen_select_own on public.salesmen;
+   588→create policy salesmen_select_own on public.salesmen
+   589→  for select using (business_id = public.current_business_id());
+   590→
+   591→drop policy if exists salesmen_manage_perms on public.salesmen;
+   592→create policy salesmen_manage_perms on public.salesmen
+   593→  for all using (business_id = public.current_business_id() and public.has_permission('can_manage_setup'))
+   594→  with check (business_id = public.current_business_id() and public.has_permission('can_manage_setup'));
+   595→
+   596→-- customers: readable by members; managed by can_manage_setup.
+   597→drop policy if exists customers_select_own on public.customers;
+   598→create policy customers_select_own on public.customers
+   599→  for select using (business_id = public.current_business_id());
+   600→
+   601→drop policy if exists customers_manage_perms on public.customers;
+   602→create policy customers_manage_perms on public.customers
+   603→  for all using (business_id = public.current_business_id() and public.has_permission('can_manage_setup'))
+   604→  with check (business_id = public.current_business_id() and public.has_permission('can_manage_setup'));
+   605→
+   606→-- invoices: readable by members with can_view_sales OR can_view_own_sales.
+   607→drop policy if exists invoices_select_own on public.invoices;
+   608→create policy invoices_select_own on public.invoices
+   609→  for select using (
+   610→    business_id = public.current_business_id()
+   611→    and (public.has_permission('can_view_sales') or public.has_permission('can_view_own_sales'))
+   612→  );
+   613→
+   614→-- No direct INSERT/UPDATE/DELETE on invoices — must use post_sale() RPC.
+   615→
+   616→-- invoice_items: readable by members with can_view_sales.
+   617→drop policy if exists invoice_items_select_own on public.invoice_items;
+   618→create policy invoice_items_select_own on public.invoice_items
+   619→  for select using (
+   620→    business_id = public.current_business_id()
+   621→    and (public.has_permission('can_view_sales') or public.has_permission('can_view_own_sales'))
+   622→  );
+   623→
+   624→-- payment_allocations: readable by members with can_view_sales.
+   625→drop policy if exists payment_allocations_select_own on public.payment_allocations;
+   626→create policy payment_allocations_select_own on public.payment_allocations
+   627→  for select using (
+   628→    business_id = public.current_business_id()
+   629→    and (public.has_permission('can_view_sales') or public.has_permission('can_view_own_sales'))
+   630→  );
+   631→
+   632→-- salesman_commissions: readable by members.
+   633→drop policy if exists commissions_select_own on public.salesman_commissions;
+   634→create policy commissions_select_own on public.salesman_commissions
+   635→  for select using (business_id = public.current_business_id());
+   636→
+   637→-- sales_returns: readable by members.
+   638→drop policy if exists sales_returns_select_own on public.sales_returns;
+   639→create policy sales_returns_select_own on public.sales_returns
+   640→  for select using (business_id = public.current_business_id());
+   641→
+   642→-- Updated_at triggers
+   643→drop trigger if exists salesmen_touch on public.salesmen;
+   644→create trigger salesmen_touch before update on public.salesmen
+   645→  for each row execute function public.touch_updated_at();
+   646→
+   647→drop trigger if exists customers_touch on public.customers;
+   648→create trigger customers_touch before update on public.customers
+   649→  for each row execute function public.touch_updated_at();
+   650→
+   651→drop trigger if exists invoices_touch on public.invoices;
+   652→create trigger invoices_touch before update on public.invoices
+   653→  for each row execute function public.touch_updated_at();
+   654→
+   655→-- ============================================================================
+   656→-- Done. Phase 4 sales module is live with:
+   657→--   ✓ Shared concurrency-safe invoice sequence (next_invoice_no)
+   658→--   ✓ post_sale() RPC: invoice + items + payments + stock + voucher + commission
+   659→--   ✓ post_sales_return() RPC: reversing voucher + stock restore (no commission reversal)
+   660→--   ✓ Idempotent commission (unique allocation_id + salesman_id)
+   661→--   ✓ RLS on all tables (no direct inserts on invoices)
+   662→--   ✓ Negative stock allowed
+   663→-- ============================================================================
+   664→
