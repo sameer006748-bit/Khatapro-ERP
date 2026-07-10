@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { signOut } from 'next-auth/react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
+import { motion, AnimatePresence } from 'framer-motion'
 import {
   LayoutDashboard,
   Settings,
@@ -19,8 +20,10 @@ import {
   LogOut,
   Wallet,
   Shield,
+  MoreHorizontal,
 } from 'lucide-react'
 import type { MeUser } from '@/components/erp/erp-app'
+import { KhataProLogo } from '@/components/erp/logo'
 import { OwnerDashboard } from '@/components/erp/views/owner-dashboard'
 import { AccountantDashboard } from '@/components/erp/views/accountant-dashboard'
 import { SalesmanDashboard } from '@/components/erp/views/salesman-dashboard'
@@ -37,28 +40,27 @@ import { ComingSoonView } from '@/components/erp/views/coming-soon'
 type NavItem = {
   key: string
   label: string
+  short: string
   icon: React.ComponentType<{ className?: string }>
-  /** Permission code required to see this item; undefined = always visible. */
   perm?: string
-  /** Restricted to Owner/Admin regardless of perm. */
   ownerOnly?: boolean
 }
 
 const NAV: NavItem[] = [
-  { key: 'home', label: 'Home', icon: LayoutDashboard },
-  { key: 'setup', label: 'Setup', icon: Settings, perm: 'can_view_setup' },
-  { key: 'business-accounts', label: 'Business Accounts', icon: Wallet, perm: 'can_view_setup' },
-  { key: 'coa', label: 'Chart of Accounts', icon: BookOpen, perm: 'can_view_setup' },
-  { key: 'users', label: 'Users & Roles', icon: Users, ownerOnly: true },
-  { key: 'permissions', label: 'Permission Matrix', icon: Shield, ownerOnly: true },
-  { key: 'audit', label: 'Audit Log', icon: ScrollText, perm: 'can_view_audit_log' },
-  { key: 'biz-day-test', label: 'Biz-Day Test', icon: FileText },
-  { key: 'sales', label: 'Sales', icon: ShoppingCart, perm: 'can_view_sales' },
-  { key: 'purchases', label: 'Purchases', icon: Receipt, perm: 'can_view_purchases' },
-  { key: 'products', label: 'Products', icon: Package, perm: 'can_view_products' },
-  { key: 'riders', label: 'Riders', icon: Bike, perm: 'can_view_riders' },
-  { key: 'vouchers', label: 'Vouchers', icon: ClipboardList, perm: 'can_view_vouchers' },
-  { key: 'reports', label: 'Reports', icon: FileText, perm: 'can_view_trial_balance' },
+  { key: 'home', label: 'Home', short: 'Home', icon: LayoutDashboard },
+  { key: 'setup', label: 'Setup', short: 'Setup', icon: Settings, perm: 'can_view_setup' },
+  { key: 'business-accounts', label: 'Business Accounts', short: 'Accounts', icon: Wallet, perm: 'can_view_setup' },
+  { key: 'coa', label: 'Chart of Accounts', short: 'CoA', icon: BookOpen, perm: 'can_view_setup' },
+  { key: 'users', label: 'Users & Roles', short: 'Users', icon: Users, ownerOnly: true },
+  { key: 'permissions', label: 'Permission Matrix', short: 'Perms', icon: Shield, ownerOnly: true },
+  { key: 'audit', label: 'Audit Log', short: 'Audit', icon: ScrollText, perm: 'can_view_audit_log' },
+  { key: 'biz-day-test', label: 'Biz-Day Test', short: 'Date', icon: FileText },
+  { key: 'sales', label: 'Sales', short: 'Sales', icon: ShoppingCart, perm: 'can_view_sales' },
+  { key: 'purchases', label: 'Purchases', short: 'Buy', icon: Receipt, perm: 'can_view_purchases' },
+  { key: 'products', label: 'Products', short: 'Stock', icon: Package, perm: 'can_view_products' },
+  { key: 'riders', label: 'Riders', short: 'Riders', icon: Bike, perm: 'can_view_riders' },
+  { key: 'vouchers', label: 'Vouchers', short: 'Vouchers', icon: ClipboardList, perm: 'can_view_vouchers' },
+  { key: 'reports', label: 'Reports', short: 'Reports', icon: FileText, perm: 'can_view_trial_balance' },
 ]
 
 function visibleNav(user: MeUser): NavItem[] {
@@ -71,29 +73,37 @@ function visibleNav(user: MeUser): NavItem[] {
 
 export function DashboardShell({ user, onSignOut }: { user: MeUser; onSignOut: () => void }) {
   const [active, setActive] = useState('home')
+  const [moreOpen, setMoreOpen] = useState(false)
   const nav = visibleNav(user)
 
   // Reset to home if the active item is no longer visible (e.g. role change).
   const effectiveActive = nav.some((n) => n.key === active) ? active : 'home'
 
+  // Mobile: first 4 items + "More" entry.
+  const mobilePrimary = nav.slice(0, 4)
+  const mobileOverflow = nav.slice(4)
+
   return (
-    <div className="min-h-screen flex flex-col bg-background text-foreground">
+    <div className="min-h-[100dvh] flex flex-col bg-background text-foreground">
       {/* Top bar */}
-      <header className="h-12 border-b border-border flex items-center px-3 sm:px-4 bg-card/30 backdrop-blur-sm">
-        <div className="flex items-center gap-2">
-          <div className="size-6 bg-primary" />
-          <span className="font-semibold tracking-tight">Khata ERP</span>
-          <span className="text-xs text-muted-foreground ml-2 hidden sm:inline">·</span>
-          <span className="text-xs text-muted-foreground hidden sm:inline">{user.roleName}</span>
+      <header className="h-14 border-b border-border flex items-center px-4 sm:px-6 bg-card/70 backdrop-blur-md sticky top-0 z-30">
+        <div className="flex items-center gap-3">
+          <KhataProLogo size="sm" showWordmark={false} />
+          <span className="font-semibold tracking-tight text-foreground hidden sm:inline">
+            KhataPro <span className="text-primary">ERP</span>
+          </span>
+          <span className="hidden md:inline text-xs text-muted-foreground ml-2 px-2 py-0.5 bg-muted rounded-md">
+            {user.roleName}
+          </span>
         </div>
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto flex items-center gap-3">
           <span className="hidden sm:inline text-xs text-muted-foreground" data-num>
             {new Date().toLocaleString('en-GB', { timeZone: 'Asia/Karachi' })}
           </span>
           <Button
             variant="ghost"
             size="sm"
-            className="text-xs"
+            className="text-xs press-sm h-8"
             onClick={async () => {
               await signOut({ redirect: false })
               onSignOut()
@@ -104,13 +114,13 @@ export function DashboardShell({ user, onSignOut }: { user: MeUser; onSignOut: (
         </div>
       </header>
 
-      {/* Desktop: sidebar + main / Mobile: main + bottom nav */}
+      {/* Desktop: sidebar + main / Mobile: main + bottom pill nav */}
       <div className="flex-1 flex">
         {/* Sidebar (desktop) */}
-        <aside className="hidden md:flex w-56 border-r border-border bg-sidebar/50 flex-col">
-          <nav className="flex-1 overflow-y-auto p-2 space-y-0.5">
+        <aside className="hidden md:flex w-60 border-r border-border bg-sidebar/60 flex-col backdrop-blur-sm">
+          <nav className="flex-1 overflow-y-auto p-3 space-y-1">
             {nav.map((n) => (
-              <NavButton
+              <SidebarNavButton
                 key={n.key}
                 item={n}
                 active={effectiveActive === n.key}
@@ -118,52 +128,68 @@ export function DashboardShell({ user, onSignOut }: { user: MeUser; onSignOut: (
               />
             ))}
           </nav>
-          <div className="p-2 border-t border-border">
-            <div className="px-2 py-1.5 text-xs text-muted-foreground">
-              <div className="font-medium text-foreground truncate">{user.displayName}</div>
-              <div className="truncate">{user.email}</div>
+          <div className="p-3 border-t border-border">
+            <div className="card-3d p-3">
+              <div className="flex items-center gap-2.5">
+                <div className="size-8 rounded-full bg-accent grid place-items-center text-xs font-semibold text-accent-foreground">
+                  {user.displayName.charAt(0).toUpperCase()}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="font-medium text-sm text-foreground truncate">
+                    {user.displayName}
+                  </div>
+                  <div className="text-[11px] text-muted-foreground truncate">{user.email}</div>
+                </div>
+              </div>
             </div>
           </div>
         </aside>
 
         {/* Main content */}
-        <main className="flex-1 overflow-y-auto pb-20 md:pb-6">
-          <div className="p-4 sm:p-6 max-w-7xl mx-auto">
-            <ViewRouter user={user} active={effectiveActive} />
+        <main className="flex-1 overflow-y-auto pb-28 md:pb-8">
+          <div className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto">
+            <AnimatePresence mode="wait">
+              <motion.div
+                key={effectiveActive}
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -4 }}
+                transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
+              >
+                <ViewRouter user={user} active={effectiveActive} />
+              </motion.div>
+            </AnimatePresence>
           </div>
         </main>
       </div>
 
-      {/* Bottom nav (mobile) */}
-      <nav className="md:hidden fixed bottom-0 inset-x-0 border-t border-border bg-card/95 backdrop-blur-md grid grid-cols-5 z-40">
-        {nav.slice(0, 5).map((n) => (
-          <button
-            key={n.key}
-            onClick={() => setActive(n.key)}
-            className={cn(
-              'flex flex-col items-center justify-center gap-0.5 py-2 text-[10px] font-medium',
-              effectiveActive === n.key ? 'text-primary' : 'text-muted-foreground',
-            )}
-          >
-            <n.icon className="size-5" />
-            <span className="truncate max-w-[60px]">{n.label.split(' ')[0]}</span>
-          </button>
-        ))}
-      </nav>
+      {/* Mobile: liquid-glass pill bottom nav */}
+      <MobilePillNav
+        primary={mobilePrimary}
+        active={effectiveActive}
+        onSelect={setActive}
+        hasMore={mobileOverflow.length > 0}
+        onMore={() => setMoreOpen(true)}
+      />
 
-      {/* Mobile "more" sheet — for nav items beyond the first 5 */}
-      {nav.length > 5 && (
+      {/* Mobile "more" sheet — for nav items beyond the first 4 */}
+      {mobileOverflow.length > 0 && (
         <MobileMoreSheet
-          items={nav.slice(5)}
+          items={mobileOverflow}
           active={effectiveActive}
-          onSelect={setActive}
+          open={moreOpen}
+          onOpenChange={setMoreOpen}
+          onSelect={(k) => {
+            setActive(k)
+            setMoreOpen(false)
+          }}
         />
       )}
     </div>
   )
 }
 
-function NavButton({
+function SidebarNavButton({
   item,
   active,
   onClick,
@@ -176,70 +202,154 @@ function NavButton({
     <button
       onClick={onClick}
       className={cn(
-        'w-full flex items-center gap-2 px-2.5 py-2 text-sm',
+        'relative w-full flex items-center gap-2.5 px-3 py-2 text-sm rounded-lg press-sm',
         active
-          ? 'bg-primary/10 text-primary border-l-2 border-primary'
-          : 'text-muted-foreground hover:text-foreground hover:bg-accent/40 border-l-2 border-transparent',
+          ? 'bg-accent text-accent-foreground font-medium'
+          : 'text-muted-foreground hover:text-foreground hover:bg-muted/60',
       )}
     >
-      <item.icon className="size-4" />
+      {active && (
+        <motion.span
+          layoutId="sidebar-active"
+          className="absolute left-0 top-1/2 -translate-y-1/2 h-5 w-1 rounded-full bg-primary"
+          transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
+        />
+      )}
+      <item.icon className={cn('size-4 shrink-0', active && 'text-primary')} />
       <span className="truncate">{item.label}</span>
     </button>
+  )
+}
+
+// State for the mobile more-sheet lives here so the parent doesn't re-render
+// on every open/close. (Using a module-level closure would be wrong; this is
+// a separate component.)
+function MobilePillNav({
+  primary,
+  active,
+  onSelect,
+  hasMore,
+  onMore,
+}: {
+  primary: NavItem[]
+  active: string
+  onSelect: (k: string) => void
+  hasMore: boolean
+  onMore: () => void
+}) {
+  return (
+    <nav
+      className="md:hidden fixed left-1/2 -translate-x-1/2 z-40 glass-pill rounded-full px-2 py-2 flex items-center gap-1"
+      style={{
+        bottom: 'calc(0.75rem + env(safe-area-inset-bottom, 0px))',
+        maxWidth: 'calc(100vw - 1.5rem)',
+      }}
+      aria-label="Primary"
+    >
+      {primary.map((n) => {
+        const isActive = active === n.key
+        return (
+          <button
+            key={n.key}
+            onClick={() => onSelect(n.key)}
+            className="relative flex items-center justify-center press-sm"
+            aria-label={n.label}
+            aria-current={isActive ? 'page' : undefined}
+          >
+            {/* Active liquid-glass highlight (animates between items via layoutId). */}
+            {isActive && (
+              <motion.span
+                layoutId="pill-active"
+                className="absolute inset-0 rounded-full bg-primary shadow-sm"
+                transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
+              />
+            )}
+            <span
+              className={cn(
+                'relative z-10 grid place-items-center size-11 rounded-full',
+                isActive ? 'text-primary-foreground' : 'text-muted-foreground',
+              )}
+            >
+              <n.icon className="size-5" />
+            </span>
+          </button>
+        )
+      })}
+      {hasMore && (
+        <button
+          onClick={onMore}
+          className="relative flex items-center justify-center press-sm"
+          aria-label="More navigation"
+        >
+          <span className="grid place-items-center size-11 rounded-full text-muted-foreground">
+            <MoreHorizontal className="size-5" />
+          </span>
+        </button>
+      )}
+    </nav>
   )
 }
 
 function MobileMoreSheet({
   items,
   active,
+  open,
+  onOpenChange,
   onSelect,
 }: {
   items: NavItem[]
   active: string
+  open: boolean
+  onOpenChange: (v: boolean) => void
   onSelect: (k: string) => void
 }) {
-  const [open, setOpen] = useState(false)
-  if (!items.length) return null
   return (
-    <>
-      <button
-        onClick={() => setOpen(true)}
-        className="md:hidden fixed bottom-4 right-4 size-10 bg-primary text-primary-foreground grid place-items-center shadow-lg z-50"
-        aria-label="More"
-      >
-        <span className="text-lg leading-none">+</span>
-      </button>
+    <AnimatePresence>
       {open && (
-        <div
-          className="md:hidden fixed inset-0 bg-black/60 z-50"
-          onClick={() => setOpen(false)}
+        <motion.div
+          className="md:hidden fixed inset-0 z-50 bg-foreground/30 backdrop-blur-sm"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.18 }}
+          onClick={() => onOpenChange(false)}
         >
-          <div
-            className="absolute bottom-0 inset-x-0 bg-card border-t border-border p-3 max-h-[60vh] overflow-y-auto"
+          <motion.div
+            className="absolute left-1/2 -translate-x-1/2 glass-card rounded-2xl p-3 w-[calc(100vw-2rem)] max-w-sm"
+            style={{ bottom: 'calc(5rem + env(safe-area-inset-bottom, 0px))' }}
+            initial={{ opacity: 0, y: 20, scale: 0.96 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 10, scale: 0.98 }}
+            transition={{ duration: 0.25, ease: [0.34, 1.4, 0.64, 1] }}
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="text-xs uppercase tracking-wider text-muted-foreground mb-2">More</div>
-            <div className="grid grid-cols-2 gap-1">
-              {items.map((n) => (
-                <button
-                  key={n.key}
-                  onClick={() => {
-                    onSelect(n.key)
-                    setOpen(false)
-                  }}
-                  className={cn(
-                    'flex items-center gap-2 p-2 text-sm',
-                    active === n.key ? 'bg-primary/10 text-primary' : 'text-foreground',
-                  )}
-                >
-                  <n.icon className="size-4" />
-                  <span className="truncate">{n.label}</span>
-                </button>
-              ))}
+            <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2 px-2">
+              More
             </div>
-          </div>
-        </div>
+            <div className="grid grid-cols-3 gap-1.5">
+              {items.map((n) => {
+                const isActive = active === n.key
+                return (
+                  <button
+                    key={n.key}
+                    onClick={() => onSelect(n.key)}
+                    className={cn(
+                      'flex flex-col items-center gap-1.5 p-3 rounded-xl press-sm',
+                      isActive ? 'bg-accent text-accent-foreground' : 'text-foreground hover:bg-muted/60',
+                    )}
+                  >
+                    <n.icon className={cn('size-5', isActive && 'text-primary')} />
+                    <span className="text-[11px] font-medium truncate w-full text-center">
+                      {n.short}
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
+          </motion.div>
+        </motion.div>
       )}
-    </>
+    </AnimatePresence>
   )
 }
 
@@ -259,7 +369,6 @@ function ViewRouter({ user, active }: { user: MeUser; active: string }) {
   if (active === 'audit') return <AuditLogView />
   if (active === 'biz-day-test') return <BizDayTestView />
 
-  // Phase 2+ screens — stubbed for Phase 1.
   if (active === 'sales') return <ComingSoonView title="Sales" phase="Phase 4" />
   if (active === 'purchases') return <ComingSoonView title="Purchases & Vendors" phase="Phase 5" />
   if (active === 'products') return <ComingSoonView title="Products & Stock" phase="Phase 3" />

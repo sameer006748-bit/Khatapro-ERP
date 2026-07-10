@@ -1,38 +1,54 @@
 'use client'
 
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import type { MeUser } from '@/components/erp/erp-app'
+import { ShoppingCart, TrendingUp, Wallet, ArrowRight } from 'lucide-react'
 
 export function SalesmanDashboard({ user }: { user: MeUser }) {
+  const actions = [
+    { label: 'New Bill', icon: ShoppingCart, phase: 'Phase 4' },
+    { label: 'My Sales', icon: TrendingUp, phase: 'Phase 4' },
+    { label: 'My Commission', icon: Wallet, phase: 'Phase 4' },
+  ]
+
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Salesman</h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          {user.displayName} — counter sale bill creation, own sales, own commission.
+      <div className="card-3d surface-gradient p-6 sm:p-8">
+        <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium">
+          KhataPro ERP · Salesman
+        </div>
+        <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight text-foreground mt-1">
+          Welcome, {user.displayName.split(' ')[0]}.
+        </h1>
+        <p className="text-sm text-muted-foreground mt-2 max-w-xl">
+          Counter sale bill creation, your own sales, your own commission. Commission accrues
+          only after payment collection — never duplicated.
         </p>
       </div>
-      <Card className="bg-card">
-        <CardHeader className="border-b border-border">
-          <CardTitle className="text-base">Your mobile home (Phase 9 preview)</CardTitle>
-        </CardHeader>
-        <CardContent className="pt-4">
-          <div className="grid grid-cols-3 gap-2">
-            {['New Bill', 'My Sales', 'My Commission'].map((label) => (
-              <div
-                key={label}
-                className="border border-border bg-background px-3 py-4 text-center text-xs"
-              >
-                {label}
+
+      <div className="card-3d p-5 sm:p-6">
+        <div className="mb-4">
+          <h2 className="text-base font-semibold text-foreground">Your mobile home</h2>
+          <p className="text-xs text-muted-foreground mt-0.5">Phase 9 preview</p>
+        </div>
+        <div className="grid grid-cols-3 gap-2.5">
+          {actions.map((a) => (
+            <div
+              key={a.label}
+              className="card-3d card-3d-hover p-4 flex flex-col items-center gap-2 text-center"
+            >
+              <div className="grid place-items-center size-11 rounded-xl icon-3d">
+                <a.icon className="size-5 text-primary-foreground" />
               </div>
-            ))}
-          </div>
-          <p className="mt-3 text-xs text-muted-foreground">
-            Counter Sale bill creation ships in Phase 4. Commission accrues only after payment
-            collection.
-          </p>
-        </CardContent>
-      </Card>
+              <div className="text-xs font-medium text-foreground">{a.label}</div>
+              <div className="text-[10px] text-muted-foreground" data-num>{a.phase}</div>
+            </div>
+          ))}
+        </div>
+        <div className="flex items-center gap-1.5 text-xs text-primary mt-4 pt-4 border-t border-border">
+          <ArrowRight className="size-3.5" />
+          <span>Counter Sale bill creation ships in Phase 4.</span>
+        </div>
+      </div>
     </div>
   )
 }

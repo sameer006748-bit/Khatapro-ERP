@@ -1,8 +1,8 @@
 'use client'
 
 import { useQuery } from '@tanstack/react-query'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import type { MeUser } from '@/components/erp/erp-app'
+import { Lock, Check, Minus } from 'lucide-react'
 
 type RoleWithPerms = {
   id: string
@@ -13,6 +13,13 @@ type RoleWithPerms = {
 }
 
 type Modules = Record<string, Array<{ code: string; description: string | null }>>
+
+const ROLE_BADGE: Record<string, string> = {
+  'Owner/Admin': 'bg-primary/10 text-primary',
+  Accountant: 'bg-sky-100 text-sky-700',
+  Salesman: 'bg-amber-100 text-amber-700',
+  Rider: 'bg-violet-100 text-violet-700',
+}
 
 export function PermissionMatrixView({ user }: { user: MeUser }) {
   const isOwner = user.roleName === 'Owner/Admin'
@@ -29,11 +36,15 @@ export function PermissionMatrixView({ user }: { user: MeUser }) {
 
   if (!isOwner) {
     return (
-      <Card className="bg-card">
-        <CardContent className="p-6 text-sm text-muted-foreground">
-          Restricted to Owner/Admin.
-        </CardContent>
-      </Card>
+      <div className="card-3d p-8 text-center">
+        <div className="grid place-items-center size-12 rounded-xl icon-3d-muted mx-auto mb-3">
+          <Lock className="size-6 text-muted-foreground" />
+        </div>
+        <p className="text-sm font-medium text-foreground">Restricted to Owner/Admin</p>
+        <p className="text-xs text-muted-foreground mt-1">
+          You don&apos;t have permission to view the permission matrix.
+        </p>
+      </div>
     )
   }
 
@@ -44,46 +55,77 @@ export function PermissionMatrixView({ user }: { user: MeUser }) {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Permission Matrix</h1>
-        <p className="text-sm text-muted-foreground mt-1">
+        <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight text-foreground">
+          Permission Matrix
+        </h1>
+        <p className="text-sm text-muted-foreground mt-1.5 max-w-2xl">
           Inspect which permission codes each role has been granted. Owner/Admin has every
           permission seeded. (Editing a role&apos;s permissions UI arrives in a later phase; the
           data model already supports it.)
         </p>
       </div>
 
-      <Card className="bg-card">
-        <CardHeader className="border-b border-border">
-          <CardTitle className="text-base">
-            Matrix <span className="text-xs text-muted-foreground ml-2" data-num>{allCodes.length} perms × {roles.length} roles</span>
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="p-0">
-          {rolesQ.isLoading || permsQ.isLoading ? (
-            <div className="p-6 text-sm text-muted-foreground">Loading…</div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-xs">
-                <thead>
-                  <tr className="border-b border-border text-muted-foreground">
-                    <th className="text-left p-2 sticky left-0 bg-card">Permission</th>
-                    {roles.map((r) => (
-                      <th key={r.id} className="p-2 text-center min-w-[100px]">
-                        <div className="font-semibold text-foreground">{r.name}</div>
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {Object.entries(modules).map(([mod, perms]) => (
-                    <Group key={mod} mod={mod} perms={perms} roles={roles} />
+      {/* Role summary chips */}
+      <div className="flex flex-wrap gap-2">
+        {roles.map((r) => (
+          <div
+            key={r.id}
+            className="card-3d px-3.5 py-2 flex items-center gap-2"
+          >
+            <span
+              className={`text-[11px] uppercase tracking-wider px-2 py-0.5 rounded-md font-medium ${
+                ROLE_BADGE[r.name] ?? 'bg-muted text-muted-foreground'
+              }`}
+            >
+              {r.name}
+            </span>
+            <span className="text-xs text-muted-foreground" data-num>
+              {r.permissions.length} perms
+            </span>
+          </div>
+        ))}
+      </div>
+
+      <div className="card-3d overflow-hidden">
+        <div className="px-5 py-3.5 border-b border-border flex items-center justify-between">
+          <h2 className="text-sm font-semibold text-foreground">Matrix</h2>
+          <span className="text-xs text-muted-foreground" data-num>
+            {allCodes.length} perms × {roles.length} roles
+          </span>
+        </div>
+
+        {rolesQ.isLoading || permsQ.isLoading ? (
+          <div className="p-8 text-sm text-muted-foreground">Loading…</div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b border-border bg-muted/40">
+                  <th className="text-left p-3 sticky left-0 bg-card z-10 min-w-[260px]">
+                    Permission
+                  </th>
+                  {roles.map((r) => (
+                    <th key={r.id} className="p-3 text-center min-w-[110px]">
+                      <span
+                        className={`inline-block text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-md font-medium ${
+                          ROLE_BADGE[r.name] ?? 'bg-muted text-muted-foreground'
+                        }`}
+                      >
+                        {r.name}
+                      </span>
+                    </th>
                   ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+                </tr>
+              </thead>
+              <tbody>
+                {Object.entries(modules).map(([mod, perms]) => (
+                  <Group key={mod} mod={mod} perms={perms} roles={roles} />
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
     </div>
   )
 }
@@ -100,28 +142,38 @@ function Group({
   return (
     <>
       <tr className="bg-muted/30">
-        <td colSpan={roles.length + 1} className="p-2 text-[10px] uppercase tracking-wider text-muted-foreground" data-num>
+        <td
+          colSpan={roles.length + 1}
+          className="p-2.5 px-3 text-[10px] uppercase tracking-wider text-muted-foreground font-semibold"
+          data-num
+        >
           {mod}
         </td>
       </tr>
       {perms.map((p) => (
-        <tr key={p.code} className="border-b border-border/30 hover:bg-accent/20">
-          <td className="p-2 sticky left-0 bg-card">
-            <div className="font-medium" data-num>{p.code}</div>
-            <div className="text-muted-foreground">{p.description}</div>
+        <tr
+          key={p.code}
+          className="border-b border-border/40 last:border-0 hover:bg-accent/30 transition-colors"
+        >
+          <td className="p-3 sticky left-0 bg-card z-10">
+            <div className="font-medium text-foreground" data-num>
+              {p.code}
+            </div>
+            <div className="text-muted-foreground mt-0.5 text-[11px]">{p.description}</div>
           </td>
           {roles.map((r) => {
             const has = r.permissions.some((rp) => rp.code === p.code)
             return (
-              <td key={r.id} className="p-2 text-center">
-                <span
-                  className={
-                    has
-                      ? 'inline-block size-2 bg-primary'
-                      : 'inline-block size-2 bg-muted-foreground/30'
-                  }
-                  aria-label={has ? 'granted' : 'not granted'}
-                />
+              <td key={r.id} className="p-3 text-center">
+                {has ? (
+                  <span className="inline-grid place-items-center size-5 rounded-md bg-primary/10 text-primary">
+                    <Check className="size-3" />
+                  </span>
+                ) : (
+                  <span className="inline-grid place-items-center size-5 rounded-md bg-muted text-muted-foreground/40">
+                    <Minus className="size-3" />
+                  </span>
+                )}
               </td>
             )
           })}

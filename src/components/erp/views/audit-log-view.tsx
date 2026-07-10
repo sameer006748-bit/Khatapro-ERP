@@ -1,8 +1,8 @@
 'use client'
 
 import { useQuery } from '@tanstack/react-query'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { bizFormat } from '@/lib/dates'
+import { ScrollText } from 'lucide-react'
 
 type Row = {
   id: string
@@ -14,6 +14,15 @@ type Row = {
   details: string | null
 }
 
+const ACTION_BADGE: Record<string, string> = {
+  BOOTSTRAP_OWNER: 'bg-primary/10 text-primary',
+  CREATE: 'bg-emerald-100 text-emerald-700',
+  INVITE_USER: 'bg-sky-100 text-sky-700',
+  UPDATE: 'bg-amber-100 text-amber-700',
+  DELETE: 'bg-rose-100 text-rose-700',
+  CANCEL: 'bg-rose-100 text-rose-700',
+}
+
 export function AuditLogView() {
   const q = useQuery<{ rows: Row[] }>({
     queryKey: ['audit'],
@@ -23,46 +32,67 @@ export function AuditLogView() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Audit Log</h1>
-        <p className="text-sm text-muted-foreground mt-1">
+        <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight text-foreground">
+          Audit Log
+        </h1>
+        <p className="text-sm text-muted-foreground mt-1.5 max-w-2xl">
           Most recent 200 entries. Every mutating API call writes one row.
         </p>
       </div>
-      <Card className="bg-card">
-        <CardHeader className="border-b border-border">
-          <CardTitle className="text-base">
-            Entries <span className="text-xs text-muted-foreground ml-2" data-num>{q.data?.rows.length ?? 0}</span>
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="p-0">
-          {q.isLoading ? (
-            <div className="p-6 text-sm text-muted-foreground">Loading…</div>
-          ) : q.data?.rows.length ? (
-            <div className="overflow-x-auto max-h-[70vh] overflow-y-auto">
+
+      {q.isLoading ? (
+        <div className="card-3d p-8 text-sm text-muted-foreground">Loading…</div>
+      ) : q.data?.rows.length ? (
+        <>
+          {/* Desktop table */}
+          <div className="hidden md:block card-3d overflow-hidden">
+            <div className="px-5 py-3.5 border-b border-border flex items-center justify-between">
+              <h2 className="text-sm font-semibold text-foreground">Entries</h2>
+              <span className="text-xs text-muted-foreground" data-num>
+                {q.data.rows.length}
+              </span>
+            </div>
+            <div className="overflow-y-auto max-h-[70vh]">
               <table className="w-full text-sm">
-                <thead className="sticky top-0 bg-card">
-                  <tr className="border-b border-border text-xs uppercase tracking-wider text-muted-foreground">
-                    <th className="text-left p-3">When (KHI)</th>
-                    <th className="text-left p-3">Action</th>
-                    <th className="text-left p-3">Entity</th>
-                    <th className="text-left p-3">Entity ID</th>
-                    <th className="text-left p-3">User ID</th>
-                    <th className="text-left p-3">Details</th>
+                <thead className="sticky top-0 bg-card z-10">
+                  <tr className="border-b border-border text-[11px] uppercase tracking-wider text-muted-foreground bg-muted/40">
+                    <th className="text-left p-3.5 font-medium">When (KHI)</th>
+                    <th className="text-left p-3.5 font-medium">Action</th>
+                    <th className="text-left p-3.5 font-medium">Entity</th>
+                    <th className="text-left p-3.5 font-medium">Entity ID</th>
+                    <th className="text-left p-3.5 font-medium">User ID</th>
+                    <th className="text-left p-3.5 font-medium">Details</th>
                   </tr>
                 </thead>
                 <tbody>
                   {q.data.rows.map((r) => (
-                    <tr key={r.id} className="border-b border-border/50 hover:bg-accent/20">
-                      <td className="p-3 text-xs" data-num>{bizFormat(r.timestamp, 'datetimes')}</td>
-                      <td className="p-3">
-                        <span className="text-xs uppercase tracking-wider bg-primary/10 text-primary px-2 py-0.5" data-num>
+                    <tr
+                      key={r.id}
+                      className="border-b border-border/60 last:border-0 hover:bg-accent/30 transition-colors"
+                    >
+                      <td className="p-3.5 text-xs text-foreground" data-num>
+                        {bizFormat(r.timestamp, 'datetimes')}
+                      </td>
+                      <td className="p-3.5">
+                        <span
+                          className={`text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-md font-medium ${
+                            ACTION_BADGE[r.action] ?? 'bg-muted text-muted-foreground'
+                          }`}
+                          data-num
+                        >
                           {r.action}
                         </span>
                       </td>
-                      <td className="p-3 text-xs" data-num>{r.entity}</td>
-                      <td className="p-3 text-xs text-muted-foreground" data-num>{r.entityId ?? '—'}</td>
-                      <td className="p-3 text-xs text-muted-foreground" data-num>{r.userId ?? '—'}</td>
-                      <td className="p-3 text-xs text-muted-foreground font-mono max-w-[420px] truncate">
+                      <td className="p-3.5 text-xs text-foreground" data-num>
+                        {r.entity}
+                      </td>
+                      <td className="p-3.5 text-xs text-muted-foreground font-mono" data-num>
+                        {r.entityId ?? '—'}
+                      </td>
+                      <td className="p-3.5 text-xs text-muted-foreground font-mono" data-num>
+                        {r.userId ?? '—'}
+                      </td>
+                      <td className="p-3.5 text-xs text-muted-foreground font-mono max-w-[420px] truncate">
                         {r.details ?? '—'}
                       </td>
                     </tr>
@@ -70,11 +100,52 @@ export function AuditLogView() {
                 </tbody>
               </table>
             </div>
-          ) : (
-            <div className="p-6 text-sm text-muted-foreground">No audit entries yet.</div>
-          )}
-        </CardContent>
-      </Card>
+          </div>
+
+          {/* Mobile cards */}
+          <div className="md:hidden space-y-3">
+            {q.data.rows.map((r) => (
+              <div key={r.id} className="card-3d p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <div className="grid place-items-center size-8 rounded-lg icon-3d-muted shrink-0">
+                      <ScrollText className="size-4 text-muted-foreground" />
+                    </div>
+                    <div className="min-w-0">
+                      <span
+                        className={`inline-block text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-md font-medium ${
+                          ACTION_BADGE[r.action] ?? 'bg-muted text-muted-foreground'
+                        }`}
+                        data-num
+                      >
+                        {r.action}
+                      </span>
+                      <div className="text-xs text-muted-foreground mt-1" data-num>
+                        {bizFormat(r.timestamp, 'datetimes')}
+                      </div>
+                    </div>
+                  </div>
+                  <span className="text-xs text-muted-foreground" data-num>
+                    {r.entity}
+                  </span>
+                </div>
+                {r.details && (
+                  <div className="mt-3 pt-3 border-t border-border text-xs text-muted-foreground font-mono break-all" data-num>
+                    {r.details}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </>
+      ) : (
+        <div className="card-3d p-8 text-center">
+          <div className="grid place-items-center size-12 rounded-xl icon-3d-muted mx-auto mb-3">
+            <ScrollText className="size-6 text-muted-foreground" />
+          </div>
+          <p className="text-sm text-muted-foreground">No audit entries yet.</p>
+        </div>
+      )}
     </div>
   )
 }

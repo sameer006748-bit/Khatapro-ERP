@@ -15,23 +15,30 @@ const geistMono = Geist_Mono({
 })
 
 export const metadata: Metadata = {
-  title: 'Khata ERP — Accounting-First Garments',
+  title: 'KhataPro ERP — Accounting-First Garments',
   description:
-    'Accounting-first ERP/PWA for Pakistani garments SMB. Counter / Online / OFC sales, purchases, vouchers, daily closing, reports.',
+    'KhataPro ERP — a clean, premium, accounting-first ERP/PWA for Pakistani garments & SMB. Counter / Online / OFC sales, purchases, vouchers, daily closing, reports. PKR · Asia/Karachi.',
+  applicationName: 'KhataPro ERP',
+  appleWebApp: {
+    capable: true,
+    title: 'KhataPro ERP',
+    statusBarStyle: 'default',
+  },
 }
 
 export const viewport: Viewport = {
-  themeColor: '#0a0a0a',
+  themeColor: '#ffffff',
   width: 'device-width',
   initialScale: 1,
   maximumScale: 1,
+  viewportFit: 'cover',
 }
 
 export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en" className="dark" suppressHydrationWarning>
+    <html lang="en" suppressHydrationWarning>
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased bg-background text-foreground`}
       >

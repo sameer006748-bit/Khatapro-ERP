@@ -21,7 +21,10 @@ export function Providers({ children }: { children: React.ReactNode }) {
   return (
     <SessionProvider>
       <QueryClientProvider client={client}>
-        <ThemeProvider attribute="class" defaultTheme="dark" enableSystem={false} forcedTheme="dark">
+        {/* Light is the default. enableSystem lets users who explicitly prefer
+            dark get it; we do NOT force light, so OS preference still wins after
+            first paint. */}
+        <ThemeProvider attribute="class" defaultTheme="light" enableSystem>
           {children}
         </ThemeProvider>
       </QueryClientProvider>

@@ -2,73 +2,131 @@
 
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import type { MeUser } from '@/components/erp/erp-app'
+import { ShieldCheck, BookOpen, Wallet, ScrollText, CalendarClock, ArrowRight } from 'lucide-react'
 
 export function OwnerDashboard({ user }: { user: MeUser }) {
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Owner / Admin</h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          Welcome, {user.displayName}. Phase 1 is foundation-only — accounting modules arrive in
-          Phase 2 onwards.
-        </p>
+      {/* Hero */}
+      <div className="card-3d surface-gradient p-6 sm:p-8">
+        <div className="flex items-start justify-between gap-4 flex-wrap">
+          <div>
+            <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium">
+              KhataPro ERP · Phase 1 / 10
+            </div>
+            <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight text-foreground mt-1">
+              Welcome, {user.displayName.split(' ')[0]}.
+            </h1>
+            <p className="text-sm text-muted-foreground mt-2 max-w-xl">
+              Foundation is live. Accounting modules (vouchers, sales, purchases, reports) arrive
+              in Phase 2 onwards — each gated on your approval.
+            </p>
+          </div>
+          <div className="flex items-center gap-2 px-3 py-1.5 bg-card border border-border rounded-lg shadow-sm">
+            <ShieldCheck className="size-4 text-primary" />
+            <span className="text-xs font-medium text-foreground">{user.roleName}</span>
+          </div>
+        </div>
       </div>
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <StatCard label="Phase" value="1 / 10" sub="Foundation" />
-        <StatCard label="Currency" value="PKR" sub="Asia/Karachi" mono />
-        <StatCard label="Your role" value={user.roleName} sub={user.email} />
-        <StatCard label="Permissions" value={String(user.permissions.length)} sub="codes granted" mono />
+      {/* Stats grid */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+        <StatCard icon={BookOpen} label="Phase" value="1 / 10" sub="Foundation" mono />
+        <StatCard icon={Wallet} label="Currency" value="PKR" sub="Asia/Karachi" mono />
+        <StatCard icon={ShieldCheck} label="Your role" value={user.roleName} sub={user.email} />
+        <StatCard
+          icon={ScrollText}
+          label="Permissions"
+          value={String(user.permissions.length)}
+          sub="codes granted"
+          mono
+        />
       </div>
 
-      <Card className="bg-card">
-        <CardHeader className="border-b border-border">
-          <CardTitle className="text-base">Phase 1 — what is live</CardTitle>
-        </CardHeader>
-        <CardContent className="pt-4 text-sm space-y-2 text-muted-foreground">
-          <ul className="space-y-1.5 list-disc list-inside marker:text-primary">
-            <li>Authentication & first-owner bootstrap</li>
-            <li>Roles &amp; permissions data model (Owner / Accountant / Salesman / Rider)</li>
-            <li>Default Chart of Accounts (17 accounts across 5 categories)</li>
-            <li>Business accounts with linked Asset ledger sub-accounts</li>
-            <li>Audit log</li>
-            <li>Asia/Karachi date grouping utilities</li>
-          </ul>
-        </CardContent>
-      </Card>
+      {/* What's live + roadmap */}
+      <div className="grid lg:grid-cols-2 gap-4">
+        <Card className="card-3d card-3d-hover border-border bg-card">
+          <CardHeader className="border-b border-border pb-3">
+            <CardTitle className="text-base">Phase 1 — what is live</CardTitle>
+          </CardHeader>
+          <CardContent className="pt-4 text-sm space-y-2.5 text-muted-foreground">
+            <ul className="space-y-2">
+              {[
+                'Authentication & first-owner bootstrap',
+                'Roles & permissions data model (Owner / Accountant / Salesman / Rider)',
+                'Default Chart of Accounts (17 accounts across 5 categories)',
+                'Business accounts with linked Asset ledger sub-accounts',
+                'Audit log',
+                'Asia/Karachi date grouping utilities',
+              ].map((t) => (
+                <li key={t} className="flex items-start gap-2">
+                  <span className="mt-1.5 size-1.5 rounded-full bg-primary shrink-0" />
+                  <span>{t}</span>
+                </li>
+              ))}
+            </ul>
+          </CardContent>
+        </Card>
 
-      <Card className="bg-card">
-        <CardHeader className="border-b border-border">
-          <CardTitle className="text-base">Coming in later phases</CardTitle>
-        </CardHeader>
-        <CardContent className="pt-4 text-sm grid sm:grid-cols-2 gap-x-6 gap-y-1.5 text-muted-foreground">
-          <div>Phase 2 — Accounting engine (vouchers, post_voucher, Trial Balance)</div>
-          <div>Phase 3 — Products &amp; stock (negative stock allowed)</div>
-          <div>Phase 4 — Sales (Counter / Online / OFC, shared invoice serial)</div>
-          <div>Phase 5 — Purchases &amp; vendor ledger</div>
-          <div>Phase 6 — Voucher module &amp; expense batches</div>
-          <div>Phase 7 — Rider &amp; COD workflow</div>
-          <div>Phase 8 — Reports (Trial Balance, P&amp;L, Balance Sheet, …)</div>
-          <div>Phase 9 — Mobile PWA polish &amp; half-A4 invoice printing</div>
-          <div>Phase 10 — AI assistant (Gemini 2.5 Flash, read-only)</div>
-        </CardContent>
-      </Card>
+        <Card className="card-3d card-3d-hover border-border bg-card">
+          <CardHeader className="border-b border-border pb-3">
+            <CardTitle className="text-base">Coming in later phases</CardTitle>
+          </CardHeader>
+          <CardContent className="pt-4 text-sm space-y-2 text-muted-foreground">
+            {[
+              ['Phase 2', 'Accounting engine (vouchers, post_voucher, Trial Balance)'],
+              ['Phase 3', 'Products & stock (negative stock allowed)'],
+              ['Phase 4', 'Sales (Counter / Online / OFC, shared invoice serial)'],
+              ['Phase 5', 'Purchases & vendor ledger'],
+              ['Phase 6', 'Voucher module & expense batches'],
+              ['Phase 7', 'Rider & COD workflow'],
+              ['Phase 8', 'Reports (Trial Balance, P&L, Balance Sheet, …)'],
+              ['Phase 9', 'Mobile PWA polish & half-A4 invoice printing'],
+              ['Phase 10', 'AI assistant (Gemini 2.5 Flash, read-only)'],
+            ].map(([p, t]) => (
+              <div key={p} className="flex items-baseline gap-3">
+                <span className="text-xs font-semibold text-primary w-16 shrink-0" data-num>
+                  {p}
+                </span>
+                <span className="text-foreground/80">{t}</span>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      </div>
 
-      <Card className="bg-card border-primary/30">
-        <CardHeader className="border-b border-border">
-          <CardTitle className="text-base text-primary">Phase 1 gate — verify in this UI</CardTitle>
+      {/* Phase 1 gate checklist */}
+      <Card className="card-3d border-primary/30 bg-card">
+        <CardHeader className="border-b border-border pb-3">
+          <CardTitle className="text-base text-primary flex items-center gap-2">
+            <CalendarClock className="size-4" />
+            Phase 1 gate — verify in this UI
+          </CardTitle>
         </CardHeader>
         <CardContent className="pt-4 text-sm space-y-2 text-muted-foreground">
           <p>Open each of these from the sidebar to verify Phase 1:</p>
-          <ol className="list-decimal list-inside space-y-1">
-            <li>Setup → Business Accounts → create one (creates linked Asset ledger account)</li>
-            <li>Setup → Chart of Accounts → confirm 17 seeded accounts across 5 categories</li>
-            <li>Users &amp; Roles → invite an Accountant / Salesman / Rider (Owner-only)</li>
-            <li>Sign out, sign in as each role — confirm nav differs per role</li>
-            <li>Permission Matrix → confirm role → permission mapping</li>
-            <li>Biz-Day Test → confirm Asia/Karachi midnight boundary</li>
-            <li>Audit Log → confirm every action above was logged</li>
+          <ol className="space-y-1.5 mt-2">
+            {[
+              'Setup → Business Accounts → create one (creates linked Asset ledger account)',
+              'Setup → Chart of Accounts → confirm 17 seeded accounts across 5 categories',
+              'Users & Roles → invite an Accountant / Salesman / Rider (Owner-only)',
+              'Sign out, sign in as each role — confirm nav differs per role',
+              'Permission Matrix → confirm role → permission mapping',
+              'Biz-Day Test → confirm Asia/Karachi midnight boundary',
+              'Audit Log → confirm every action above was logged',
+            ].map((t, i) => (
+              <li key={t} className="flex items-start gap-2.5">
+                <span className="grid place-items-center size-5 rounded-md bg-accent text-accent-foreground text-[10px] font-semibold shrink-0 mt-0.5" data-num>
+                  {i + 1}
+                </span>
+                <span className="text-foreground/80">{t}</span>
+              </li>
+            ))}
           </ol>
+          <div className="flex items-center gap-1.5 text-xs text-primary mt-3 pt-3 border-t border-border">
+            <ArrowRight className="size-3.5" />
+            <span>Approve Phase 1 to unlock Phase 2 (Accounting Engine).</span>
+          </div>
         </CardContent>
       </Card>
     </div>
@@ -76,25 +134,35 @@ export function OwnerDashboard({ user }: { user: MeUser }) {
 }
 
 function StatCard({
+  icon: Icon,
   label,
   value,
   sub,
   mono,
 }: {
+  icon: React.ComponentType<{ className?: string }>
   label: string
   value: string
   sub?: string
   mono?: boolean
 }) {
   return (
-    <Card className="bg-card">
-      <CardContent className="p-4">
-        <div className="text-xs uppercase tracking-wider text-muted-foreground">{label}</div>
-        <div className="text-2xl font-semibold mt-1" data-num={mono ? true : undefined}>
-          {value}
+    <div className="card-3d card-3d-hover p-4 sm:p-5">
+      <div className="flex items-center justify-between">
+        <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium">
+          {label}
         </div>
-        {sub && <div className="text-xs text-muted-foreground mt-0.5 truncate">{sub}</div>}
-      </CardContent>
-    </Card>
+        <div className="grid place-items-center size-7 rounded-lg icon-3d-muted">
+          <Icon className="size-3.5 text-muted-foreground" />
+        </div>
+      </div>
+      <div
+        className="text-xl sm:text-2xl font-semibold mt-2 text-foreground"
+        data-num={mono ? true : undefined}
+      >
+        {value}
+      </div>
+      {sub && <div className="text-[11px] text-muted-foreground mt-0.5 truncate">{sub}</div>}
+    </div>
   )
 }

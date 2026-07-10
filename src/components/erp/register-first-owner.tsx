@@ -4,9 +4,9 @@ import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { KhataProLogo } from '@/components/erp/logo'
 import { Alert, AlertDescription } from '@/components/ui/alert'
-import { ArrowLeft } from 'lucide-react'
+import { ArrowLeft, ShieldCheck } from 'lucide-react'
 
 export function RegisterFirstOwnerForm({
   onBack,
@@ -51,61 +51,103 @@ export function RegisterFirstOwnerForm({
     setForm((s) => ({ ...s, [k]: e.target.value }))
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-4 bg-background">
-      <Card className="w-full max-w-md bg-card border-border">
-        <CardHeader className="border-b border-border">
+    <div className="min-h-[100dvh] flex items-center justify-center p-5 sm:p-8 bg-background">
+      <div className="w-full max-w-[460px]">
+        <div className="flex justify-center mb-6">
+          <KhataProLogo size="md" />
+        </div>
+
+        <div className="card-3d p-6 sm:p-8 fade-in">
           <button
             onClick={onBack}
-            className="flex items-center text-xs text-muted-foreground hover:text-foreground mb-2"
+            className="flex items-center text-xs text-muted-foreground hover:text-foreground mb-4 press-sm"
           >
-            <ArrowLeft className="size-3 mr-1" /> Back to sign in
+            <ArrowLeft className="size-3.5 mr-1.5" /> Back to sign in
           </button>
-          <CardTitle className="text-xl tracking-tight">Register first Owner/Admin</CardTitle>
-          <p className="text-xs text-muted-foreground mt-1">
+
+          <h2 className="text-xl font-semibold tracking-tight text-foreground">
+            Register first Owner/Admin
+          </h2>
+          <p className="text-xs text-muted-foreground mt-1 mb-5">
             This account becomes the business Owner. After this, public registration is closed.
           </p>
-        </CardHeader>
-        <CardContent className="pt-6 space-y-4">
-          <Alert className="bg-primary/10 border-primary/40">
-            <AlertDescription className="text-xs">
-              You are bootstrapping the system. Choose a strong password — it controls full business
-              access.
+
+          <Alert className="bg-accent/60 border-primary/30 mb-5">
+            <ShieldCheck className="size-3.5 text-primary" />
+            <AlertDescription className="text-xs text-accent-foreground">
+              You are bootstrapping the system. Choose a strong password — it controls full
+              business access.
             </AlertDescription>
           </Alert>
-          <form onSubmit={submit} className="space-y-3">
-            <div className="space-y-2">
-              <Label className="text-xs uppercase tracking-wider text-muted-foreground">
-                Business name
-              </Label>
-              <Input value={form.businessName} onChange={set('businessName')} required className="bg-background" />
+
+          <form onSubmit={submit} className="space-y-3.5">
+            <div className="space-y-1.5">
+              <Label className="text-xs font-medium text-muted-foreground">Business name</Label>
+              <Input
+                value={form.businessName}
+                onChange={set('businessName')}
+                required
+                className="h-10 bg-background press-sm"
+                placeholder="e.g. Karachi Garments"
+              />
             </div>
-            <div className="space-y-2">
-              <Label className="text-xs uppercase tracking-wider text-muted-foreground">
-                Your name
-              </Label>
-              <Input value={form.displayName} onChange={set('displayName')} required className="bg-background" />
+            <div className="space-y-1.5">
+              <Label className="text-xs font-medium text-muted-foreground">Your name</Label>
+              <Input
+                value={form.displayName}
+                onChange={set('displayName')}
+                required
+                className="h-10 bg-background press-sm"
+              />
             </div>
-            <div className="space-y-2">
-              <Label className="text-xs uppercase tracking-wider text-muted-foreground">Email</Label>
-              <Input type="email" value={form.email} onChange={set('email')} required className="bg-background" />
+            <div className="space-y-1.5">
+              <Label className="text-xs font-medium text-muted-foreground">Email</Label>
+              <Input
+                type="email"
+                value={form.email}
+                onChange={set('email')}
+                required
+                className="h-10 bg-background press-sm"
+              />
             </div>
-            <div className="space-y-2">
-              <Label className="text-xs uppercase tracking-wider text-muted-foreground">Password</Label>
-              <Input type="password" value={form.password} onChange={set('password')} required minLength={6} className="bg-background" />
+            <div className="space-y-1.5">
+              <Label className="text-xs font-medium text-muted-foreground">Password</Label>
+              <Input
+                type="password"
+                value={form.password}
+                onChange={set('password')}
+                required
+                minLength={6}
+                className="h-10 bg-background press-sm"
+              />
+              <p className="text-[10px] text-muted-foreground">Minimum 6 characters.</p>
             </div>
-            <div className="space-y-2">
-              <Label className="text-xs uppercase tracking-wider text-muted-foreground">
+            <div className="space-y-1.5">
+              <Label className="text-xs font-medium text-muted-foreground">
                 Phone (optional)
               </Label>
-              <Input value={form.phone} onChange={set('phone')} className="bg-background" />
+              <Input
+                value={form.phone}
+                onChange={set('phone')}
+                className="h-10 bg-background press-sm"
+                data-num
+              />
             </div>
-            {error && <p className="text-xs text-destructive">{error}</p>}
-            <Button type="submit" disabled={loading} className="w-full font-semibold">
+            {error && <p className="text-xs text-destructive fade-in">{error}</p>}
+            <Button
+              type="submit"
+              disabled={loading}
+              className="w-full h-10 font-semibold press-md shadow-sm mt-2"
+            >
               {loading ? 'Creating owner…' : 'Create Owner & business'}
             </Button>
           </form>
-        </CardContent>
-      </Card>
+        </div>
+
+        <p className="text-[11px] text-muted-foreground text-center mt-5">
+          © {new Date().getFullYear()} KhataPro ERP
+        </p>
+      </div>
     </div>
   )
 }
