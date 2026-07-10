@@ -70,6 +70,17 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: (e as Error).message }, { status: 400 })
   }
 
+  // Defensive: validate all payment account IDs are UUIDs (not Prisma cuids)
+  const isUuid = (s: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s)
+  for (const p of payments) {
+    if (!isUuid(p.accountId)) {
+      return NextResponse.json(
+        { error: `Invalid account ID (not a UUID): ${p.accountId}. Payment accounts must be Supabase UUIDs. Refresh the page.` },
+        { status: 400 },
+      )
+    }
+  }
+
   try {
     const result = await postSale({
       businessId: su.businessId,

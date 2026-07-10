@@ -185,71 +185,76 @@ export function InvoiceDetailView({ invoiceId }: { invoiceId: string }) {
       {/* ─── PRINT-ONLY INVOICE (half-A4/A5) ─── */}
       {/* Hidden on screen via offscreen positioning; shown only during print via @media print CSS */}
       <div className="print-invoice" style={{ position: 'absolute', left: '-9999px', top: 0, width: '100%' }}>
-        <div style={{ fontFamily: 'sans-serif', color: '#000', padding: '8mm', maxWidth: '210mm' }}>
+        <div style={{ fontFamily: 'Arial, sans-serif', color: '#000', padding: '6mm', maxWidth: '140mm', margin: '0 auto' }}>
           {/* Header */}
-          <div style={{ textAlign: 'center', marginBottom: '12px', borderBottom: '2px solid #000', paddingBottom: '8px' }}>
-            <div style={{ fontSize: '20px', fontWeight: 'bold' }}>KhataPro ERP</div>
-            <div style={{ fontSize: '10px', color: '#666' }}>Accounting-First Garments ERP</div>
-          </div>
-          {/* Invoice meta */}
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', fontSize: '11px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '2px solid #000', paddingBottom: '6px', marginBottom: '8px' }}>
             <div>
-              <div><strong>Invoice:</strong> <span>{inv.invoiceNo}</span></div>
-              <div><strong>Type:</strong> {inv.invoiceType}</div>
-              <div><strong>Date:</strong> {bizDate(inv.invoiceDate)}</div>
+              <div style={{ fontSize: '18px', fontWeight: 'bold', color: '#000' }}>KhataPro ERP</div>
+              <div style={{ fontSize: '8px', color: '#666' }}>Accounting-First Garments ERP</div>
             </div>
             <div style={{ textAlign: 'right' }}>
-              {inv.salesmanName && <div><strong>Salesman:</strong> {inv.salesmanName}</div>}
-              {inv.customerName && <div><strong>Customer:</strong> {inv.customerName}</div>}
-              {inv.customerPhone && <div><strong>Phone:</strong> {inv.customerPhone}</div>}
+              <div style={{ fontSize: '14px', fontWeight: 'bold' }}>{inv.invoiceNo}</div>
+              <div style={{ fontSize: '9px', color: '#666' }}>{inv.invoiceType} · {bizDate(inv.invoiceDate)}</div>
             </div>
           </div>
-          {/* Items table */}
-          <table style={{ width: '100%', fontSize: '10px', borderCollapse: 'collapse', marginBottom: '8px' }}>
+          {/* Meta */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px', fontSize: '9px' }}>
+            <div>
+              {inv.salesmanName && <div><strong>Salesman:</strong> {inv.salesmanName}</div>}
+            </div>
+            <div style={{ textAlign: 'right' }}>
+              {inv.customerName && <div><strong>Customer:</strong> {inv.customerName}</div>}
+              {inv.customerPhone && <div><strong>Phone:</strong> {inv.customerPhone}</div>}
+              {inv.customerAddress && <div style={{ fontSize: '8px' }}>{inv.customerAddress}{inv.customerCity ? `, ${inv.customerCity}` : ''}</div>}
+            </div>
+          </div>
+          {/* Items */}
+          <table style={{ width: '100%', fontSize: '9px', borderCollapse: 'collapse', marginBottom: '6px' }}>
             <thead>
-              <tr style={{ borderBottom: '1px solid #000' }}>
-                <th style={{ textAlign: 'left', padding: '4px' }}>Item</th>
-                <th style={{ textAlign: 'center', padding: '4px', width: '30px' }}>Qty</th>
-                <th style={{ textAlign: 'right', padding: '4px', width: '60px' }}>Price</th>
-                <th style={{ textAlign: 'right', padding: '4px', width: '70px' }}>Total</th>
+              <tr style={{ background: '#f0f0f0', borderBottom: '1px solid #000' }}>
+                <th style={{ textAlign: 'left', padding: '3px 4px', fontSize: '8px', textTransform: 'uppercase' }}>Item</th>
+                <th style={{ textAlign: 'center', padding: '3px', width: '25px', fontSize: '8px' }}>Qty</th>
+                <th style={{ textAlign: 'right', padding: '3px 4px', width: '50px', fontSize: '8px' }}>Price</th>
+                <th style={{ textAlign: 'right', padding: '3px 4px', width: '60px', fontSize: '8px' }}>Total</th>
               </tr>
             </thead>
             <tbody>
-              {inv.items?.map(it => (
-                <tr key={it.id} style={{ borderBottom: '1px dotted #ccc' }}>
-                  <td style={{ padding: '3px 4px' }}>{it.productName}{it.isTemporary ? ' (Temp)' : ''}</td>
-                  <td style={{ textAlign: 'center', padding: '3px 4px' }}>{it.qty}</td>
-                  <td style={{ textAlign: 'right', padding: '3px 4px' }}>{formatMoney(BigInt(it.unitPrice), false)}</td>
-                  <td style={{ textAlign: 'right', padding: '3px 4px', fontWeight: 'bold' }}>{formatMoney(BigInt(it.lineTotal), false)}</td>
+              {inv.items?.map((it, i) => (
+                <tr key={it.id} style={{ borderBottom: '1px solid #ddd' }}>
+                  <td style={{ padding: '3px 4px' }}>{it.productName}{it.isTemporary ? ' *' : ''}</td>
+                  <td style={{ textAlign: 'center', padding: '3px' }}>{it.qty}</td>
+                  <td style={{ textAlign: 'right', padding: '3px 4px', fontFamily: 'monospace' }}>{formatMoney(BigInt(it.unitPrice), false)}</td>
+                  <td style={{ textAlign: 'right', padding: '3px 4px', fontFamily: 'monospace', fontWeight: 'bold' }}>{formatMoney(BigInt(it.lineTotal), false)}</td>
                 </tr>
               ))}
             </tbody>
           </table>
           {/* Totals */}
-          <div style={{ display: 'flex', justifyContent: 'flex-end', fontSize: '11px' }}>
-            <div style={{ minWidth: '160px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0', borderTop: '1px solid #000' }}>
-                <strong>Total:</strong> <strong>{formatMoney(BigInt(inv.total))}</strong>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '8px' }}>
+            <div style={{ minWidth: '140px', fontSize: '10px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0', borderTop: '1px solid #000', fontWeight: 'bold' }}>
+                <span>Total</span><span style={{ fontFamily: 'monospace' }}>{formatMoney(BigInt(inv.total))}</span>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0' }}>
-                <span>Paid:</span> <span>{formatMoney(BigInt(inv.paidAmount))}</span>
+                <span>Paid</span><span style={{ fontFamily: 'monospace' }}>{formatMoney(BigInt(inv.paidAmount))}</span>
               </div>
               {outstanding > 0n && (
-                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0' }}>
-                  <span>Outstanding:</span> <span>{formatMoney(outstanding)}</span>
+                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0', color: '#c00' }}>
+                  <span>Outstanding</span><span style={{ fontFamily: 'monospace' }}>{formatMoney(outstanding)}</span>
                 </div>
               )}
               {inv.payments?.filter(p => p.isChange).map(p => (
                 <div key={p.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0' }}>
-                  <span>Change ({p.accountName}):</span> <span>{formatMoney(BigInt(p.amount))}</span>
+                  <span>Change ({p.accountName})</span><span style={{ fontFamily: 'monospace' }}>{formatMoney(BigInt(p.amount))}</span>
                 </div>
               ))}
             </div>
           </div>
           {/* Footer */}
-          <div style={{ textAlign: 'center', fontSize: '9px', color: '#999', marginTop: '16px', borderTop: '1px solid #ccc', paddingTop: '4px' }}>
-            KhataPro ERP · PKR · Asia/Karachi
+          <div style={{ textAlign: 'center', fontSize: '7px', color: '#999', borderTop: '1px solid #ccc', paddingTop: '4px' }}>
+            KhataPro ERP · PKR · Asia/Karachi · * = temporary item
           </div>
+          {inv.memo && <div style={{ fontSize: '8px', color: '#666', marginTop: '4px' }}><strong>Note:</strong> {inv.memo}</div>}
         </div>
       </div>
     </motion.div>
