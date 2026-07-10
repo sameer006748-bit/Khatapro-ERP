@@ -603,3 +603,48 @@ Stage Summary:
 - Salesman properly blocked from all purchase/vendor APIs
 - ESLint clean, TypeScript clean, build succeeds
 - Phase 6 NOT started
+
+---
+Task ID: 5a-live-verification
+Agent: Main (fullstack-dev)
+Task: Phase 5a live verification against real Supabase schema — switch from TS fallback to live RPCs, verify all features work against dedicated tables.
+
+Work Log:
+- Verified migration 00005a is live in Supabase: purchase_replacements table ✓, purchase_replacement_items table ✓, vendor_ledger RPC ✓, post_purchase_replacement RPC ✓, post_advance_application RPC ✓, can_replace_purchases permission ✓
+- Removed the audit_logs-based TS fallback for replacements — postPurchaseReplacement() now calls post_purchase_replacement() RPC directly
+- Removed the TS-side voucher/payment/stock-movement logic from postAdvanceApplication() — now calls post_advance_application() RPC directly (RPC handles all atomic operations server-side)
+- Rewrote vendorLedger() to call vendor_ledger() RPC — RPC returns line_date, line_type, reference, description, debit, credit, running_balance, voucher_id, reference_id, reference_type. Client-side applies type filter + reference search.
+- Rewrote listReplacementsForPurchase() to read from purchase_replacements + nested purchase_replacement_items tables (was reading from audit_logs JSON)
+- Updated /api/purchases/[id]/replacement route to use can_replace_purchases permission (was can_return_purchases)
+- Added can_replace_purchases + can_pay_vendors + can_manage_vendors + can_return_purchases + can_view_vendor_ledger to seed-phase1.ts permission catalog
+- Granted all 5 Phase 5 permissions to Owner/Admin and Accountant in local Prisma DB via grant-p5a-permissions.ts script (Owner now has 46 permissions)
+- Ran ESLint (clean), tsc --noEmit (clean), bun run build (succeeds)
+- Wrote verify-phase5a-live.ts — 17-test live verification script. ALL 17 TESTS PASSED:
+  * TEST 1: Equal-value replacement → dedicated record created (REP-0001), value_diff=0, NO voucher, no accounting impact ✓
+  * TEST 2: Higher-value replacement (Rs 100→150) → value_diff=50000, voucher created, Dr Purchases 50000, Cr Payable 50000 ✓
+  * TEST 3: Lower-value replacement (Rs 100→80) → Dr Payable 20000, Cr Purchases 20000 ✓
+  * TEST 4: Advance application via RPC → outstanding reduced from 500000 to 400000 ✓
+  * TEST 5: Vendor ledger shows all 7 transaction types: Purchase (18), Vendor Advance (7), Advance Application (6), Replacement (4), Purchase Return, Vendor Payment, Payment ✓
+  * TEST 6: Permissions — Owner full access ✓, Salesman blocked (403 FORBIDDEN) ✓, Rider blocked ✓
+- Wrote verify-replacement-stock-movements.ts — verified all 3 replacement items have linked outgoing_stock_movement_id + incoming_stock_movement_id. All 6 stock movements exist with correct types (adjustment_out for defective, adjustment_in for replacement) and reasons ("Replacement out (defective) REP-0001", "Replacement in (received) REP-0001").
+- Browser UI verification:
+  * Print view: .print-purchase div rendered with KhataPro branding, PURCHASE header, purchase number, vendor info, items table, grand total, payment summary, footer ✓
+  * Purchase detail: all 5 action buttons present (Print, Pay Vendor, Apply Advance, Return Items, Replacement) ✓
+  * Replacement modal: opens with title, outgoing/incoming sections, post button ✓
+  * Vendor ledger: 50 rows, all 7 transaction types, filters (From/To/Type/Search), running balance, Payable/Advance labels, final balance Rs 168,081.00 ✓
+  * Accountant: full access to all purchase/vendor APIs + all 5 action buttons ✓
+  * Salesman: /api/purchases → 403 FORBIDDEN, /api/vendors → 403 FORBIDDEN, nav has no Purchases/Vendors ✓
+  * Rider: /api/purchases → 403 FORBIDDEN, /api/vendors → 403 FORBIDDEN, nav has only Dashboard + Accounting ✓
+- Screenshots: p5a-live-purchase-detail, p5a-live-purchase-with-outstanding, p5a-live-replacement-modal, p5a-live-vendor-ledger
+
+Stage Summary:
+- Phase 5a LIVE VERIFICATION COMPLETE. All 17 live tests pass against real Supabase schema.
+- Code now uses dedicated RPCs (post_purchase_replacement, post_advance_application, vendor_ledger) instead of TS fallbacks.
+- Dedicated replacement records created in purchase_replacements + purchase_replacement_items tables.
+- Stock-out + stock-in movements linked via outgoing_stock_movement_id + incoming_stock_movement_id.
+- Equal-value replacement: no voucher (verified null voucher_id).
+- Higher/lower value replacement: balanced vouchers with correct accounting (verified via trial balance deltas).
+- Vendor ledger reads live RPC data showing all 7 transaction types with running balance.
+- Owner + Accountant have full access; Salesman + Rider fully blocked.
+- ESLint clean, TypeScript clean, build succeeds.
+- Phase 6 NOT started.

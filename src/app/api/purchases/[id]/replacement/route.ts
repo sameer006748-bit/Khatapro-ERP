@@ -27,7 +27,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   if (!session?.user) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
   const loaded = await loadSessionUser((session.user as any).id)
   if (!loaded) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
-  const su = await requirePermission(loaded, 'can_return_purchases')
+  const su = await requirePermission(loaded, 'can_replace_purchases')
   const { id: purchaseId } = await params
   const body = await req.json().catch(() => null)
   const parsed = Schema.safeParse(body)

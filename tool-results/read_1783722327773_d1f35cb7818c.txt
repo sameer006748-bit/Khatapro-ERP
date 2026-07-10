@@ -1,0 +1,552 @@
+   288→// ─── Vendor Ledger (proper — derived from voucher_lines on account 2010) ───
+   289→export type VendorLedgerRow = {
+   290→  date: string; type: string; reference: string; description: string
+   291→  debit: string; credit: string; runningBalance: string
+   292→  voucherId: string; referenceId: string | null; referenceType: string | null
+   293→}
+   294→
+   295→export async function vendorLedger(
+   296→  businessId: string,
+   297→  vendorId: string,
+   298→  filters?: { fromDate?: string | null; toDate?: string | null; typeFilter?: string | null; search?: string | null },
+   299→): Promise<VendorLedgerRow[]> {
+   300→  if (await isPhase5Live()) {
+   301→    return vendorLedgerViaSupabase(businessId, vendorId, filters)
+   302→  }
+   303→  // Prisma fallback — simplified
+   304→  return []
+   305→}
+   306→
+   307→async function vendorLedgerViaSupabase(
+   308→  businessId: string,
+   309→  vendorId: string,
+   310→  filters?: { fromDate?: string | null; toDate?: string | null; typeFilter?: string | null; search?: string | null },
+   311→): Promise<VendorLedgerRow[]> {
+   312→  const admin = getAdminSupabase()
+   313→
+   314→  // 1. Resolve the Vendors Payable account (2010).
+   315→  const { data: payableAcct } = await admin.from('accounts')
+   316→    .select('id').eq('business_id', businessId).eq('code', '2010').maybeSingle()
+   317→  if (!payableAcct) return []
+   318→  const payableAcctId = payableAcct.id
+   319→
+   320→  // 2. Collect all voucher_ids that belong to this vendor:
+   321→  //    - purchases by this vendor (PU vouchers)
+   322→  //    - purchase_payments by this vendor (PM vouchers)
+   323→  //    - purchase_returns for this vendor (PR vouchers)
+   324→  const voucherIds = new Set<string>()
+   325→
+   326→  // Purchases
+   327→  const { data: purchases } = await admin.from('purchases')
+   328→    .select('id, voucher_id, purchase_no, purchase_date')
+   329→    .eq('business_id', businessId).eq('vendor_id', vendorId).not('voucher_id', 'is', null)
+   330→  const purchaseMap = new Map<string, { ref: string; date: string; id: string }>()
+   331→  for (const p of purchases ?? []) {
+   332→    if (p.voucher_id) { voucherIds.add(p.voucher_id); purchaseMap.set(p.voucher_id, { ref: p.purchase_no, date: p.purchase_date, id: p.id }) }
+   333→  }
+   334→
+   335→  // Purchase payments (later payments + advances + advance applications)
+   336→  const { data: payments } = await admin.from('purchase_payments')
+   337→    .select('id, voucher_id, payment_type, payment_date, purchase_id')
+   338→    .eq('business_id', businessId).eq('vendor_id', vendorId).not('voucher_id', 'is', null)
+   339→  const paymentMap = new Map<string, { type: string; id: string; date: string; purchaseId: string | null }>()
+   340→  for (const pp of payments ?? []) {
+   341→    if (pp.voucher_id) {
+   342→      voucherIds.add(pp.voucher_id)
+   343→      paymentMap.set(pp.voucher_id, { type: pp.payment_type, id: pp.id, date: pp.payment_date, purchaseId: pp.purchase_id })
+   344→    }
+   345→  }
+   346→
+   347→  // Purchase returns
+   348→  const { data: returns } = await admin.from('purchase_returns')
+   349→    .select('id, voucher_id, return_no, return_date')
+   350→    .eq('business_id', businessId).eq('vendor_id', vendorId).not('voucher_id', 'is', null)
+   351→  const returnMap = new Map<string, { ref: string; date: string; id: string }>()
+   352→  for (const r of returns ?? []) {
+   353→    if (r.voucher_id) { voucherIds.add(r.voucher_id); returnMap.set(r.voucher_id, { ref: r.return_no, date: r.return_date, id: r.id }) }
+   354→  }
+   355→
+   356→  if (voucherIds.size === 0) return []
+   357→
+   358→  // 3. Fetch vouchers + voucher_lines on the payable account for these voucher_ids.
+   359→  const voucherIdArr = Array.from(voucherIds)
+   360→  const { data: vouchers } = await admin.from('vouchers')
+   361→    .select('id, voucher_type, voucher_date, memo, reference_id, reference_type, created_at')
+   362→    .in('id', voucherIdArr)
+   363→    .order('voucher_date', { ascending: true })
+   364→    .order('created_at', { ascending: true })
+   365→
+   366→  // Filter by date range if provided
+   367→  let filteredVouchers = (vouchers ?? []).filter(v => {
+   368→    if (filters?.fromDate && v.voucher_date < filters.fromDate) return false
+   369→    if (filters?.toDate && v.voucher_date > filters.toDate) return false
+   370→    return true
+   371→  })
+   372→
+   373→  if (filteredVouchers.length === 0) return []
+   374→
+   375→  // Fetch voucher_lines on the payable account for these vouchers
+   376→  const { data: lines } = await admin.from('voucher_lines')
+   377→    .select('voucher_id, debit, credit')
+   378→    .eq('account_id', payableAcctId)
+   379→    .in('voucher_id', filteredVouchers.map(v => v.id))
+   380→
+   381→  // Aggregate lines by voucher_id
+   382→  const lineAgg = new Map<string, { debit: bigint; credit: bigint }>()
+   383→  for (const l of lines ?? []) {
+   384→    const cur = lineAgg.get(l.voucher_id) ?? { debit: 0n, credit: 0n }
+   385→    cur.debit += BigInt(l.debit)
+   386→    cur.credit += BigInt(l.credit)
+   387→    lineAgg.set(l.voucher_id, cur)
+   388→  }
+   389→
+   390→  // 4. Build ledger rows: one per voucher, with type + reference.
+   391→  type Row = VendorLedgerRow & { _created: string }
+   392→  let rows: Row[] = []
+   393→  for (const v of filteredVouchers) {
+   394→    const agg = lineAgg.get(v.id) ?? { debit: 0n, credit: 0n }
+   395→    let txnType = v.voucher_type
+   396→    let refNo = ''
+   397→    let refId: string | null = null
+   398→    let refType: string | null = null
+   399→
+   400→    const pur = purchaseMap.get(v.id)
+   401→    const pay = paymentMap.get(v.id)
+   402→    const ret = returnMap.get(v.id)
+   403→
+   404→    if (pur) {
+   405→      txnType = 'Purchase'
+   406→      refNo = pur.ref
+   407→      refId = pur.id
+   408→      refType = 'purchase'
+   409→    } else if (ret) {
+   410→      txnType = 'Purchase Return'
+   411→      refNo = ret.ref
+   412→      refId = ret.id
+   413→      refType = 'purchase_return'
+   414→    } else if (pay) {
+   415→      txnType = pay.type === 'vendor_advance' ? 'Vendor Advance'
+   416→        : pay.type === 'advance_application' ? 'Advance Application'
+   417→        : pay.type === 'vendor_refund' ? 'Vendor Refund'
+   418→        : 'Vendor Payment'
+   419→      refNo = pay.type === 'vendor_advance' ? 'ADV-' + pay.id.slice(0, 8)
+   420→        : pay.type === 'advance_application' ? 'APP-' + pay.id.slice(0, 8)
+   421→        : 'PMT-' + pay.id.slice(0, 8)
+   422→      refId = pay.id
+   423→      refType = pay.type
+   424→    } else {
+   425→      // Replacement or other — check voucher_type 'RP'
+   426→      if (v.voucher_type === 'RP') {
+   427→        txnType = 'Replacement'
+   428→        refNo = v.memo?.match(/REP-\d+/)?.[0] ?? v.id.slice(0, 8)
+   429→      } else {
+   430→        txnType = v.voucher_type
+   431→        refNo = v.id.slice(0, 8)
+   432→      }
+   433→    }
+   434→
+   435→    rows.push({
+   436→      date: v.voucher_date,
+   437→      type: txnType,
+   438→      reference: refNo,
+   439→      description: v.memo ?? '',
+   440→      debit: agg.debit.toString(),
+   441→      credit: agg.credit.toString(),
+   442→      runningBalance: '0', // computed below
+   443→      voucherId: v.id,
+   444→      referenceId: refId,
+   445→      referenceType: refType,
+   446→      _created: v.created_at,
+   447→    })
+   448→  }
+   449→
+   450→  // 5. Compute running balance (credit - debit; positive = payable, negative = advance).
+   451→  let running = 0n
+   452→  rows = rows.sort((a, b) => {
+   453→    if (a.date !== b.date) return a.date < b.date ? -1 : 1
+   454→    return a._created < b._created ? -1 : 1
+   455→  })
+   456→  for (const r of rows) {
+   457→    running += BigInt(r.credit) - BigInt(r.debit)
+   458→    r.runningBalance = running.toString()
+   459→  }
+   460→
+   461→  // 6. Apply type filter
+   462→  if (filters?.typeFilter && filters.typeFilter !== 'all') {
+   463→    const typeMap: Record<string, string[]> = {
+   464→      purchase: ['Purchase'],
+   465→      payment: ['Vendor Payment'],
+   466→      advance: ['Vendor Advance'],
+   467→      advance_application: ['Advance Application'],
+   468→      return: ['Purchase Return'],
+   469→      replacement: ['Replacement'],
+   470→      refund: ['Vendor Refund'],
+   471→    }
+   472→    const allowed = typeMap[filters.typeFilter] ?? []
+   473→    rows = rows.filter(r => allowed.includes(r.type))
+   474→  }
+   475→
+   476→  // 7. Apply reference search
+   477→  if (filters?.search) {
+   478→    const q = filters.search.toLowerCase()
+   479→    rows = rows.filter(r => r.reference.toLowerCase().includes(q) || r.description.toLowerCase().includes(q) || r.type.toLowerCase().includes(q))
+   480→  }
+   481→
+   482→  // Strip the _created helper
+   483→  return rows.map(({ _created, ...rest }) => rest)
+   484→}
+   485→
+   486→// ─── Update Vendor (edit) ───
+   487→export async function updateVendor(
+   488→  businessId: string,
+   489→  vendorId: string,
+   490→  updates: { name?: string; phone?: string | null; email?: string | null; address?: string | null; city?: string | null; isActive?: boolean },
+   491→): Promise<VendorRow | null> {
+   492→  if (await isPhase5Live()) {
+   493→    const admin = getAdminSupabase()
+   494→    const patch: Record<string, unknown> = { updated_at: new Date().toISOString() }
+   495→    if (updates.name !== undefined) patch.name = updates.name
+   496→    if (updates.phone !== undefined) patch.phone = updates.phone
+   497→    if (updates.email !== undefined) patch.email = updates.email
+   498→    if (updates.address !== undefined) patch.address = updates.address
+   499→    if (updates.city !== undefined) patch.city = updates.city
+   500→    if (updates.isActive !== undefined) patch.is_active = updates.isActive
+   501→    const { data, error } = await admin.from('vendors')
+   502→      .update(patch).eq('id', vendorId).eq('business_id', businessId)
+   503→      .select('id, name, phone, email, address, city, is_active, account_id').single()
+   504→    if (error) throw new Error(`Supabase: ${error.message}`)
+   505→    return { id: data.id, name: data.name, phone: data.phone, email: data.email, address: data.address, city: data.city, isActive: data.is_active, accountId: data.account_id }
+   506→  }
+   507→  const v = await db.vendor.update({ where: { id: vendorId }, data: { name: updates.name, phone: updates.phone ?? undefined, email: updates.email ?? undefined, address: updates.address ?? undefined, city: updates.city ?? undefined, isActive: updates.isActive } })
+   508→  return { id: v.id, name: v.name, phone: v.phone, email: v.email, address: v.address, city: v.city, isActive: v.isActive, accountId: v.accountId }
+   509→}
+   510→
+   511→// ─── Advance Application (apply vendor advance against a purchase) ───
+   512→export async function postAdvanceApplication(input: {
+   513→  businessId: string; vendorId: string; purchaseId: string
+   514→  amountPaisas: bigint; applicationDate?: Date; notes?: string | null; createdBy?: string | null
+   515→}): Promise<string> {
+   516→  if (await isPhase5Live()) {
+   517→    const admin = getAdminSupabase()
+   518→    const supabaseCreatedBy = await resolveSupabaseUuid(input.createdBy)
+   519→
+   520→    // Validate purchase belongs to vendor and has sufficient outstanding
+   521→    const { data: purchase } = await admin.from('purchases')
+   522→      .select('id, purchase_no, outstanding_amount, paid_amount, vendor_id')
+   523→      .eq('id', input.purchaseId).eq('business_id', input.businessId).eq('vendor_id', input.vendorId).maybeSingle()
+   524→    if (!purchase) throw new Error('Purchase not found for this vendor')
+   525→    if (BigInt(purchase.outstanding_amount) < input.amountPaisas) {
+   526→      throw new Error(`Advance application amount exceeds outstanding (${purchase.outstanding_amount})`)
+   527→    }
+   528→
+   529→    // Resolve Vendors Payable account (2010)
+   530→    const { data: payableAcct } = await admin.from('accounts')
+   531→      .select('id').eq('business_id', input.businessId).eq('code', '2010').maybeSingle()
+   532→    if (!payableAcct) throw new Error('Vendors Payable account (2010) not found')
+   533→
+   534→    const dateStr = input.applicationDate ? bizDateString(input.applicationDate) : null
+   535→
+   536→    // Post voucher: Debit Payable (reduce payable), Credit Payable (reduce advance).
+   537→    // Both on 2010 — balanced, no net change, creates audit trail.
+   538→    const linesJson = [
+   539→      { account_id: payableAcct.id, debit: input.amountPaisas.toString(), credit: '0', memo: `Advance applied to purchase ${purchase.purchase_no}`, idx: 1 },
+   540→      { account_id: payableAcct.id, debit: '0', credit: input.amountPaisas.toString(), memo: 'Advance applied (reclassify)', idx: 2 },
+   541→    ]
+   542→    const { data: voucherId, error: vErr } = await admin.rpc('post_voucher', {
+   543→      p_business_id: input.businessId, p_voucher_type: 'PM',
+   544→      p_voucher_date: dateStr ?? bizDateString(new Date()),
+   545→      p_memo: `Advance application ${purchase.purchase_no}`,
+   546→      p_lines: linesJson,
+   547→      p_reference_id: input.purchaseId, p_reference_type: 'advance_application',
+   548→      p_posted_by: supabaseCreatedBy,
+   549→    })
+   550→    if (vErr) throw new Error(`post_voucher: ${vErr.message}`)
+   551→
+   552→    // Insert payment record
+   553→    const { data: pp, error: ppErr } = await admin.from('purchase_payments').insert({
+   554→      business_id: input.businessId, purchase_id: input.purchaseId, vendor_id: input.vendorId,
+   555→      account_id: payableAcct.id, amount: input.amountPaisas.toString(),
+   556→      payment_date: dateStr, payment_type: 'advance_application',
+   557→      voucher_id: voucherId, notes: input.notes ?? null, created_by: supabaseCreatedBy,
+   558→    }).select('id').single()
+   559→    if (ppErr) throw new Error(`insert payment: ${ppErr.message}`)
+   560→
+   561→    // Update purchase outstanding + paid
+   562→    const newOutstanding = BigInt(purchase.outstanding_amount) - input.amountPaisas
+   563→    const newPaid = BigInt(purchase.paid_amount) + input.amountPaisas
+   564→    const newStatus = newOutstanding <= 0n ? 'paid' : 'partially_paid'
+   565→    await admin.from('purchases').update({
+   566→      paid_amount: newPaid.toString(),
+   567→      outstanding_amount: newOutstanding.toString(),
+   568→      status: newStatus,
+   569→      updated_at: new Date().toISOString(),
+   570→    }).eq('id', input.purchaseId)
+   571→
+   572→    return pp.id
+   573→  }
+   574→  // Prisma fallback
+   575→  const payableAcct = await getAccountByCode(input.businessId, '2010')
+   576→  if (!payableAcct) throw new Error('Vendors Payable account (2010) not found')
+   577→  const { postVoucherSmart } = await import('@/lib/accounting/voucher-supabase')
+   578→  const voucherId = await postVoucherSmart({
+   579→    businessId: input.businessId, voucherType: 'PM', voucherDate: input.applicationDate ?? new Date(),
+   580→    memo: 'Advance application', lines: [
+   581→      { accountId: payableAcct.id, debit: input.amountPaisas, credit: 0n, memo: 'Advance applied to purchase' },
+   582→      { accountId: payableAcct.id, debit: 0n, credit: input.amountPaisas, memo: 'Advance applied (reclassify)' },
+   583→    ], referenceId: input.purchaseId, referenceType: 'advance_application', postedBy: input.createdBy,
+   584→  })
+   585→  const pp = await db.purchasePayment.create({ data: { businessId: input.businessId, purchaseId: input.purchaseId, vendorId: input.vendorId, accountId: payableAcct.id, amount: input.amountPaisas, paymentType: 'advance_application', voucherId, notes: input.notes ?? null, createdBy: input.createdBy ?? null } })
+   586→  await db.purchase.update({ where: { id: input.purchaseId }, data: { paidAmount: { increment: input.amountPaisas }, outstandingAmount: { decrement: input.amountPaisas } } })
+   587→  return pp.id
+   588→}
+   589→
+   590→// ─── Purchase Replacement (vendor replacement flow) ───
+   591→export type ReplacementItemInput = {
+   592→  originalPurchaseItemId: string
+   593→  outgoingProductId?: string | null; outgoingProductName: string
+   594→  outgoingQuantity: number; outgoingUnitCostPaisas: bigint
+   595→  incomingProductId?: string | null; incomingProductName: string
+   596→  incomingQuantity: number; incomingUnitCostPaisas: bigint
+   597→}
+   598→
+   599→export async function postPurchaseReplacement(input: {
+   600→  businessId: string; purchaseId: string
+   601→  replacementItems: ReplacementItemInput[]
+   602→  replacementDate?: Date; notes?: string | null; createdBy?: string | null
+   603→}): Promise<{ replacementId: string; replacementNo: string }> {
+   604→  if (await isPhase5Live()) {
+   605→    return postPurchaseReplacementViaSupabase(input)
+   606→  }
+   607→  // Prisma fallback — simplified, same logic
+   608→  return postPurchaseReplacementViaPrisma(input)
+   609→}
+   610→
+   611→async function postPurchaseReplacementViaSupabase(input: {
+   612→  businessId: string; purchaseId: string
+   613→  replacementItems: ReplacementItemInput[]
+   614→  replacementDate?: Date; notes?: string | null; createdBy?: string | null
+   615→}): Promise<{ replacementId: string; replacementNo: string }> {
+   616→  const admin = getAdminSupabase()
+   617→  const supabaseCreatedBy = await resolveSupabaseUuid(input.createdBy)
+   618→
+   619→  // Load purchase
+   620→  const { data: purchase } = await admin.from('purchases')
+   621→    .select('id, purchase_no, vendor_id, business_id')
+   622→    .eq('id', input.purchaseId).eq('business_id', input.businessId).maybeSingle()
+   623→  if (!purchase) throw new Error('Purchase not found')
+   624→
+   625→  // Generate REP-0001 number (from audit_logs since we don't have a dedicated table yet)
+   626→  const { data: lastRep } = await admin.from('audit_logs')
+   627→    .select('details').eq('business_id', input.businessId).eq('action', 'PURCHASE_REPLACEMENT')
+   628→    .order('created_at', { ascending: false }).limit(1)
+   629→  let nextNum = 1
+   630→  if (lastRep && lastRep.length > 0) {
+   631→    const m = (lastRep[0].details as string)?.match(/REP-(\d+)/)
+   632→    if (m) nextNum = parseInt(m[1], 10) + 1
+   633→  }
+   634→  const replacementNo = `REP-${String(nextNum).padStart(4, '0')}`
+   635→
+   636→  // Compute values
+   637→  let outgoingValue = 0n
+   638→  let incomingValue = 0n
+   639→  for (const item of input.replacementItems) {
+   640→    outgoingValue += item.outgoingUnitCostPaisas * BigInt(item.outgoingQuantity)
+   641→    incomingValue += item.incomingUnitCostPaisas * BigInt(item.incomingQuantity)
+   642→  }
+   643→  const valueDiff = incomingValue - outgoingValue
+   644→
+   645→  // Resolve accounts
+   646→  const { data: purchasesAcct } = await admin.from('accounts')
+   647→    .select('id').eq('business_id', input.businessId).eq('code', '5010').maybeSingle()
+   648→  if (!purchasesAcct) throw new Error('Purchases account (5010) not found')
+   649→  const { data: payableAcct } = await admin.from('accounts')
+   650→    .select('id').eq('business_id', input.businessId).eq('code', '2010').maybeSingle()
+   651→  if (!payableAcct) throw new Error('Vendors Payable account (2010) not found')
+   652→
+   653→  const dateStr = input.replacementDate ? bizDateString(input.replacementDate) : bizDateString(new Date())
+   654→
+   655→  // Post voucher ONLY if there's a value difference
+   656→  let voucherId: string | null = null
+   657→  if (valueDiff > 0n) {
+   658→    // Replacement costs more: Debit Purchases, Credit Vendor Payable
+   659→    const linesJson = [
+   660→      { account_id: purchasesAcct.id, debit: valueDiff.toString(), credit: '0', memo: `Replacement value difference (higher) ${replacementNo}`, idx: 1 },
+   661→      { account_id: payableAcct.id, debit: '0', credit: valueDiff.toString(), memo: `Additional payable for ${replacementNo}`, idx: 2 },
+   662→    ]
+   663→    const { data: vid, error: ve } = await admin.rpc('post_voucher', {
+   664→      p_business_id: input.businessId, p_voucher_type: 'RP', p_voucher_date: dateStr,
+   665→      p_memo: `Replacement (higher value) ${replacementNo}`, p_lines: linesJson,
+   666→      p_reference_id: null, p_reference_type: 'purchase_replacement', p_posted_by: supabaseCreatedBy,
+   667→    })
+   668→    if (ve) throw new Error(`post_voucher: ${ve.message}`)
+   669→    voucherId = vid as string
+   670→  } else if (valueDiff < 0n) {
+   671→    // Replacement costs less: Debit Vendor Payable, Credit Purchases
+   672→    const absDiff = (-valueDiff).toString()
+   673→    const linesJson = [
+   674→      { account_id: payableAcct.id, debit: absDiff, credit: '0', memo: `Vendor credit for ${replacementNo}`, idx: 1 },
+   675→      { account_id: purchasesAcct.id, debit: '0', credit: absDiff, memo: `Replacement value reduction ${replacementNo}`, idx: 2 },
+   676→    ]
+   677→    const { data: vid, error: ve } = await admin.rpc('post_voucher', {
+   678→      p_business_id: input.businessId, p_voucher_type: 'RP', p_voucher_date: dateStr,
+   679→      p_memo: `Replacement (lower value) ${replacementNo}`, p_lines: linesJson,
+   680→      p_reference_id: null, p_reference_type: 'purchase_replacement', p_posted_by: supabaseCreatedBy,
+   681→    })
+   682→    if (ve) throw new Error(`post_voucher: ${ve.message}`)
+   683→    voucherId = vid as string
+   684→  }
+   685→  // Equal value: no voucher — audit trail only
+   686→
+   687→  // Create stock movements for each item
+   688→  for (const item of input.replacementItems) {
+   689→    // Stock-out for defective
+   690→    if (item.outgoingProductId) {
+   691→      const { error: smErr } = await admin.rpc('create_stock_movement', {
+   692→        p_business_id: input.businessId, p_product_id: item.outgoingProductId,
+   693→        p_movement_type: 'adjustment_out', p_quantity: item.outgoingQuantity,
+   694→        p_reason: `Replacement out (defective) ${replacementNo}`,
+   695→        p_movement_date: dateStr, p_created_by: supabaseCreatedBy,
+   696→      })
+   697→      if (smErr) throw new Error(`create_stock_movement (out): ${smErr.message}`)
+   698→    }
+   699→    // Stock-in for replacement
+   700→    if (item.incomingProductId) {
+   701→      const { error: smErr } = await admin.rpc('create_stock_movement', {
+   702→        p_business_id: input.businessId, p_product_id: item.incomingProductId,
+   703→        p_movement_type: 'adjustment_in', p_quantity: item.incomingQuantity,
+   704→        p_reason: `Replacement in (received) ${replacementNo}`,
+   705→        p_movement_date: dateStr, p_created_by: supabaseCreatedBy,
+   706→      })
+   707→      if (smErr) throw new Error(`create_stock_movement (in): ${smErr.message}`)
+   708→    }
+   709→  }
+   710→
+   711→  // Write audit log — this is the replacement record (stores all details)
+   712→  const replacementId = `rep-${Date.now().toString(36)}`
+   713→  const details = {
+   714→    replacement_no: replacementNo,
+   715→    purchase_id: input.purchaseId,
+   716→    purchase_no: purchase.purchase_no,
+   717→    vendor_id: purchase.vendor_id,
+   718→    outgoing_value: outgoingValue.toString(),
+   719→    incoming_value: incomingValue.toString(),
+   720→    value_diff: valueDiff.toString(),
+   721→    voucher_id: voucherId,
+   722→    notes: input.notes ?? null,
+   723→    items: input.replacementItems.map(it => ({
+   724→      original_purchase_item_id: it.originalPurchaseItemId,
+   725→      outgoing_product_id: it.outgoingProductId ?? null,
+   726→      outgoing_product_name: it.outgoingProductName,
+   727→      outgoing_quantity: it.outgoingQuantity,
+   728→      outgoing_unit_cost: it.outgoingUnitCostPaisas.toString(),
+   729→      incoming_product_id: it.incomingProductId ?? null,
+   730→      incoming_product_name: it.incomingProductName,
+   731→      incoming_quantity: it.incomingQuantity,
+   732→      incoming_unit_cost: it.incomingUnitCostPaisas.toString(),
+   733→    })),
+   734→  }
+   735→  await admin.from('audit_logs').insert({
+   736→    business_id: input.businessId, user_id: supabaseCreatedBy,
+   737→    action: 'PURCHASE_REPLACEMENT', entity: 'purchase_replacement', entity_id: replacementId,
+   738→    details: JSON.stringify(details),
+   739→  })
+   740→
+   741→  return { replacementId, replacementNo }
+   742→}
+   743→
+   744→async function postPurchaseReplacementViaPrisma(input: {
+   745→  businessId: string; purchaseId: string
+   746→  replacementItems: ReplacementItemInput[]
+   747→  replacementDate?: Date; notes?: string | null; createdBy?: string | null
+   748→}): Promise<{ replacementId: string; replacementNo: string }> {
+   749→  const purchasesAcct = await getAccountByCode(input.businessId, '5010')
+   750→  if (!purchasesAcct) throw new Error('Purchases account (5010) not found')
+   751→  const payableAcct = await getAccountByCode(input.businessId, '2010')
+   752→  if (!payableAcct) throw new Error('Vendors Payable account (2010) not found')
+   753→
+   754→  let outgoingValue = 0n; let incomingValue = 0n
+   755→  for (const item of input.replacementItems) {
+   756→    outgoingValue += item.outgoingUnitCostPaisas * BigInt(item.outgoingQuantity)
+   757→    incomingValue += item.incomingUnitCostPaisas * BigInt(item.incomingQuantity)
+   758→  }
+   759→  const valueDiff = incomingValue - outgoingValue
+   760→  const replacementNo = `REP-${String(Date.now()).slice(-4)}`
+   761→
+   762→  let voucherId: string | null = null
+   763→  const { postVoucherSmart } = await import('@/lib/accounting/voucher-supabase')
+   764→  if (valueDiff > 0n) {
+   765→    voucherId = await postVoucherSmart({
+   766→      businessId: input.businessId, voucherType: 'RP', voucherDate: input.replacementDate ?? new Date(),
+   767→      memo: `Replacement (higher) ${replacementNo}`,
+   768→      lines: [
+   769→        { accountId: purchasesAcct.id, debit: valueDiff, credit: 0n, memo: `Replacement diff ${replacementNo}` },
+   770→        { accountId: payableAcct.id, debit: 0n, credit: valueDiff, memo: `Additional payable ${replacementNo}` },
+   771→      ], postedBy: input.createdBy,
+   772→    })
+   773→  } else if (valueDiff < 0n) {
+   774→    const abs = -valueDiff
+   775→    voucherId = await postVoucherSmart({
+   776→      businessId: input.businessId, voucherType: 'RP', voucherDate: input.replacementDate ?? new Date(),
+   777→      memo: `Replacement (lower) ${replacementNo}`,
+   778→      lines: [
+   779→        { accountId: payableAcct.id, debit: abs, credit: 0n, memo: `Vendor credit ${replacementNo}` },
+   780→        { accountId: purchasesAcct.id, debit: 0n, credit: abs, memo: `Value reduction ${replacementNo}` },
+   781→      ], postedBy: input.createdBy,
+   782→    })
+   783→  }
+   784→
+   785→  const { createStockMovement } = await import('@/lib/products/data-access')
+   786→  for (const item of input.replacementItems) {
+   787→    if (item.outgoingProductId) await createStockMovement(input.businessId, { productId: item.outgoingProductId, movementType: 'adjustment_out', quantity: item.outgoingQuantity, reason: `Replacement out ${replacementNo}`, createdBy: input.createdBy })
+   788→    if (item.incomingProductId) await createStockMovement(input.businessId, { productId: item.incomingProductId, movementType: 'adjustment_in', quantity: item.incomingQuantity, reason: `Replacement in ${replacementNo}`, createdBy: input.createdBy })
+   789→  }
+   790→
+   791→  await writeAudit({ businessId: input.businessId, userId: input.createdBy ?? null, action: 'PURCHASE_REPLACEMENT', entity: 'purchase_replacement', entityId: replacementNo, details: { replacement_no: replacementNo, purchase_id: input.purchaseId, outgoing_value: outgoingValue.toString(), incoming_value: incomingValue.toString(), value_diff: valueDiff.toString(), voucher_id: voucherId, notes: input.notes } })
+   792→  return { replacementId: replacementNo, replacementNo }
+   793→}
+   794→
+   795→// ─── List Replacements for a purchase (from audit_logs) ───
+   796→export type ReplacementRecord = {
+   797→  id: string; replacementNo: string; date: string
+   798→  outgoingValue: string; incomingValue: string; valueDiff: string
+   799→  voucherId: string | null; notes: string | null
+   800→  items: Array<{
+   801→    outgoingProductName: string; outgoingQuantity: number; outgoingUnitCost: string
+   802→    incomingProductName: string; incomingQuantity: number; incomingUnitCost: string
+   803→  }>
+   804→}
+   805→
+   806→export async function listReplacementsForPurchase(businessId: string, purchaseId: string): Promise<ReplacementRecord[]> {
+   807→  if (await isPhase5Live()) {
+   808→    const admin = getAdminSupabase()
+   809→    const { data, error } = await admin.from('audit_logs')
+   810→      .select('id, entity_id, details, created_at')
+   811→      .eq('business_id', businessId).eq('action', 'PURCHASE_REPLACEMENT')
+   812→      .order('created_at', { ascending: false })
+   813→    if (error) return []
+   814→    const rows: ReplacementRecord[] = []
+   815→    for (const r of data ?? []) {
+   816→      try {
+   817→        const d = JSON.parse(r.details as string)
+   818→        if (d.purchase_id !== purchaseId) continue
+   819→        rows.push({
+   820→          id: r.entity_id ?? r.id,
+   821→          replacementNo: d.replacement_no ?? 'REP-????',
+   822→          date: r.created_at,
+   823→          outgoingValue: String(d.outgoing_value ?? '0'),
+   824→          incomingValue: String(d.incoming_value ?? '0'),
+   825→          valueDiff: String(d.value_diff ?? '0'),
+   826→          voucherId: d.voucher_id ?? null,
+   827→          notes: d.notes ?? null,
+   828→          items: (d.items ?? []).map((it: any) => ({
+   829→            outgoingProductName: it.outgoing_product_name, outgoingQuantity: it.outgoing_quantity, outgoingUnitCost: String(it.outgoing_unit_cost),
+   830→            incomingProductName: it.incoming_product_name, incomingQuantity: it.incoming_quantity, incomingUnitCost: String(it.incoming_unit_cost),
+   831→          })),
+   832→        })
+   833→      } catch { /* skip malformed */ }
+   834→    }
+   835→    return rows
+   836→  }
+   837→  return []
+   838→}
+   839→
