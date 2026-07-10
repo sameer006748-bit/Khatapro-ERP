@@ -26,7 +26,7 @@ import { VoucherError } from '@/lib/accounting/voucher'
  * Returns null if the user has no linked Supabase account (e.g. Supabase Auth
  * not yet configured, or align script not run).
  */
-async function resolveSupabaseUuid(prismaUserId: string | null | undefined): Promise<string | null> {
+export async function resolveSupabaseUuid(prismaUserId: string | null | undefined): Promise<string | null> {
   if (!prismaUserId) return null
   const u = await db.user.findUnique({
     where: { id: prismaUserId },

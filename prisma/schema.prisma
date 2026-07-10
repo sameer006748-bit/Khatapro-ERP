@@ -110,6 +110,12 @@ model Business {
   vouchers         Voucher[]
   productCategories ProductCategory[]
   products         Product[]
+  vendors          Vendor[]
+  purchases        Purchase[]
+  purchaseReturns  PurchaseReturn[]
+  purchaseItems    PurchaseItem[]
+  purchasePayments PurchasePayment[]
+  purchaseReturnItems PurchaseReturnItem[]
   stockMovements   StockMovement[]
   salesmen         Salesman[]
   customers        Customer[]
@@ -161,6 +167,8 @@ model Account {
   salesmen        Salesman[]
   customers       Customer[]
   paymentAllocations PaymentAllocation[]
+  vendors         Vendor[]
+  purchasePayments PurchasePayment[]
 
   @@unique([businessId, code])
   @@index([categoryId])
@@ -288,6 +296,7 @@ model Product {
 
   stockMovements StockMovement[]
   invoiceItems   InvoiceItem[]
+  purchaseItems  PurchaseItem[]
 
   @@index([businessId])
   @@index([businessId, categoryId])
@@ -474,4 +483,143 @@ model SalesReturn {
   createdAt          DateTime @default(now())
 
   @@index([originalInvoiceId])
+}
+
+// =================== Phase 5: Purchases & Vendors ===================
+
+model Vendor {
+  id          String   @id @default(cuid())
+  businessId  String
+  business    Business @relation(fields: [businessId], references: [id])
+  accountId   String   @unique
+  account     Account  @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  name        String
+  phone       String?
+  email       String?
+  address     String?
+  city        String?
+  isActive    Boolean  @default(true)
+  notes       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  purchases Purchase[]
+  payments  PurchasePayment[]
+
+  @@index([businessId])
+}
+
+model Purchase {
+  id              String   @id @default(cuid())
+  businessId      String
+  business        Business @relation(fields: [businessId], references: [id])
+  purchaseNo      String
+  vendorId        String
+  vendor          Vendor   @relation(fields: [vendorId], references: [id], onDelete: Restrict)
+  supplierBillNo  String?
+  purchaseDate    DateTime
+  subtotal        BigInt   @default(0)
+  discount        BigInt   @default(0)
+  additionalCharges BigInt @default(0)
+  total           BigInt   @default(0)
+  paidAmount      BigInt   @default(0)
+  outstandingAmount BigInt @default(0)
+  status          String   @default("posted")
+  notes           String?
+  voucherId       String?
+  createdBy       String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  items    PurchaseItem[]
+  payments PurchasePayment[]
+  returns  PurchaseReturn[]
+
+  @@unique([businessId, purchaseNo])
+  @@index([businessId, purchaseDate])
+  @@index([vendorId])
+}
+
+model PurchaseItem {
+  id              String   @id @default(cuid())
+  businessId      String
+  business        Business @relation(fields: [businessId], references: [id])
+  purchaseId      String
+  purchase        Purchase @relation(fields: [purchaseId], references: [id], onDelete: Cascade)
+  productId       String?
+  product         Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
+  productName     String
+  quantity        Int
+  unitCost        BigInt
+  lineTotal       BigInt
+  returnedQuantity Int    @default(0)
+  stockMovementId String?
+  createdAt       DateTime @default(now())
+
+  @@index([purchaseId])
+  @@index([productId])
+}
+
+model PurchasePayment {
+  id           String   @id @default(cuid())
+  businessId   String
+  business     Business @relation(fields: [businessId], references: [id])
+  purchaseId   String?
+  purchase     Purchase? @relation(fields: [purchaseId], references: [id], onDelete: SetNull)
+  vendorId     String
+  vendor       Vendor   @relation(fields: [vendorId], references: [id], onDelete: Restrict)
+  accountId    String
+  account      Account  @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  amount       BigInt
+  paymentDate  DateTime @default(now())
+  paymentType  String   @default("purchase_payment")
+  voucherId    String?
+  notes        String?
+  createdBy    String?
+  createdAt    DateTime @default(now())
+
+  @@index([purchaseId])
+  @@index([vendorId])
+}
+
+model PurchaseReturn {
+  id                  String   @id @default(cuid())
+  businessId          String
+  business            Business @relation(fields: [businessId], references: [id])
+  purchaseId          String
+  purchase            Purchase @relation(fields: [purchaseId], references: [id], onDelete: Restrict)
+  vendorId            String
+  returnNo            String
+  returnDate          DateTime @default(now())
+  totalAmount         BigInt
+  settlementType      String   @default("reduce_payable")
+  settlementAccountId String?
+  voucherId           String?
+  notes               String?
+  createdBy           String?
+  createdAt           DateTime @default(now())
+
+  items PurchaseReturnItem[]
+
+  @@unique([businessId, returnNo])
+  @@index([purchaseId])
+  @@index([vendorId])
+}
+
+model PurchaseReturnItem {
+  id                String   @id @default(cuid())
+  businessId        String
+  business          Business @relation(fields: [businessId], references: [id])
+  purchaseReturnId  String
+  purchaseReturn    PurchaseReturn @relation(fields: [purchaseReturnId], references: [id], onDelete: Cascade)
+  purchaseItemId    String
+  productId         String?
+  productName       String
+  quantity          Int
+  unitCost          BigInt
+  lineTotal         BigInt
+  stockMovementId   String?
+  createdAt         DateTime @default(now())
+
+  @@index([purchaseReturnId])
 }

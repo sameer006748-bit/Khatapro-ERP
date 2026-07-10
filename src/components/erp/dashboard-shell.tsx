@@ -57,6 +57,8 @@ import { StockAdjustmentView } from '@/components/erp/views/stock-adjustment-vie
 import { NegativeStockReportView } from '@/components/erp/views/negative-stock-report-view'
 import { PendingStockReportView } from '@/components/erp/views/pending-stock-report-view'
 import { InventoryView } from '@/components/erp/views/inventory-view'
+import { PurchasesView } from '@/components/erp/views/purchases-view'
+import { VendorsView } from '@/components/erp/views/vendors-view'
 import { CounterSaleView } from '@/components/erp/views/counter-sale-view'
 import { OnlineSaleView } from '@/components/erp/views/online-sale-view'
 import { OfcSaleView } from '@/components/erp/views/ofc-sale-view'
@@ -146,13 +148,14 @@ const NAV_CATEGORIES: NavCategory[] = [
       { key: 'sales-list', label: 'Sales List', short: 'List', icon: ClipboardList, perm: 'can_view_sales' },
     ],
   },
-  // 6. Purchases (Phase 5 placeholder)
+  // 6. Purchases (Phase 5)
   {
     id: 'purchases',
     label: 'Purchases',
     icon: Receipt,
     items: [
-      { key: 'purchases', label: 'Purchases', short: 'Buy', icon: Receipt, perm: 'can_view_purchases' },
+      { key: 'purchases', label: 'Purchases', short: 'Purchases', icon: Receipt, perm: 'can_view_purchases' },
+      { key: 'vendors', label: 'Vendors', short: 'Vendors', icon: Users, perm: 'can_view_purchases' },
     ],
   },
   // 7. Delivery / Riders (Phase 7 placeholder)
@@ -719,7 +722,8 @@ function ViewRouter({
   if (active === 'ofc-sale') return <OfcSaleView user={user} />
   if (active === 'sales-list') return <SalesListView />
 
-  if (active === 'purchases') return <ComingSoonView title="Purchases & Vendors" phase="Phase 5" />
+  if (active === 'purchases') return <PurchasesView user={user} />
+  if (active === 'vendors') return <VendorsView user={user} />
   if (active === 'riders') return <ComingSoonView title="Riders & COD" phase="Phase 7" />
   if (active === 'vouchers') return <JournalVoucherView />
   if (active === 'reports') return <ComingSoonView title="Reports" phase="Phase 8" />
