@@ -11,7 +11,7 @@ import { getServerSession } from 'next-auth'
 import { z } from 'zod'
 import { authOptions } from '@/lib/auth/authOptions'
 import { loadSessionUser, requirePermission, hasPermission } from '@/lib/auth/permissions'
-import { postSale, listInvoices } from '@/lib/sales/data-access'
+import { postSale, listInvoices, resolveSalesmanIdForUser } from '@/lib/sales/data-access'
 import { parseMoney } from '@/lib/format'
 
 const ItemSchema = z.object({
@@ -119,6 +119,16 @@ export async function GET(req: Request) {
   const url = new URL(req.url)
   const type = url.searchParams.get('type') || undefined
 
-  const rows = await listInvoices(su.businessId, type ? { type } : undefined)
+  // If user can only view own sales, resolve their salesman_id and filter
+  let salesmanId: string | undefined
+  if (!canViewAll && canViewOwn) {
+    const smId = await resolveSalesmanIdForUser(su.businessId, su.supabaseUserUuid, su.userId)
+    if (!smId) {
+      return NextResponse.json({ rows: [] })
+    }
+    salesmanId = smId
+  }
+
+  const rows = await listInvoices(su.businessId, { type, salesmanId })
   return NextResponse.json({ rows })
 }

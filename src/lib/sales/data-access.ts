@@ -149,6 +149,70 @@ export async function listSalesmen(businessId: string): Promise<SalesmanRow[]> {
   }))
 }
 
+/**
+ * Resolve the salesman_id for the current user.
+ * Used to filter invoices for users with can_view_own_sales only.
+ * Returns null if no salesman record is linked to this user.
+ */
+export async function resolveSalesmanIdForUser(
+  businessId: string,
+  supabaseUserUuid: string | null,
+  prismaUserId: string,
+): Promise<string | null> {
+  if (await isPhase4Live()) {
+    if (!supabaseUserUuid) {
+      // No Supabase UUID — fall through to Prisma fallback
+    } else {
+      const admin = getAdminSupabase()
+      const { data, error } = await admin
+        .from('salesmen')
+        .select('id')
+        .eq('business_id', businessId)
+        .eq('user_id', supabaseUserUuid)
+        .maybeSingle()
+      if (!error && data) {
+        return data.id
+      }
+      // If error (e.g. user_id column doesn't exist yet), fall through to Prisma
+    }
+  }
+  // Prisma fallback (also used when Supabase query fails)
+  const sm = await db.salesman.findFirst({
+    where: { businessId, userId: prismaUserId },
+    select: { id: true },
+  })
+  return sm?.id ?? null
+}
+
+/**
+ * Verify that an invoice belongs to the given salesman_id.
+ * Returns true if the invoice's salesman_id matches, false otherwise.
+ */
+export async function verifyInvoiceOwnership(
+  businessId: string,
+  invoiceId: string,
+  salesmanId: string,
+): Promise<boolean> {
+  if (await isPhase4Live()) {
+    const admin = getAdminSupabase()
+    const { data, error } = await admin
+      .from('invoices')
+      .select('salesman_id')
+      .eq('id', invoiceId)
+      .eq('business_id', businessId)
+      .maybeSingle()
+    if (error || !data) return false
+    return data.salesman_id === salesmanId
+  }
+  // Prisma fallback
+  const inv = await db.invoice.findFirst({
+    where: { id: invoiceId, businessId },
+    select: { salesmanId: true },
+  })
+  if (!inv) return false
+  return inv.salesmanId === salesmanId
+}
+
 // ─────────────────────────────────────────────────────────────
 // Post Sale (the main entry point)
 // ─────────────────────────────────────────────────────────────
@@ -377,7 +441,7 @@ async function postSaleViaPrisma(input: PostSaleInput): Promise<{ invoiceId: str
 // ─────────────────────────────────────────────────────────────
 // List invoices
 // ─────────────────────────────────────────────────────────────
-export async function listInvoices(businessId: string, opts?: { type?: string }): Promise<InvoiceRow[]> {
+export async function listInvoices(businessId: string, opts?: { type?: string; salesmanId?: string }): Promise<InvoiceRow[]> {
   if (await isPhase4Live()) {
     const admin = getAdminSupabase()
     let query = admin
@@ -394,6 +458,9 @@ export async function listInvoices(businessId: string, opts?: { type?: string })
       .limit(100)
     if (opts?.type) {
       query = query.eq('invoice_type', opts.type)
+    }
+    if (opts?.salesmanId) {
+      query = query.eq('salesman_id', opts.salesmanId)
     }
     const { data, error } = await query
     if (error) throw new Error(`Supabase: ${error.message}`)
@@ -412,7 +479,11 @@ export async function listInvoices(businessId: string, opts?: { type?: string })
     }))
   }
   const invoices = await db.invoice.findMany({
-    where: { businessId, ...(opts?.type ? { invoiceType: opts.type } : {}) },
+    where: {
+      businessId,
+      ...(opts?.type ? { invoiceType: opts.type } : {}),
+      ...(opts?.salesmanId ? { salesmanId: opts.salesmanId } : {}),
+    },
     include: { salesman: true },
     orderBy: [{ invoiceDate: 'desc' }, { createdAt: 'desc' }],
     take: 100,
