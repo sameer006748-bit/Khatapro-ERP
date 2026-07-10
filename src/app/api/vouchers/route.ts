@@ -11,7 +11,7 @@ import { z } from 'zod'
 import { db } from '@/lib/db'
 import { authOptions } from '@/lib/auth/authOptions'
 import { loadSessionUser, requirePermission } from '@/lib/auth/permissions'
-import { postVoucher, VoucherError } from '@/lib/accounting/voucher'
+import { postVoucherSmart, VoucherError } from '@/lib/accounting/voucher-supabase'
 import { parseMoney } from '@/lib/format'
 
 const LineSchema = z.object({
@@ -69,7 +69,7 @@ export async function POST(req: Request) {
   }
 
   try {
-    const voucherId = await postVoucher({
+    const voucherId = await postVoucherSmart({
       businessId: su.businessId,
       voucherType,
       voucherDate: new Date(voucherDate),
@@ -94,6 +94,48 @@ export async function GET() {
   const loaded = await loadSessionUser((session.user as any).id)
   if (!loaded) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
   const su = await requirePermission(loaded, 'can_view_vouchers')
+
+  // Dual-path: read from Supabase when live, Prisma otherwise.
+  const { isUsingSupabase } = await import('@/lib/accounting/data-access')
+  if (await isUsingSupabase()) {
+    const { getAdminSupabase } = await import('@/lib/supabase/admin')
+    const admin = getAdminSupabase()
+    const { data, error } = await admin
+      .from('vouchers')
+      .select(`
+        id, voucher_type, voucher_date, memo, is_cancelled, posted_at,
+        total_debit, total_credit,
+        voucher_lines ( id, account_id, debit, credit, memo, account:accounts ( code, name, category:account_categories ( code ) ) )
+      `)
+      .eq('business_id', su.businessId)
+      .order('posted_at', { ascending: false })
+      .limit(100)
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 })
+    }
+    return NextResponse.json({
+      rows: (data ?? []).map((v: any) => ({
+        id: v.id,
+        voucherType: v.voucher_type,
+        voucherDate: v.voucher_date,
+        memo: v.memo,
+        isCancelled: v.is_cancelled,
+        postedAt: v.posted_at,
+        totalDebit: String(v.total_debit),
+        totalCredit: String(v.total_credit),
+        lines: (v.voucher_lines ?? []).map((l: any) => ({
+          id: l.id,
+          accountId: l.account_id,
+          accountCode: l.account?.code ?? '',
+          accountName: l.account?.name ?? '',
+          categoryCode: l.account?.category?.code ?? '',
+          debit: String(l.debit),
+          credit: String(l.credit),
+          memo: l.memo,
+        })),
+      })),
+    })
+  }
 
   const vouchers = await db.voucher.findMany({
     where: { businessId: su.businessId },

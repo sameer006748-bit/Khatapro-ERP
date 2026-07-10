@@ -4,10 +4,10 @@
  */
 import { NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
-import { db } from '@/lib/db'
 import { authOptions } from '@/lib/auth/authOptions'
 import { loadSessionUser, requirePermission } from '@/lib/auth/permissions'
-import { accountLedger } from '@/lib/accounting/voucher'
+import { accountLedgerSmart } from '@/lib/accounting/voucher-supabase'
+import { getAccountById } from '@/lib/accounting/data-access'
 
 export async function GET(
   _req: Request,
@@ -21,14 +21,12 @@ export async function GET(
 
   const { accountId } = await params
 
-  // Verify the account belongs to the user's business.
-  const acct = await db.account.findFirst({
-    where: { id: accountId, businessId: su.businessId },
-    include: { category: true },
-  })
+  // Verify the account belongs to the user's business (reads from Supabase
+  // when live, Prisma otherwise).
+  const acct = await getAccountById(su.businessId, accountId)
   if (!acct) return NextResponse.json({ error: 'NOT_FOUND' }, { status: 404 })
 
-  const lines = await accountLedger(su.businessId, accountId)
+  const lines = await accountLedgerSmart(su.businessId, accountId)
 
   return NextResponse.json({
     account: {

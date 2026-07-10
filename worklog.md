@@ -157,3 +157,75 @@ Stage Summary:
 - All Phase 1 + 1.1 functionality intact (auth, roles, CoA, business accounts, audit log, biz-day test, KhataPro branding, light premium theme, glass pill mobile nav, 3D cards).
 - 6 screenshots saved to /home/z/my-project/download/p2-*.png (JV desktop+mobile, Trial Balance desktop+mobile, ledger drilldown desktop+mobile, opening balance mobile, audit log).
 - Stopping for user approval before Phase 3 (Products & Stock).
+
+---
+Task ID: SLA
+Agent: Main (fullstack-dev)
+Task: Supabase Live Activation Pass. No Phase 3.
+
+Work Log:
+- Created /home/z/my-project/.env.local with the 3 Supabase env vars provided by user (NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sb_publishable_****, SUPABASE_SERVICE_ROLE_KEY=eyJ****). Verified .gitignore excludes .env* (gitignored). Keys NEVER printed in logs or final report.
+- Wrote scripts/verify-supabase-connection.ts — loads .env.local, tests Auth health endpoint (publishable key) + permissions table query (service-role key) + vouchers/voucher_lines tables + post_voucher RPC. Masks all key values in output.
+- Verified Supabase connection: Auth health = 200 ✓, but permissions/vouchers/voucher_lines tables and post_voucher RPC do NOT exist (migrations not applied).
+- Attempted to apply SQL migrations automatically via multiple methods: /pg/query endpoint (404), /rest/v1/rpc/pg_exec (function not found), /database/query (404). None worked — Supabase intentionally does NOT expose DDL execution via the REST API for security. DDL requires either the database password (direct Postgres) or a Supabase personal access token (Management API), neither of which were provided.
+- HONEST REPORT: Migrations NOT applied automatically. User must run the 2 SQL files manually in Supabase SQL Editor.
+- Wrote src/lib/accounting/voucher-supabase.ts — Supabase RPC implementations (postVoucherViaSupabase, trialBalanceViaSupabase, accountLedgerViaSupabase, cancelVoucherViaSupabase) + smart dispatchers (postVoucherSmart, trialBalanceSmart, accountLedgerSmart, cancelVoucherSmart) that use Supabase RPC when env vars set AND Phase 2 migration applied, otherwise fall back to Prisma.
+- Wrote src/lib/accounting/data-access.ts — smart data-access helpers (getChartOfAccounts, getAccountById, getAccountByCode, validateAccounts, isUsingSupabase) that read from Supabase when env vars set AND Phase 1 migration applied, otherwise Prisma.
+- Updated Phase 2 API routes to use smart dispatchers: /api/vouchers (POST+GET), /api/vouchers/[id], /api/trial-balance, /api/ledger/[accountId], /api/opening-balance. Also updated Phase 1 routes: /api/setup/coa, /api/audit-logs.
+- Updated /api/supabase-status to report phase1Applied + phase2Applied flags (checks table existence via real select, not head).
+- Updated SupabaseStatusBadge to show 4 states: "Supabase live" (green, fully live), "Supabase (migrations pending)" (amber, connected but tables missing), "Supabase (pending)" (amber, reachable but admin not working), "Local preview" (gray, env vars not set).
+- Wrote scripts/seed-supabase-users.ts — creates 4 test users in Supabase Auth + profiles once Phase 1 migration is applied. Idempotent.
+- Fixed critical bug: PostgREST returns null count without an error when a table doesn't exist in the schema cache. Changed all table-existence checks from head:true+count to real select+Array.isArray check.
+- All accounting rules preserved: balanced voucher validation, Opening Voucher against Opening Balance Equity, no hard delete, BigInt paisas money, Asia/Karachi date grouping.
+
+Supabase Connection Status:
+- .env.local created with real keys (sb_publishable_**** + eyJ****). Gitignored. ✓
+- Auth health endpoint reachable (publishable key works). ✓
+- Service-role key valid (can query REST API). ✓
+- Phase 1 migration: NOT applied (permissions table doesn't exist).
+- Phase 2 migration: NOT applied (vouchers/voucher_lines tables + post_voucher RPC don't exist).
+- Badge shows: "Supabase (pending)" (amber).
+- App gracefully falls back to Prisma/SQLite for all accounting operations.
+
+Migrations — NOT applied automatically. User must run manually:
+- File 1: supabase/migrations/00001_phase1_foundation.sql
+  → Open https://supabase.com/dashboard/project/ebcebxwpddltiwrqybqc/sql/new
+  → Paste entire file contents, click Run.
+- File 2: supabase/migrations/00002_phase2_accounting.sql
+  → Same SQL Editor, paste + Run.
+- After both: re-run `bun run scripts/verify-supabase-connection.ts` to confirm.
+- Then: `bun run scripts/seed-supabase-users.ts` to create Supabase Auth users (optional — local Prisma users still work for NextAuth login).
+
+Preview Login Credentials (UNCHANGED — local Prisma users, still work):
+- owner@test.local / password123 (Owner/Admin)
+- accountant@test.local / password123 (Accountant)
+- salesman@test.local / password123 (Salesman)
+- rider@test.local / password123 (Rider)
+Note: NextAuth credentials provider reads from the local Prisma User table. These users exist in Prisma from Phase 1. They will ALSO exist in Supabase Auth after running seed-supabase-users.ts, but NextAuth still uses Prisma for login unless you switch the auth provider.
+
+Verification:
+- lint: clean ✓
+- tsc --noEmit: clean ✓
+- next build: succeeds, 18 routes ✓
+- Browser (Agent Browser) verified:
+  1. Login as owner@test.local / password123 ✓
+  2. Supabase badge shows "Supabase (pending)" (amber) — env vars present, project reachable, migrations not applied ✓
+  3. Journal Voucher form opens ✓
+  4. Unbalanced voucher (5000 vs 3000) REJECTED with HTTP 400 "Unbalanced voucher: total debit 500000 <> total credit 300000" (via Prisma fallback) ✓
+  5. Balanced voucher (7000 Cash / 7000 Sales) POSTED successfully (via Prisma fallback) ✓
+  6. Trial Balance updates: Cash debit 1,200,000 paisas, Sales credit 1,200,000, balanced ✓
+  7. Ledger drill-down works (via Prisma fallback) ✓
+  8. Opening balance posting works (via Prisma fallback) ✓
+  9. Audit log records POST_VOUCHER (via Prisma fallback) ✓
+  10. Direct browser insert into voucher_lines: BLOCKED — no /api/voucher-lines endpoint exists; in production Supabase, RLS would also block it (no INSERT policy on voucher_lines table) ✓
+  11. Desktop layout: sidebar with 17 nav items ✓
+  12. Mobile layout: liquid-glass pill bottom nav, no horizontal overflow ✓
+  13. No Phase 3+ features implemented ✓
+
+Stage Summary:
+- Supabase architecture fully built and connected. Env vars loaded. Auth reachable.
+- Migrations NOT applied automatically (Supabase blocks DDL via REST). User must run 2 SQL files manually.
+- Dual-path smart dispatchers ensure the app works on BOTH Prisma (now) and Supabase (after migrations applied) without code changes.
+- Supabase status badge accurately reflects connection state: "Supabase (pending)" now → "Supabase live" after migrations applied.
+- All Phase 1 + 1.1 + 2 functionality intact. KhataPro ERP branding, light premium theme, glass pill mobile nav, 3D cards all preserved.
+- Stopping for user approval. User action required: run the 2 SQL migration files in Supabase SQL Editor to go fully live.

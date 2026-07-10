@@ -1,11 +1,10 @@
 /**
  * GET /api/supabase-status
  *
- * Reports whether Supabase env vars are configured and (if so) whether the
- * live Supabase project responds. Used by the UI to show a "connected to
- * Supabase" badge and by the Phase 2 gate to confirm safe connection.
+ * Reports whether Supabase env vars are configured, whether the project is
+ * reachable, AND whether the Phase 1 + Phase 2 migrations have been applied.
  *
- * NEVER returns keys — only booleans and the project URL.
+ * NEVER returns keys — only booleans, the project URL, and table-existence flags.
  */
 import { NextResponse } from 'next/server'
 import { isSupabaseConfigured } from '@/lib/supabase/browser'
@@ -22,6 +21,10 @@ export async function GET() {
       adminConfigured: false,
       url: null,
       reachable: false,
+      authReachable: false,
+      adminCanQuery: false,
+      phase1Applied: false,
+      phase2Applied: false,
       message: 'Supabase env vars not set. App is running on Prisma/SQLite local preview. Copy .env.local.example to .env.local and fill in real values.',
     })
   }
@@ -41,19 +44,50 @@ export async function GET() {
     reachable = false
   }
 
-  // If admin is also configured, try to count rows in a known table to
-  // confirm the service role works. NEVER print the key.
+  // If admin is also configured, check table existence to determine which
+  // migrations have been applied. NEVER print the key.
   let adminCanQuery = false
+  let phase1Applied = false
+  let phase2Applied = false
+
   if (adminConfigured) {
     try {
       const admin = getAdminSupabase()
-      const { count, error } = await admin
+
+      // Check Phase 1: permissions table exists and has rows.
+      // Use a real select (not head) so PostgREST returns an error when the
+      // table doesn't exist in the schema cache.
+      const { data: permData, error: permErr } = await admin
         .from('permissions')
-        .select('*', { count: 'exact', head: true })
-      adminCanQuery = !error && count !== null
+        .select('id')
+        .limit(1)
+      adminCanQuery = !permErr
+      phase1Applied = adminCanQuery && Array.isArray(permData) && permData.length > 0
+
+      // Check Phase 2: vouchers table exists.
+      if (phase1Applied) {
+        const { data: vData, error: vErr } = await admin
+          .from('vouchers')
+          .select('id')
+          .limit(1)
+        phase2Applied = !vErr && Array.isArray(vData)
+      }
     } catch {
       adminCanQuery = false
     }
+  }
+
+  let message: string
+  if (adminCanQuery && phase1Applied && phase2Applied) {
+    message = 'Supabase fully live — Phase 1 + Phase 2 migrations applied. RLS enforced for browser queries; service-role used server-side only.'
+  } else if (adminCanQuery && phase1Applied && !phase2Applied) {
+    message = 'Supabase connected, Phase 1 applied, but Phase 2 migration NOT applied yet. Run supabase/migrations/00002_phase2_accounting.sql in SQL Editor.'
+  } else if (adminCanQuery && !phase1Applied) {
+    message = 'Supabase connected but migrations NOT applied. Run supabase/migrations/00001_phase1_foundation.sql then 00002_phase2_accounting.sql in SQL Editor.'
+  } else if (reachable) {
+    message = 'Supabase reachable but admin key not configured or tables not queryable.'
+  } else {
+    message = 'Supabase URL set but project not reachable.'
   }
 
   return NextResponse.json({
@@ -64,10 +98,8 @@ export async function GET() {
     reachable,
     authReachable,
     adminCanQuery,
-    message: adminCanQuery
-      ? 'Supabase connected (browser + admin). RLS enforced for browser queries.'
-      : reachable
-      ? 'Supabase reachable but admin key not configured or migrations not applied yet.'
-      : 'Supabase URL set but project not reachable.',
+    phase1Applied,
+    phase2Applied,
+    message,
   })
 }

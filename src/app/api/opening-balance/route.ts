@@ -17,10 +17,10 @@
 import { NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { z } from 'zod'
-import { db } from '@/lib/db'
 import { authOptions } from '@/lib/auth/authOptions'
 import { loadSessionUser, requirePermission } from '@/lib/auth/permissions'
-import { postVoucher, VoucherError } from '@/lib/accounting/voucher'
+import { postVoucherSmart, VoucherError } from '@/lib/accounting/voucher-supabase'
+import { getAccountById, getAccountByCode } from '@/lib/accounting/data-access'
 import { parseMoney, formatMoney } from '@/lib/format'
 
 const Schema = z.object({
@@ -52,18 +52,14 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'Invalid amount' }, { status: 400 })
   }
 
-  // Verify target account.
-  const target = await db.account.findFirst({
-    where: { id: accountId, businessId: su.businessId, isActive: true },
-  })
-  if (!target) {
+  // Verify target account (reads from Supabase when live, Prisma otherwise).
+  const target = await getAccountById(su.businessId, accountId)
+  if (!target || !target.isActive) {
     return NextResponse.json({ error: 'INVALID_ACCOUNT' }, { status: 400 })
   }
 
   // Find the Opening Balance Equity account (code 3030) for this business.
-  const equity = await db.account.findFirst({
-    where: { businessId: su.businessId, code: '3030' },
-  })
+  const equity = await getAccountByCode(su.businessId, '3030')
   if (!equity) {
     return NextResponse.json({ error: 'OPENING_BALANCE_EQUITY_MISSING' }, { status: 500 })
   }
@@ -81,7 +77,7 @@ export async function POST(req: Request) {
         ]
 
   try {
-    const voucherId = await postVoucher({
+    const voucherId = await postVoucherSmart({
       businessId: su.businessId,
       voucherType: 'OP',
       voucherDate: new Date(),

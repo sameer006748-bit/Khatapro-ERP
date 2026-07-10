@@ -1,11 +1,12 @@
 /**
  * Default Chart of Accounts — list (categories with their accounts).
+ * Reads from Supabase when env vars are configured, Prisma otherwise.
  */
 import { NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
-import { db } from '@/lib/db'
 import { authOptions } from '@/lib/auth/authOptions'
 import { loadSessionUser } from '@/lib/auth/permissions'
+import { getChartOfAccounts } from '@/lib/accounting/data-access'
 
 export async function GET() {
   const session = await getServerSession(authOptions)
@@ -15,15 +16,7 @@ export async function GET() {
     return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
   }
 
-  const cats = await db.accountCategory.findMany({
-    where: { businessId: su.businessId },
-    include: {
-      accounts: {
-        orderBy: { code: 'asc' },
-      },
-    },
-    orderBy: [{ code: 'asc' }],
-  })
+  const cats = await getChartOfAccounts(su.businessId)
 
   return NextResponse.json({
     categories: cats.map((c) => ({

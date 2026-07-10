@@ -6,7 +6,7 @@ import { NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth/authOptions'
 import { loadSessionUser, requirePermission } from '@/lib/auth/permissions'
-import { trialBalance } from '@/lib/accounting/voucher'
+import { trialBalanceSmart } from '@/lib/accounting/voucher-supabase'
 
 export async function GET() {
   const session = await getServerSession(authOptions)
@@ -15,7 +15,7 @@ export async function GET() {
   if (!loaded) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
   const su = await requirePermission(loaded, 'can_view_trial_balance')
 
-  const rows = await trialBalance(su.businessId)
+  const rows = await trialBalanceSmart(su.businessId)
 
   let grandDebit = 0n
   let grandCredit = 0n
