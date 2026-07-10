@@ -56,6 +56,11 @@ import { ProductsView } from '@/components/erp/views/products-view'
 import { StockAdjustmentView } from '@/components/erp/views/stock-adjustment-view'
 import { NegativeStockReportView } from '@/components/erp/views/negative-stock-report-view'
 import { PendingStockReportView } from '@/components/erp/views/pending-stock-report-view'
+import { CounterSaleView } from '@/components/erp/views/counter-sale-view'
+import { OnlineSaleView } from '@/components/erp/views/online-sale-view'
+import { OfcSaleView } from '@/components/erp/views/ofc-sale-view'
+import { SalesListView } from '@/components/erp/views/sales-list-view'
+import { InvoiceDetailView } from '@/components/erp/views/invoice-detail-view'
 import { SupabaseStatusBadge } from '@/components/erp/supabase-status-badge'
 
 // ─────────────────────────────────────────────────────────────
@@ -132,13 +137,16 @@ const NAV_CATEGORIES: NavCategory[] = [
       { key: 'pending-stock', label: 'Pending Stock', short: 'Pending', icon: Clock, perm: 'can_view_stock_report' },
     ],
   },
-  // 5. Sales (Phase 4 placeholder)
+  // 5. Sales (Phase 4)
   {
     id: 'sales',
     label: 'Sales',
     icon: ShoppingCart,
     items: [
-      { key: 'sales', label: 'Sales', short: 'Sales', icon: ShoppingCart, perm: 'can_view_sales' },
+      { key: 'counter-sale', label: 'Counter Sale', short: 'Counter', icon: ShoppingCart, perm: 'can_create_sales' },
+      { key: 'online-sale', label: 'Online Sale', short: 'Online', icon: ShoppingCart, perm: 'can_create_sales' },
+      { key: 'ofc-sale', label: 'OFC Sale', short: 'OFC', icon: ShoppingCart, perm: 'can_create_sales' },
+      { key: 'sales-list', label: 'Sales List', short: 'List', icon: ClipboardList, perm: 'can_view_sales' },
     ],
   },
   // 6. Purchases (Phase 5 placeholder)
@@ -234,6 +242,7 @@ export function DashboardShell({ user, onSignOut }: { user: MeUser; onSignOut: (
   const [moreOpen, setMoreOpen] = useState(false)
   const searchParams = useSearchParams()
   const ledgerAccountId = searchParams.get('ledger')
+  const invoiceId = searchParams.get('invoice')
 
   const cats = useMemo(() => visibleCategories(user), [user])
 
@@ -245,9 +254,11 @@ export function DashboardShell({ user, onSignOut }: { user: MeUser; onSignOut: (
     return init
   })
 
-  // If ?ledger= is in the URL, show the ledger drill-down instead.
+  // If ?ledger= or ?invoice= is in the URL, show that view instead.
   const effectiveActive = ledgerAccountId
     ? 'ledger-drilldown'
+    : invoiceId
+    ? 'invoice-detail'
     : cats.some((c) => c.visibleItems.some((i) => i.key === active))
     ? active
     : 'home'
@@ -367,7 +378,7 @@ export function DashboardShell({ user, onSignOut }: { user: MeUser; onSignOut: (
                 exit={{ opacity: 0, y: -4 }}
                 transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
               >
-                <ViewRouter user={user} active={effectiveActive} ledgerAccountId={ledgerAccountId} />
+                <ViewRouter user={user} active={effectiveActive} ledgerAccountId={ledgerAccountId} invoiceId={invoiceId} />
               </motion.div>
             </AnimatePresence>
           </div>
@@ -664,14 +675,20 @@ function ViewRouter({
   user,
   active,
   ledgerAccountId,
+  invoiceId,
 }: {
   user: MeUser
   active: string
   ledgerAccountId: string | null
+  invoiceId: string | null
 }) {
   // Ledger drill-down takes precedence when ?ledger= is set.
   if (active === 'ledger-drilldown' && ledgerAccountId) {
     return <LedgerDrilldownView accountId={ledgerAccountId} />
+  }
+  // Invoice detail when ?invoice= is set.
+  if (active === 'invoice-detail' && invoiceId) {
+    return <InvoiceDetailView invoiceId={invoiceId} />
   }
 
   if (active === 'home') {
@@ -699,7 +716,12 @@ function ViewRouter({
   if (active === 'negative-stock') return <NegativeStockReportView />
   if (active === 'pending-stock') return <PendingStockReportView />
 
-  if (active === 'sales') return <ComingSoonView title="Sales" phase="Phase 4" />
+  // Phase 4 — Sales
+  if (active === 'counter-sale') return <CounterSaleView user={user} />
+  if (active === 'online-sale') return <OnlineSaleView user={user} />
+  if (active === 'ofc-sale') return <OfcSaleView user={user} />
+  if (active === 'sales-list') return <SalesListView />
+
   if (active === 'purchases') return <ComingSoonView title="Purchases & Vendors" phase="Phase 5" />
   if (active === 'riders') return <ComingSoonView title="Riders & COD" phase="Phase 7" />
   if (active === 'vouchers') return <JournalVoucherView />

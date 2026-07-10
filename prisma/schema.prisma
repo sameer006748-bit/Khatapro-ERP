@@ -111,6 +111,13 @@ model Business {
   productCategories ProductCategory[]
   products         Product[]
   stockMovements   StockMovement[]
+  salesmen         Salesman[]
+  customers        Customer[]
+  invoices         Invoice[]
+  invoiceItems     InvoiceItem[]
+  paymentAllocations PaymentAllocation[]
+  salesmanCommissions SalesmanCommission[]
+  salesReturns     SalesReturn[]
 }
 
 // =================== Chart of Accounts ===================
@@ -151,6 +158,9 @@ model Account {
 
   businessAccount BusinessAccount?
   voucherLines    VoucherLine[]
+  salesmen        Salesman[]
+  customers       Customer[]
+  paymentAllocations PaymentAllocation[]
 
   @@unique([businessId, code])
   @@index([categoryId])
@@ -276,6 +286,7 @@ model Product {
   updatedAt      DateTime @updatedAt
 
   stockMovements StockMovement[]
+  invoiceItems   InvoiceItem[]
 
   @@index([businessId])
   @@index([businessId, categoryId])
@@ -301,4 +312,163 @@ model StockMovement {
   @@index([productId])
   @@index([businessId, movementDate])
   @@index([businessId, movementType])
+}
+
+// =================== Phase 4: Sales ===================
+
+model Salesman {
+  id            String   @id @default(cuid())
+  businessId    String
+  business      Business @relation(fields: [businessId], references: [id])
+  accountId     String   @unique
+  account       Account  @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  name          String
+  phone         String?
+  commissionPct Float    @default(5.0)
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  invoices    Invoice[]
+  commissions SalesmanCommission[]
+
+  @@index([businessId])
+}
+
+model Customer {
+  id         String   @id @default(cuid())
+  businessId String
+  business   Business @relation(fields: [businessId], references: [id])
+  accountId  String   @unique
+  account    Account  @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  name       String
+  phone      String?
+  address    String?
+  city       String?
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  invoices Invoice[]
+
+  @@index([businessId])
+}
+
+model Invoice {
+  id              String   @id @default(cuid())
+  businessId      String
+  business        Business @relation(fields: [businessId], references: [id])
+  invoiceNo       String
+  invoiceType     String   // COUNTER | ONLINE | OFC
+  invoiceDate     DateTime
+  customerId      String?
+  customer        Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  salesmanId      String?
+  salesman        Salesman? @relation(fields: [salesmanId], references: [id], onDelete: SetNull)
+  customerName    String?
+  customerPhone   String?
+  customerAddress String?
+  customerCity    String?
+  subtotal        BigInt   @default(0)
+  discount        BigInt   @default(0)
+  total           BigInt   @default(0)
+  paidAmount      BigInt   @default(0)
+  voucherId       String?
+  isCancelled     Boolean  @default(false)
+  cancelledAt     DateTime?
+  cancelVoucherId String?
+  isReturned      Boolean  @default(false)
+  returnVoucherId String?
+  memo            String?
+  createdBy       String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  items              InvoiceItem[]
+  paymentAllocations PaymentAllocation[]
+  commissions        SalesmanCommission[]
+  salesReturns       SalesReturn[]
+
+  @@unique([businessId, invoiceNo])
+  @@index([businessId, invoiceDate])
+  @@index([businessId, invoiceType])
+  @@index([salesmanId])
+  @@index([customerId])
+}
+
+model InvoiceItem {
+  id              String   @id @default(cuid())
+  businessId      String
+  business        Business @relation(fields: [businessId], references: [id])
+  invoiceId       String
+  invoice         Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  productId       String?
+  product         Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
+  productName     String
+  qty             Int
+  unitPrice       BigInt
+  lineTotal       BigInt
+  isTemporary     Boolean  @default(false)
+  stockMovementId String?
+  createdAt       DateTime @default(now())
+
+  @@index([invoiceId])
+  @@index([productId])
+}
+
+model PaymentAllocation {
+  id             String   @id @default(cuid())
+  businessId     String
+  business       Business @relation(fields: [businessId], references: [id])
+  invoiceId      String
+  invoice        Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  accountId      String
+  account        Account  @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  amount         BigInt
+  isChange       Boolean  @default(false)
+  voucherId      String?
+  allocationDate DateTime @default(now())
+  createdBy      String?
+  createdAt      DateTime @default(now())
+
+  commissions SalesmanCommission[]
+
+  @@index([invoiceId])
+  @@index([accountId])
+}
+
+model SalesmanCommission {
+  id               String   @id @default(cuid())
+  businessId       String
+  business         Business @relation(fields: [businessId], references: [id])
+  salesmanId       String
+  salesman         Salesman  @relation(fields: [salesmanId], references: [id], onDelete: Cascade)
+  invoiceId        String
+  invoice          Invoice   @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  allocationId     String
+  allocation       PaymentAllocation @relation(fields: [allocationId], references: [id], onDelete: Cascade)
+  collectedAmount  BigInt
+  commissionPct    Float
+  commissionAmount BigInt
+  createdAt        DateTime @default(now())
+
+  @@unique([allocationId, salesmanId])
+  @@index([salesmanId])
+  @@index([invoiceId])
+}
+
+model SalesReturn {
+  id                 String   @id @default(cuid())
+  businessId         String
+  business           Business @relation(fields: [businessId], references: [id])
+  originalInvoiceId  String
+  originalInvoice    Invoice  @relation(fields: [originalInvoiceId], references: [id], onDelete: Restrict)
+  returnVoucherId    String?
+  returnDate         DateTime @default(now())
+  total              BigInt
+  reason             String?
+  createdBy          String?
+  createdAt          DateTime @default(now())
+
+  @@index([originalInvoiceId])
 }

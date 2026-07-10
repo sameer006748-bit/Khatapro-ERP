@@ -471,3 +471,78 @@ Preview login emails/passwords (UNCHANGED):
 
 Stage Summary:
 - Navigation cleanup complete. Desktop sidebar is now 8 clean grouped categories with expand/collapse. Mobile nav is 5 primary slots with a grouped More sheet. Role-based permissions fully respected — Salesman and Rider see dramatically simplified navigation. All Phase 1-3 functionality intact. Stopping for approval before Phase 4.
+
+---
+Task ID: P4
+Agent: Main (fullstack-dev)
+Task: Phase 4 — Sales module. No Phase 5+.
+
+Files changed:
+- supabase/migrations/00004_phase4_sales.sql (new) — salesmen, customers, invoices, invoice_items, payment_allocations, salesman_commissions, sales_returns tables + next_invoice_no() RPC (concurrency-safe via advisory lock) + post_sale() RPC (creates invoice + items + payments + stock movements + balanced voucher + idempotent commission) + post_sales_return() RPC (reversing voucher + stock restore, no commission reversal) + RLS on all tables.
+- prisma/schema.prisma — added Salesman, Customer, Invoice, InvoiceItem, PaymentAllocation, SalesmanCommission, SalesReturn models + back-relations on Account, Product, Business.
+- src/lib/sales/data-access.ts (new) — smart dual-path helpers: listSalesmen, postSale (Supabase RPC or Prisma), listInvoices, getInvoice, postSalesReturn.
+- src/app/api/sales/counter/route.ts (new) — POST Counter Sale + GET list invoices.
+- src/app/api/sales/online/route.ts (new) — POST Online Sale shell.
+- src/app/api/sales/ofc/route.ts (new) — POST OFC Sale shell.
+- src/app/api/sales/[id]/route.ts (new) — GET invoice detail.
+- src/app/api/sales/[id]/return/route.ts (new) — POST sales return.
+- src/app/api/salesmen/route.ts (new) — GET salesmen list.
+- src/components/erp/views/counter-sale-view.tsx (new) — full Counter Sale form with items + payments + change + totals.
+- src/components/erp/views/online-sale-view.tsx (new) — Online Sale shell.
+- src/components/erp/views/ofc-sale-view.tsx (new) — OFC Sale shell.
+- src/components/erp/views/sales-list-view.tsx (new) — invoice list with type filter + search.
+- src/components/erp/views/invoice-detail-view.tsx (new) — invoice detail with items + payments + return button + print button.
+- src/components/erp/dashboard-shell.tsx — added Sales sub-items (Counter Sale, Online Sale, OFC Sale, Sales List) + ?invoice= URL param handling + InvoiceDetailView.
+
+What was built:
+- Shared concurrency-safe invoice sequence (next_invoice_no() RPC with advisory lock).
+- Counter Sale: customer optional, salesman required, multiple items, temporary items, negative stock, multiple payment methods, partial payment, change/refund through different account.
+- Online Sale shell: customer name/phone/address required, items, shared invoice sequence.
+- OFC Sale shell: customer name/phone/city/address required, fully advance-paid, shared invoice sequence.
+- Payment allocations: tracks partial payments, outstanding balance.
+- Salesman commission: 5% default, override per salesman, accrues only on collected amount, idempotent (unique allocation_id + salesman_id).
+- Sales return: reversing voucher, stock restored, commission NOT reversed by default, no hard delete.
+- Invoice detail view with print button (window.print).
+- Sales list with type filter (All/Counter/Online/OFC) + search.
+
+What was intentionally NOT built:
+- Purchase module (Phase 5)
+- Full rider COD workflow (Phase 7)
+- Full reports (Phase 8)
+- AI (Phase 10)
+- Advanced invoice printing (half-A4 with top/bottom split) — simple window.print() used for now
+- Courier/vendor settlement for OFC (Phase 5+)
+
+Supabase migration status: 00004_phase4_sales.sql NOT yet applied. User must run it in Supabase SQL Editor. Until then, Phase 4 operations use Prisma/SQLite fallback — BUT there's a known issue: when Phase 1-3 are live on Supabase but Phase 4 is not, account IDs from Supabase (UUIDs) don't match Prisma account IDs (cuids), causing foreign key violations in the Prisma fallback. The fix is to apply the Phase 4 migration so everything goes through Supabase consistently.
+
+Browser verification log:
+1. Login as Owner/Admin → "Welcome, Bilal." ✓
+2. Sales category in sidebar expands to show Counter Sale, Online Sale, OFC Sale, Sales List ✓
+3. Counter Sale form renders with items + payments + totals ✓
+4. Online Sale form renders with customer details + items + payment ✓
+5. OFC Sale form renders with customer details + items + advance payment ✓
+6. Sales List renders with filter + search ✓
+7. Mobile layout (390×844): no horizontal overflow, card-based ✓
+8. Desktop layout: grouped sidebar, dense forms ✓
+9. Supabase badge still "Supabase live" ✓
+10. No Phase 5+ features (Purchases still "Phase 5 Coming Soon") ✓
+NOTE: Full sale posting (gates 2-19) could not be completed because Phase 4 SQL migration is not yet applied. The dual-path fallback has a known limitation: Supabase account UUIDs don't match Prisma account cuids when Phase 4 tables don't exist in Supabase. User must run 00004_phase4_sales.sql in Supabase SQL Editor to enable full sale posting.
+
+lint/tsc/build result:
+- lint: clean ✓
+- tsc --noEmit: clean ✓
+- next build: succeeds, 29 routes ✓
+
+Known issues:
+- Phase 4 Supabase migration NOT yet applied. User must run supabase/migrations/00004_phase4_sales.sql in Supabase SQL Editor. Until then, full sale posting will fail with foreign key constraint violations because account IDs are Supabase UUIDs (from live Phase 1-3) but the Prisma fallback expects Prisma cuids.
+- Invoice printing uses simple window.print() — half-A4 with top/bottom split not yet implemented (can be added in a polish pass).
+- Salesman creation UI not built — salesmen must be created via script or direct DB insert for now.
+
+Preview login emails/passwords (UNCHANGED):
+- owner@test.local / password123 (Owner/Admin)
+- accountant@test.local / password123 (Accountant)
+- salesman@test.local / password123 (Salesman)
+- rider@test.local / password123 (Rider)
+
+Stage Summary:
+- Phase 4 Sales module code complete. Supabase migration written but NOT yet applied. All code compiles, lint/tsc/build pass. UI views render on desktop + mobile. Full sale posting requires the Phase 4 SQL migration to be applied to Supabase. Stopping for approval.
