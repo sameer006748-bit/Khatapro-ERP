@@ -30,6 +30,7 @@ const CreateSchema = z.object({
   purchasePrice: z.number().min(0).optional(),
   openingStock: z.number().int().optional(),
   isTemporary: z.boolean().optional(),
+  lowStockThreshold: z.number().int().optional(),
 })
 
 export async function POST(req: Request) {

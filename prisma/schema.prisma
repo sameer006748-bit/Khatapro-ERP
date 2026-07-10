@@ -280,6 +280,7 @@ model Product {
   currentStock   Int      @default(0)
   isTemporary    Boolean  @default(false)
   isActive       Boolean  @default(true)
+  lowStockThreshold Int   @default(5)
   mergedIntoId   String?
   markedForMerge Boolean  @default(false)
   createdAt      DateTime @default(now())

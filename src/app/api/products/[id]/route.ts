@@ -18,6 +18,7 @@ const UpdateSchema = z.object({
   isTemporary: z.boolean().optional(),
   isActive: z.boolean().optional(),
   markedForMerge: z.boolean().optional(),
+  lowStockThreshold: z.number().int().optional(),
 })
 
 export async function PATCH(

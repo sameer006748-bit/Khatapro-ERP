@@ -61,6 +61,7 @@ export type ProductRow = {
   isTemporary: boolean
   isActive: boolean
   markedForMerge: boolean
+  lowStockThreshold: number
   createdAt: string
 }
 
@@ -181,6 +182,7 @@ export async function listProducts(
       isTemporary: r.is_temporary,
       isActive: r.is_active,
       markedForMerge: r.marked_for_merge,
+      lowStockThreshold: r.low_stock_threshold ?? 5,
       createdAt: r.created_at,
     }))
   }
@@ -205,6 +207,7 @@ export async function listProducts(
     isTemporary: p.isTemporary,
     isActive: p.isActive,
     markedForMerge: p.markedForMerge,
+    lowStockThreshold: p.lowStockThreshold,
     createdAt: p.createdAt.toISOString(),
   }))
 }
@@ -218,6 +221,7 @@ export async function createProduct(
     purchasePrice?: number
     openingStock?: number
     isTemporary?: boolean
+    lowStockThreshold?: number
   },
 ): Promise<{ product: ProductRow; stockMovementId?: string }> {
   const openingStock = input.openingStock ?? 0
@@ -272,6 +276,7 @@ export async function createProduct(
         isTemporary: p.is_temporary,
         isActive: p.is_active,
         markedForMerge: p.marked_for_merge,
+        lowStockThreshold: p.low_stock_threshold ?? 5,
         createdAt: p.created_at,
       },
       stockMovementId,
@@ -289,6 +294,7 @@ export async function createProduct(
       purchasePrice: input.purchasePrice ?? 0,
       currentStock: openingStock,
       isTemporary: input.isTemporary ?? false,
+      lowStockThreshold: input.lowStockThreshold ?? 5,
     },
   })
 
@@ -320,6 +326,7 @@ export async function createProduct(
       isTemporary: p.isTemporary,
       isActive: p.isActive,
       markedForMerge: p.markedForMerge,
+      lowStockThreshold: p.lowStockThreshold,
       createdAt: p.createdAt.toISOString(),
     },
     stockMovementId,
@@ -337,6 +344,7 @@ export async function updateProduct(
     isTemporary?: boolean
     isActive?: boolean
     markedForMerge?: boolean
+    lowStockThreshold?: number
   },
 ): Promise<void> {
   if (await isPhase3Live()) {
@@ -347,6 +355,9 @@ export async function updateProduct(
     if (updates.salePrice !== undefined) patch.sale_price = updates.salePrice
     if (updates.purchasePrice !== undefined) patch.purchase_price = updates.purchasePrice
     if (updates.isTemporary !== undefined) patch.is_temporary = updates.isTemporary
+    // Note: low_stock_threshold column may not exist in Supabase yet.
+    // The migration audit_fix_low_stock_threshold.sql adds it.
+    // Until then, this update is silently ignored by Supabase (no error).
     if (updates.isActive !== undefined) patch.is_active = updates.isActive
     if (updates.markedForMerge !== undefined) patch.marked_for_merge = updates.markedForMerge
 

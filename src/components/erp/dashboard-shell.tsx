@@ -56,6 +56,7 @@ import { ProductsView } from '@/components/erp/views/products-view'
 import { StockAdjustmentView } from '@/components/erp/views/stock-adjustment-view'
 import { NegativeStockReportView } from '@/components/erp/views/negative-stock-report-view'
 import { PendingStockReportView } from '@/components/erp/views/pending-stock-report-view'
+import { InventoryView } from '@/components/erp/views/inventory-view'
 import { CounterSaleView } from '@/components/erp/views/counter-sale-view'
 import { OnlineSaleView } from '@/components/erp/views/online-sale-view'
 import { OfcSaleView } from '@/components/erp/views/ofc-sale-view'
@@ -124,17 +125,13 @@ const NAV_CATEGORIES: NavCategory[] = [
       { key: 'biz-day-test', label: 'Biz-Day Test', short: 'Date', icon: FileText },
     ],
   },
-  // 4. Products & Stock
+  // 4. Inventory (merged Products & Stock)
   {
-    id: 'products-stock',
-    label: 'Products & Stock',
+    id: 'inventory',
+    label: 'Inventory',
     icon: Package,
     items: [
-      { key: 'product-categories', label: 'Product Categories', short: 'Cats', icon: Tag, perm: 'can_view_products' },
-      { key: 'products', label: 'Products', short: 'Products', icon: Package, perm: 'can_view_products' },
-      { key: 'stock-adjustment', label: 'Stock Adjustment', short: 'Adjust', icon: PackagePlus, perm: 'can_view_products' },
-      { key: 'negative-stock', label: 'Negative Stock', short: 'Neg', icon: TrendingDown, perm: 'can_view_stock_report' },
-      { key: 'pending-stock', label: 'Pending Stock', short: 'Pending', icon: Clock, perm: 'can_view_stock_report' },
+      { key: 'inventory', label: 'Inventory', short: 'Stock', icon: Package, perm: 'can_view_products' },
     ],
   },
   // 5. Sales (Phase 4)
@@ -223,11 +220,11 @@ const MOBILE_SLOTS: MobileSlot[] = [
     return null
   }},
   { id: 'stock', label: 'Stock', icon: Package, resolve: (u) => {
-    if (u.permissions.includes('can_view_products')) return 'products'
+    if (u.permissions.includes('can_view_products')) return 'inventory'
     return null
   }},
   { id: 'reports', label: 'Reports', icon: BarChart3, resolve: (u) => {
-    if (u.permissions.includes('can_view_stock_report')) return 'negative-stock'
+    if (u.permissions.includes('can_view_stock_report')) return 'inventory'
     if (u.permissions.includes('can_view_trial_balance')) return 'trial-balance'
     return null
   }},
@@ -709,12 +706,12 @@ function ViewRouter({
   if (active === 'audit') return <AuditLogView />
   if (active === 'biz-day-test') return <BizDayTestView />
 
-  // Phase 3 — Products & Stock
-  if (active === 'product-categories') return <ProductCategoriesView user={user} />
-  if (active === 'products') return <ProductsView user={user} />
-  if (active === 'stock-adjustment') return <StockAdjustmentView user={user} />
-  if (active === 'negative-stock') return <NegativeStockReportView />
-  if (active === 'pending-stock') return <PendingStockReportView />
+  // Inventory (merged Products & Stock)
+  if (active === 'inventory') return <InventoryView user={user} />
+  // Old URLs redirect to inventory
+  if (active === 'product-categories' || active === 'products' || active === 'stock-adjustment' || active === 'negative-stock' || active === 'pending-stock') {
+    return <InventoryView user={user} />
+  }
 
   // Phase 4 — Sales
   if (active === 'counter-sale') return <CounterSaleView user={user} />
