@@ -276,3 +276,49 @@
   }
   .card-3d-hover:hover { transform: none; }
 }
+
+/* ============================================================================
+   Print CSS — half-A4/A5 invoice-only printing.
+   Hides the entire app shell (sidebar, header, nav, buttons) and shows
+   only the .print-invoice element.
+   ============================================================================ */
+@media print {
+  /* Hide everything by default */
+  body * {
+    visibility: hidden;
+  }
+
+  /* Show only the invoice print area and its children */
+  .print-invoice, .print-invoice * {
+    visibility: visible;
+  }
+
+  /* Position the invoice at the top of the page */
+  .print-invoice {
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 100% !important;
+  }
+
+  /* A5 page size (half A4) with small margins */
+  @page {
+    size: A5 portrait;
+    margin: 6mm;
+  }
+
+  /* Reset backgrounds for print */
+  .print-invoice {
+    background: white !important;
+    color: black !important;
+    box-shadow: none !important;
+    border: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+
+  /* Ensure no floating elements overlap the invoice */
+  header, aside, nav, .sticky, [class*="glass-pill"], [class*="glass-card"] {
+    display: none !important;
+  }
+}
