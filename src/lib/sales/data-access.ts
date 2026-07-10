@@ -235,6 +235,15 @@ async function postSaleViaPrisma(input: PostSaleInput): Promise<{ invoiceId: str
   const salesAccount = await getAccountByCode(input.businessId, '4010')
   if (!salesAccount) throw new Error('Sales account (4010) not found')
 
+  // Find Customers Receivable (1200) for partial payments.
+  const arAccount = await getAccountByCode(input.businessId, '1200')
+
+  // Compute change total.
+  let changeTotal = 0n
+  for (const p of input.payments) {
+    if (p.isChange) changeTotal += p.amount
+  }
+
   // Build voucher lines: Credit Sales by total, Debit each payment account, Credit change accounts.
   const voucherLines: Array<{ accountId: string; debit: bigint; credit: bigint; memo?: string }> = [
     { accountId: salesAccount.id, debit: 0n, credit: total, memo: `Sale ${invoiceNo}` },
@@ -248,6 +257,12 @@ async function postSaleViaPrisma(input: PostSaleInput): Promise<{ invoiceId: str
     if (p.isChange) {
       voucherLines.push({ accountId: p.accountId, debit: 0n, credit: p.amount, memo: `Change given ${invoiceNo}` })
     }
+  }
+
+  // Partial payment: if paid < total + change, debit outstanding to AR (1200).
+  const outstanding = total - paidAmount + changeTotal
+  if (outstanding > 0n && arAccount) {
+    voucherLines.push({ accountId: arAccount.id, debit: outstanding, credit: 0n, memo: `Outstanding ${invoiceNo}` })
   }
 
   // Post the voucher via the smart dispatcher (uses Supabase post_voucher if live).
