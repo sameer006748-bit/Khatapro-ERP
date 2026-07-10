@@ -11,7 +11,7 @@ import { getServerSession } from 'next-auth'
 import { z } from 'zod'
 import { authOptions } from '@/lib/auth/authOptions'
 import { loadSessionUser, requirePermission, hasPermission } from '@/lib/auth/permissions'
-import { postSale, listInvoices, resolveSalesmanIdForUser } from '@/lib/sales/data-access'
+import { postSale, listInvoices, resolveSalesmanIdForUser, resolveEffectiveSalesmanId } from '@/lib/sales/data-access'
 import { parseMoney } from '@/lib/format'
 
 const ItemSchema = z.object({
@@ -33,7 +33,7 @@ const PostSaleSchema = z.object({
   invoiceDate: z.string(),
   items: z.array(ItemSchema).min(1),
   payments: z.array(PaymentSchema).min(1),
-  salesmanId: z.string().min(1),  // required for counter sale
+  salesmanId: z.string().nullable().optional(),  // optional — resolved server-side for salesmen
   customerId: z.string().nullable().optional(),
   customerName: z.string().optional(),
   customerPhone: z.string().optional(),
@@ -84,13 +84,19 @@ export async function POST(req: Request) {
   }
 
   try {
+    // Resolve the effective salesman_id (salesmen get their own, owners can assign)
+    const smResult = await resolveEffectiveSalesmanId(su, parsed.data.salesmanId ?? null)
+    if (!smResult.ok) {
+      return NextResponse.json({ error: smResult.error }, { status: smResult.status })
+    }
+
     const result = await postSale({
       businessId: su.businessId,
       invoiceType: 'COUNTER',
       invoiceDate: new Date(parsed.data.invoiceDate),
       items,
       payments,
-      salesmanId: parsed.data.salesmanId,
+      salesmanId: smResult.salesmanId,
       customerId: parsed.data.customerId ?? null,
       customerName: parsed.data.customerName ?? null,
       customerPhone: parsed.data.customerPhone ?? null,

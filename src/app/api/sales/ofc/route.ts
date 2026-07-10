@@ -8,7 +8,7 @@ import { getServerSession } from 'next-auth'
 import { z } from 'zod'
 import { authOptions } from '@/lib/auth/authOptions'
 import { loadSessionUser, requirePermission } from '@/lib/auth/permissions'
-import { postSale } from '@/lib/sales/data-access'
+import { postSale, resolveEffectiveSalesmanId } from '@/lib/sales/data-access'
 import { parseMoney } from '@/lib/format'
 
 const ItemSchema = z.object({
@@ -68,13 +68,19 @@ export async function POST(req: Request) {
   }
 
   try {
+    // Resolve the effective salesman_id (salesmen get their own, owners can assign)
+    const smResult = await resolveEffectiveSalesmanId(su, parsed.data.salesmanId ?? null)
+    if (!smResult.ok) {
+      return NextResponse.json({ error: smResult.error }, { status: smResult.status })
+    }
+
     const result = await postSale({
       businessId: su.businessId,
       invoiceType: 'OFC',
       invoiceDate: new Date(parsed.data.invoiceDate),
       items,
       payments,
-      salesmanId: parsed.data.salesmanId ?? null,
+      salesmanId: smResult.salesmanId,
       customerName: parsed.data.customerName,
       customerPhone: parsed.data.customerPhone,
       customerAddress: parsed.data.customerAddress,

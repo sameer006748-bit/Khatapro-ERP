@@ -185,6 +185,56 @@ export async function resolveSalesmanIdForUser(
 }
 
 /**
+ * Resolve the effective salesman_id for a sale being posted.
+ *
+ * - Owner/Accountant (can_view_sales): use the client-supplied salesmanId.
+ * - Salesman (can_view_own_sales, not can_view_sales): resolve their own
+ *   linked salesman_id and use that, ignoring the client-supplied value.
+ * - Other roles: blocked.
+ *
+ * This prevents a Salesman from posting a sale under a different salesman's
+ * identity, and ensures all sale types (Counter/Online/OFC) store the
+ * correct salesman_id for ownership verification.
+ */
+export type SessionUserInfo = {
+  userId: string
+  supabaseUserUuid: string | null
+  businessId: string
+  permissions: Set<string>
+}
+
+export async function resolveEffectiveSalesmanId(
+  su: SessionUserInfo,
+  clientSalesmanId: string | null | undefined,
+): Promise<{ ok: true; salesmanId: string } | { ok: false; error: string; status: number }> {
+  const canViewAll = su.permissions.has('can_view_sales')
+  const canViewOwn = su.permissions.has('can_view_own_sales')
+
+  if (canViewAll) {
+    // Owner/Accountant: trust client-supplied salesmanId
+    if (!clientSalesmanId) {
+      return { ok: false, error: 'Salesman is required', status: 400 }
+    }
+    return { ok: true, salesmanId: clientSalesmanId }
+  }
+
+  if (canViewOwn) {
+    // Salesman: resolve their own salesman_id, ignore client-supplied value
+    const smId = await resolveSalesmanIdForUser(su.businessId, su.supabaseUserUuid, su.userId)
+    if (!smId) {
+      return {
+        ok: false,
+        error: 'Your user account is not linked to a salesman record. Ask the Owner to link your account.',
+        status: 403,
+      }
+    }
+    return { ok: true, salesmanId: smId }
+  }
+
+  return { ok: false, error: 'FORBIDDEN', status: 403 }
+}
+
+/**
  * Verify that an invoice belongs to the given salesman_id.
  * Returns true if the invoice's salesman_id matches, false otherwise.
  */
