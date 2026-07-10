@@ -12,6 +12,7 @@ import { db } from '@/lib/db'
 
 export type SessionUser = {
   userId: string
+  supabaseUserUuid: string | null
   profileId: string
   businessId: string
   roleId: string
@@ -44,6 +45,7 @@ export async function loadSessionUser(userId: string): Promise<SessionUser | nul
 
   return {
     userId: u.id,
+    supabaseUserUuid: u.supabaseUserUuid,
     profileId: u.profile.id,
     businessId: u.profile.businessId,
     roleId: u.profile.roleId,

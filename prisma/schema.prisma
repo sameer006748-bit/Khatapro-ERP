@@ -18,13 +18,20 @@ datasource db {
 // no duplicated standalone `users` auth table.
 
 model User {
-  id           String   @id @default(cuid())
-  email        String   @unique
-  name         String?
-  passwordHash String
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-  profile      Profile?
+  id                String   @id @default(cuid())
+  email             String   @unique
+  name              String?
+  passwordHash      String
+  // Phase 2.1: UUID from Supabase auth.users. Used as posted_by / user_id
+  // for all Supabase writes (vouchers, audit_logs, etc.). Populated by
+  // scripts/align-supabase-auth.ts. Nullable so the app still works if
+  // Supabase Auth isn't configured yet.
+  supabaseUserUuid  String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  profile           Profile?
+
+  @@index([supabaseUserUuid])
 }
 
 model Profile {

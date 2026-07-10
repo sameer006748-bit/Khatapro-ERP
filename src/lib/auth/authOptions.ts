@@ -51,6 +51,7 @@ export const authOptions: NextAuthOptions = {
         const su = await loadSessionUser(token.userId as string)
         if (su) {
           ;(session.user as any).id = su.userId
+          ;(session.user as any).supabaseUserUuid = su.supabaseUserUuid
           ;(session.user as any).profileId = su.profileId
           ;(session.user as any).businessId = su.businessId
           ;(session.user as any).roleId = su.roleId
@@ -67,6 +68,7 @@ export const authOptions: NextAuthOptions = {
 export type AppSession = {
   user: {
     id: string
+    supabaseUserUuid: string | null
     email: string
     name?: string | null
     profileId: string

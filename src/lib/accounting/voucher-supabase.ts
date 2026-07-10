@@ -9,6 +9,9 @@
  * for regular users). The RPC itself enforces balanced-voucher validation.
  *
  * Money is BigInt paisas — passed as string to preserve precision over JSON.
+ *
+ * Phase 2.1: posted_by is now the real Supabase auth.users UUID, fetched
+ * from User.supabaseUserUuid (populated by scripts/align-supabase-auth.ts).
  */
 import 'server-only'
 import { getAdminSupabase } from '@/lib/supabase/admin'
@@ -17,6 +20,20 @@ import { writeAudit } from '@/lib/auth/permissions'
 import { bizDateString } from '@/lib/dates'
 import type { VoucherLineInput, PostVoucherInput } from '@/lib/accounting/voucher'
 import { VoucherError } from '@/lib/accounting/voucher'
+
+/**
+ * Resolve a Prisma user ID (cuid) to the corresponding Supabase auth.users UUID.
+ * Returns null if the user has no linked Supabase account (e.g. Supabase Auth
+ * not yet configured, or align script not run).
+ */
+async function resolveSupabaseUuid(prismaUserId: string | null | undefined): Promise<string | null> {
+  if (!prismaUserId) return null
+  const u = await db.user.findUnique({
+    where: { id: prismaUserId },
+    select: { supabaseUserUuid: true },
+  })
+  return u?.supabaseUserUuid ?? null
+}
 
 export async function postVoucherViaSupabase(input: PostVoucherInput): Promise<string> {
   const { businessId, voucherType, voucherDate, memo, lines, referenceId, referenceType, postedBy } = input
@@ -51,6 +68,9 @@ export async function postVoucherViaSupabase(input: PostVoucherInput): Promise<s
     throw new VoucherError('Zero-value voucher not allowed', 'ZERO_VALUE')
   }
 
+  // Phase 2.1: resolve the real Supabase auth.users UUID for posted_by.
+  const supabasePostedBy = await resolveSupabaseUuid(postedBy)
+
   // Call the post_voucher() RPC.
   // Lines are passed as JSONB with debit/credit as STRING (BigInt-safe over JSON).
   const linesJson = lines.map((l, i) => ({
@@ -61,12 +81,6 @@ export async function postVoucherViaSupabase(input: PostVoucherInput): Promise<s
     idx: i + 1,
   }))
 
-  // posted_by must be a valid UUID (it references auth.users.id in Supabase).
-  // NextAuth uses Prisma cuids for user IDs, which are NOT valid UUIDs.
-  // Pass null when the ID isn't a UUID — the local Prisma audit log still
-  // records the full user ID for traceability.
-  const validUuid = postedBy && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(postedBy)
-
   const { data, error } = await admin.rpc('post_voucher', {
     p_business_id: businessId,
     p_voucher_type: voucherType,
@@ -75,7 +89,7 @@ export async function postVoucherViaSupabase(input: PostVoucherInput): Promise<s
     p_lines: linesJson,
     p_reference_id: referenceId ?? null,
     p_reference_type: referenceType ?? null,
-    p_posted_by: validUuid ? postedBy : null,
+    p_posted_by: supabasePostedBy,
   })
 
   if (error) {
@@ -99,6 +113,7 @@ export async function postVoucherViaSupabase(input: PostVoucherInput): Promise<s
   // local audit_logs table is what the /api/audit-logs route reads when
   // running in Prisma-fallback mode). When fully on Supabase, the Supabase
   // audit_logs table is the source of truth and this is a no-op duplicate.
+  // Phase 2.1: include the Supabase UUID in details for full traceability.
   try {
     await writeAudit({
       businessId,
@@ -113,6 +128,7 @@ export async function postVoucherViaSupabase(input: PostVoucherInput): Promise<s
         total_credit: totalCredit.toString(),
         line_count: lines.length,
         source: 'supabase_rpc',
+        supabase_posted_by: supabasePostedBy,
       },
     })
   } catch {
@@ -236,9 +252,11 @@ export async function cancelVoucherViaSupabase(
   reason?: string | null,
 ): Promise<string> {
   const admin = getAdminSupabase()
+  // Phase 2.1: resolve the real Supabase auth.users UUID for cancelled_by.
+  const supabaseCancelledBy = await resolveSupabaseUuid(cancelledBy)
   const { data, error } = await admin.rpc('cancel_voucher', {
     p_voucher_id: voucherId,
-    p_cancelled_by: cancelledBy,
+    p_cancelled_by: supabaseCancelledBy,
     p_reason: reason ?? null,
   })
   if (error) throw new VoucherError(error.message, 'RPC_ERROR')

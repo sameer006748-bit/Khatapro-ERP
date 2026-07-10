@@ -286,3 +286,54 @@ Preview login emails/passwords (UNCHANGED):
 Stage Summary:
 - Supabase is FULLY LIVE. All Phase 2 accounting operations go through Supabase RPCs (post_voucher, trial_balance, account_ledger). RLS blocks direct browser inserts. Badge is green.
 - Stopping for user approval before Phase 3.
+
+---
+Task ID: P2.1
+Agent: Main (fullstack-dev)
+Task: Phase 2.1 Auth Alignment — map NextAuth users to Supabase auth.users UUIDs. No Phase 3.
+
+Approach chosen: Map NextAuth users to Supabase auth.users UUIDs via a new supabaseUserUuid column on the Prisma User table.
+- WHY: Switching to Supabase Auth would require rewriting the credentials provider, session handling, and first-owner bootstrap — high risk of breaking everything. The mapping approach is minimal, safe, and preserves all existing functionality.
+- HOW: Each Prisma User gets a supabaseUserUuid field. The align script creates the user in Supabase Auth, captures the UUID, stores it in Prisma. loadSessionUser() exposes the UUID. postVoucherViaSupabase() resolves the UUID and passes it as posted_by.
+
+Files changed:
+- prisma/schema.prisma — added supabaseUserUuid String? to User model + index.
+- src/lib/auth/permissions.ts — added supabaseUserUuid to SessionUser type + loadSessionUser return.
+- src/lib/auth/authOptions.ts — exposed supabaseUserUuid on session + AppSession type.
+- src/lib/accounting/voucher-supabase.ts — added resolveSupabaseUuid() helper; postVoucherViaSupabase and cancelVoucherViaSupabase now resolve the UUID before calling the RPC. Local audit write includes supabase_posted_by in details.
+- scripts/align-supabase-auth.ts (new) — creates 4 users in Supabase Auth, links UUIDs to Prisma User.supabaseUserUuid, upserts Supabase profiles.
+
+Supabase user/role mapping result (all 4 aligned):
+- owner@test.local → UUID 352993c1-a4de-4826-91d2-6cf955f60625 → Owner/Admin
+- accountant@test.local → UUID 3be16672-0d37-403c-986a-3c69f45ac231 → Accountant
+- salesman@test.local → UUID 0ff3b086-5fd1-4a85-bd23-b8fa723c207c → Salesman
+- rider@test.local → UUID 2f6267f6-522e-453a-b8c9-2229ef85aeef → Rider
+
+Browser verification log:
+1. Login as owner@test.local / password123 → "Welcome, Bilal." badge "Supabase live" ✓
+2. Unbalanced voucher (5000 vs 3000) REJECTED by Supabase RPC: HTTP 400 "Unbalanced: 500000 <> 300000" ✓
+3. Balanced voucher (8000 Cash / 8000 Sales) POSTED through Supabase: voucher ID fbdea101-139d-44d9-9a67-033a8ae1392e ✓
+4. posted_by = 352993c1-a4de-4826-91d2-6cf955f60625 (real Supabase UUID, NOT null) ✓
+5. audit_logs.user_id = 352993c1-a4de-4826-91d2-6cf955f60625 (real UUID) ✓
+6. Trial Balance: grand totals 6300000 = 6300000, balanced, 3 non-zero accounts ✓
+7. Ledger drill-down: Cash shows 3 entries with running balances 5000 → 55000 → 63000 ✓
+8. RLS still blocks direct voucher_lines insert: HTTP 401, error code 42501 ✓
+9. All 4 logins work: owner → "Welcome, Bilal." / accountant → "Accountant" / salesman → "Welcome, Salesman." / rider → "Welcome, Rider." ✓
+
+lint/tsc/build result:
+- lint: clean ✓
+- tsc --noEmit: clean ✓
+- next build: succeeds, 18 routes ✓
+
+Preview login emails/passwords (UNCHANGED):
+- owner@test.local / password123 (Owner/Admin)
+- accountant@test.local / password123 (Accountant)
+- salesman@test.local / password123 (Salesman)
+- rider@test.local / password123 (Rider)
+
+Known issues:
+- Older vouchers posted before the alignment (84b4f4dd-... and 1965c649-...) still have posted_by = null. This is expected — they were posted before the UUID mapping existed. All NEW vouchers have the real UUID.
+- NextAuth is still the login mechanism. If you later want to switch fully to Supabase Auth (so the publishable-key client can make RLS-aware queries on behalf of the user), that would be a separate larger task. For now, the admin client (service-role) handles all Supabase writes with the resolved UUID.
+
+Stage Summary:
+- Auth alignment complete. Every server-side Supabase write now passes a real auth.users UUID for posted_by / user_id. No more null. All 4 preview users created in Supabase Auth with linked profiles + roles. All Phase 2 functionality intact. Stopping for approval before Phase 3.
