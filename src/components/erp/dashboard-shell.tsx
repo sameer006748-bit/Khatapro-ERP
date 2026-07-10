@@ -24,6 +24,10 @@ import {
   Scale,
   Plus,
   Sparkles,
+  Tag,
+  PackagePlus,
+  TrendingDown,
+  Clock,
 } from 'lucide-react'
 import { useSearchParams } from 'next/navigation'
 import type { MeUser } from '@/components/erp/erp-app'
@@ -44,6 +48,11 @@ import { JournalVoucherView } from '@/components/erp/views/journal-voucher-view'
 import { TrialBalanceView } from '@/components/erp/views/trial-balance-view'
 import { LedgerDrilldownView } from '@/components/erp/views/ledger-drilldown-view'
 import { OpeningBalanceView } from '@/components/erp/views/opening-balance-view'
+import { ProductCategoriesView } from '@/components/erp/views/product-categories-view'
+import { ProductsView } from '@/components/erp/views/products-view'
+import { StockAdjustmentView } from '@/components/erp/views/stock-adjustment-view'
+import { NegativeStockReportView } from '@/components/erp/views/negative-stock-report-view'
+import { PendingStockReportView } from '@/components/erp/views/pending-stock-report-view'
 import { SupabaseStatusBadge } from '@/components/erp/supabase-status-badge'
 
 type NavItem = {
@@ -67,9 +76,13 @@ const NAV: NavItem[] = [
   { key: 'trial-balance', label: 'Trial Balance', short: 'TB', icon: Scale, perm: 'can_view_trial_balance' },
   { key: 'audit', label: 'Audit Log', short: 'Audit', icon: ScrollText, perm: 'can_view_audit_log' },
   { key: 'biz-day-test', label: 'Biz-Day Test', short: 'Date', icon: FileText },
+  { key: 'product-categories', label: 'Product Categories', short: 'Cats', icon: Tag, perm: 'can_view_products' },
+  { key: 'products', label: 'Products', short: 'Products', icon: Package, perm: 'can_view_products' },
+  { key: 'stock-adjustment', label: 'Stock Adjustment', short: 'Adjust', icon: PackagePlus, perm: 'can_view_products' },
+  { key: 'negative-stock', label: 'Negative Stock', short: 'Neg', icon: TrendingDown, perm: 'can_view_stock_report' },
+  { key: 'pending-stock', label: 'Pending Stock', short: 'Pending', icon: Clock, perm: 'can_view_stock_report' },
   { key: 'sales', label: 'Sales', short: 'Sales', icon: ShoppingCart, perm: 'can_view_sales' },
   { key: 'purchases', label: 'Purchases', short: 'Buy', icon: Receipt, perm: 'can_view_purchases' },
-  { key: 'products', label: 'Products', short: 'Stock', icon: Package, perm: 'can_view_products' },
   { key: 'riders', label: 'Riders', short: 'Riders', icon: Bike, perm: 'can_view_riders' },
   { key: 'vouchers', label: 'Vouchers', short: 'Vouchers', icon: ClipboardList, perm: 'can_view_vouchers' },
   { key: 'reports', label: 'Reports', short: 'Reports', icon: FileText, perm: 'can_view_trial_balance' },
@@ -404,9 +417,15 @@ function ViewRouter({
   if (active === 'audit') return <AuditLogView />
   if (active === 'biz-day-test') return <BizDayTestView />
 
+  // Phase 3 — Products & Stock
+  if (active === 'product-categories') return <ProductCategoriesView user={user} />
+  if (active === 'products') return <ProductsView user={user} />
+  if (active === 'stock-adjustment') return <StockAdjustmentView user={user} />
+  if (active === 'negative-stock') return <NegativeStockReportView />
+  if (active === 'pending-stock') return <PendingStockReportView />
+
   if (active === 'sales') return <ComingSoonView title="Sales" phase="Phase 4" />
   if (active === 'purchases') return <ComingSoonView title="Purchases & Vendors" phase="Phase 5" />
-  if (active === 'products') return <ComingSoonView title="Products & Stock" phase="Phase 3" />
   if (active === 'riders') return <ComingSoonView title="Riders & COD" phase="Phase 7" />
   if (active === 'vouchers') return <JournalVoucherView />
   if (active === 'reports') return <ComingSoonView title="Reports" phase="Phase 8" />

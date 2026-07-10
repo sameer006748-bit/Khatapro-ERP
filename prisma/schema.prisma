@@ -108,6 +108,9 @@ model Business {
   businessAccounts BusinessAccount[]
   auditLogs        AuditLog[]
   vouchers         Voucher[]
+  productCategories ProductCategory[]
+  products         Product[]
+  stockMovements   StockMovement[]
 }
 
 // =================== Chart of Accounts ===================
@@ -235,4 +238,67 @@ model VoucherLine {
 
   @@index([voucherId])
   @@index([businessId, accountId])
+}
+
+// =================== Phase 3: Products & Stock ===================
+
+model ProductCategory {
+  id          String   @id @default(cuid())
+  businessId  String
+  business    Business @relation(fields: [businessId], references: [id])
+  name        String
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  products    Product[]
+
+  @@unique([businessId, name])
+  @@index([businessId])
+}
+
+model Product {
+  id             String   @id @default(cuid())
+  businessId     String
+  business       Business @relation(fields: [businessId], references: [id])
+  name           String
+  categoryId     String?
+  category       ProductCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  unit           String   @default("piece")
+  salePrice      Float    @default(0)
+  purchasePrice  Float    @default(0)
+  currentStock   Int      @default(0)
+  isTemporary    Boolean  @default(false)
+  isActive       Boolean  @default(true)
+  mergedIntoId   String?
+  markedForMerge Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  stockMovements StockMovement[]
+
+  @@index([businessId])
+  @@index([businessId, categoryId])
+  @@index([businessId, isTemporary])
+  @@index([businessId, currentStock])
+}
+
+model StockMovement {
+  id            String   @id @default(cuid())
+  businessId    String
+  business      Business @relation(fields: [businessId], references: [id])
+  productId     String
+  product       Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  movementType  String
+  quantity      Int
+  balanceAfter  Int
+  reason        String?
+  movementDate  DateTime @default(now())
+  createdBy     String?
+  createdAt     DateTime @default(now())
+  voucherId     String?
+
+  @@index([productId])
+  @@index([businessId, movementDate])
+  @@index([businessId, movementType])
 }

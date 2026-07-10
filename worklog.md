@@ -337,3 +337,76 @@ Known issues:
 
 Stage Summary:
 - Auth alignment complete. Every server-side Supabase write now passes a real auth.users UUID for posted_by / user_id. No more null. All 4 preview users created in Supabase Auth with linked profiles + roles. All Phase 2 functionality intact. Stopping for approval before Phase 3.
+
+---
+Task ID: P3
+Agent: Main (fullstack-dev)
+Task: Phase 3 — Products & Stock. No Phase 4+.
+
+Work Log:
+- Wrote supabase/migrations/00003_phase3_products_stock.sql — product_categories, products, stock_movements tables + create_stock_movement() RPC (SECURITY DEFINER, atomic stock update, audit entry) + negative_stock_report() + pending_stock_report() RPCs + RLS policies (no direct INSERT on stock_movements — must go through RPC) + updated_at triggers. Negative stock ALLOWED.
+- Added ProductCategory, Product, StockMovement models to Prisma schema (Float for prices since SQLite doesn't support Decimal; Supabase uses numeric(14,2) in the SQL migration). Pushed schema.
+- Wrote src/lib/products/data-access.ts — smart dual-path helpers (Supabase when Phase 3 applied, Prisma otherwise) for: listProductCategories, createProductCategory, listProducts (with search + temporary filter), createProduct (with opening stock movement), updateProduct, createStockMovement (resolves Supabase UUID for created_by), listStockMovements, negativeStockReport, pendingStockReport.
+- API routes: /api/product-categories (GET+POST), /api/products (GET+POST), /api/products/[id] (PATCH), /api/stock-movements (GET+POST), /api/reports/negative-stock (GET), /api/reports/pending-stock (GET).
+- UI views: ProductCategoriesView (desktop table + mobile cards + create form), ProductsView (search + temporary filter + create form + edit modal with mark-for-merge), StockAdjustmentView (product picker + in/out radio + projection with negative-stock warning + recent movements table), NegativeStockReportView (summary cards + table + mobile cards), PendingStockReportView (summary + table + mobile cards).
+- Updated dashboard-shell.tsx: added 5 new nav items (Product Categories, Products, Stock Adjustment, Negative Stock, Pending Stock) with permission gating (can_view_products / can_view_stock_report). Added Tag, PackagePlus, TrendingDown, Clock icons. Updated ViewRouter.
+- All Phase 3 views use KhataPro ERP branding, light premium theme, 3D cards, glass pill mobile nav, desktop tables + mobile cards.
+
+Supabase migration status: 00003_phase3_products_stock.sql NOT yet applied (user must run in SQL Editor). App falls back to Prisma for Phase 3 operations. When applied, the dual-path data-access layer will automatically switch to Supabase.
+
+What was built:
+- Product Categories: create/list, active/inactive, simple garments-friendly.
+- Products: create/list/edit, fields (name, category, unit=piece, sale/purchase price, opening stock, is_temporary, active/inactive), search, temporary-only filter, edit modal with mark-for-merge.
+- Stock Movements: create via API (adjustment_in/out), every movement creates a stock_movements record with balanceAfter. Types: opening, adjustment_in, adjustment_out, temporary_item, correction. Sale/purchase reserved for future phases.
+- Negative Stock: ALLOWED. Stock-out when stock=0 → stock becomes -5, not blocked.
+- Negative Stock Report: products with current_stock < 0, shows name/category/stock/last movement.
+- Pending Stock Report: products with negative stock OR that have had adjustment_out movements, shows pending qty.
+- Manual Stock Adjustment UI: product picker, in/out type, quantity, reason, projection with negative warning, recent movements table.
+
+What was intentionally NOT built:
+- Sale invoice stock-out (Phase 4)
+- Purchase stock-in (Phase 5)
+- COGS posting (Phase 4+)
+- Weighted average cost (Phase 5)
+- Advanced product merge UI (just mark-for-merge foundation)
+- Rider workflow (Phase 7)
+- Full reports (Phase 8)
+- AI (Phase 10)
+
+Browser verification log (via Prisma fallback — Supabase Phase 3 migration not yet applied):
+1. Login as owner@test.local / password123 → "Welcome, Bilal." badge "Supabase live" ✓
+2. Open Product Categories → renders ✓
+3. Create category "Shirts" → created ✓
+4. Open Products → renders with search + temporary filter ✓
+5. Create product "Black Cotton Shirt" with opening stock 0 → created, currentStock=0 ✓
+6. Create stock-out adjustment of 5 pieces → posted ✓
+7. balanceAfter = -5 (negative stock allowed) ✓
+8. Action was NOT blocked ✓
+9. Product appears in Negative Stock Report with stock=-5, lastMovementType=adjustment_out ✓
+10. Create stock-in adjustment of 20 pieces → posted ✓
+11. balanceAfter = 15 (was -5, +20 = 15) ✓
+12. Create temporary product "Temp Item - Blue Polo" → created with isTemporary=true ✓
+13. Edit temporary product (rename to "Blue Polo Shirt" + markForMerge=true) → updated; appears in temporary-only filter with markedForMerge=true ✓
+14. Trial Balance still works: balanced, 6,300,000 = 6,300,000 (Phase 3 doesn't post vouchers) ✓
+15. Desktop layout: sidebar with 21 nav items, dense tables ✓
+16. Mobile layout (390×844): card-based, no horizontal overflow, glass pill bottom nav ✓
+17. Sales still shows "Phase 4 — not built" Coming Soon; no Phase 4+ features implemented ✓
+
+lint/tsc/build result:
+- lint: clean ✓
+- tsc --noEmit: clean ✓
+- next build: succeeds, 23 routes (up from 18 — added 6 new Phase 3 API routes) ✓
+
+Known issues:
+- Phase 3 Supabase migration (00003_phase3_products_stock.sql) NOT yet applied. User must run it in Supabase SQL Editor to go fully live on Phase 3. Until then, Phase 3 operations use Prisma/SQLite fallback (still fully functional).
+- Product prices use Float in Prisma (SQLite limitation) but numeric(14,2) in Supabase. When Supabase is live, prices will be exact decimals.
+- Stock movements don't post COGS vouchers (by design — Phase 3 boundary). Trial Balance is unaffected.
+
+Preview login emails/passwords (UNCHANGED):
+- owner@test.local / password123 (Owner/Admin)
+- accountant@test.local / password123 (Accountant)
+- salesman@test.local / password123 (Salesman)
+- rider@test.local / password123 (Rider)
+
+Stage Summary:
+- Phase 3 Products & Stock complete. Product categories, products (with temporary items + merge foundation), stock movements (with negative stock allowed), Negative Stock Report, Pending Stock Report all built. Dual-path Supabase/Prisma data-access layer ready. All 17 browser gates pass. Stopping for approval before Phase 4.
