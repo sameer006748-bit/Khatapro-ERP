@@ -100,6 +100,7 @@ model Business {
   accounts         Account[]
   businessAccounts BusinessAccount[]
   auditLogs        AuditLog[]
+  vouchers         Voucher[]
 }
 
 // =================== Chart of Accounts ===================
