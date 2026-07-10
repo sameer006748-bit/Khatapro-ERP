@@ -93,6 +93,7 @@ declare
   v_debit       numeric(20,0);
   v_credit      numeric(20,0);
   v_count       integer := 0;
+  v_line_order  integer := 0;
 begin
   -- Sanity: at least 2 lines.
   if jsonb_array_length(p_lines) < 2 then
@@ -145,9 +146,15 @@ begin
      v_total_debit, v_total_credit)
   returning id into v_voucher_id;
 
-  -- Insert lines.
-  for v_line in select * with ordinality from jsonb_array_elements(p_lines) with ordinality as t(elem, idx)
+  -- Insert lines using a manual counter for line_order.
+  -- (Previous version used invalid `WITH ORDINALITY` syntax inside a FOR
+  --  loop — `select * with ordinality from ... with ordinality` is not
+  --  valid PL/pgSQL. A manual counter is simpler and equivalent since
+  --  jsonb_array_elements preserves array order.)
+  v_line_order := 0;
+  for v_line in select * from jsonb_array_elements(p_lines)
   loop
+    v_line_order := v_line_order + 1;
     insert into public.voucher_lines
       (business_id, voucher_id, account_id, debit, credit, memo, line_order)
     values
@@ -156,7 +163,7 @@ begin
        coalesce((v_line->>'debit')::numeric, 0),
        coalesce((v_line->>'credit')::numeric, 0),
        v_line->>'memo',
-       (v_line->>'idx')::integer);
+       v_line_order);
   end loop;
 
   -- Update balance_cache on every affected account.
@@ -312,6 +319,8 @@ $$;
 
 -- ----------------------------------------------------------------------------
 -- 6. account_ledger() — drill-down: every line touching an account.
+-- Uses a window function (SUM OVER) for running balance instead of
+-- PL/pgSQL variable assignment (which is invalid inside RETURN QUERY SELECT).
 -- ----------------------------------------------------------------------------
 create or replace function public.account_ledger(
   p_business_id text,
@@ -333,8 +342,6 @@ language plpgsql stable
 security definer
 set search_path = public
 as $$
-declare
-  v_running numeric(20,0) := 0;
 begin
   return query
   with ordered as (
@@ -346,7 +353,8 @@ begin
       coalesce(vl.memo, v.memo) as memo,
       vl.debit,
       vl.credit,
-      vl.line_order
+      vl.line_order,
+      v.posted_at
     from public.voucher_lines vl
     join public.vouchers v on v.id = vl.voucher_id
     where vl.business_id = p_business_id
@@ -354,7 +362,6 @@ begin
       and v.is_cancelled = false
       and (p_from_date is null or v.voucher_date >= p_from_date)
       and (p_to_date is null or v.voucher_date <= p_to_date)
-    order by v.voucher_date asc, v.posted_at asc, vl.line_order asc
   )
   select
     o.line_id,
@@ -364,8 +371,12 @@ begin
     o.memo,
     o.debit,
     o.credit,
-    (v_running := v_running + o.debit - o.credit)::numeric as running_balance
-  from ordered o;
+    sum(o.debit - o.credit) over (
+      order by o.voucher_date asc, o.posted_at asc, o.line_order asc
+      rows between unbounded preceding and current row
+    )::numeric as running_balance
+  from ordered o
+  order by o.voucher_date asc, o.posted_at asc, o.line_order asc;
 end;
 $$;
 
@@ -418,7 +429,7 @@ create trigger vouchers_touch before update on public.vouchers
 --   ✓ post_voucher() RPC with balanced-voucher validation
 --   ✓ cancel_voucher() with reversing-voucher pair (no hard delete)
 --   ✓ trial_balance() aggregate
---   ✓ account_ledger() drill-down with running balance
+--   ✓ account_ledger() drill-down with running balance (window function)
 --   ✓ RLS blocking direct voucher_lines inserts
 --   ✓ Audit log entries on post + cancel
 -- ============================================================================
