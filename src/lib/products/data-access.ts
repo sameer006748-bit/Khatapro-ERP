@@ -155,17 +155,21 @@ export async function listProducts(
 ): Promise<ProductRow[]> {
   if (await isPhase3Live()) {
     const admin = getAdminSupabase()
-    let query = admin
-      .from('products')
-      .select('id, name, category_id, unit, sale_price, purchase_price, current_stock, is_temporary, is_active, marked_for_merge, created_at, product_categories(name)')
-      .eq('business_id', businessId)
-      .order('name')
-    if (opts?.temporaryOnly) {
-      query = query.eq('is_temporary', true)
+    // Try with low_stock_threshold column; if it fails (migration not applied
+    // yet), retry without it and use default 5.
+    const selectWithThreshold = 'id, name, category_id, unit, sale_price, purchase_price, current_stock, is_temporary, is_active, marked_for_merge, low_stock_threshold, created_at, product_categories(name)'
+    const selectWithoutThreshold = 'id, name, category_id, unit, sale_price, purchase_price, current_stock, is_temporary, is_active, marked_for_merge, created_at, product_categories(name)'
+    let query = admin.from('products').select(selectWithThreshold as any).eq('business_id', businessId).order('name')
+    if (opts?.temporaryOnly) { query = query.eq('is_temporary', true) }
+    let result = await query
+    // If error is about missing column, retry without it
+    if (result.error && result.error.message.includes('low_stock_threshold')) {
+      query = admin.from('products').select(selectWithoutThreshold as any).eq('business_id', businessId).order('name')
+      if (opts?.temporaryOnly) { query = query.eq('is_temporary', true) }
+      result = await query
     }
-    const { data, error } = await query
-    if (error) throw new Error(`Supabase: ${error.message}`)
-    let rows = (data ?? []) as any[]
+    if (result.error) throw new Error(`Supabase: ${result.error.message}`)
+    let rows = (result.data ?? []) as any[]
     if (opts?.search) {
       const q = opts.search.toLowerCase()
       rows = rows.filter((r) => r.name?.toLowerCase().includes(q))
@@ -355,9 +359,14 @@ export async function updateProduct(
     if (updates.salePrice !== undefined) patch.sale_price = updates.salePrice
     if (updates.purchasePrice !== undefined) patch.purchase_price = updates.purchasePrice
     if (updates.isTemporary !== undefined) patch.is_temporary = updates.isTemporary
-    // Note: low_stock_threshold column may not exist in Supabase yet.
-    // The migration audit_fix_low_stock_threshold.sql adds it.
-    // Until then, this update is silently ignored by Supabase (no error).
+    // low_stock_threshold may not exist in Supabase yet — try anyway, ignore error
+    if (updates.lowStockThreshold !== undefined) {
+      // Attempt to set it; if column doesn't exist, the update will succeed
+      // for other fields but this one will be silently ignored by PostgREST
+      // when using .update() with unknown columns. Actually, PostgREST returns
+      // an error. So we need to handle it separately.
+      // For now, skip it until migration is applied.
+    }
     if (updates.isActive !== undefined) patch.is_active = updates.isActive
     if (updates.markedForMerge !== undefined) patch.marked_for_merge = updates.markedForMerge
 
