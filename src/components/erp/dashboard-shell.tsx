@@ -31,6 +31,9 @@ import {
   Briefcase,
   BarChart3,
   Home as HomeIcon,
+  ArrowLeftRight,
+  ArrowDownToLine,
+  ArrowUpFromLine,
 } from 'lucide-react'
 import { useSearchParams } from 'next/navigation'
 import type { MeUser } from '@/components/erp/erp-app'
@@ -51,6 +54,11 @@ import { JournalVoucherView } from '@/components/erp/views/journal-voucher-view'
 import { TrialBalanceView } from '@/components/erp/views/trial-balance-view'
 import { LedgerDrilldownView } from '@/components/erp/views/ledger-drilldown-view'
 import { OpeningBalanceView } from '@/components/erp/views/opening-balance-view'
+import { DayBookView } from '@/components/erp/views/day-book-view'
+import { PaymentVoucherView, ReceiptVoucherView, ContraEntryView } from '@/components/erp/views/voucher-forms-view'
+import { ExpenseBatchView } from '@/components/erp/views/expense-batch-view'
+import { PettyCashView } from '@/components/erp/views/petty-cash-view'
+import { VoucherDetailView } from '@/components/erp/views/voucher-detail-view'
 import { ProductCategoriesView } from '@/components/erp/views/product-categories-view'
 import { ProductsView } from '@/components/erp/views/products-view'
 import { StockAdjustmentView } from '@/components/erp/views/stock-adjustment-view'
@@ -119,12 +127,16 @@ const NAV_CATEGORIES: NavCategory[] = [
     label: 'Accounting',
     icon: Briefcase,
     items: [
-      { key: 'journal-voucher', label: 'Journal Voucher', short: 'JV', icon: ClipboardList, perm: 'can_post_journal_voucher' },
-      { key: 'opening-balance', label: 'Opening Balance', short: 'Opening', icon: Plus, perm: 'can_post_opening_voucher' },
+      { key: 'day-book', label: 'Day Book', short: 'Day Book', icon: BookOpen, perm: 'can_view_day_book' },
+      { key: 'journal-voucher', label: 'Journal Voucher', short: 'JV', icon: ClipboardList, perm: 'can_create_journal_voucher' },
+      { key: 'receipt-voucher', label: 'Receipt Voucher', short: 'Receipt', icon: ArrowDownToLine, perm: 'can_create_receipt_voucher' },
+      { key: 'payment-voucher', label: 'Payment Voucher', short: 'Payment', icon: ArrowUpFromLine, perm: 'can_create_payment_voucher' },
+      { key: 'contra-entry', label: 'Contra Entry', short: 'Contra', icon: ArrowLeftRight, perm: 'can_create_contra' },
+      { key: 'petty-cash', label: 'Petty Cash', short: 'Petty', icon: Wallet, perm: 'can_manage_petty_cash' },
+      { key: 'expense-batch', label: 'Expenses', short: 'Expenses', icon: Receipt, perm: 'can_create_expense_batch' },
       { key: 'trial-balance', label: 'Trial Balance', short: 'TB', icon: Scale, perm: 'can_view_trial_balance' },
-      { key: 'vouchers', label: 'Vouchers', short: 'Vouchers', icon: ClipboardList, perm: 'can_view_vouchers' },
+      { key: 'opening-balance', label: 'Opening Balance', short: 'Opening', icon: Plus, perm: 'can_post_opening_voucher' },
       { key: 'audit', label: 'Audit Log', short: 'Audit', icon: ScrollText, perm: 'can_view_audit_log' },
-      { key: 'biz-day-test', label: 'Biz-Day Test', short: 'Date', icon: FileText },
     ],
   },
   // 4. Inventory (merged Products & Stock)
@@ -243,6 +255,7 @@ export function DashboardShell({ user, onSignOut }: { user: MeUser; onSignOut: (
   const searchParams = useSearchParams()
   const ledgerAccountId = searchParams.get('ledger')
   const invoiceId = searchParams.get('invoice')
+  const voucherId = searchParams.get('voucher')
 
   const cats = useMemo(() => visibleCategories(user), [user])
 
@@ -254,11 +267,13 @@ export function DashboardShell({ user, onSignOut }: { user: MeUser; onSignOut: (
     return init
   })
 
-  // If ?ledger= or ?invoice= is in the URL, show that view instead.
+  // If ?ledger= or ?invoice= or ?voucher= is in the URL, show that view instead.
   const effectiveActive = ledgerAccountId
     ? 'ledger-drilldown'
     : invoiceId
     ? 'invoice-detail'
+    : voucherId
+    ? 'voucher-detail'
     : cats.some((c) => c.visibleItems.some((i) => i.key === active))
     ? active
     : 'home'
@@ -378,7 +393,7 @@ export function DashboardShell({ user, onSignOut }: { user: MeUser; onSignOut: (
                 exit={{ opacity: 0, y: -4 }}
                 transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
               >
-                <ViewRouter user={user} active={effectiveActive} ledgerAccountId={ledgerAccountId} invoiceId={invoiceId} />
+                <ViewRouter user={user} active={effectiveActive} ledgerAccountId={ledgerAccountId} invoiceId={invoiceId} voucherId={voucherId} />
               </motion.div>
             </AnimatePresence>
           </div>
@@ -676,11 +691,13 @@ function ViewRouter({
   active,
   ledgerAccountId,
   invoiceId,
+  voucherId,
 }: {
   user: MeUser
   active: string
   ledgerAccountId: string | null
   invoiceId: string | null
+  voucherId: string | null
 }) {
   // Ledger drill-down takes precedence when ?ledger= is set.
   if (active === 'ledger-drilldown' && ledgerAccountId) {
@@ -689,6 +706,10 @@ function ViewRouter({
   // Invoice detail when ?invoice= is set.
   if (active === 'invoice-detail' && invoiceId) {
     return <InvoiceDetailView invoiceId={invoiceId} />
+  }
+  // Voucher detail when ?voucher= is set.
+  if (active === 'voucher-detail' && voucherId) {
+    return <VoucherDetailView voucherId={voucherId} onBack={() => { window.history.pushState({}, '', '/'); window.dispatchEvent(new PopStateEvent('popstate')) }} />
   }
 
   if (active === 'home') {
@@ -703,7 +724,13 @@ function ViewRouter({
   if (active === 'coa') return <CoaView />
   if (active === 'users') return <UsersView user={user} />
   if (active === 'permissions') return <PermissionMatrixView user={user} />
-  if (active === 'journal-voucher') return <JournalVoucherView />
+  if (active === 'journal-voucher') return <JournalVoucherView user={user} />
+  if (active === 'receipt-voucher') return <ReceiptVoucherView user={user} />
+  if (active === 'payment-voucher') return <PaymentVoucherView user={user} />
+  if (active === 'contra-entry') return <ContraEntryView user={user} />
+  if (active === 'petty-cash') return <PettyCashView user={user} />
+  if (active === 'expense-batch') return <ExpenseBatchView user={user} />
+  if (active === 'day-book') return <DayBookView user={user} onSelectVoucher={(id) => { window.history.pushState({}, '', `/?voucher=${id}`); window.dispatchEvent(new PopStateEvent('popstate')) }} />
   if (active === 'opening-balance') return <OpeningBalanceView />
   if (active === 'trial-balance') return <TrialBalanceView />
   if (active === 'audit') return <AuditLogView />
@@ -725,7 +752,7 @@ function ViewRouter({
   if (active === 'purchases') return <PurchasesView user={user} />
   if (active === 'vendors') return <VendorsView user={user} />
   if (active === 'riders') return <ComingSoonView title="Riders & COD" phase="Phase 7" />
-  if (active === 'vouchers') return <JournalVoucherView />
+  if (active === 'vouchers') return <DayBookView user={user} onSelectVoucher={(id) => { window.history.pushState({}, '', `/?voucher=${id}`); window.dispatchEvent(new PopStateEvent('popstate')) }} />
   if (active === 'reports') return <ComingSoonView title="Reports" phase="Phase 8" />
 
   return <OwnerDashboard user={user} />

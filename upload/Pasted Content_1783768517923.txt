@@ -1,0 +1,1538 @@
+You are now allowed to modify the KhataPro ERP source code.
+
+PHASE 7 — RIDER, ONLINE COD DELIVERY, COD SETTLEMENT AND RIDER LEDGER
+
+Recommended reasoning: Extra High
+
+Build and completely verify Phase 7.
+
+Do not start Phase 8 Reports or any later phase.
+
+==================================================
+PROJECT CONTEXT
+==================================================
+
+KhataPro ERP is an accounting-first garments ERP/PWA built with:
+
+- Next.js App Router
+- TypeScript strict
+- Tailwind CSS
+- shadcn/ui
+- Supabase Postgres/Auth/RLS
+- Prisma/SQLite + NextAuth only as local preview fallback
+- Supabase as the live production source
+- Currency: PKR
+- Timezone: Asia/Karachi
+- Vercel deployment
+- PWA
+
+Completed and verified:
+
+- Phase 1: Foundation, authentication, roles and accounts
+- Phase 2: Double-entry accounting engine
+- Phase 3: Inventory and weighted-average costing
+- Phase 4: Sales, Online/OFC shells and returns
+- Phase 5: Purchases and vendors
+- Phase 6: Vouchers, expenses and simplified Accounts workspace
+
+All existing functionality must remain working.
+
+==================================================
+PHASE 7 PRIMARY GOAL
+==================================================
+
+Build a complete but simple Delivery and Rider workflow for Karachi COD orders.
+
+The business must be able to:
+
+- Create an Online COD order
+- Assign a rider
+- Track the delivery status
+- Let the rider see only assigned orders
+- Mark an order Out for Delivery
+- Mark it Delivered or Returned
+- Track money collected by the rider
+- Track money submitted by the rider
+- Support daily/batch COD submission
+- Track rider delivery earnings
+- Keep product-sale revenue separate from rider delivery charges
+- View a proper rider ledger
+- Prevent duplicate delivery or COD accounting
+- Maintain correct double-entry vouchers automatically
+
+The normal user must not manually create debit/credit entries.
+
+==================================================
+ABSOLUTE ACCOUNTING RULE
+==================================================
+
+Rider delivery charges must not automatically become company Sales revenue.
+
+Default rule:
+
+- Product amount belongs to the business
+- Delivery charge belongs to the rider
+- This default may be changed per order by an authorized user
+- Product revenue and rider earnings must remain separate accounting threads
+
+Never combine:
+
+- Product sale amount
+- Rider earning
+- Company delivery income
+- COD collected
+- COD submitted
+
+into one misleading Sales amount.
+
+Every financial event must produce balanced voucher lines automatically.
+
+==================================================
+SCOPE BOUNDARY
+==================================================
+
+Build only Phase 7:
+
+- Rider setup
+- Delivery workspace
+- Online COD order assignment
+- Delivery status flow
+- COD collection
+- COD submission
+- Rider earnings
+- Rider ledger
+- Rider mobile home
+- Parcel label/basic delivery print
+- Permissions and RLS
+- Required accounting integrations
+
+Do not build Phase 8 reports beyond the operational Rider Ledger and Delivery summaries required here.
+
+Do not start:
+
+- Profit & Loss reports
+- Balance Sheet enhancements
+- Full report exports
+- Phase 8 dashboard/report suite
+- AI assistant
+
+==================================================
+PART A — AUDIT THE CURRENT ONLINE SALE FLOW FIRST
+==================================================
+
+Before modifying anything, trace the current Phase 4 Online Sale flow:
+
+- Online Sale UI
+- Online Sale API
+- `post_sale()` RPC
+- invoice subtotal
+- delivery fee
+- COD amount
+- payment allocation
+- Customer Receivable
+- Sales account
+- stock-out movement
+- invoice detail/printing
+- salesman ownership
+- sales-return integration
+
+Determine exactly:
+
+1. Whether the current Online Sale posts Sales revenue immediately.
+2. Whether its delivery fee is currently included in Sales revenue.
+3. Whether COD orders currently post Customer Receivable.
+4. Whether the order already creates a stock-out movement.
+5. Whether a second financial posting at delivery would duplicate Sales.
+6. Which invoice fields already store:
+   - product subtotal
+   - delivery fee
+   - COD amount
+   - total due
+
+Do not create duplicate:
+
+- Sales revenue
+- Customer Receivable
+- Stock-out movement
+- Invoice
+- Commission
+- Voucher
+
+If the existing Online Sale incorrectly credits rider-owned delivery fees to Sales:
+
+- fix future Online COD posting
+- add the smallest safe migration/RPC update
+- do not silently rewrite old posted vouchers
+- report historical data implications clearly
+
+==================================================
+PART B — CANONICAL ONLINE COD ACCOUNTING POLICY
+==================================================
+
+Use this accounting policy unless the existing verified architecture requires an equivalent balanced treatment.
+
+ONLINE ORDER CREATED
+
+The sale invoice already recognizes the product sale.
+
+For a COD order:
+
+- Product amount is posted as business Sales
+- Product amount becomes Customer Receivable until delivery
+- Stock-out occurs through the existing sale posting
+- Rider-owned delivery fee is not credited to company Sales
+
+Example:
+
+Product amount:
+- Rs 8,000
+
+Delivery charge:
+- Rs 300
+
+Default rider earning:
+- Rs 300
+
+At Online COD order creation:
+
+- Customer Receivable debit Rs 8,000
+- Sales credit Rs 8,000
+
+The operational customer collection amount is:
+
+- Product Rs 8,000
+- Delivery Rs 300
+- Total COD Rs 8,300
+
+Do not post Sales revenue twice at delivery.
+
+==================================================
+PART C — DELIVERED ORDER ACCOUNTING
+==================================================
+
+When the rider marks the order Delivered and confirms collection:
+
+Example:
+
+- Product amount: Rs 8,000
+- Customer delivery charge: Rs 300
+- Rider earning: Rs 300
+- Total collected: Rs 8,300
+
+Expected voucher:
+
+- Rider COD Receivable debit Rs 8,300
+- Customer Receivable credit Rs 8,000
+- Rider Payable credit Rs 300
+
+Balanced:
+
+- Debit Rs 8,300
+- Credit Rs 8,300
+
+Meaning:
+
+- Customer no longer owes the business
+- Rider now holds Rs 8,300
+- Business owes the rider Rs 300 delivery earning
+- Business Sales remains Rs 8,000 only
+
+==================================================
+COMPANY SHARE OF DELIVERY CHARGE
+==================================================
+
+Allow an authorized configuration where the customer delivery charge is split.
+
+Example:
+
+- Product amount: Rs 8,000
+- Customer delivery charge: Rs 300
+- Rider earning: Rs 200
+- Company delivery income: Rs 100
+- Total rider collection: Rs 8,300
+
+Expected delivery voucher:
+
+- Rider COD Receivable debit Rs 8,300
+- Customer Receivable credit Rs 8,000
+- Rider Payable credit Rs 200
+- Delivery Income credit Rs 100
+
+Default rider earning should equal the full delivery charge unless configured otherwise.
+
+Do not credit the company with rider-owned delivery income.
+
+==================================================
+PART D — COD SUBMISSION ACCOUNTING
+==================================================
+
+Support two settlement methods.
+
+METHOD 1 — RIDER SUBMITS FULL/GROSS COD
+
+Example:
+
+Rider submits:
+- Rs 8,300
+
+Expected:
+
+- Cash/Bank debit Rs 8,300
+- Rider COD Receivable credit Rs 8,300
+
+Rider Payable remains Rs 300.
+
+Later rider earning payment:
+
+- Rider Payable debit Rs 300
+- Cash/Bank credit Rs 300
+
+METHOD 2 — RIDER RETAINS DELIVERY FEE AND SUBMITS NET COD
+
+Example:
+
+- Rider COD held: Rs 8,300
+- Rider earning: Rs 300
+- Rider submits cash: Rs 8,000
+
+Expected settlement voucher:
+
+- Cash/Bank debit Rs 8,000
+- Rider Payable debit Rs 300
+- Rider COD Receivable credit Rs 8,300
+
+Balanced.
+
+The rider payable is settled through deduction.
+
+==================================================
+PARTIAL COD SUBMISSION
+==================================================
+
+Allow partial COD submission.
+
+Example:
+
+Rider COD pending:
+- Rs 20,000
+
+Rider submits:
+- Rs 12,000
+
+Expected:
+
+- Cash/Bank debit Rs 12,000
+- Rider COD Receivable credit Rs 12,000
+- Remaining COD pending Rs 8,000
+
+Rules:
+
+- Cannot submit more than COD pending plus any explicitly supported settlement adjustment
+- Cannot allocate the same delivered order amount twice
+- Partial settlement must update rider/order allocation correctly
+- Accounting and operational balances must agree
+
+==================================================
+PART E — RETURNED ORDER ACCOUNTING
+==================================================
+
+Returned before successful delivery:
+
+- No COD collection
+- No rider COD receivable
+- No rider delivery earning by default
+- Use the existing Sales Return/reversal logic
+- Restore stock
+- Reverse/adjust product Sales and receivable
+- Preserve original invoice
+- Preserve audit trail
+
+Do not hard-delete the Online invoice.
+
+A rider must not be able to return more quantity than the order contains.
+
+A delivered order must not be converted directly to Returned through the simple delivery status action.
+
+A delivered customer return must use the existing Sales Return module.
+
+==================================================
+PART F — REQUIRED CHART OF ACCOUNTS
+==================================================
+
+Inspect the live Chart of Accounts first.
+
+Safely create or reuse these control accounts if missing:
+
+- Rider COD Receivable — Asset
+- Rider Payable — Liability
+- Delivery Income — Income, only for company-owned delivery share
+
+Do not hardcode random UUIDs.
+
+Resolve using:
+
+- stable account code
+- linked configuration
+- business ID
+- active status
+
+Avoid duplicate account creation.
+
+The Rider Ledger may use:
+
+- control accounts plus rider-level subledger records
+or
+- dedicated rider-linked accounts where the current architecture safely supports them
+
+The accounting totals must always derive from voucher_lines.
+
+Operational rider balance fields must never become the accounting source of truth.
+
+==================================================
+PART G — DATABASE AND MIGRATIONS
+==================================================
+
+Inspect existing Phase 1/4 rider and online-order tables first.
+
+Reuse safe existing tables where possible.
+
+Add the smallest safe migration for missing structures.
+
+Recommended entities:
+
+1. riders
+
+Required or verified fields:
+
+- id UUID
+- business_id
+- user_id linked to the Rider-role authenticated user
+- name
+- phone
+- zone/area optional
+- vehicle/type optional
+- status / is_active
+- default_delivery_fee_rule
+- created_at
+- updated_at
+
+Use an explicit user-to-rider relation.
+
+Do not identify rider ownership by display name alone.
+
+2. delivery_orders
+
+Suggested fields:
+
+- id UUID
+- business_id
+- invoice_id unique
+- rider_id optional
+- status
+- product_amount
+- customer_delivery_charge
+- rider_earning_amount
+- company_delivery_income
+- total_cod_amount
+- cod_collected_amount
+- assigned_at
+- out_for_delivery_at
+- delivered_at
+- returned_at
+- return_reason
+- recipient_name optional
+- delivery_note optional
+- created_by
+- updated_by
+- created_at
+- updated_at
+
+3. delivery_status_events
+
+- id
+- business_id
+- delivery_order_id
+- from_status
+- to_status
+- rider_id
+- note
+- location_text optional
+- created_by
+- created_at
+
+4. rider_cod_submissions
+
+- id
+- business_id
+- submission_no
+- rider_id
+- submitted_date
+- requested_amount
+- confirmed_cash_amount
+- rider_fee_deduction
+- settlement_mode
+- received_into_account_id optional until confirmed
+- status:
+  - draft
+  - submitted
+  - confirmed
+  - rejected
+- notes
+- requested_by
+- confirmed_by
+- voucher_id
+- created_at
+- confirmed_at
+
+5. rider_cod_submission_items
+
+- submission_id
+- delivery_order_id
+- amount_allocated
+- rider_fee_deducted
+- created_at
+
+6. rider_ledger_entries or an equivalent operational subledger
+
+It may track:
+
+- assignment
+- delivered COD
+- COD submission
+- COD pending
+- rider earning
+- earning settlement
+- return
+
+Every financial rider-ledger row should link to the related voucher where applicable.
+
+Add:
+
+- foreign keys
+- indexes
+- unique constraints
+- status constraints
+- non-negative money checks
+- business isolation
+- duplicate allocation protection
+- RLS
+- audit fields
+
+Use:
+
+`NOTIFY pgrst, 'reload schema';`
+
+If a migration is required:
+
+- create the complete migration file
+- stop at the migration checkpoint
+- do not pretend live verification passed before the user applies it
+
+==================================================
+PART H — SERVER-SIDE RPCS / TRANSACTIONS
+==================================================
+
+Build or safely reuse transactional RPCs.
+
+Suggested:
+
+- assign_rider_to_order()
+- update_delivery_status()
+- mark_order_delivered()
+- mark_order_returned()
+- create_cod_submission()
+- confirm_cod_submission()
+- reject_cod_submission()
+- rider_ledger()
+- rider_dashboard_summary()
+- next_cod_submission_no()
+
+Every money-changing RPC must:
+
+- run atomically
+- validate authenticated user
+- validate business
+- validate permission
+- validate rider ownership
+- validate current status
+- validate invoice/order amounts server-side
+- validate active account UUID
+- create voucher
+- create voucher_lines
+- verify balance
+- create operational rows
+- create audit log
+- return IDs/numbers
+- roll back everything on failure
+
+Do not trust client-supplied totals.
+
+Recalculate server-side from:
+
+- invoice items
+- delivery-order configuration
+- existing COD allocations
+- rider fee settings
+
+==================================================
+IDEMPOTENCY AND DUPLICATE PREVENTION
+==================================================
+
+Protect against:
+
+- double-click Delivered
+- repeated status requests
+- duplicate stock return
+- duplicate COD receivable
+- duplicate rider earning
+- duplicate COD submission
+- duplicate settlement allocation
+- duplicate voucher
+- network retry
+
+Use:
+
+- unique constraints
+- status checks
+- allocation constraints
+- request/idempotency key where practical
+
+A Delivered order must not create its rider accounting twice.
+
+A Returned order must not create two sales returns.
+
+==================================================
+PART I — DELIVERY STATUS WORKFLOW
+==================================================
+
+Required statuses:
+
+- Pending
+- Assigned
+- Out for Delivery
+- Delivered
+- Returned
+
+Allowed transitions:
+
+Pending:
+- → Assigned
+
+Assigned:
+- → Out for Delivery
+- → Pending through authorized unassign/reassign action
+
+Out for Delivery:
+- → Delivered
+- → Returned
+
+Delivered:
+- terminal for normal delivery workflow
+
+Returned:
+- terminal
+
+Rules:
+
+- Rider cannot assign themselves unless explicitly allowed
+- Rider cannot reassign the order
+- Rider cannot change product amount, COD amount or rider fee
+- Rider can update only orders assigned to them
+- Owner/authorized staff can reassign before delivery
+- Status transitions enforced on server, not only UI
+- Every transition writes a status event and audit log
+
+==================================================
+PART J — ONLINE SALE FORM INTEGRATION
+==================================================
+
+Update the Online Sale flow carefully.
+
+Required fields:
+
+- Customer name
+- Phone
+- Address
+- Source:
+  - WhatsApp
+  - Facebook
+  - Instagram
+  - Manual
+- Items
+- Product amount
+- Customer delivery charge
+- Rider earning amount, default equal to delivery charge
+- Total COD
+- Optional rider assignment
+- Notes
+- Post Online Order
+
+Normal user should see:
+
+- Product Total
+- Delivery Charge
+- Total Customer Pays
+
+Authorized user may expand:
+
+“Delivery charge split”
+
+to edit:
+
+- Rider earning
+- Company delivery income
+
+Validation:
+
+- Rider earning + company delivery income must equal customer delivery charge
+- Values cannot be negative
+- Default rider earning receives full delivery charge
+- Do not include rider-owned amount in company Sales revenue
+
+After posting:
+
+- View Invoice
+- Print Invoice
+- Print Parcel Label
+- Assign Rider
+- Send/Share placeholder
+- New Order
+
+==================================================
+PART K — SIMPLE DELIVERY WORKSPACE
+==================================================
+
+Do not create many sidebar subcategories.
+
+Use one main navigation item:
+
+“Delivery”
+
+Inside it use tabs:
+
+1. Orders
+2. Riders
+3. COD Settlement
+
+Owner/Admin/Accountant/authorized staff use this workspace.
+
+Rider sees a separate simplified:
+
+“My Deliveries”
+
+home.
+
+==================================================
+DELIVERY DASHBOARD
+==================================================
+
+Top KPI cards:
+
+- Pending
+- Assigned
+- Out for Delivery
+- Delivered Today
+- Returned
+- COD Pending
+
+Keep cards compact.
+
+Do not use fake data.
+
+Use Asia/Karachi for “Today”.
+
+==================================================
+ORDERS TAB
+==================================================
+
+Filters:
+
+- Search order/invoice/customer/phone
+- Status
+- Rider
+- Source
+- Date range
+- COD pending only
+
+Desktop columns:
+
+- Order/Invoice
+- Customer
+- Phone
+- Area
+- Rider
+- Product Amount
+- Delivery Charge
+- Total COD
+- Status
+- COD Status
+- Actions
+
+Actions:
+
+- View
+- Assign/Reassign Rider
+- Mark Out for Delivery
+- Mark Delivered
+- Mark Returned
+- Print Parcel Label
+- Open Invoice
+
+Mobile:
+
+Use clean cards, not a squeezed table.
+
+Each card should show:
+
+- Invoice/order number
+- Customer
+- Phone
+- Address/area
+- Rider
+- Total COD
+- Delivery charge
+- Status
+- Clear action button
+
+==================================================
+PART L — ASSIGN RIDER
+==================================================
+
+Create a compact Assign Rider modal.
+
+Show:
+
+- Order number
+- Customer area
+- Current rider
+- Active riders
+- Rider zone
+- Rider current active-order count
+- Assign button
+
+Authorized staff may:
+
+- assign
+- reassign before delivery
+- unassign before Out for Delivery
+
+Do not expose:
+
+- rider personal accounting
+- unrelated business reports
+
+to unauthorized staff.
+
+==================================================
+PART M — MARK DELIVERED
+==================================================
+
+Delivered modal must show:
+
+- Order/invoice
+- Product amount
+- Delivery charge
+- Rider earning
+- Company delivery share
+- Expected customer collection
+- Actual amount collected
+- Recipient name optional
+- Delivery note optional
+
+Default actual collection:
+
+- expected total COD
+
+Validation:
+
+- amount cannot be negative
+- any short/extra must be explicitly handled
+- do not silently force the amount to match
+
+For MVP:
+
+If collected amount does not equal expected total:
+
+- block delivery confirmation
+or
+- require authorized shortage/extra handling with a clear accounting treatment
+
+Do not create hidden balancing adjustments.
+
+==================================================
+PART N — MARK RETURNED
+==================================================
+
+Returned modal:
+
+- Order/invoice
+- Return reason
+- Notes
+- Confirm Return
+
+On confirmation:
+
+- call/reuse existing Sales Return logic
+- restore stock
+- create reversing voucher
+- do not reverse commission unless existing policy says so
+- no rider earning by default
+- no COD receivable
+- status becomes Returned
+- audit event written
+
+Prevent duplicate return.
+
+==================================================
+PART O — RIDERS TAB
+==================================================
+
+Build a professional but simple rider list.
+
+KPI cards:
+
+- Active Riders
+- Orders Out
+- COD Pending
+- Rider Earnings Payable
+
+Rider list:
+
+- Rider
+- Phone
+- Zone
+- Assigned Orders
+- Out for Delivery
+- Delivered Today
+- COD Pending
+- Earnings Payable
+- Status
+- Actions
+
+Actions:
+
+- View Rider
+- View Ledger
+- Assign Order
+- Activate/Deactivate
+- Edit
+
+Rider creation:
+
+- Name
+- Phone
+- Zone
+- Link to existing Rider-role user or invite flow
+- Active status
+
+Do not allow two riders to link to the same auth user.
+
+==================================================
+PART P — COD SETTLEMENT TAB
+==================================================
+
+Show:
+
+- Rider selector
+- COD pending
+- Delivery earnings payable
+- Delivered orders not fully settled
+- Previous submissions
+- New COD Submission
+
+NEW COD SUBMISSION
+
+Fields:
+
+- Rider
+- Delivered orders
+- Select/allocation amounts
+- Settlement mode:
+  - Submit Full COD
+  - Deduct Rider Delivery Fees
+- Cash amount handed over
+- Received into business account
+- Date
+- Reference/note
+
+Allow:
+
+- one order
+- multiple orders
+- partial allocation
+
+Show live summary:
+
+- COD selected
+- Rider fee selected
+- Cash to receive
+- COD remaining
+- Rider payable remaining
+
+Accounting effect may be shown in a collapsed section for Accountant/Owner.
+
+==================================================
+RIDER-INITIATED SUBMISSION
+==================================================
+
+Rider mobile may create a submission request.
+
+Rider can:
+
+- select delivered orders
+- enter amount handed over
+- add note
+- submit request
+
+Rider cannot:
+
+- choose arbitrary ledger account
+- confirm their own accounting voucher
+- mark the submission confirmed
+- edit voucher lines
+
+Owner/Accountant confirms:
+
+- actual amount received
+- received-into business account
+- fee deduction treatment
+- posting
+
+Only confirmation posts accounting.
+
+==================================================
+PART Q — RIDER LEDGER
+==================================================
+
+Build a proper rider ledger.
+
+The Rider Ledger should show:
+
+- Date
+- Reference
+- Event Type
+- Order
+- COD Assigned
+- COD Delivered
+- COD Submitted
+- COD Pending
+- Delivery Earning
+- Earning Settled
+- Running COD Balance
+- Running Earning Balance
+
+Event types:
+
+- Assigned
+- Out for Delivery
+- Delivered
+- Returned
+- COD Submission
+- COD Confirmation
+- Rider Fee Deduction
+- Rider Fee Payment
+- Reversal
+
+Accounting truth must derive from vouchers/voucher_lines.
+
+Operational counts/assignment events may derive from delivery tables.
+
+Clearly distinguish:
+
+- COD rider owes business
+- Earnings business owes rider
+
+Do not display one ambiguous net balance only.
+
+Show two clear balances:
+
+1. COD Pending With Rider
+2. Delivery Earnings Payable To Rider
+
+Allow date filter and order/reference search.
+
+==================================================
+PART R — RIDER MOBILE HOME
+==================================================
+
+Create a Rider-specific mobile-first home.
+
+Top cards:
+
+- Assigned
+- Out for Delivery
+- Delivered Today
+- COD Pending
+
+Tabs/filters:
+
+- My Orders
+- Out for Delivery
+- Delivered
+- Returned
+- COD Submit
+- My Ledger
+
+Order card:
+
+- Customer name
+- Phone
+- Address
+- Invoice/order number
+- Product amount
+- Delivery charge
+- Total COD
+- Status
+
+Quick actions:
+
+- Call Customer
+- Open Address in Maps
+- Start Delivery
+- Delivered
+- Returned
+
+Use:
+
+- `tel:` link for phone
+- map/search link for address where practical
+
+Rider must not see:
+
+- purchase price
+- product cost
+- business profit
+- Trial Balance
+- other riders’ orders
+- other riders’ ledgers
+- vendor data
+- business-account balances
+- general accounting workspace
+
+Mobile requirements:
+
+- large tap targets
+- no horizontal overflow
+- bottom-nav/safe-area respected
+- no tiny action icons
+- one-hand use
+- fast loading
+- clear offline/live-connection message
+- no unsafe offline financial writes
+
+==================================================
+PART S — PARCEL LABEL / DELIVERY PRINT
+==================================================
+
+Create a compact parcel label/print view.
+
+Include:
+
+- KhataPro ERP
+- Invoice/order number
+- Customer name
+- Phone
+- Address
+- Area/city
+- COD product amount
+- Delivery charge
+- Total collectable
+- Rider
+- Source
+- Optional barcode/QR if safely available
+- Return note placeholder
+
+Print only the label.
+
+Hide app shell/navigation.
+
+Support:
+
+- A5/half-A4
+- standard thermal-friendly compact layout where practical
+- browser Save as PDF
+
+Do not replace the existing professional invoice print.
+
+==================================================
+PART T — PERMISSIONS
+==================================================
+
+Add granular permissions if missing:
+
+- can_view_delivery_orders
+- can_create_online_orders
+- can_assign_rider
+- can_update_delivery_status
+- can_mark_delivered
+- can_mark_returned
+- can_manage_riders
+- can_view_rider_ledger
+- can_create_cod_submission
+- can_confirm_cod_submission
+- can_view_cod_settlements
+- can_edit_delivery_fee_split
+
+Default:
+
+Owner/Admin:
+- Full access
+
+Accountant:
+- View delivery financials
+- Confirm COD submissions
+- Rider ledger
+- Settlement
+according to configurable permissions
+
+Salesman:
+- Create Online Orders
+- View only their own Online Orders where permitted
+- Cannot confirm COD settlement
+- Cannot see rider financial ledger unless explicitly granted
+- Cannot view all business delivery data by default
+
+Rider:
+- Only own assigned orders
+- Own status updates
+- Own COD submission requests
+- Own rider ledger
+- No assignment/reassignment
+- No amount edits
+- No other riders’ data
+
+Enforce at:
+
+- UI
+- API
+- server data access
+- RPC
+- RLS
+
+==================================================
+PART U — RLS AND SECURITY
+==================================================
+
+Verify:
+
+- RLS enabled on all Phase 7 tables
+- Business isolation enforced
+- Rider sees only rows linked to their rider ID
+- Salesman sees only permitted/own orders
+- Owner/Accountant permissions enforced
+- Direct client voucher inserts blocked
+- Direct COD confirmation by Rider blocked
+- Service-role key server-only
+- No raw database errors in UI
+- No client-trusted rider ID
+- Server resolves Rider identity from authenticated user
+- Active/inactive account validation
+- UUID validation
+- Safe SECURITY DEFINER search_path
+- Audit events written
+
+Attempt direct API calls as:
+
+- Owner
+- Accountant
+- Salesman
+- Rider
+- unauthorized/no session
+
+==================================================
+PART V — MONEY AND DATE SAFETY
+==================================================
+
+Trace every amount through:
+
+- UI
+- API
+- RPC
+- database
+- voucher_lines
+- rider ledger
+- settlement display
+
+Use existing paisa convention.
+
+Required:
+
+- Rs 8,000 = 800000 paisas
+- Rs 300 = 30000 paisas
+- Total Rs 8,300 = 830000 paisas
+
+Convert exactly once.
+
+Do not use raw JavaScript floating-point arithmetic.
+
+Use:
+
+- BigInt
+- decimal-safe parsing
+- server-side calculations
+
+Use Asia/Karachi for:
+
+- Delivered Today
+- Daily COD
+- submission dates
+- rider dashboard dates
+
+Store timestamps in UTC.
+
+==================================================
+PART W — MANDATORY ACCOUNTING TESTS
+==================================================
+
+TEST 1 — ONLINE COD ORDER CREATION
+
+Product:
+- Rs 8,000
+
+Delivery:
+- Rs 300, rider-owned
+
+Expected creation accounting:
+
+- Customer Receivable debit 800000
+- Sales credit 800000
+- Delivery fee not credited to Sales
+- One stock-out movement
+- One invoice/order
+
+TEST 2 — DELIVERED
+
+Expected:
+
+- Rider COD Receivable debit 830000
+- Customer Receivable credit 800000
+- Rider Payable credit 30000
+- Balanced
+
+TEST 3 — FULL COD SUBMISSION
+
+Rider submits Rs 8,300 into Cash.
+
+Expected:
+
+- Cash debit 830000
+- Rider COD Receivable credit 830000
+
+TEST 4 — RIDER EARNING PAYMENT
+
+Pay rider Rs 300.
+
+Expected:
+
+- Rider Payable debit 30000
+- Cash credit 30000
+
+TEST 5 — NET COD SUBMISSION
+
+Rider retains Rs 300 and submits Rs 8,000.
+
+Expected:
+
+- Cash debit 800000
+- Rider Payable debit 30000
+- Rider COD Receivable credit 830000
+
+TEST 6 — COMPANY DELIVERY SHARE
+
+Delivery charge:
+- Rs 300
+
+Rider earning:
+- Rs 200
+
+Company share:
+- Rs 100
+
+Expected delivered voucher:
+
+- Rider COD Receivable debit 830000
+- Customer Receivable credit 800000
+- Rider Payable credit 20000
+- Delivery Income credit 10000
+
+TEST 7 — PARTIAL COD SUBMISSION
+
+COD pending:
+- Rs 20,000
+
+Submit:
+- Rs 12,000
+
+Expected:
+
+- business account debit 1200000
+- Rider COD Receivable credit 1200000
+- COD pending remains 800000
+
+TEST 8 — RETURNED ORDER
+
+Expected:
+
+- stock restored
+- original sale reversed/adjusted
+- no rider COD receivable
+- no rider earning
+- duplicate return blocked
+
+TEST 9 — DUPLICATE DELIVERED REQUEST
+
+Expected:
+
+- second request rejected
+- no duplicate voucher
+- no duplicate rider COD
+- no duplicate earning
+
+TEST 10 — DUPLICATE COD SUBMISSION
+
+Expected:
+
+- over-allocation rejected
+- no duplicate settlement voucher
+
+==================================================
+PART X — REAL BROWSER VERIFICATION
+==================================================
+
+Use actual browser UI clicks wherever possible.
+
+Required flows:
+
+1. Owner creates Online COD order.
+2. Confirm product amount and delivery charge are separate.
+3. Assign rider.
+4. Rider logs in.
+5. Rider sees only assigned order.
+6. Rider marks Out for Delivery.
+7. Rider marks Delivered.
+8. Confirm actual collected amount.
+9. Owner opens Rider Ledger.
+10. Confirm COD Delivered and COD Pending.
+11. Rider creates COD submission request.
+12. Owner/Accountant confirms submission.
+13. Confirm business account balance updates.
+14. Confirm rider COD pending reduces.
+15. Confirm rider earnings remain separately visible.
+16. Test net settlement with fee deduction.
+17. Create second order and mark Returned.
+18. Confirm stock restored.
+19. Confirm no rider earning for returned order.
+20. Test duplicate Delivered click.
+21. Test duplicate settlement attempt.
+22. Reassign an Assigned order before delivery.
+23. Confirm rider cannot open another rider’s order URL.
+24. Confirm Salesman cannot view all delivery orders.
+25. Confirm Rider cannot confirm their own submission.
+26. Print parcel label.
+27. Test mobile Rider home.
+28. Test mobile Owner Delivery workspace.
+29. Test desktop Delivery workspace.
+30. Confirm Supabase live.
+
+Do not mark a UI test passed if it was only tested through direct API calls.
+
+API tests may supplement but not replace UI proof.
+
+==================================================
+PART Y — PHASE 1–6 REGRESSION
+==================================================
+
+Verify:
+
+- Login/logout
+- Owner/Accountant permissions
+- Salesman own-invoice security
+- Accounts simplification remains intact
+- Trial Balance remains balanced
+- Day Book works
+- Expense posting works
+- Contra works
+- Inventory loads
+- WAC remains correct
+- Counter Sale works
+- Online Sale existing invoice flow works
+- OFC Sale works
+- Sales Return works
+- Purchases work
+- Purchase returns work
+- Replacements work
+- Vendor ledger works
+- Invoice printing works
+- Mobile navigation works
+- Global Sales invoice sequence remains shared
+- Purchase sequence remains correct
+- No service-role key in browser
+
+==================================================
+PART Z — AUTOMATED CHECKS
+==================================================
+
+Run:
+
+- ESLint
+- TypeScript strict check
+- Production build
+- Phase 7 accounting verification script
+- Rider permission verification script
+- COD allocation/idempotency tests
+- Trial Balance verification
+- RLS/direct-access tests
+- Phase 1–6 regression scripts
+
+Do not claim a test passed unless it ran successfully.
+
+==================================================
+FINAL REPORT FORMAT
+==================================================
+
+Return one complete report containing:
+
+1. Executive summary
+2. Existing Online Sale audit
+3. Online COD accounting policy implemented
+4. Database changes
+5. Migration filenames
+6. RPCs/functions added
+7. Files changed
+8. Delivery workspace
+9. Rider setup
+10. Rider mobile home
+11. Status-flow proof
+12. Delivered accounting proof
+13. Rider delivery-fee separation proof
+14. Full COD submission proof
+15. Net COD submission proof
+16. Partial COD submission proof
+17. Returned-order proof
+18. Rider ledger proof
+19. Parcel-label proof
+20. Permission proof
+21. RLS proof
+22. Idempotency/duplicate-prevention proof
+23. Money-conversion proof
+24. Asia/Karachi date proof
+25. Mobile verification
+26. Desktop verification
+27. Phase 1–6 regression results
+28. lint result
+29. TypeScript result
+30. build result
+31. Tests not possible and exact reason
+32. Remaining known issues
+33. Reminder to rotate exposed credentials before production
+34. Confirmation that Phase 8 was not started
+
+If a migration must be manually applied:
+
+- stop at the migration checkpoint
+- provide the exact filename
+- do not claim Phase 7 complete before live Supabase verification
+
+Do not start Phase 8.
+
+Stop for user approval after Phase 7.

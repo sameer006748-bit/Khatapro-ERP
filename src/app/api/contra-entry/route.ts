@@ -1,0 +1,46 @@
+import { NextResponse } from 'next/server'
+import { getServerSession } from 'next-auth'
+import { z } from 'zod'
+import { authOptions } from '@/lib/auth/authOptions'
+import { loadSessionUser, requirePermission } from '@/lib/auth/permissions'
+import { postContraEntry } from '@/lib/vouchers/data-access'
+import { parseMoney } from '@/lib/format'
+
+const isUuid = (s: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s)
+const Schema = z.object({
+  contraDate: z.string(),
+  fromAccountId: z.string().min(1),
+  toAccountId: z.string().min(1),
+  amount: z.string().min(1),
+  reference: z.string().optional(),
+  notes: z.string().optional(),
+})
+
+export async function POST(req: Request) {
+  const session = await getServerSession(authOptions)
+  if (!session?.user) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
+  const loaded = await loadSessionUser((session.user as any).id)
+  if (!loaded) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
+  const su = await requirePermission(loaded, 'can_create_contra')
+  const body = await req.json().catch(() => null)
+  const parsed = Schema.safeParse(body)
+  if (!parsed.success) return NextResponse.json({ error: 'INVALID_INPUT', details: parsed.error.flatten() }, { status: 400 })
+  if (!isUuid(parsed.data.fromAccountId)) return NextResponse.json({ error: 'Invalid from account ID' }, { status: 400 })
+  if (!isUuid(parsed.data.toAccountId)) return NextResponse.json({ error: 'Invalid to account ID' }, { status: 400 })
+  if (parsed.data.fromAccountId === parsed.data.toAccountId) return NextResponse.json({ error: 'From and To accounts must differ' }, { status: 400 })
+  const amountPaisas = parseMoney(parsed.data.amount)
+  if (amountPaisas === null || amountPaisas <= 0n) return NextResponse.json({ error: 'Invalid amount' }, { status: 400 })
+  try {
+    const result = await postContraEntry({
+      businessId: su.businessId,
+      contraDate: new Date(parsed.data.contraDate),
+      fromAccountId: parsed.data.fromAccountId,
+      toAccountId: parsed.data.toAccountId,
+      amountPaisas,
+      reference: parsed.data.reference ?? null,
+      notes: parsed.data.notes ?? null,
+      createdBy: su.userId,
+    })
+    return NextResponse.json({ ok: true, ...result })
+  } catch (e) { return NextResponse.json({ error: (e as Error).message }, { status: 500 }) }
+}
