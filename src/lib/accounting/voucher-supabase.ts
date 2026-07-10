@@ -61,6 +61,12 @@ export async function postVoucherViaSupabase(input: PostVoucherInput): Promise<s
     idx: i + 1,
   }))
 
+  // posted_by must be a valid UUID (it references auth.users.id in Supabase).
+  // NextAuth uses Prisma cuids for user IDs, which are NOT valid UUIDs.
+  // Pass null when the ID isn't a UUID — the local Prisma audit log still
+  // records the full user ID for traceability.
+  const validUuid = postedBy && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(postedBy)
+
   const { data, error } = await admin.rpc('post_voucher', {
     p_business_id: businessId,
     p_voucher_type: voucherType,
@@ -69,7 +75,7 @@ export async function postVoucherViaSupabase(input: PostVoucherInput): Promise<s
     p_lines: linesJson,
     p_reference_id: referenceId ?? null,
     p_reference_type: referenceType ?? null,
-    p_posted_by: postedBy ?? null,
+    p_posted_by: validUuid ? postedBy : null,
   })
 
   if (error) {

@@ -229,3 +229,60 @@ Stage Summary:
 - Supabase status badge accurately reflects connection state: "Supabase (pending)" now → "Supabase live" after migrations applied.
 - All Phase 1 + 1.1 + 2 functionality intact. KhataPro ERP branding, light premium theme, glass pill mobile nav, 3D cards all preserved.
 - Stopping for user approval. User action required: run the 2 SQL migration files in Supabase SQL Editor to go fully live.
+
+---
+Task ID: SLA-Verify
+Agent: Main (fullstack-dev)
+Task: Verify Supabase live status after 00002 migration fix. No Phase 3.
+
+Work Log:
+- Ran scripts/verify-supabase-connection.ts → all 5 tests pass: Auth health ✓, permissions table ✓ (5 rows), vouchers table ✓, voucher_lines table ✓, post_voucher() RPC ✓.
+- Restarted dev server to clear module-level cache (_phase1Checked/_phase2Checked were cached as false from the previous run when migrations weren't applied).
+- Fixed new bug in postVoucherViaSupabase: posted_by column is type uuid in Supabase, but NextAuth user IDs are Prisma cuids (not valid UUIDs). Added UUID validation regex — passes null to the RPC when the user ID isn't a valid UUID. The local Prisma audit log still records the full user ID for traceability.
+- Verified all 13 gates in the browser with Supabase fully live.
+
+Supabase Status: FULLY LIVE ✅
+- Badge: "Supabase live" (green)
+- phase1Applied: true, phase2Applied: true, adminCanQuery: true
+- All Phase 1 tables exist (business, roles, permissions, role_permissions, profiles, account_categories, accounts, business_accounts, audit_logs)
+- All Phase 2 tables exist (vouchers, voucher_lines)
+- post_voucher() RPC exists and enforces balanced-voucher validation
+- RLS blocks direct browser inserts into voucher_lines (HTTP 401, error code 42501)
+
+Browser Verification Log:
+1. Login as owner@test.local / password123 → "Welcome, Bilal." ✓
+2. Badge shows "Supabase live" (green) ✓
+3. Phase 1 tables exist (confirmed via /api/supabase-status: phase1Applied=true) ✓
+4. Phase 2 tables exist (confirmed via /api/supabase-status: phase2Applied=true) ✓
+5. post_voucher() RPC exists (confirmed via verify-supabase-connection.ts) ✓
+6. Journal Voucher form opens ✓
+7. Unbalanced voucher (5000 debit vs 3000 credit) REJECTED by Supabase RPC with HTTP 400 "Unbalanced voucher: total debit 500000 <> total credit 300000" ✓
+8. Balanced voucher (5000 Cash debit / 5000 Sales credit) POSTED through Supabase — voucher ID 84b4f4dd-86ae-4865-9e03-ce4cd3177fa8 (UUID confirms Supabase) ✓
+9. Trial Balance updates from Supabase voucher_lines: Cash debit 500000, Sales credit 500000, grand totals 500000=500000, isBalanced=true ✓
+10. Click Cash in Trial Balance → ledger drill-down from Supabase shows JV entry with running balance 5000 ✓
+11. Opening balance posted (Rs 50,000 debit Cash) → OP voucher 1965c649-... → Trial Balance shows Cash 5500000 debit, Opening Balance Equity (3030) 5000000 credit, balanced ✓
+12. Audit log shows 2 POST_VOUCHER entries from Supabase flow with UUIDs + JSONB details + KHI timestamps ✓
+13. Direct browser insert into voucher_lines BLOCKED by RLS — HTTP 401 "new row violates row-level security policy for table \"voucher_lines\"" (error code 42501) ✓
+
+lint/tsc/build result:
+- lint: clean ✓
+- tsc --noEmit: clean ✓
+- next build: succeeds, 18 routes ✓
+
+Files changed:
+- src/lib/accounting/voucher-supabase.ts — added UUID validation for posted_by (passes null when NextAuth cuid isn't a valid UUID)
+- supabase/migrations/00002_phase2_accounting.sql — fixed in previous turn (WITH ORDINALITY + window function bugs)
+- supabase/migrations/00001_phase1_schema.sql — deleted (was duplicate of 00001_phase1_foundation.sql)
+
+Remaining issues:
+- NextAuth user IDs (Prisma cuids) don't match Supabase auth.users IDs (UUIDs). The posted_by column in Supabase vouchers shows null for voucher posts. The local Prisma audit log still records the full user ID. This is a known limitation of the dual-auth setup — switching NextAuth to use Supabase Auth would fix it, but that's a separate task.
+
+Preview login emails/passwords (UNCHANGED):
+- owner@test.local / password123 (Owner/Admin)
+- accountant@test.local / password123 (Accountant)
+- salesman@test.local / password123 (Salesman)
+- rider@test.local / password123 (Rider)
+
+Stage Summary:
+- Supabase is FULLY LIVE. All Phase 2 accounting operations go through Supabase RPCs (post_voucher, trial_balance, account_ledger). RLS blocks direct browser inserts. Badge is green.
+- Stopping for user approval before Phase 3.
