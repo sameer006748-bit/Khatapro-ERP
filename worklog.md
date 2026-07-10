@@ -94,3 +94,66 @@ Stage Summary:
 - prefers-reduced-motion respected — all animations reduced to 0.001ms
 - All Phase 1 functionality intact: bootstrap, login/logout, role-based dashboards, permission matrix, audit log, business accounts, CoA, users & roles, biz-day test, Asia/Karachi grouping, role-based nav visibility, mobile bottom nav
 - Stopping for user approval before Phase 2.
+
+---
+Task ID: 2
+Agent: Main (fullstack-dev)
+Task: Supabase connection checkpoint + Phase 2 (Accounting Engine). No Phase 3+ features.
+
+Work Log:
+- Read user request: connect project to real Supabase safely, then implement Phase 2.
+- Checked .env.local — user has not yet provided Supabase keys. Built the full Supabase architecture so it's ready the moment .env.local is dropped in.
+- Installed @supabase/supabase-js + @supabase/ssr.
+- Created src/lib/supabase/browser.ts — browser client using publishable key only, with isSupabaseConfigured() check.
+- Created src/lib/supabase/admin.ts — server-only admin client using service-role key (import 'server-only' directive prevents client import), with isAdminConfigured() check.
+- Created src/lib/supabase/server.ts — server-side RLS-aware client using @supabase/ssr createServerClient + cookies.
+- Wrote supabase/migrations/00001_phase1_foundation.sql — all Phase 1 tables (business, roles, permissions, role_permissions, profiles, account_categories, accounts, business_accounts, audit_logs) with business_id on every table, RLS policies on every table, SECURITY DEFINER helper functions (current_profile, has_permission, is_owner, no_owner_exists, current_business_id), updated_at triggers, and seed data (default business, 4 system roles, 42 permissions, 17 default CoA accounts, role-permission mappings).
+- Wrote supabase/migrations/00002_phase2_accounting.sql — vouchers + voucher_lines tables, post_voucher() SECURITY DEFINER RPC with full balanced-voucher validation (rejects unbalanced, rejects invalid lines, validates account ownership, updates balance_cache, writes audit log), cancel_voucher() RPC (posts reversing voucher, no hard delete), trial_balance() aggregate function, account_ledger() drill-down function with running balance, RLS policies that BLOCK direct client inserts into voucher_lines (no INSERT policy = RLS blocks it).
+- Wrote scripts/apply-supabase-migrations.ts — verifies Supabase connection using service-role key, then instructs user to apply SQL migrations via Supabase Dashboard SQL Editor (since DDL execution requires either database password or Management API personal access token, not just service-role key).
+- Created /api/supabase-status route — reports whether Supabase env vars are configured and reachable, never prints keys.
+- Created src/components/erp/supabase-status-badge.tsx — shows "Supabase" (green, connected) / "Supabase (pending)" (amber) / "Local preview" (gray) badge in the header.
+- Added Voucher + VoucherLine models to Prisma schema (for local preview). Pushed schema via db:push.
+- Created src/lib/accounting/voucher.ts — server-side postVoucher() (Prisma equivalent of Supabase RPC) with identical validation rules: at least 2 lines, each line has exactly one of debit/credit > 0, no negatives, total debit == total credit, account belongs to same business and is active, atomic $transaction (header + lines + balance_cache update), audit log entry. Also cancelVoucher() (reversing voucher pair, no hard delete), trialBalance() (aggregate per account), accountLedger() (drill-down with running balance). Money is BigInt paisas throughout.
+- Created API routes: /api/vouchers (POST=postVoucher, GET=list), /api/vouchers/[id] (GET detail), /api/trial-balance (GET), /api/ledger/[accountId] (GET drill-down), /api/opening-balance (POST — posts OP voucher against Opening Balance Equity 3030).
+- Created UI views: JournalVoucherView (full JV form with line editor, balance indicator, unbalanced/balanced test guidance), TrialBalanceView (status banner + table with click-to-drill-down + mobile cards), LedgerDrilldownView (running balance ledger, back button, voucher type badges), OpeningBalanceView (account picker + amount + side + preview of balanced OP voucher).
+- Updated dashboard-shell.tsx: added Journal Voucher, Opening Balance, Trial Balance nav items with permission gating (can_post_journal_voucher, can_post_opening_voucher, can_view_trial_balance). Added ?ledger=accountId URL param handling for ledger drill-down. Added SupabaseStatusBadge to header. Wrapped DashboardShell in Suspense (useSearchParams requires it).
+- Updated erp-app.tsx: wrapped DashboardShell in <Suspense> boundary.
+- All Phase 2 views use the KhataPro ERP branding, light premium theme, 3D cards, and mobile card layouts consistent with Phase 1.1 polish.
+- Dev server restarted via zscripts/dev.sh (the previous background-process approach was unstable — agent-browser's Chrome startup was killing the dev server; zscripts/dev.sh uses the system's process management which is stable).
+
+Supabase Connection Status:
+- .env.local not yet provided by user. App is running on Prisma/SQLite local preview.
+- Supabase architecture is fully built and ready: client setup (browser/admin/server), SQL migrations (Phase 1 + Phase 2), apply-migrations script, status API + badge.
+- The moment user drops .env.local with the 3 Supabase env vars, the status badge will turn green and the app can switch to Supabase (API routes would need to be updated to call the Supabase RPCs instead of the Prisma postVoucher — currently they call the Prisma equivalent which enforces the same rules).
+- User must run supabase/migrations/00001_phase1_foundation.sql then 00002_phase2_accounting.sql in the Supabase Dashboard SQL Editor.
+
+Verification:
+- lint: clean ✓
+- tsc --noEmit: clean ✓
+- next build: succeeds, 18 routes (up from 14 — added /api/ledger/[accountId], /api/opening-balance, /api/supabase-status, /api/trial-balance, /api/vouchers, /api/vouchers/[id]) ✓
+- Browser (Agent Browser) verified all Phase 2 gates:
+  1. Login as Owner/Admin ✓
+  2. Supabase badge shows "Local preview" (env vars not set; architecture ready) ✓
+  3. Journal Voucher form opens with line editor, balance indicator ✓
+  4. Unbalanced voucher (5000 debit vs 3000 credit) REJECTED by server with HTTP 400 "Unbalanced voucher: total debit 500000 <> total credit 300000" ✓
+  5. Balanced voucher (5000 Cash debit / 5000 Sales credit) POSTED successfully, voucher ID returned ✓
+  6. Trial Balance updates: Cash debit 5000, Sales credit 5000, grand totals 5000=5000, isBalanced=true ✓
+  7. Click Cash in Trial Balance → ledger drill-down shows the JV entry with running balance 5000 ✓
+  8. Opening balance posted for HBL Current (code 1900), Rs 50,000 debit ✓
+  9. Opening Voucher posted through Opening Balance Equity (3030): HBL debit 50000, Equity credit 50000 — Trial Balance still balanced (5500000=5500000) ✓
+  10. Audit log shows 2 POST_VOUCHER entries (JV + OP) with full details + KHI timestamps ✓
+  11. Desktop layout: sidebar with 17 nav items, dense readable tables, 3D cards ✓
+  12. Mobile layout (390×844): card-based layouts, no horizontal overflow, glass pill bottom nav ✓
+  13. No Phase 3+ features implemented — Sales/Purchases/Products/Riders/Reports still show "Coming Soon" stubs from Phase 1 ✓
+- Role-based access verified:
+  * Owner/Admin: sees all 17 nav items including Journal Voucher, Opening Balance, Trial Balance ✓
+  * Accountant: sees Journal Voucher, Opening Balance, Trial Balance (has can_post_journal_voucher, can_post_opening_voucher, can_view_trial_balance) ✓
+  * Salesman: does NOT see Journal Voucher/Opening Balance/Trial Balance (no accounting perms) ✓
+- RLS-equivalent security verified: no /api/voucher-lines endpoint exists — the ONLY way to create voucher lines is through POST /api/vouchers → postVoucher() which enforces balanced validation. In production Supabase, RLS would also block direct browser inserts into voucher_lines table.
+
+Stage Summary:
+- Supabase connection architecture: COMPLETE (client setup + SQL migrations + apply script + status API + badge). Awaiting user's .env.local to activate.
+- Phase 2 Accounting Engine: COMPLETE (vouchers, voucher_lines, postVoucher with balanced validation, cancel with reversing voucher, Trial Balance, ledger drill-down, Opening Voucher posting, audit logs).
+- All Phase 1 + 1.1 functionality intact (auth, roles, CoA, business accounts, audit log, biz-day test, KhataPro branding, light premium theme, glass pill mobile nav, 3D cards).
+- 6 screenshots saved to /home/z/my-project/download/p2-*.png (JV desktop+mobile, Trial Balance desktop+mobile, ledger drilldown desktop+mobile, opening balance mobile, audit log).
+- Stopping for user approval before Phase 3 (Products & Stock).

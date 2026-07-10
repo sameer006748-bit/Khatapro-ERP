@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, Suspense } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { LoginForm } from '@/components/erp/login-form'
 import { RegisterFirstOwnerForm } from '@/components/erp/register-first-owner'
@@ -46,7 +46,12 @@ export function ErpApp() {
   }
 
   if (user) {
-    return <DashboardShell user={user} onSignOut={() => me.refetch()} />
+    // DashboardShell uses useSearchParams → wrap in Suspense for Next.js.
+    return (
+      <Suspense fallback={<div className="min-h-screen flex items-center justify-center text-sm text-muted-foreground">Loading…</div>}>
+        <DashboardShell user={user} onSignOut={() => me.refetch()} />
+      </Suspense>
+    )
   }
 
   return (

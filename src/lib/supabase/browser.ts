@@ -1,24 +1,44 @@
 /**
  * Browser-side Supabase client.
  *
- * Uses ONLY the publishable (anon) key. Never imports the service-role key.
- * RLS policies on the server enforce all access control — the browser
- * client can only do what RLS allows.
+ * Uses ONLY the publishable (anon) key. RLS policies are enforced for
+ * every query made through this client — this is the whole point of the
+ * Supabase permission model. The service-role key is NEVER imported here.
+ *
+ * Env:
+ *   NEXT_PUBLIC_SUPABASE_URL
+ *   NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
  */
-import { createBrowserClient } from '@supabase/ssr'
-import { SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, isSupabaseConfigured } from './config'
+import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 
-export function createClient() {
-  if (!isSupabaseConfigured()) {
+function env(name: string): string {
+  const v = process.env[name]
+  if (!v || v.startsWith('<')) {
     throw new Error(
-      'Supabase is not configured. Set NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY, and SUPABASE_SERVICE_ROLE_KEY in .env.local',
+      `Missing env var ${name}. Copy .env.local.example to .env.local and fill in real values.`,
     )
   }
-  return createBrowserClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY)
+  return v
 }
 
-/** Safe getter that returns null instead of throwing when Supabase isn't configured. */
-export function getBrowserClient() {
-  if (!isSupabaseConfigured()) return null
-  return createBrowserClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY)
+let _client: SupabaseClient | null = null
+
+export function getBrowserSupabase(): SupabaseClient {
+  if (_client) return _client
+  _client = createClient(env('NEXT_PUBLIC_SUPABASE_URL'), env('NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY'), {
+    auth: {
+      persistSession: true,
+      autoRefreshToken: true,
+      detectSessionInUrl: true,
+    },
+  })
+  return _client
+}
+
+/** True if Supabase env vars are configured. Used by the app to decide
+ *  whether to use Supabase or fall back to the Prisma/SQLite local preview. */
+export function isSupabaseConfigured(): boolean {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL
+  const key = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
+  return !!url && !!key && !url.startsWith('<') && !key.startsWith('<')
 }

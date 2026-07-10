@@ -140,6 +140,7 @@ model Account {
   updatedAt          DateTime         @updatedAt
 
   businessAccount BusinessAccount?
+  voucherLines    VoucherLine[]
 
   @@unique([businessId, code])
   @@index([categoryId])
@@ -181,4 +182,50 @@ model AuditLog {
 
   @@index([businessId, timestamp])
   @@index([entity, entityId])
+}
+
+// =================== Phase 2: Accounting Engine ===================
+
+model Voucher {
+  id              String         @id @default(cuid())
+  businessId      String
+  business        Business       @relation(fields: [businessId], references: [id])
+  voucherNo       String?
+  voucherType     String
+  referenceId     String?
+  referenceType   String?
+  memo            String?
+  voucherDate     DateTime
+  postedAt        DateTime       @default(now())
+  postedBy        String?
+  isCancelled     Boolean        @default(false)
+  cancelledAt     DateTime?
+  cancelledBy     String?
+  cancelVoucherId String?
+  totalDebit      BigInt         @default(0)
+  totalCredit     BigInt         @default(0)
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  lines           VoucherLine[]
+
+  @@index([businessId, voucherDate])
+  @@index([businessId, voucherType])
+  @@index([referenceType, referenceId])
+}
+
+model VoucherLine {
+  id          String   @id @default(cuid())
+  businessId  String
+  voucherId   String
+  voucher     Voucher  @relation(fields: [voucherId], references: [id], onDelete: Restrict)
+  accountId   String
+  account     Account  @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  debit       BigInt   @default(0)
+  credit      BigInt   @default(0)
+  memo        String?
+  lineOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+
+  @@index([voucherId])
+  @@index([businessId, accountId])
 }

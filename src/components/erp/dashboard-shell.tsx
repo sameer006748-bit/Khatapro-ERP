@@ -21,7 +21,11 @@ import {
   Wallet,
   Shield,
   MoreHorizontal,
+  Scale,
+  Plus,
+  Sparkles,
 } from 'lucide-react'
+import { useSearchParams } from 'next/navigation'
 import type { MeUser } from '@/components/erp/erp-app'
 import { KhataProLogo } from '@/components/erp/logo'
 import { OwnerDashboard } from '@/components/erp/views/owner-dashboard'
@@ -36,6 +40,11 @@ import { AuditLogView } from '@/components/erp/views/audit-log-view'
 import { BizDayTestView } from '@/components/erp/views/biz-day-test-view'
 import { PermissionMatrixView } from '@/components/erp/views/permission-matrix-view'
 import { ComingSoonView } from '@/components/erp/views/coming-soon'
+import { JournalVoucherView } from '@/components/erp/views/journal-voucher-view'
+import { TrialBalanceView } from '@/components/erp/views/trial-balance-view'
+import { LedgerDrilldownView } from '@/components/erp/views/ledger-drilldown-view'
+import { OpeningBalanceView } from '@/components/erp/views/opening-balance-view'
+import { SupabaseStatusBadge } from '@/components/erp/supabase-status-badge'
 
 type NavItem = {
   key: string
@@ -53,6 +62,9 @@ const NAV: NavItem[] = [
   { key: 'coa', label: 'Chart of Accounts', short: 'CoA', icon: BookOpen, perm: 'can_view_setup' },
   { key: 'users', label: 'Users & Roles', short: 'Users', icon: Users, ownerOnly: true },
   { key: 'permissions', label: 'Permission Matrix', short: 'Perms', icon: Shield, ownerOnly: true },
+  { key: 'journal-voucher', label: 'Journal Voucher', short: 'JV', icon: ClipboardList, perm: 'can_post_journal_voucher' },
+  { key: 'opening-balance', label: 'Opening Balance', short: 'Opening', icon: Plus, perm: 'can_post_opening_voucher' },
+  { key: 'trial-balance', label: 'Trial Balance', short: 'TB', icon: Scale, perm: 'can_view_trial_balance' },
   { key: 'audit', label: 'Audit Log', short: 'Audit', icon: ScrollText, perm: 'can_view_audit_log' },
   { key: 'biz-day-test', label: 'Biz-Day Test', short: 'Date', icon: FileText },
   { key: 'sales', label: 'Sales', short: 'Sales', icon: ShoppingCart, perm: 'can_view_sales' },
@@ -75,9 +87,11 @@ export function DashboardShell({ user, onSignOut }: { user: MeUser; onSignOut: (
   const [active, setActive] = useState('home')
   const [moreOpen, setMoreOpen] = useState(false)
   const nav = visibleNav(user)
+  const searchParams = useSearchParams()
+  const ledgerAccountId = searchParams.get('ledger')
 
-  // Reset to home if the active item is no longer visible (e.g. role change).
-  const effectiveActive = nav.some((n) => n.key === active) ? active : 'home'
+  // If ?ledger= is in the URL, show the ledger drill-down instead.
+  const effectiveActive = ledgerAccountId ? 'ledger-drilldown' : (nav.some((n) => n.key === active) ? active : 'home')
 
   // Mobile: first 4 items + "More" entry.
   const mobilePrimary = nav.slice(0, 4)
@@ -97,7 +111,8 @@ export function DashboardShell({ user, onSignOut }: { user: MeUser; onSignOut: (
           </span>
         </div>
         <div className="ml-auto flex items-center gap-3">
-          <span className="hidden sm:inline text-xs text-muted-foreground" data-num>
+          <SupabaseStatusBadge />
+          <span className="hidden lg:inline text-xs text-muted-foreground" data-num>
             {new Date().toLocaleString('en-GB', { timeZone: 'Asia/Karachi' })}
           </span>
           <Button
@@ -124,7 +139,11 @@ export function DashboardShell({ user, onSignOut }: { user: MeUser; onSignOut: (
                 key={n.key}
                 item={n}
                 active={effectiveActive === n.key}
-                onClick={() => setActive(n.key)}
+                onClick={() => {
+                  // Strip ?ledger= when switching nav items.
+                  if (ledgerAccountId) window.history.pushState({}, '', '/')
+                  setActive(n.key)
+                }}
               />
             ))}
           </nav>
@@ -150,13 +169,13 @@ export function DashboardShell({ user, onSignOut }: { user: MeUser; onSignOut: (
           <div className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto">
             <AnimatePresence mode="wait">
               <motion.div
-                key={effectiveActive}
+                key={effectiveActive + (ledgerAccountId ?? '')}
                 initial={{ opacity: 0, y: 6 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -4 }}
                 transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
               >
-                <ViewRouter user={user} active={effectiveActive} />
+                <ViewRouter user={user} active={effectiveActive} ledgerAccountId={ledgerAccountId} />
               </motion.div>
             </AnimatePresence>
           </div>
@@ -167,19 +186,23 @@ export function DashboardShell({ user, onSignOut }: { user: MeUser; onSignOut: (
       <MobilePillNav
         primary={mobilePrimary}
         active={effectiveActive}
-        onSelect={setActive}
+        onSelect={(k) => {
+          if (ledgerAccountId) window.history.pushState({}, '', '/')
+          setActive(k)
+        }}
         hasMore={mobileOverflow.length > 0}
         onMore={() => setMoreOpen(true)}
       />
 
-      {/* Mobile "more" sheet — for nav items beyond the first 4 */}
+      {/* Mobile "more" sheet */}
       {mobileOverflow.length > 0 && (
         <MobileMoreSheet
           items={mobileOverflow}
-          active={effectiveActive}
+          active={active}
           open={moreOpen}
           onOpenChange={setMoreOpen}
           onSelect={(k) => {
+            if (ledgerAccountId) window.history.pushState({}, '', '/')
             setActive(k)
             setMoreOpen(false)
           }}
@@ -221,9 +244,6 @@ function SidebarNavButton({
   )
 }
 
-// State for the mobile more-sheet lives here so the parent doesn't re-render
-// on every open/close. (Using a module-level closure would be wrong; this is
-// a separate component.)
 function MobilePillNav({
   primary,
   active,
@@ -256,7 +276,6 @@ function MobilePillNav({
             aria-label={n.label}
             aria-current={isActive ? 'page' : undefined}
           >
-            {/* Active liquid-glass highlight (animates between items via layoutId). */}
             {isActive && (
               <motion.span
                 layoutId="pill-active"
@@ -353,7 +372,20 @@ function MobileMoreSheet({
   )
 }
 
-function ViewRouter({ user, active }: { user: MeUser; active: string }) {
+function ViewRouter({
+  user,
+  active,
+  ledgerAccountId,
+}: {
+  user: MeUser
+  active: string
+  ledgerAccountId: string | null
+}) {
+  // Ledger drill-down takes precedence when ?ledger= is set.
+  if (active === 'ledger-drilldown' && ledgerAccountId) {
+    return <LedgerDrilldownView accountId={ledgerAccountId} />
+  }
+
   if (active === 'home') {
     if (user.roleName === 'Owner/Admin') return <OwnerDashboard user={user} />
     if (user.roleName === 'Accountant') return <AccountantDashboard user={user} />
@@ -366,6 +398,9 @@ function ViewRouter({ user, active }: { user: MeUser; active: string }) {
   if (active === 'coa') return <CoaView />
   if (active === 'users') return <UsersView user={user} />
   if (active === 'permissions') return <PermissionMatrixView user={user} />
+  if (active === 'journal-voucher') return <JournalVoucherView />
+  if (active === 'opening-balance') return <OpeningBalanceView />
+  if (active === 'trial-balance') return <TrialBalanceView />
   if (active === 'audit') return <AuditLogView />
   if (active === 'biz-day-test') return <BizDayTestView />
 
@@ -373,8 +408,11 @@ function ViewRouter({ user, active }: { user: MeUser; active: string }) {
   if (active === 'purchases') return <ComingSoonView title="Purchases & Vendors" phase="Phase 5" />
   if (active === 'products') return <ComingSoonView title="Products & Stock" phase="Phase 3" />
   if (active === 'riders') return <ComingSoonView title="Riders & COD" phase="Phase 7" />
-  if (active === 'vouchers') return <ComingSoonView title="Vouchers & Expenses" phase="Phase 2 & 6" />
+  if (active === 'vouchers') return <JournalVoucherView />
   if (active === 'reports') return <ComingSoonView title="Reports" phase="Phase 8" />
 
   return <OwnerDashboard user={user} />
 }
+
+// Avoid unused-import error.
+void Sparkles

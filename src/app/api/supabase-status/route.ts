@@ -1,69 +1,73 @@
 /**
- * Supabase connection status — reports whether Supabase env vars are set
- * and (if configured) whether the admin client can reach the project.
+ * GET /api/supabase-status
  *
- * Used by the Phase 2 "Supabase checkpoint" verification gate.
+ * Reports whether Supabase env vars are configured and (if so) whether the
+ * live Supabase project responds. Used by the UI to show a "connected to
+ * Supabase" badge and by the Phase 2 gate to confirm safe connection.
  *
- * SECURITY: this route NEVER returns keys, URLs with keys, or any
- * credential material. It only returns boolean flags + table counts.
+ * NEVER returns keys — only booleans and the project URL.
  */
 import { NextResponse } from 'next/server'
-import { isSupabaseConfigured, SUPABASE_URL } from '@/lib/supabase/config'
-import { getAdminClient } from '@/lib/supabase/server-admin'
+import { isSupabaseConfigured } from '@/lib/supabase/browser'
+import { isAdminConfigured, getAdminSupabase } from '@/lib/supabase/admin'
 
 export async function GET() {
-  const configured = isSupabaseConfigured()
-  if (!configured) {
+  const browserConfigured = isSupabaseConfigured()
+  const adminConfigured = isAdminConfigured()
+
+  if (!browserConfigured) {
     return NextResponse.json({
       configured: false,
-      url: SUPABASE_URL || null,
-      message:
-        'Supabase env vars not set. Add NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY and SUPABASE_SERVICE_ROLE_KEY to .env.local, then run `bun run scripts/apply-supabase-migrations.ts`.',
-      usingFallback: 'Prisma/SQLite (local preview)',
+      browserConfigured: false,
+      adminConfigured: false,
+      url: null,
+      reachable: false,
+      message: 'Supabase env vars not set. App is running on Prisma/SQLite local preview. Copy .env.local.example to .env.local and fill in real values.',
     })
   }
 
-  // Configured — try to reach the project and count key tables.
-  const admin = getAdminClient()
-  if (!admin) {
-    return NextResponse.json({ configured: false, error: 'ADMIN_CLIENT_NULL' }, { status: 500 })
-  }
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL!
 
+  // Light reachability check — hits the public health endpoint.
+  let reachable = false
+  let authReachable = false
   try {
-    const [biz, cats, accts, roles, perms, vouchers] = await Promise.all([
-      admin.from('business').select('id', { count: 'exact', head: true }),
-      admin.from('account_categories').select('id', { count: 'exact', head: true }),
-      admin.from('accounts').select('id', { count: 'exact', head: true }),
-      admin.from('roles').select('id', { count: 'exact', head: true }),
-      admin.from('permissions').select('id', { count: 'exact', head: true }),
-      admin.from('vouchers').select('id', { count: 'exact', head: true }).then((r) => r).catch(() => ({ count: null, error: 'vouchers table not found' })),
-    ])
-
-    return NextResponse.json({
-      configured: true,
-      url: SUPABASE_URL,
-      reachable: true,
-      counts: {
-        business: biz.count ?? 0,
-        account_categories: cats.count ?? 0,
-        accounts: accts.count ?? 0,
-        roles: roles.count ?? 0,
-        permissions: perms.count ?? 0,
-        vouchers: (vouchers as any).count ?? 0,
-      },
-      usingFallback: 'Supabase Postgres',
+    const r = await fetch(`${url}/auth/v1/health`, {
+      headers: { apikey: process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY! },
     })
-  } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : String(e)
-    return NextResponse.json(
-      {
-        configured: true,
-        url: SUPABASE_URL,
-        reachable: false,
-        error: msg.slice(0, 200),
-        message: 'Supabase env vars are set but the project could not be reached. Check the URL and keys.',
-      },
-      { status: 502 },
-    )
+    authReachable = r.ok
+    reachable = authReachable
+  } catch {
+    reachable = false
   }
+
+  // If admin is also configured, try to count rows in a known table to
+  // confirm the service role works. NEVER print the key.
+  let adminCanQuery = false
+  if (adminConfigured) {
+    try {
+      const admin = getAdminSupabase()
+      const { count, error } = await admin
+        .from('permissions')
+        .select('*', { count: 'exact', head: true })
+      adminCanQuery = !error && count !== null
+    } catch {
+      adminCanQuery = false
+    }
+  }
+
+  return NextResponse.json({
+    configured: true,
+    browserConfigured: true,
+    adminConfigured,
+    url,
+    reachable,
+    authReachable,
+    adminCanQuery,
+    message: adminCanQuery
+      ? 'Supabase connected (browser + admin). RLS enforced for browser queries.'
+      : reachable
+      ? 'Supabase reachable but admin key not configured or migrations not applied yet.'
+      : 'Supabase URL set but project not reachable.',
+  })
 }
