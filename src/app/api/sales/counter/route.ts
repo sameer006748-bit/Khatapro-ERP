@@ -10,7 +10,7 @@ import { NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { z } from 'zod'
 import { authOptions } from '@/lib/auth/authOptions'
-import { loadSessionUser, requirePermission } from '@/lib/auth/permissions'
+import { loadSessionUser, requirePermission, hasPermission } from '@/lib/auth/permissions'
 import { postSale, listInvoices } from '@/lib/sales/data-access'
 import { parseMoney } from '@/lib/format'
 
@@ -108,7 +108,13 @@ export async function GET(req: Request) {
   if (!session?.user) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
   const su = await loadSessionUser((session.user as any).id)
   if (!su) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
-  await requirePermission(su, 'can_view_sales')
+
+  // Allow both can_view_sales (full) and can_view_own_sales (salesman)
+  const canViewAll = hasPermission(su, 'can_view_sales')
+  const canViewOwn = hasPermission(su, 'can_view_own_sales')
+  if (!canViewAll && !canViewOwn) {
+    return NextResponse.json({ error: 'FORBIDDEN' }, { status: 403 })
+  }
 
   const url = new URL(req.url)
   const type = url.searchParams.get('type') || undefined
