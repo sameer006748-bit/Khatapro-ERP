@@ -1,0 +1,851 @@
+     1→-- ============================================================================
+     2→-- KhataPro ERP — Phase 5 Purchases, Vendors, Payables and Purchase Returns
+     3→-- Target: Supabase Postgres
+     4→--
+     5→-- This migration adds the complete purchases module:
+     6→--   - vendors (party accounts linked to accounts table)
+     7→--   - purchases (header with purchase_no sequence)
+     8→--   - purchase_items (line items)
+     9→--   - purchase_payments (payments, advances, advance applications)
+    10→--   - purchase_returns (returns with PRN- sequence)
+    11→--   - purchase_return_items (return line items)
+    12→--
+    13→-- Accounting rules:
+    14→--   * Every purchase posts a balanced voucher via post_voucher()
+    15→--   * Stock-in movements created for each item
+    16→--   * Vendor payments post balanced vouchers
+    17→--   * Vendor advances post balanced vouchers
+    18→--   * Purchase returns post reversing vouchers + stock-out
+    19→--   * No hard delete for posted records
+    20→--   * All money in numeric(20,0) paisas
+    21→--
+    22→-- Money columns use numeric(20,0) = BigInt paisas (consistent with vouchers).
+    23→-- ============================================================================
+    24→
+    25→-- Required extensions
+    26→create extension if not exists "pgcrypto";
+    27→
+    28→-- ----------------------------------------------------------------------------
+    29→-- 1. vendors — party accounts linked to the accounts table.
+    30→--    Every vendor MUST have a linked ledger account under Liability (Vendors Payable 2010)
+    31→--    or a sub-account. The vendor's balance is derived from voucher_lines.
+    32→-- ----------------------------------------------------------------------------
+    33→create table if not exists public.vendors (
+    34→  id             text primary key default gen_random_uuid()::text,
+    35→  business_id    text not null references public.business(id) on delete cascade,
+    36→  account_id     text not null unique references public.accounts(id) on delete restrict,
+    37→  name           text not null,
+    38→  phone          text,
+    39→  email          text,
+    40→  address        text,
+    41→  city           text,
+    42→  is_active      boolean not null default true,
+    43→  notes          text,
+    44→  created_at     timestamptz not null default now(),
+    45→  updated_at     timestamptz not null default now()
+    46→);
+    47→create index if not exists vendors_biz_idx on public.vendors(business_id);
+    48→
+    49→-- ----------------------------------------------------------------------------
+    50→-- 2. purchases — header with server-side PUR-0001 sequence.
+    51→-- ----------------------------------------------------------------------------
+    52→create table if not exists public.purchases (
+    53→  id              text primary key default gen_random_uuid()::text,
+    54→  business_id     text not null references public.business(id) on delete cascade,
+    55→  purchase_no     text not null,
+    56→  vendor_id       text not null references public.vendors(id) on delete restrict,
+    57→  supplier_bill_no text,
+    58→  purchase_date   date not null default (now() at time zone 'Asia/Karachi')::date,
+    59→  -- Totals in paisas
+    60→  subtotal        numeric(20,0) not null default 0,
+    61→  discount        numeric(20,0) not null default 0,
+    62→  additional_charges numeric(20,0) not null default 0,
+    63→  total           numeric(20,0) not null default 0,
+    64→  paid_amount     numeric(20,0) not null default 0,
+    65→  outstanding_amount numeric(20,0) not null default 0,
+    66→  -- Status: draft | posted | partially_paid | paid | returned | partially_returned | cancelled
+    67→  status          text not null default 'posted',
+    68→  notes           text,
+    69→  voucher_id      text references public.vouchers(id) on delete set null,
+    70→  created_by      uuid,
+    71→  created_at      timestamptz not null default now(),
+    72→  updated_at      timestamptz not null default now(),
+    73→  unique (business_id, purchase_no)
+    74→);
+    75→create index if not exists purchases_biz_date_idx on public.purchases(business_id, purchase_date desc);
+    76→create index if not exists purchases_vendor_idx on public.purchases(vendor_id);
+    77→create index if not exists purchases_status_idx on public.purchases(business_id, status);
+    78→
+    79→-- ----------------------------------------------------------------------------
+    80→-- 3. purchase_items
+    81→-- ----------------------------------------------------------------------------
+    82→create table if not exists public.purchase_items (
+    83→  id              text primary key default gen_random_uuid()::text,
+    84→  business_id     text not null references public.business(id) on delete cascade,
+    85→  purchase_id     text not null references public.purchases(id) on delete cascade,
+    86→  product_id      text references public.products(id) on delete set null,
+    87→  product_name    text not null,
+    88→  quantity        integer not null,
+    89→  unit_cost       numeric(20,0) not null,  -- paisas
+    90→  line_total      numeric(20,0) not null,  -- paisas
+    91→  returned_quantity integer not null default 0,
+    92→  stock_movement_id text references public.stock_movements(id) on delete set null,
+    93→  created_at      timestamptz not null default now()
+    94→);
+    95→create index if not exists purchase_items_purchase_idx on public.purchase_items(purchase_id);
+    96→create index if not exists purchase_items_product_idx on public.purchase_items(product_id);
+    97→
+    98→-- ----------------------------------------------------------------------------
+    99→-- 4. purchase_payments — payments, advances, advance applications
+   100→-- ----------------------------------------------------------------------------
+   101→create table if not exists public.purchase_payments (
+   102→  id              text primary key default gen_random_uuid()::text,
+   103→  business_id     text not null references public.business(id) on delete cascade,
+   104→  purchase_id     text references public.purchases(id) on delete set null,
+   105→  vendor_id       text not null references public.vendors(id) on delete restrict,
+   106→  account_id      text not null references public.accounts(id) on delete restrict,
+   107→  amount          numeric(20,0) not null,  -- paisas
+   108→  payment_date    date not null default (now() at time zone 'Asia/Karachi')::date,
+   109→  -- payment_type: purchase_payment | later_payment | vendor_advance | advance_application | vendor_refund
+   110→  payment_type    text not null default 'purchase_payment',
+   111→  voucher_id      text references public.vouchers(id) on delete set null,
+   112→  notes           text,
+   113→  created_by      uuid,
+   114→  created_at      timestamptz not null default now()
+   115→);
+   116→create index if not exists purchase_payments_purchase_idx on public.purchase_payments(purchase_id);
+   117→create index if not exists purchase_payments_vendor_idx on public.purchase_payments(vendor_id);
+   118→create index if not exists purchase_payments_account_idx on public.purchase_payments(account_id);
+   119→
+   120→-- ----------------------------------------------------------------------------
+   121→-- 5. purchase_returns — returns with PRN-0001 sequence
+   122→-- ----------------------------------------------------------------------------
+   123→create table if not exists public.purchase_returns (
+   124→  id              text primary key default gen_random_uuid()::text,
+   125→  business_id     text not null references public.business(id) on delete cascade,
+   126→  purchase_id     text not null references public.purchases(id) on delete restrict,
+   127→  vendor_id       text not null references public.vendors(id) on delete restrict,
+   128→  return_no       text not null,
+   129→  return_date     date not null default (now() at time zone 'Asia/Karachi')::date,
+   130→  total_amount    numeric(20,0) not null,  -- paisas
+   131→  -- settlement_type: reduce_payable | vendor_refund | vendor_credit
+   132→  settlement_type text not null default 'reduce_payable',
+   133→  settlement_account_id text references public.accounts(id) on delete set null,
+   134→  voucher_id      text references public.vouchers(id) on delete set null,
+   135→  notes           text,
+   136→  created_by      uuid,
+   137→  created_at      timestamptz not null default now(),
+   138→  unique (business_id, return_no)
+   139→);
+   140→create index if not exists purchase_returns_purchase_idx on public.purchase_returns(purchase_id);
+   141→create index if not exists purchase_returns_vendor_idx on public.purchase_returns(vendor_id);
+   142→
+   143→-- ----------------------------------------------------------------------------
+   144→-- 6. purchase_return_items
+   145→-- ----------------------------------------------------------------------------
+   146→create table if not exists public.purchase_return_items (
+   147→  id              text primary key default gen_random_uuid()::text,
+   148→  business_id     text not null references public.business(id) on delete cascade,
+   149→  purchase_return_id text not null references public.purchase_returns(id) on delete cascade,
+   150→  purchase_item_id   text not null references public.purchase_items(id) on delete restrict,
+   151→  product_id      text references public.products(id) on delete set null,
+   152→  product_name    text not null,
+   153→  quantity        integer not null,
+   154→  unit_cost       numeric(20,0) not null,  -- paisas
+   155→  line_total      numeric(20,0) not null,  -- paisas
+   156→  stock_movement_id text references public.stock_movements(id) on delete set null,
+   157→  created_at      timestamptz not null default now()
+   158→);
+   159→create index if not exists purchase_return_items_return_idx on public.purchase_return_items(purchase_return_id);
+   160→
+   161→-- ============================================================================
+   162→-- RPC FUNCTIONS
+   163→-- ============================================================================
+   164→
+   165→-- ----------------------------------------------------------------------------
+   166→-- 7. next_purchase_no() — concurrency-safe purchase number sequence.
+   167→--    Returns 'PUR-0001', 'PUR-0002', etc.
+   168→-- ----------------------------------------------------------------------------
+   169→create or replace function public.next_purchase_no(p_business_id text)
+   170→returns text
+   171→language plpgsql
+   172→security definer
+   173→set search_path = public
+   174→as $$
+   175→declare
+   176→  v_next int;
+   177→begin
+   178→  perform pg_advisory_xact_lock(987654322, hashtext(p_business_id));
+   179→  select coalesce(max(cast(replace(purchase_no, 'PUR-', '') as integer)), 0) + 1
+   180→    into v_next
+   181→    from public.purchases
+   182→    where business_id = p_business_id;
+   183→  return 'PUR-' || lpad(v_next::text, 4, '0');
+   184→end;
+   185→$$;
+   186→
+   187→-- ----------------------------------------------------------------------------
+   188→-- 8. next_purchase_return_no() — concurrency-safe return number sequence.
+   189→--    Returns 'PRN-0001', 'PRN-0002', etc.
+   190→-- ----------------------------------------------------------------------------
+   191→create or replace function public.next_purchase_return_no(p_business_id text)
+   192→returns text
+   193→language plpgsql
+   194→security definer
+   195→set search_path = public
+   196→as $$
+   197→declare
+   198→  v_next int;
+   199→begin
+   200→  perform pg_advisory_xact_lock(987654323, hashtext(p_business_id));
+   201→  select coalesce(max(cast(replace(return_no, 'PRN-', '') as integer)), 0) + 1
+   202→    into v_next
+   203→    from public.purchase_returns
+   204→    where business_id = p_business_id;
+   205→  return 'PRN-' || lpad(v_next::text, 4, '0');
+   206→end;
+   207→$$;
+   208→
+   209→-- ----------------------------------------------------------------------------
+   210→-- 9. post_purchase() — atomic purchase posting RPC.
+   211→--    Creates: purchase + items + stock-in + voucher + payments + audit.
+   212→--    SECURITY DEFINER so it can insert into all tables.
+   213→--
+   214→--    p_items: [{product_id, product_name, quantity, unit_cost_paisas}, ...]
+   215→--    p_payments: [{account_id, amount_paisas, payment_type}, ...]
+   216→--         payment_type: 'purchase_payment' | 'vendor_advance' | 'credit' (no cash)
+   217→--    p_discount_paisas, p_additional_charges_paisas: numeric
+   218→-- ----------------------------------------------------------------------------
+   219→create or replace function public.post_purchase(
+   220→  p_business_id     text,
+   221→  p_vendor_id       text,
+   222→  p_purchase_date   date,
+   223→  p_supplier_bill_no text default null,
+   224→  p_items           jsonb default '[]'::jsonb,
+   225→  p_payments        jsonb default '[]'::jsonb,
+   226→  p_discount_paisas numeric(20,0) default 0,
+   227→  p_additional_charges_paisas numeric(20,0) default 0,
+   228→  p_notes           text default null,
+   229→  p_created_by      uuid default null
+   230→)
+   231→returns text  -- the new purchase id
+   232→language plpgsql
+   233→security definer
+   234→set search_path = public
+   235→as $$
+   236→declare
+   237→  v_purchase_id    text;
+   238→  v_purchase_no    text;
+   239→  v_subtotal       numeric(20,0) := 0;
+   240→  v_total          numeric(20,0) := 0;
+   241→  v_paid           numeric(20,0) := 0;
+   242→  v_outstanding    numeric(20,0) := 0;
+   243→  v_item           jsonb;
+   244→  v_payment        jsonb;
+   245→  v_line_total     numeric(20,0);
+   246→  v_qty            integer;
+   247→  v_unit_cost      numeric(20,0);
+   248→  v_product_id     text;
+   249→  v_voucher_id     text;
+   250→  v_voucher_lines  jsonb := '[]'::jsonb;
+   251→  v_purchases_acct text;
+   252→  v_payable_acct   text;
+   253→  v_vendor         record;
+   254→  v_stock_sm_id    text;
+   255→  v_pp_id          text;
+   256→  v_status         text;
+   257→begin
+   258→  -- Validate at least 1 item.
+   259→  if jsonb_array_length(p_items) < 1 then
+   260→    raise exception 'Purchase must have at least 1 item';
+   261→  end if;
+   262→
+   263→  -- Validate vendor belongs to business.
+   264→  select * into v_vendor from public.vendors
+   265→  where id = p_vendor_id and business_id = p_business_id and is_active = true;
+   266→  if not found then
+   267→    raise exception 'Invalid or inactive vendor: %', p_vendor_id;
+   268→  end if;
+   269→
+   270→  -- Generate purchase number.
+   271→  v_purchase_no := public.next_purchase_no(p_business_id);
+   272→
+   273→  -- Compute subtotal from items.
+   274→  for v_item in select * from jsonb_array_elements(p_items)
+   275→  loop
+   276→    v_qty := (v_item->>'quantity')::integer;
+   277→    v_unit_cost := coalesce((v_item->>'unit_cost_paisas')::numeric, 0);
+   278→    v_line_total := v_qty * v_unit_cost;
+   279→    v_subtotal := v_subtotal + v_line_total;
+   280→  end loop;
+   281→
+   282→  -- Total = subtotal - discount + additional_charges
+   283→  v_total := v_subtotal - p_discount_paisas + p_additional_charges_paisas;
+   284→
+   285→  -- Compute paid from payments (exclude 'credit' type).
+   286→  for v_payment in select * from jsonb_array_elements(p_payments)
+   287→  loop
+   288→    if coalesce((v_payment->>'payment_type')::text, 'purchase_payment') <> 'credit' then
+   289→      v_paid := v_paid + coalesce((v_payment->>'amount_paisas')::numeric, 0);
+   290→    end if;
+   291→  end loop;
+   292→
+   293→  v_outstanding := v_total - v_paid;
+   294→
+   295→  -- Determine status.
+   296→  if v_outstanding <= 0 then
+   297→    v_status := 'paid';
+   298→  elsif v_paid > 0 then
+   299→    v_status := 'partially_paid';
+   300→  else
+   301→    v_status := 'posted';
+   302→  end if;
+   303→
+   304→  -- Resolve accounts by code.
+   305→  -- Purchases/COGS = 5010, Vendors Payable = 2010
+   306→  select id into v_purchases_acct from public.accounts
+   307→  where business_id = p_business_id and code = '5010' and is_active = true;
+   308→  if not found then
+   309→    raise exception 'Purchases/COGS account (5010) not found';
+   310→  end if;
+   311→
+   312→  select id into v_payable_acct from public.accounts
+   313→  where business_id = p_business_id and code = '2010' and is_active = true;
+   314→  if not found then
+   315→    raise exception 'Vendors Payable account (2010) not found';
+   316→  end if;
+   317→
+   318→  -- Build voucher lines.
+   319→  -- Debit Purchases/COGS by total.
+   320→  v_voucher_lines := v_voucher_lines || jsonb_build_object(
+   321→    'account_id', v_purchases_acct,
+   322→    'debit', v_total::text,
+   323→    'credit', '0',
+   324→    'memo', 'Purchase ' || v_purchase_no
+   325→  );
+   326→
+   327→  -- Credit each payment account (non-credit payments).
+   328→  for v_payment in select * from jsonb_array_elements(p_payments)
+   329→  loop
+   330→    if coalesce((v_payment->>'payment_type')::text, 'purchase_payment') <> 'credit' then
+   331→      v_voucher_lines := v_voucher_lines || jsonb_build_object(
+   332→        'account_id', v_payment->>'account_id',
+   333→        'debit', '0',
+   334→        'credit', coalesce((v_payment->>'amount_paisas')::numeric, 0)::text,
+   335→        'memo', 'Payment for ' || v_purchase_no
+   336→      );
+   337→    end if;
+   338→  end loop;
+   339→
+   340→  -- Credit Vendor Payable for outstanding.
+   341→  if v_outstanding > 0 then
+   342→    v_voucher_lines := v_voucher_lines || jsonb_build_object(
+   343→      'account_id', v_payable_acct,
+   344→      'debit', '0',
+   345→      'credit', v_outstanding::text,
+   346→      'memo', 'Payable for ' || v_purchase_no
+   347→    );
+   348→  end if;
+   349→
+   350→  -- Post the voucher.
+   351→  v_voucher_id := public.post_voucher(
+   352→    p_business_id, 'PU', p_purchase_date,
+   353→    'Purchase ' || v_purchase_no, v_voucher_lines,
+   354→    null, null, p_created_by
+   355→  );
+   356→
+   357→  -- Insert purchase header.
+   358→  insert into public.purchases (
+   359→    business_id, purchase_no, vendor_id, supplier_bill_no, purchase_date,
+   360→    subtotal, discount, additional_charges, total, paid_amount, outstanding_amount,
+   361→    status, notes, voucher_id, created_by
+   362→  ) values (
+   363→    p_business_id, v_purchase_no, p_vendor_id, p_supplier_bill_no, p_purchase_date,
+   364→    v_subtotal, p_discount_paisas, p_additional_charges_paisas, v_total, v_paid, v_outstanding,
+   365→    v_status, p_notes, v_voucher_id, p_created_by
+   366→  ) returning id into v_purchase_id;
+   367→
+   368→  -- Insert items + create stock-in movements.
+   369→  for v_item in select * from jsonb_array_elements(p_items)
+   370→  loop
+   371→    v_qty := (v_item->>'quantity')::integer;
+   372→    v_unit_cost := coalesce((v_item->>'unit_cost_paisas')::numeric, 0);
+   373→    v_line_total := v_qty * v_unit_cost;
+   374→    v_product_id := v_item->>'product_id';
+   375→
+   376→    v_stock_sm_id := null;
+   377→    if v_product_id is not null and v_product_id <> '' then
+   378→      v_stock_sm_id := public.create_stock_movement(
+   379→        p_business_id, v_product_id, 'adjustment_in', v_qty,
+   380→        'Purchase ' || v_purchase_no, p_purchase_date, p_created_by
+   381→      );
+   382→    end if;
+   383→
+   384→    insert into public.purchase_items (
+   385→      business_id, purchase_id, product_id, product_name, quantity, unit_cost, line_total, stock_movement_id
+   386→    ) values (
+   387→      p_business_id, v_purchase_id, v_product_id,
+   388→      v_item->>'product_name', v_qty, v_unit_cost, v_line_total, v_stock_sm_id
+   389→    );
+   390→  end loop;
+   391→
+   392→  -- Insert payment records.
+   393→  for v_payment in select * from jsonb_array_elements(p_payments)
+   394→  loop
+   395→    if coalesce((v_payment->>'payment_type')::text, 'purchase_payment') <> 'credit' then
+   396→      insert into public.purchase_payments (
+   397→        business_id, purchase_id, vendor_id, account_id, amount, payment_date, payment_type, voucher_id, notes, created_by
+   398→      ) values (
+   399→        p_business_id, v_purchase_id, p_vendor_id,
+   400→        v_payment->>'account_id',
+   401→        coalesce((v_payment->>'amount_paisas')::numeric, 0),
+   402→        p_purchase_date,
+   403→        coalesce((v_payment->>'payment_type')::text, 'purchase_payment'),
+   404→        v_voucher_id,
+   405→        v_payment->>'notes',
+   406→        p_created_by
+   407→      ) returning id into v_pp_id;
+   408→    end if;
+   409→  end loop;
+   410→
+   411→  -- Audit.
+   412→  insert into public.audit_logs (business_id, user_id, action, entity, entity_id, details)
+   413→  values (p_business_id, p_created_by, 'POST_PURCHASE', 'purchase', v_purchase_id,
+   414→    jsonb_build_object('purchase_no', v_purchase_no, 'total', v_total, 'paid', v_paid, 'outstanding', v_outstanding, 'voucher_id', v_voucher_id));
+   415→
+   416→  return v_purchase_id;
+   417→end;
+   418→$$;
+   419→
+   420→-- ----------------------------------------------------------------------------
+   421→-- 10. post_vendor_payment() — pay vendor later (separate from purchase).
+   422→--     Posts: Supplier Payable debit, Cash/Bank credit.
+   423→-- ----------------------------------------------------------------------------
+   424→create or replace function public.post_vendor_payment(
+   425→  p_business_id   text,
+   426→  p_vendor_id     text,
+   427→  p_account_id    text,
+   428→  p_amount_paisas numeric(20,0),
+   429→  p_payment_date  date default null,
+   430→  p_purchase_id   text default null,
+   431→  p_notes         text default null,
+   432→  p_created_by    uuid default null
+   433→)
+   434→returns text  -- the purchase_payment id
+   435→language plpgsql
+   436→security definer
+   437→set search_path = public
+   438→as $$
+   439→declare
+   440→  v_pp_id        text;
+   441→  v_voucher_id   text;
+   442→  v_voucher_lines jsonb := '[]'::jsonb;
+   443→  v_payable_acct text;
+   444→  v_date         date;
+   445→begin
+   446→  -- Validate vendor.
+   447→  if not exists (select 1 from public.vendors where id = p_vendor_id and business_id = p_business_id and is_active = true) then
+   448→    raise exception 'Invalid vendor: %', p_vendor_id;
+   449→  end if;
+   450→
+   451→  -- Validate account is active and belongs to business.
+   452→  if not exists (select 1 from public.accounts where id = p_account_id and business_id = p_business_id and is_active = true) then
+   453→    raise exception 'Invalid or inactive account: %', p_account_id;
+   454→  end if;
+   455→
+   456→  -- Resolve Vendors Payable account (2010).
+   457→  select id into v_payable_acct from public.accounts
+   458→  where business_id = p_business_id and code = '2010' and is_active = true;
+   459→  if not found then
+   460→    raise exception 'Vendors Payable account (2010) not found';
+   461→  end if;
+   462→
+   463→  v_date := coalesce(p_payment_date, (now() at time zone 'Asia/Karachi')::date);
+   464→
+   465→  -- Voucher: Debit Payable, Credit Cash/Bank.
+   466→  v_voucher_lines := v_voucher_lines || jsonb_build_object(
+   467→    'account_id', v_payable_acct, 'debit', p_amount_paisas::text, 'credit', '0',
+   468→    'memo', 'Vendor payment'
+   469→  );
+   470→  v_voucher_lines := v_voucher_lines || jsonb_build_object(
+   471→    'account_id', p_account_id, 'debit', '0', 'credit', p_amount_paisas::text,
+   472→    'memo', 'Paid to vendor'
+   473→  );
+   474→
+   475→  v_voucher_id := public.post_voucher(
+   476→    p_business_id, 'PM', v_date, 'Vendor payment', v_voucher_lines,
+   477→    p_purchase_id, 'vendor_payment', p_created_by
+   478→  );
+   479→
+   480→  -- Insert payment record.
+   481→  insert into public.purchase_payments (
+   482→    business_id, purchase_id, vendor_id, account_id, amount, payment_date, payment_type, voucher_id, notes, created_by
+   483→  ) values (
+   484→    p_business_id, p_purchase_id, p_vendor_id, p_account_id, p_amount_paisas, v_date,
+   485→    'later_payment', v_voucher_id, p_notes, p_created_by
+   486→  ) returning id into v_pp_id;
+   487→
+   488→  -- Update purchase outstanding if linked.
+   489→  if p_purchase_id is not null then
+   490→    update public.purchases
+   491→    set paid_amount = paid_amount + p_amount_paisas,
+   492→        outstanding_amount = outstanding_amount - p_amount_paisas,
+   493→        status = case when outstanding_amount - p_amount_paisas <= 0 then 'paid' else 'partially_paid' end,
+   494→        updated_at = now()
+   495→    where id = p_purchase_id;
+   496→  end if;
+   497→
+   498→  -- Audit.
+   499→  insert into public.audit_logs (business_id, user_id, action, entity, entity_id, details)
+   500→  values (p_business_id, p_created_by, 'VENDOR_PAYMENT', 'purchase_payment', v_pp_id,
+   501→    jsonb_build_object('vendor_id', p_vendor_id, 'amount', p_amount_paisas, 'voucher_id', v_voucher_id));
+   502→
+   503→  return v_pp_id;
+   504→end;
+   505→$$;
+   506→
+   507→-- ----------------------------------------------------------------------------
+   508→-- 11. post_vendor_advance() — record vendor advance.
+   509→--     Posts: Vendor Advance debit, Cash/Bank credit.
+   510→--     Uses a dynamic account for vendor advance. We create a sub-account
+   511→--     under Liability if it doesn't exist, or use an existing one.
+   512→--     For simplicity, we use the Vendor Payable account (2010) as the
+   513→--     advance account — advance is a debit balance on the payable account.
+   514→-- ----------------------------------------------------------------------------
+   515→create or replace function public.post_vendor_advance(
+   516→  p_business_id   text,
+   517→  p_vendor_id     text,
+   518→  p_account_id    text,
+   519→  p_amount_paisas numeric(20,0),
+   520→  p_advance_date  date default null,
+   521→  p_notes         text default null,
+   522→  p_created_by    uuid default null
+   523→)
+   524→returns text
+   525→language plpgsql
+   526→security definer
+   527→set search_path = public
+   528→as $$
+   529→declare
+   530→  v_pp_id        text;
+   531→  v_voucher_id   text;
+   532→  v_voucher_lines jsonb := '[]'::jsonb;
+   533→  v_payable_acct text;
+   534→  v_date         date;
+   535→begin
+   536→  if not exists (select 1 from public.vendors where id = p_vendor_id and business_id = p_business_id and is_active = true) then
+   537→    raise exception 'Invalid vendor: %', p_vendor_id;
+   538→  end if;
+   539→  if not exists (select 1 from public.accounts where id = p_account_id and business_id = p_business_id and is_active = true) then
+   540→    raise exception 'Invalid account: %', p_account_id;
+   541→  end if;
+   542→
+   543→  select id into v_payable_acct from public.accounts
+   544→  where business_id = p_business_id and code = '2010' and is_active = true;
+   545→  if not found then raise exception 'Vendors Payable account (2010) not found'; end if;
+   546→
+   547→  v_date := coalesce(p_advance_date, (now() at time zone 'Asia/Karachi')::date);
+   548→
+   549→  -- Debit Vendor Payable (advance = debit balance), Credit Cash/Bank.
+   550→  v_voucher_lines := v_voucher_lines || jsonb_build_object(
+   551→    'account_id', v_payable_acct, 'debit', p_amount_paisas::text, 'credit', '0',
+   552→    'memo', 'Vendor advance'
+   553→  );
+   554→  v_voucher_lines := v_voucher_lines || jsonb_build_object(
+   555→    'account_id', p_account_id, 'debit', '0', 'credit', p_amount_paisas::text,
+   556→    'memo', 'Advance paid to vendor'
+   557→  );
+   558→
+   559→  v_voucher_id := public.post_voucher(
+   560→    p_business_id, 'PM', v_date, 'Vendor advance', v_voucher_lines,
+   561→    null, 'vendor_advance', p_created_by
+   562→  );
+   563→
+   564→  insert into public.purchase_payments (
+   565→    business_id, purchase_id, vendor_id, account_id, amount, payment_date, payment_type, voucher_id, notes, created_by
+   566→  ) values (
+   567→    p_business_id, null, p_vendor_id, p_account_id, p_amount_paisas, v_date,
+   568→    'vendor_advance', v_voucher_id, p_notes, p_created_by
+   569→  ) returning id into v_pp_id;
+   570→
+   571→  insert into public.audit_logs (business_id, user_id, action, entity, entity_id, details)
+   572→  values (p_business_id, p_created_by, 'VENDOR_ADVANCE', 'purchase_payment', v_pp_id,
+   573→    jsonb_build_object('vendor_id', p_vendor_id, 'amount', p_amount_paisas));
+   574→
+   575→  return v_pp_id;
+   576→end;
+   577→$$;
+   578→
+   579→-- ----------------------------------------------------------------------------
+   580→-- 12. post_purchase_return() — atomic purchase return.
+   581→--     Creates: return header + items + stock-out + reversing voucher.
+   582→--     settlement_type: reduce_payable | vendor_refund | vendor_credit
+   583→-- ----------------------------------------------------------------------------
+   584→create or replace function public.post_purchase_return(
+   585→  p_business_id        text,
+   586→  p_purchase_id        text,
+   587→  p_return_items       jsonb,  -- [{purchase_item_id, product_id, product_name, quantity, unit_cost_paisas}, ...]
+   588→  p_settlement_type    text default 'reduce_payable',
+   589→  p_settlement_account_id text default null,
+   590→  p_return_date        date default null,
+   591→  p_notes              text default null,
+   592→  p_created_by         uuid default null
+   593→)
+   594→returns text  -- the purchase_return id
+   595→language plpgsql
+   596→security definer
+   597→set search_path = public
+   598→as $$
+   599→declare
+   600→  v_return_id    text;
+   601→  v_return_no    text;
+   602→  v_total        numeric(20,0) := 0;
+   603→  v_item         jsonb;
+   604→  v_line_total   numeric(20,0);
+   605→  v_qty          integer;
+   606→  v_unit_cost    numeric(20,0);
+   607→  v_product_id   text;
+   608→  v_voucher_id   text;
+   609→  v_voucher_lines jsonb := '[]'::jsonb;
+   610→  v_purchases_acct text;
+   611→  v_payable_acct   text;
+   612→  v_purchase     record;
+   613→  v_stock_sm_id  text;
+   614→  v_date         date;
+   615→begin
+   616→  -- Load original purchase.
+   617→  select * into v_purchase from public.purchases
+   618→  where id = p_purchase_id and business_id = p_business_id;
+   619→  if not found then raise exception 'Purchase not found: %', p_purchase_id; end if;
+   620→
+   621→  -- Generate return number.
+   622→  v_return_no := public.next_purchase_return_no(p_business_id);
+   623→
+   624→  -- Compute total from return items.
+   625→  for v_item in select * from jsonb_array_elements(p_return_items)
+   626→  loop
+   627→    v_qty := (v_item->>'quantity')::integer;
+   628→    v_unit_cost := coalesce((v_item->>'unit_cost_paisas')::numeric, 0);
+   629→    v_line_total := v_qty * v_unit_cost;
+   630→    v_total := v_total + v_line_total;
+   631→  end loop;
+   632→
+   633→  -- Resolve accounts.
+   634→  select id into v_purchases_acct from public.accounts
+   635→  where business_id = p_business_id and code = '5010' and is_active = true;
+   636→  if not found then raise exception 'Purchases account (5010) not found'; end if;
+   637→
+   638→  select id into v_payable_acct from public.accounts
+   639→  where business_id = p_business_id and code = '2010' and is_active = true;
+   640→  if not found then raise exception 'Vendors Payable account (2010) not found'; end if;
+   641→
+   642→  v_date := coalesce(p_return_date, (now() at time zone 'Asia/Karachi')::date);
+   643→
+   644→  -- Build voucher lines based on settlement type.
+   645→  -- Credit Purchases/COGS (reverse the original debit).
+   646→  v_voucher_lines := v_voucher_lines || jsonb_build_object(
+   647→    'account_id', v_purchases_acct, 'debit', '0', 'credit', v_total::text,
+   648→    'memo', 'Purchase return ' || v_return_no
+   649→  );
+   650→
+   651→  if p_settlement_type = 'reduce_payable' then
+   652→    -- Debit Vendor Payable (reduce what we owe).
+   653→    v_voucher_lines := v_voucher_lines || jsonb_build_object(
+   654→      'account_id', v_payable_acct, 'debit', v_total::text, 'credit', '0',
+   655→      'memo', 'Return reduces payable ' || v_return_no
+   656→    );
+   657→  elsif p_settlement_type = 'vendor_refund' then
+   658→    -- Debit Cash/Bank (vendor refunds us).
+   659→    if p_settlement_account_id is null then
+   660→      raise exception 'Settlement account required for vendor_refund';
+   661→    end if;
+   662→    v_voucher_lines := v_voucher_lines || jsonb_build_object(
+   663→      'account_id', p_settlement_account_id, 'debit', v_total::text, 'credit', '0',
+   664→      'memo', 'Vendor refund ' || v_return_no
+   665→    );
+   666→  else
+   667→    -- vendor_credit: Debit Vendor Payable (same as reduce_payable accounting-wise).
+   668→    v_voucher_lines := v_voucher_lines || jsonb_build_object(
+   669→      'account_id', v_payable_acct, 'debit', v_total::text, 'credit', '0',
+   670→      'memo', 'Vendor credit ' || v_return_no
+   671→    );
+   672→  end if;
+   673→
+   674→  -- Post reversing voucher.
+   675→  v_voucher_id := public.post_voucher(
+   676→    p_business_id, 'PR', v_date, 'Purchase return ' || v_return_no,
+   677→    v_voucher_lines, p_purchase_id, 'purchase_return', p_created_by
+   678→  );
+   679→
+   680→  -- Insert return header.
+   681→  insert into public.purchase_returns (
+   682→    business_id, purchase_id, vendor_id, return_no, return_date, total_amount,
+   683→    settlement_type, settlement_account_id, voucher_id, notes, created_by
+   684→  ) values (
+   685→    p_business_id, p_purchase_id, v_purchase.vendor_id, v_return_no, v_date, v_total,
+   686→    p_settlement_type, p_settlement_account_id, v_voucher_id, p_notes, p_created_by
+   687→  ) returning id into v_return_id;
+   688→
+   689→  -- Insert return items + create stock-out movements.
+   690→  for v_item in select * from jsonb_array_elements(p_return_items)
+   691→  loop
+   692→    v_qty := (v_item->>'quantity')::integer;
+   693→    v_unit_cost := coalesce((v_item->>'unit_cost_paisas')::numeric, 0);
+   694→    v_line_total := v_qty * v_unit_cost;
+   695→    v_product_id := v_item->>'product_id';
+   696→
+   697→    v_stock_sm_id := null;
+   698→    if v_product_id is not null and v_product_id <> '' then
+   699→      v_stock_sm_id := public.create_stock_movement(
+   700→        p_business_id, v_product_id, 'adjustment_out', v_qty,
+   701→        'Purchase return ' || v_return_no, v_date, p_created_by
+   702→      );
+   703→    end if;
+   704→
+   705→    insert into public.purchase_return_items (
+   706→      business_id, purchase_return_id, purchase_item_id, product_id, product_name,
+   707→      quantity, unit_cost, line_total, stock_movement_id
+   708→    ) values (
+   709→      p_business_id, v_return_id, v_item->>'purchase_item_id', v_product_id,
+   710→      v_item->>'product_name', v_qty, v_unit_cost, v_line_total, v_stock_sm_id
+   711→    );
+   712→
+   713→    -- Update returned_quantity on original purchase_item.
+   714→    update public.purchase_items
+   715→    set returned_quantity = returned_quantity + v_qty
+   716→    where id = v_item->>'purchase_item_id';
+   717→  end loop;
+   718→
+   719→  -- Update purchase status.
+   720→  if v_total >= v_purchase.total then
+   721→    update public.purchases set status = 'returned', updated_at = now() where id = p_purchase_id;
+   722→  else
+   723→    update public.purchases set status = 'partially_returned', updated_at = now() where id = p_purchase_id;
+   724→  end if;
+   725→
+   726→  -- Audit.
+   727→  insert into public.audit_logs (business_id, user_id, action, entity, entity_id, details)
+   728→  values (p_business_id, p_created_by, 'PURCHASE_RETURN', 'purchase_return', v_return_id,
+   729→    jsonb_build_object('return_no', v_return_no, 'purchase_id', p_purchase_id, 'total', v_total, 'voucher_id', v_voucher_id));
+   730→
+   731→  return v_return_id;
+   732→end;
+   733→$$;
+   734→
+   735→-- ============================================================================
+   736→-- Row-Level Security
+   737→-- ============================================================================
+   738→
+   739→alter table public.vendors               enable row level security;
+   740→alter table public.purchases              enable row level security;
+   741→alter table public.purchase_items         enable row level security;
+   742→alter table public.purchase_payments      enable row level security;
+   743→alter table public.purchase_returns       enable row level security;
+   744→alter table public.purchase_return_items  enable row level security;
+   745→
+   746→-- vendors: readable by members; managed by can_manage_setup or can_create_purchases.
+   747→drop policy if exists vendors_select_own on public.vendors;
+   748→create policy vendors_select_own on public.vendors
+   749→  for select using (business_id = public.current_business_id());
+   750→
+   751→drop policy if exists vendors_manage_perms on public.vendors;
+   752→create policy vendors_manage_perms on public.vendors
+   753→  for all using (
+   754→    business_id = public.current_business_id()
+   755→    and (public.has_permission('can_manage_setup') or public.has_permission('can_create_purchases'))
+   756→  ) with check (
+   757→    business_id = public.current_business_id()
+   758→    and (public.has_permission('can_manage_setup') or public.has_permission('can_create_purchases'))
+   759→  );
+   760→
+   761→-- purchases: readable by members with can_view_purchases.
+   762→drop policy if exists purchases_select_own on public.purchases;
+   763→create policy purchases_select_own on public.purchases
+   764→  for select using (
+   765→    business_id = public.current_business_id()
+   766→    and public.has_permission('can_view_purchases')
+   767→  );
+   768→
+   769→-- No direct INSERT on purchases — must use post_purchase() RPC.
+   770→
+   771→-- purchase_items: readable by members with can_view_purchases.
+   772→drop policy if exists purchase_items_select_own on public.purchase_items;
+   773→create policy purchase_items_select_own on public.purchase_items
+   774→  for select using (
+   775→    business_id = public.current_business_id()
+   776→    and public.has_permission('can_view_purchases')
+   777→  );
+   778→
+   779→-- purchase_payments: readable by members with can_view_purchases.
+   780→drop policy if exists purchase_payments_select_own on public.purchase_payments;
+   781→create policy purchase_payments_select_own on public.purchase_payments
+   782→  for select using (
+   783→    business_id = public.current_business_id()
+   784→    and public.has_permission('can_view_purchases')
+   785→  );
+   786→
+   787→-- purchase_returns: readable by members with can_view_purchases.
+   788→drop policy if exists purchase_returns_select_own on public.purchase_returns;
+   789→create policy purchase_returns_select_own on public.purchase_returns
+   790→  for select using (
+   791→    business_id = public.current_business_id()
+   792→    and public.has_permission('can_view_purchases')
+   793→  );
+   794→
+   795→-- purchase_return_items: readable by members with can_view_purchases.
+   796→drop policy if exists purchase_return_items_select_own on public.purchase_return_items;
+   797→create policy purchase_return_items_select_own on public.purchase_return_items
+   798→  for select using (
+   799→    business_id = public.current_business_id()
+   800→    and public.has_permission('can_view_purchases')
+   801→  );
+   802→
+   803→-- ============================================================================
+   804→-- Updated_at triggers
+   805→-- ============================================================================
+   806→drop trigger if exists vendors_touch on public.vendors;
+   807→create trigger vendors_touch before update on public.vendors
+   808→  for each row execute function public.touch_updated_at();
+   809→
+   810→drop trigger if exists purchases_touch on public.purchases;
+   811→create trigger purchases_touch before update on public.purchases
+   812→  for each row execute function public.touch_updated_at();
+   813→
+   814→-- ============================================================================
+   815→-- Add new permissions to the catalog
+   816→-- ============================================================================
+   817→insert into public.permissions (code, module, description) values
+   818→  ('can_pay_vendors', 'purchases', 'Pay vendors and record advances'),
+   819→  ('can_manage_vendors', 'purchases', 'Create/edit vendors'),
+   820→  ('can_return_purchases', 'purchases', 'Post purchase returns'),
+   821→  ('can_view_vendor_ledger', 'purchases', 'View vendor ledger')
+   822→on conflict (code) do update set
+   823→  module = excluded.module,
+   824→  description = excluded.description;
+   825→
+   826→-- Grant new permissions to Owner/Admin and Accountant.
+   827→insert into public.role_permissions (role_id, permission_id)
+   828→select r.id, p.id from public.roles r, public.permissions p
+   829→where r.business_id = 'biz-default' and r.name in ('Owner/Admin', 'Accountant')
+   830→  and p.code in ('can_pay_vendors', 'can_manage_vendors', 'can_return_purchases', 'can_view_vendor_ledger')
+   831→on conflict do nothing;
+   832→
+   833→-- Refresh PostgREST schema cache.
+   834→NOTIFY pgrst, 'reload schema';
+   835→
+   836→-- ============================================================================
+   837→-- Done. Phase 5 purchases module is live with:
+   838→--   ✓ Vendors table with linked ledger accounts
+   839→--   ✓ Purchases with PUR-0001 sequence (concurrency-safe)
+   840→--   ✓ Purchase items with stock-in movements
+   841→--   ✓ Purchase payments (cash, credit, partial, advance)
+   842→--   ✓ Purchase returns with PRN-0001 sequence
+   843→--   ✓ post_purchase() RPC — atomic purchase posting
+   844→--   ✓ post_vendor_payment() RPC — later vendor payments
+   845→--   ✓ post_vendor_advance() RPC — vendor advances
+   846→--   ✓ post_purchase_return() RPC — atomic returns with stock-out
+   847→--   ✓ RLS on all tables
+   848→--   ✓ Audit logs for all actions
+   849→--   ✓ New permissions: can_pay_vendors, can_manage_vendors, can_return_purchases, can_view_vendor_ledger
+   850→-- ============================================================================
+   851→

@@ -7,13 +7,13 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { toast } from 'sonner'
-import { Plus, Search, Package, Wallet, TrendingDown, X, CheckCircle2, AlertCircle, MoreVertical, History, Printer, FileText, ArrowLeft } from 'lucide-react'
-import { formatMoney } from '@/lib/format'
+import { Plus, Search, Package, Wallet, TrendingDown, X, CheckCircle2, AlertCircle, MoreVertical, History, Printer, FileText, ArrowLeft, RefreshCw, ArrowRightLeft } from 'lucide-react'
+import { formatMoney, parseMoney } from '@/lib/format'
 import { bizDate } from '@/lib/dates'
 import { motion, AnimatePresence } from 'framer-motion'
 import type { MeUser } from '@/components/erp/erp-app'
 
-type Purchase = { id: string; purchaseNo: string; vendorId: string; vendorName: string | null; supplierBillNo: string | null; purchaseDate: string; total: string; paidAmount: string; outstandingAmount: string; status: string }
+type Purchase = { id: string; purchaseNo: string; vendorId: string; vendorName: string | null; vendorPhone?: string | null; vendorAddress?: string | null; vendorCity?: string | null; supplierBillNo: string | null; purchaseDate: string; total: string; paidAmount: string; outstandingAmount: string; status: string }
 type Vendor = { id: string; name: string; phone: string | null }
 type Product = { id: string; name: string; currentStock: number; purchasePrice: number }
 type Account = { id: string; code: string; name: string }
@@ -31,10 +31,12 @@ export function PurchasesView({ user }: { user: MeUser }) {
   const canReturn = user.permissions.includes('can_return_purchases')
   const [search, setSearch] = useState('')
   const [filter, setFilter] = useState('all')
-  const [modal, setModal] = useState<'add' | 'pay' | 'return' | 'detail' | null>(null)
+  const [modal, setModal] = useState<'add' | 'pay' | 'return' | 'detail' | 'replacement' | 'apply-advance' | null>(null)
   const [detailId, setDetailId] = useState<string | null>(null)
   const [payPurchase, setPayPurchase] = useState<Purchase | null>(null)
   const [returnPurchase, setReturnPurchase] = useState<PurchaseDetail | null>(null)
+  const [replacementPurchase, setReplacementPurchase] = useState<PurchaseDetail | null>(null)
+  const [applyAdvancePurchase, setApplyAdvancePurchase] = useState<PurchaseDetail | null>(null)
 
   const purchasesQ = useQuery<{ rows: Purchase[] }>({ queryKey: ['purchases'], queryFn: () => fetch('/api/purchases').then(r => r.json()) })
 
@@ -103,9 +105,11 @@ export function PurchasesView({ user }: { user: MeUser }) {
       {/* Modals */}
       <AnimatePresence>
         {modal === 'add' && <AddPurchaseModal user={user} onClose={() => setModal(null)} />}
-        {modal === 'detail' && detailId && <PurchaseDetailModal purchaseId={detailId} user={user} canPay={canPay} canReturn={canReturn} onClose={() => { setModal(null); setDetailId(null) }} onPay={(p) => { setModal('pay'); setPayPurchase(p) }} onReturn={(p) => { setModal('return'); setReturnPurchase(p) }} />}
+        {modal === 'detail' && detailId && <PurchaseDetailModal purchaseId={detailId} user={user} canPay={canPay} canReturn={canReturn} onClose={() => { setModal(null); setDetailId(null) }} onPay={(p) => { setModal('pay'); setPayPurchase(p) }} onReturn={(p) => { setModal('return'); setReturnPurchase(p) }} onReplacement={(p) => { setModal('replacement'); setReplacementPurchase(p) }} onApplyAdvance={(p) => { setModal('apply-advance'); setApplyAdvancePurchase(p) }} />}
         {modal === 'pay' && payPurchase && <PayVendorModal purchase={payPurchase} user={user} onClose={() => { setModal('detail') }} />}
         {modal === 'return' && returnPurchase && <ReturnModal purchase={returnPurchase} user={user} onClose={() => { setModal('detail') }} />}
+        {modal === 'replacement' && replacementPurchase && <ReplacementModal purchase={replacementPurchase} user={user} onClose={() => { setModal('detail') }} />}
+        {modal === 'apply-advance' && applyAdvancePurchase && <ApplyAdvanceModal purchase={applyAdvancePurchase} user={user} onClose={() => { setModal('detail') }} />}
       </AnimatePresence>
     </div>
   )
@@ -134,22 +138,22 @@ function AddPurchaseModal({ user, onClose }: { user: MeUser; onClose: () => void
   const coaQ = useQuery({ queryKey: ['coa'], queryFn: () => fetch('/api/setup/coa').then(r => r.json()) })
   const accounts: Account[] = useMemo(() => coaQ.data?.categories?.flatMap((c: any) => c.accounts).filter((a: any) => a.isBusinessAccount && a.isActive).map((a: any) => ({ id: a.id, code: a.code, name: a.name })) ?? [], [coaQ.data])
 
-  const subtotal = useMemo(() => cart.reduce((s, it) => s + (BigInt(it.unitCost || '0') * BigInt(it.qty || '0')), 0n), [cart])
+  const subtotal = useMemo(() => cart.reduce((s, it) => { const c = parseMoney(it.unitCost); const q = BigInt(it.qty || '0'); return s + (c ?? 0n) * q }, 0n), [cart])
   const totalPaisas = subtotal
   const filteredProducts = productsQ.data?.rows?.filter(p => p.name.toLowerCase().includes(search.toLowerCase())).slice(0, 8) ?? []
 
   const mut = useMutation({
     mutationFn: async () => {
-      const r = await fetch('/api/purchases', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ vendorId, purchaseDate, supplierBillNo: supplierBillNo || undefined, items: cart.map(it => ({ productId: it.productId || null, productName: it.productName, quantity: parseInt(it.qty) || 1, unitCostPaisas: it.unitCost })), payments: payments.map(p => ({ accountId: p.accountId, amountPaisas: p.amountPaisas, paymentType: p.paymentType })) }) })
+      const r = await fetch('/api/purchases', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ vendorId, purchaseDate, supplierBillNo: supplierBillNo || undefined, items: cart.map(it => ({ productId: it.productId || null, productName: it.productName, quantity: parseInt(it.qty) || 1, unitCostPaisas: (parseMoney(it.unitCost) ?? 0n).toString() })), payments: payments.map(p => ({ accountId: p.accountId, amountPaisas: (parseMoney(p.amountPaisas) ?? 0n).toString(), paymentType: p.paymentType })) }) })
       const j = await r.json(); if (!r.ok) throw new Error(j?.error ?? 'Failed'); return j
     },
     onSuccess: (j) => { toast.success(`Purchase posted: ${j.purchaseNo}`); setResult({ ok: true, purchaseNo: j.purchaseNo, purchaseId: j.purchaseId }); void qc.invalidateQueries({ queryKey: ['purchases'] }); void qc.invalidateQueries({ queryKey: ['products'] }) },
     onError: (e: Error) => { setResult({ ok: false, error: e.message }); toast.error(`Failed: ${e.message}`) },
   })
 
-  if (result?.ok) return <Shell title="Purchase Posted" onClose={onClose}><div className="text-center py-4"><CheckCircle2 className="size-12 text-primary mx-auto mb-3" /><p className="text-2xl font-bold text-primary" data-num>{result.purchaseNo}</p><div className="mt-4 flex flex-col gap-2"><Button size="sm" onClick={() => window.open(`/?purchase=${result.purchaseId}`, '_self')}>View Purchase</Button><Button variant="outline" size="sm" onClick={() => window.print()}>Print</Button><Button variant="ghost" size="sm" onClick={() => { setResult(null); setCart([]); setPayments([{ accountId: '', amountPaisas: '', paymentType: 'purchase_payment' }]); setVendorId(''); setSupplierBillNo('') }}>New Purchase</Button></div></div></Shell>
+  if (result?.ok) return <Shell title="Purchase Posted" onClose={onClose}><div className="text-center py-4"><CheckCircle2 className="size-12 text-primary mx-auto mb-3" /><p className="text-2xl font-bold text-primary" data-num>{result.purchaseNo}</p><p className="text-xs text-muted-foreground mt-2">Purchase posted successfully. Close and click the purchase in the list to view details, print, or pay.</p><div className="mt-4 flex flex-col gap-2"><Button variant="ghost" size="sm" onClick={() => { setResult(null); setCart([]); setPayments([{ accountId: '', amountPaisas: '', paymentType: 'purchase_payment' }]); setVendorId(''); setSupplierBillNo('') }}>New Purchase</Button></div></div></Shell>
 
-  function addProduct(pid: string) { const p = productsQ.data?.rows.find(x => x.id === pid); if (p) { setCart(ls => [...ls, { key: String(Date.now()), productId: pid, productName: p.name, qty: '1', unitCost: String(p.purchasePrice * 100) }]); setSearch('') } }
+  function addProduct(pid: string) { const p = productsQ.data?.rows.find(x => x.id === pid); if (p) { setCart(ls => [...ls, { key: String(Date.now()), productId: pid, productName: p.name, qty: '1', unitCost: String(p.purchasePrice) }]); setSearch('') } }
   const canPost = vendorId && cart.length > 0 && cart.every(it => it.qty && it.unitCost) && payments.every(p => p.paymentType === 'credit' || (p.accountId && p.amountPaisas))
 
   return <Shell title="Add Purchase" onClose={onClose} wide>
@@ -168,8 +172,8 @@ function AddPurchaseModal({ user, onClose }: { user: MeUser; onClose: () => void
         <div className="space-y-1">{cart.map(it => <div key={it.key} className="flex items-center gap-2 p-2 border border-border/50 rounded">
           <span className="flex-1 text-sm truncate">{it.productName}</span>
           <Input type="number" value={it.qty} onChange={e => setCart(ls => ls.map(c => c.key === it.key ? { ...c, qty: e.target.value } : c))} className="h-7 w-14 bg-background text-sm" data-num />
-          <Input type="text" value={it.unitCost} onChange={e => setCart(ls => ls.map(c => c.key === it.key ? { ...c, unitCost: e.target.value } : c))} className="h-7 w-20 bg-background text-sm" data-num />
-          <span className="text-xs font-medium w-16 text-right" data-num>{formatMoney(BigInt(it.unitCost || '0') * BigInt(it.qty || '0'), false)}</span>
+          <Input type="text" value={it.unitCost} onChange={e => setCart(ls => ls.map(c => c.key === it.key ? { ...c, unitCost: e.target.value } : c))} placeholder="Rs" className="h-7 w-20 bg-background text-sm" data-num />
+          <span className="text-xs font-medium w-20 text-right" data-num>{formatMoney((parseMoney(it.unitCost) ?? 0n) * BigInt(it.qty || '0'), false)}</span>
           <button onClick={() => setCart(ls => ls.filter(c => c.key !== it.key))} className="text-muted-foreground"><X className="size-3.5" /></button>
         </div>)}</div>
       </div>
@@ -182,7 +186,7 @@ function AddPurchaseModal({ user, onClose }: { user: MeUser; onClose: () => void
           {payments.map((p, i) => <div key={i} className="space-y-1">
             <Select value={p.paymentType} onValueChange={v => setPayments(ls => ls.map((x, j) => j === i ? { ...x, paymentType: v } : x))}><SelectTrigger className="h-8 bg-background text-sm"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="purchase_payment">Cash/Bank Payment</SelectItem><SelectItem value="credit">Credit (No Payment)</SelectItem></SelectContent></Select>
             {p.paymentType !== 'credit' && <><Select value={p.accountId} onValueChange={v => setPayments(ls => ls.map((x, j) => j === i ? { ...x, accountId: v } : x))}><SelectTrigger className="h-8 bg-background text-sm"><SelectValue placeholder="Account…" /></SelectTrigger><SelectContent>{accounts.map(a => <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>)}</SelectContent></Select>
-            <Input type="text" value={p.amountPaisas} onChange={e => setPayments(ls => ls.map((x, j) => j === i ? { ...x, amountPaisas: e.target.value } : x))} placeholder="Amount (paisas)" className="h-8 bg-background text-sm" data-num /></>}
+            <Input type="text" value={p.amountPaisas} onChange={e => setPayments(ls => ls.map((x, j) => j === i ? { ...x, amountPaisas: e.target.value } : x))} placeholder="Amount (Rs)" className="h-8 bg-background text-sm" data-num /></>}
           </div>)}
           <button onClick={() => setPayments(ls => [...ls, { accountId: '', amountPaisas: '', paymentType: 'purchase_payment' }])} className="text-xs text-primary">+ Add payment</button>
         </div>
@@ -193,12 +197,21 @@ function AddPurchaseModal({ user, onClose }: { user: MeUser; onClose: () => void
   </Shell>
 }
 
-function PurchaseDetailModal({ purchaseId, user, canPay, canReturn, onClose, onPay, onReturn }: { purchaseId: string; user: MeUser; canPay: boolean; canReturn: boolean; onClose: () => void; onPay: (p: Purchase) => void; onReturn: (p: PurchaseDetail) => void }) {
+function PurchaseDetailModal({ purchaseId, user, canPay, canReturn, onClose, onPay, onReturn, onReplacement, onApplyAdvance }: { purchaseId: string; user: MeUser; canPay: boolean; canReturn: boolean; onClose: () => void; onPay: (p: Purchase) => void; onReturn: (p: PurchaseDetail) => void; onReplacement: (p: PurchaseDetail) => void; onApplyAdvance: (p: PurchaseDetail) => void }) {
+  const qc = useQueryClient()
   const q = useQuery<{ purchase: PurchaseDetail }>({ queryKey: ['purchase', purchaseId], queryFn: () => fetch(`/api/purchases/${purchaseId}`).then(r => r.json()), enabled: !!purchaseId, retry: 1, retryDelay: 500 })
+  const replacementsQ = useQuery<{ rows: Array<{ id: string; replacementNo: string; date: string; outgoingValue: string; incomingValue: string; valueDiff: string; notes: string | null }> }>({ queryKey: ['purchase-replacements', purchaseId], queryFn: () => fetch(`/api/purchases/${purchaseId}/replacements`).then(r => r.json()), enabled: !!purchaseId, retry: 1, retryDelay: 500 })
+
   if (q.isLoading) return <Shell title="Loading…" onClose={onClose}><div className="text-center py-4 text-sm text-muted-foreground animate-pulse">Loading purchase…</div></Shell>
   if (q.isError || !q.data?.purchase) return <Shell title="Error" onClose={onClose}><div className="text-center py-4"><p className="text-sm text-destructive mb-3">Unable to load purchase.</p><Button variant="outline" size="sm" onClick={() => q.refetch()}>Retry</Button></div></Shell>
   const p = q.data.purchase
   const outstanding = BigInt(p.outstandingAmount)
+  const replacements = replacementsQ.data?.rows ?? []
+
+  function printPurchase() {
+    window.print()
+  }
+
   return <Shell title={p.purchaseNo} onClose={onClose} wide>
     <div className="space-y-3">
       <div className="grid grid-cols-2 gap-2 text-xs">
@@ -207,15 +220,126 @@ function PurchaseDetailModal({ purchaseId, user, canPay, canReturn, onClose, onP
         <div><span className="text-muted-foreground">Bill No:</span> {p.supplierBillNo ?? '—'}</div>
         <div><span className="text-muted-foreground">Status:</span> <span className={`text-[9px] uppercase px-1 py-0.5 rounded border ${STATUS_BADGE[p.status] ?? 'bg-muted'}`}>{p.status.replace(/_/g, ' ')}</span></div>
       </div>
+      {/* Vendor details */}
+      {(p.vendorPhone || p.vendorAddress) && <div className="text-xs text-muted-foreground border-l-2 border-border pl-2">
+        {p.vendorPhone && <div data-num>Phone: {p.vendorPhone}</div>}
+        {p.vendorAddress && <div>{p.vendorAddress}{p.vendorCity ? `, ${p.vendorCity}` : ''}</div>}
+      </div>}
       {/* Items */}
       <div className="border border-border rounded-lg overflow-hidden"><table className="w-full text-sm"><thead className="bg-muted/50"><tr className="text-[10px] uppercase text-muted-foreground"><th className="text-left px-2 py-1.5">Item</th><th className="text-right px-2 py-1.5">Qty</th><th className="text-right px-2 py-1.5">Cost</th><th className="text-right px-2 py-1.5">Total</th></tr></thead><tbody>{p.items?.map(it => <tr key={it.id} className="border-t border-border/40"><td className="px-2 py-1.5">{it.productName}{it.returnedQuantity > 0 && <span className="text-[9px] text-red-600 ml-1">(-{it.returnedQuantity} ret)</span>}</td><td className="text-right px-2 py-1.5" data-num>{it.quantity}</td><td className="text-right px-2 py-1.5" data-num>{formatMoney(BigInt(it.unitCost), false)}</td><td className="text-right px-2 py-1.5 font-medium" data-num>{formatMoney(BigInt(it.lineTotal), false)}</td></tr>)}</tbody></table></div>
       {/* Totals */}
-      <div className="flex justify-end"><div className="text-xs space-y-0.5 min-w-[160px]"><div className="flex justify-between"><span className="text-muted-foreground">Subtotal</span><span data-num>{formatMoney(BigInt(p.subtotal), false)}</span></div><div className="flex justify-between"><span className="text-muted-foreground">Total</span><span className="font-bold" data-num>{formatMoney(BigInt(p.total))}</span></div><div className="flex justify-between"><span className="text-muted-foreground">Paid</span><span className="text-primary" data-num>{formatMoney(BigInt(p.paidAmount))}</span></div>{outstanding > 0n && <div className="flex justify-between"><span className="text-muted-foreground">Outstanding</span><span className="text-amber-600 font-medium" data-num>{formatMoney(outstanding)}</span></div>}</div></div>
+      <div className="flex justify-end"><div className="text-xs space-y-0.5 min-w-[160px]">
+        <div className="flex justify-between"><span className="text-muted-foreground">Subtotal</span><span data-num>{formatMoney(BigInt(p.subtotal), false)}</span></div>
+        {BigInt(p.discount) > 0n && <div className="flex justify-between"><span className="text-muted-foreground">Discount</span><span data-num>−{formatMoney(BigInt(p.discount), false)}</span></div>}
+        {BigInt(p.additionalCharges) > 0n && <div className="flex justify-between"><span className="text-muted-foreground">Add. Charges</span><span data-num>+{formatMoney(BigInt(p.additionalCharges), false)}</span></div>}
+        <div className="flex justify-between"><span className="text-muted-foreground">Total</span><span className="font-bold" data-num>{formatMoney(BigInt(p.total))}</span></div>
+        <div className="flex justify-between"><span className="text-muted-foreground">Paid</span><span className="text-primary" data-num>{formatMoney(BigInt(p.paidAmount))}</span></div>
+        {outstanding > 0n && <div className="flex justify-between"><span className="text-muted-foreground">Outstanding</span><span className="text-amber-600 font-medium" data-num>{formatMoney(outstanding)}</span></div>}
+      </div></div>
+      {/* Payments */}
+      {p.payments && p.payments.length > 0 && <div className="border border-border rounded-lg p-2"><div className="text-[10px] uppercase text-muted-foreground mb-1">Payments</div><div className="space-y-0.5">{p.payments.map(pp => <div key={pp.id} className="flex justify-between text-xs"><span className="text-muted-foreground">{pp.paymentType.replace(/_/g, ' ')} · {bizDate(pp.paymentDate)}</span><span data-num>{formatMoney(BigInt(pp.amount), false)}</span></div>)}</div></div>}
+      {/* Replacements */}
+      {replacements.length > 0 && <div className="border border-border rounded-lg p-2"><div className="text-[10px] uppercase text-muted-foreground mb-1 flex items-center gap-1"><ArrowRightLeft className="size-3" /> Replacements</div><div className="space-y-0.5">{replacements.map(r => <div key={r.id} className="flex justify-between text-xs"><span data-num>{r.replacementNo}</span><span className={BigInt(r.valueDiff) > 0n ? 'text-amber-600' : BigInt(r.valueDiff) < 0n ? 'text-emerald-600' : 'text-muted-foreground'} data-num>{BigInt(r.valueDiff) === 0n ? 'Equal' : formatMoney(BigInt(r.valueDiff), false)}</span></div>)}</div></div>}
       {/* Actions */}
-      <div className="flex gap-2 pt-2 border-t border-border">
-        <Button variant="outline" size="sm" onClick={() => window.print()}><Printer className="size-3.5" /> Print</Button>
+      <div className="flex gap-2 pt-2 border-t border-border flex-wrap">
+        <Button variant="outline" size="sm" onClick={printPurchase}><Printer className="size-3.5" /> Print</Button>
         {canPay && outstanding > 0n && <Button size="sm" onClick={() => onPay(p)}><Wallet className="size-3.5" /> Pay Vendor</Button>}
+        {canPay && outstanding > 0n && <Button variant="outline" size="sm" onClick={() => onApplyAdvance(p)}><RefreshCw className="size-3.5" /> Apply Advance</Button>}
         {canReturn && <Button variant="outline" size="sm" onClick={() => onReturn(p)}><TrendingDown className="size-3.5" /> Return Items</Button>}
+        {canReturn && <Button variant="outline" size="sm" onClick={() => onReplacement(p)}><ArrowRightLeft className="size-3.5" /> Replacement</Button>}
+      </div>
+    </div>
+
+    {/* ─── PRINT-ONLY PURCHASE DOCUMENT (A5 / half-A4) ─── */}
+    <div className="print-purchase" style={{ position: 'absolute', left: '-9999px', top: 0, width: '100%' }}>
+      <div style={{ fontFamily: 'Arial, sans-serif', color: '#000', padding: '6mm', maxWidth: '140mm', margin: '0 auto' }}>
+        {/* Header */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '2px solid #000', paddingBottom: '6px', marginBottom: '8px' }}>
+          <div>
+            <div style={{ fontSize: '18px', fontWeight: 'bold', color: '#000' }}>KhataPro ERP</div>
+            <div style={{ fontSize: '8px', color: '#666' }}>Accounting-First Garments ERP</div>
+          </div>
+          <div style={{ textAlign: 'right' }}>
+            <div style={{ fontSize: '14px', fontWeight: 'bold' }}>PURCHASE</div>
+            <div style={{ fontSize: '11px', fontWeight: 'bold' }}>{p.purchaseNo}</div>
+            <div style={{ fontSize: '9px', color: '#666' }}>{bizDate(p.purchaseDate)}</div>
+          </div>
+        </div>
+        {/* Vendor + Bill info */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px', fontSize: '9px' }}>
+          <div>
+            <div style={{ fontWeight: 'bold', fontSize: '8px', textTransform: 'uppercase', color: '#666' }}>Vendor</div>
+            <div style={{ fontWeight: 'bold' }}>{p.vendorName ?? '—'}</div>
+            {p.vendorPhone && <div>Phone: {p.vendorPhone}</div>}
+            {p.vendorAddress && <div style={{ fontSize: '8px' }}>{p.vendorAddress}{p.vendorCity ? `, ${p.vendorCity}` : ''}</div>}
+          </div>
+          <div style={{ textAlign: 'right' }}>
+            {p.supplierBillNo && <div><strong>Bill No:</strong> {p.supplierBillNo}</div>}
+            <div><strong>Status:</strong> {p.status.replace(/_/g, ' ')}</div>
+          </div>
+        </div>
+        {/* Items */}
+        <table style={{ width: '100%', fontSize: '9px', borderCollapse: 'collapse', marginBottom: '6px' }}>
+          <thead>
+            <tr style={{ background: '#f0f0f0', borderBottom: '1px solid #000' }}>
+              <th style={{ textAlign: 'left', padding: '3px 4px', fontSize: '8px', textTransform: 'uppercase' }}>Product</th>
+              <th style={{ textAlign: 'center', padding: '3px', width: '30px', fontSize: '8px' }}>Qty</th>
+              <th style={{ textAlign: 'right', padding: '3px 4px', width: '55px', fontSize: '8px' }}>Unit Cost</th>
+              <th style={{ textAlign: 'right', padding: '3px 4px', width: '65px', fontSize: '8px' }}>Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            {p.items?.map(it => (
+              <tr key={it.id} style={{ borderBottom: '1px solid #ddd' }}>
+                <td style={{ padding: '3px 4px' }}>{it.productName}{it.returnedQuantity > 0 ? ` (-${it.returnedQuantity} ret)` : ''}</td>
+                <td style={{ textAlign: 'center', padding: '3px' }}>{it.quantity}</td>
+                <td style={{ textAlign: 'right', padding: '3px 4px', fontFamily: 'monospace' }}>{formatMoney(BigInt(it.unitCost), false)}</td>
+                <td style={{ textAlign: 'right', padding: '3px 4px', fontFamily: 'monospace', fontWeight: 'bold' }}>{formatMoney(BigInt(it.lineTotal), false)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {/* Totals */}
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '6px' }}>
+          <div style={{ minWidth: '150px', fontSize: '10px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '1px 0' }}>
+              <span>Subtotal</span><span style={{ fontFamily: 'monospace' }}>{formatMoney(BigInt(p.subtotal), false)}</span>
+            </div>
+            {BigInt(p.discount) > 0n && <div style={{ display: 'flex', justifyContent: 'space-between', padding: '1px 0' }}>
+              <span>Discount</span><span style={{ fontFamily: 'monospace' }}>−{formatMoney(BigInt(p.discount), false)}</span>
+            </div>}
+            {BigInt(p.additionalCharges) > 0n && <div style={{ display: 'flex', justifyContent: 'space-between', padding: '1px 0' }}>
+              <span>Add. Charges</span><span style={{ fontFamily: 'monospace' }}>+{formatMoney(BigInt(p.additionalCharges), false)}</span>
+            </div>}
+            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0', borderTop: '1px solid #000', fontWeight: 'bold' }}>
+              <span>Grand Total</span><span style={{ fontFamily: 'monospace' }}>{formatMoney(BigInt(p.total))}</span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '1px 0' }}>
+              <span>Paid</span><span style={{ fontFamily: 'monospace' }}>{formatMoney(BigInt(p.paidAmount))}</span>
+            </div>
+            {outstanding > 0n && <div style={{ display: 'flex', justifyContent: 'space-between', padding: '1px 0', color: '#c00' }}>
+              <span>Outstanding</span><span style={{ fontFamily: 'monospace' }}>{formatMoney(outstanding)}</span>
+            </div>}
+          </div>
+        </div>
+        {/* Payment summary */}
+        {p.payments && p.payments.length > 0 && (
+          <div style={{ fontSize: '8px', marginBottom: '6px', borderTop: '1px solid #ccc', paddingTop: '4px' }}>
+            <div style={{ fontWeight: 'bold', textTransform: 'uppercase', fontSize: '7px', color: '#666', marginBottom: '2px' }}>Payment Summary</div>
+            {p.payments.map(pp => (
+              <div key={pp.id} style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span>{pp.paymentType.replace(/_/g, ' ')} · {bizDate(pp.paymentDate)}</span>
+                <span style={{ fontFamily: 'monospace' }}>{formatMoney(BigInt(pp.amount), false)}</span>
+              </div>
+            ))}
+          </div>
+        )}
+        {/* Notes */}
+        {p.notes && <div style={{ fontSize: '8px', color: '#666', marginBottom: '4px', borderTop: '1px solid #ccc', paddingTop: '4px' }}><strong>Notes:</strong> {p.notes}</div>}
+        {/* Footer */}
+        <div style={{ textAlign: 'center', fontSize: '7px', color: '#999', borderTop: '1px solid #ccc', paddingTop: '4px' }}>
+          KhataPro ERP · PKR · Asia/Karachi · This is a computer-generated purchase document.
+        </div>
       </div>
     </div>
   </Shell>
@@ -224,12 +348,16 @@ function PurchaseDetailModal({ purchaseId, user, canPay, canReturn, onClose, onP
 function PayVendorModal({ purchase, user, onClose }: { purchase: Purchase; user: MeUser; onClose: () => void }) {
   const qc = useQueryClient()
   const [accountId, setAccountId] = useState('')
-  const [amountPaisas, setAmountPaisas] = useState(purchase.outstandingAmount)
+  const [amount, setAmount] = useState(formatMoney(BigInt(purchase.outstandingAmount), false))
   const [notes, setNotes] = useState('')
   const coaQ = useQuery({ queryKey: ['coa'], queryFn: () => fetch('/api/setup/coa').then(r => r.json()) })
   const accounts: Account[] = useMemo(() => coaQ.data?.categories?.flatMap((c: any) => c.accounts).filter((a: any) => a.isBusinessAccount && a.isActive).map((a: any) => ({ id: a.id, code: a.code, name: a.name })) ?? [], [coaQ.data])
   const mut = useMutation({
-    mutationFn: async () => { const r = await fetch(`/api/purchases/${purchase.id}/payment`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ vendorId: purchase.vendorId, accountId, amountPaisas, notes: notes || undefined }) }); const j = await r.json(); if (!r.ok) throw new Error(j?.error ?? 'Failed'); return j },
+    mutationFn: async () => {
+      const amountPaisas = (parseMoney(amount) ?? 0n).toString()
+      const r = await fetch(`/api/purchases/${purchase.id}/payment`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ vendorId: purchase.vendorId, accountId, amountPaisas, notes: notes || undefined }) })
+      const j = await r.json(); if (!r.ok) throw new Error(j?.error ?? 'Failed'); return j
+    },
     onSuccess: () => { toast.success('Vendor payment posted.'); void qc.invalidateQueries({ queryKey: ['purchases'] }); void qc.invalidateQueries({ queryKey: ['purchase', purchase.id] }); onClose() },
     onError: (e: Error) => toast.error(`Failed: ${e.message}`),
   })
@@ -238,9 +366,40 @@ function PayVendorModal({ purchase, user, onClose }: { purchase: Purchase; user:
       <div className="text-sm"><span className="text-muted-foreground">Purchase:</span> <span className="font-medium" data-num>{purchase.purchaseNo}</span></div>
       <div className="text-sm"><span className="text-muted-foreground">Outstanding:</span> <span className="font-bold text-amber-600" data-num>{formatMoney(BigInt(purchase.outstandingAmount))}</span></div>
       <div><Label className="text-xs text-muted-foreground">Pay From</Label><Select value={accountId} onValueChange={setAccountId}><SelectTrigger className="h-9 bg-background"><SelectValue placeholder="Select account…" /></SelectTrigger><SelectContent>{accounts.map(a => <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>)}</SelectContent></Select></div>
-      <div><Label className="text-xs text-muted-foreground">Amount (paisas)</Label><Input type="text" value={amountPaisas} onChange={e => setAmountPaisas(e.target.value)} className="h-9 bg-background" data-num /></div>
+      <div><Label className="text-xs text-muted-foreground">Amount (Rs)</Label><Input type="text" value={amount} onChange={e => setAmount(e.target.value)} className="h-9 bg-background" data-num /></div>
       <div><Label className="text-xs text-muted-foreground">Note</Label><Input value={notes} onChange={e => setNotes(e.target.value)} placeholder="Optional" className="h-9 bg-background" /></div>
-      <Button className="w-full" disabled={!accountId || !amountPaisas || mut.isPending} onClick={() => mut.mutate()}>{mut.isPending ? 'Paying…' : 'Pay Vendor'}</Button>
+      <Button className="w-full" disabled={!accountId || !amount || mut.isPending} onClick={() => mut.mutate()}>{mut.isPending ? 'Paying…' : 'Pay Vendor'}</Button>
+    </div>
+  </Shell>
+}
+
+function ApplyAdvanceModal({ purchase, user, onClose }: { purchase: PurchaseDetail; user: MeUser; onClose: () => void }) {
+  const qc = useQueryClient()
+  const [amount, setAmount] = useState(formatMoney(BigInt(purchase.outstandingAmount), false))
+  const [notes, setNotes] = useState('')
+  const mut = useMutation({
+    mutationFn: async () => {
+      const amountPaisas = (parseMoney(amount) ?? 0n).toString()
+      const r = await fetch(`/api/purchases/${purchase.id}/apply-advance`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ vendorId: purchase.vendorId, amountPaisas, notes: notes || undefined }) })
+      const j = await r.json(); if (!r.ok) throw new Error(j?.error ?? 'Failed'); return j
+    },
+    onSuccess: () => { toast.success('Advance applied to purchase.'); void qc.invalidateQueries({ queryKey: ['purchases'] }); void qc.invalidateQueries({ queryKey: ['purchase', purchase.id] }); void qc.invalidateQueries({ queryKey: ['vendor-ledger', purchase.vendorId] }); onClose() },
+    onError: (e: Error) => toast.error(`Failed: ${e.message}`),
+  })
+  const amt = parseMoney(amount) ?? 0n
+  const outstanding = BigInt(purchase.outstandingAmount)
+  const exceeds = amt > outstanding
+  return <Shell title="Apply Vendor Advance" onClose={onClose}>
+    <div className="space-y-3">
+      <div className="text-xs text-muted-foreground bg-muted/40 p-2 rounded border border-border">
+        This applies an existing vendor advance against this purchase's outstanding balance. No new cash movement — just reclassifies the advance.
+      </div>
+      <div className="text-sm"><span className="text-muted-foreground">Purchase:</span> <span className="font-medium" data-num>{purchase.purchaseNo}</span></div>
+      <div className="text-sm"><span className="text-muted-foreground">Outstanding:</span> <span className="font-bold text-amber-600" data-num>{formatMoney(outstanding)}</span></div>
+      <div><Label className="text-xs text-muted-foreground">Amount to Apply (Rs)</Label><Input type="text" value={amount} onChange={e => setAmount(e.target.value)} className="h-9 bg-background" data-num /></div>
+      {exceeds && <div className="text-xs text-destructive flex items-center gap-1"><AlertCircle className="size-3" /> Amount exceeds outstanding</div>}
+      <div><Label className="text-xs text-muted-foreground">Note</Label><Input value={notes} onChange={e => setNotes(e.target.value)} placeholder="Optional" className="h-9 bg-background" /></div>
+      <Button className="w-full" disabled={!amount || mut.isPending || exceeds} onClick={() => mut.mutate()}>{mut.isPending ? 'Applying…' : 'Apply Advance'}</Button>
     </div>
   </Shell>
 }
@@ -266,6 +425,131 @@ function ReturnModal({ purchase, user, onClose }: { purchase: PurchaseDetail; us
       <div><Label className="text-xs text-muted-foreground">Settlement</Label><Select value={settlementType} onValueChange={setSettlementType}><SelectTrigger className="h-9 bg-background"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="reduce_payable">Reduce Payable</SelectItem><SelectItem value="vendor_refund">Vendor Refund</SelectItem><SelectItem value="vendor_credit">Vendor Credit</SelectItem></SelectContent></Select></div>
       <div><Label className="text-xs text-muted-foreground">Notes</Label><Input value={notes} onChange={e => setNotes(e.target.value)} placeholder="Optional" className="h-9 bg-background" /></div>
       <Button className="w-full" disabled={mut.isPending || !Object.values(returnQty).some(v => parseInt(v) > 0)} onClick={() => mut.mutate()}>{mut.isPending ? 'Posting…' : 'Post Return'}</Button>
+    </div>
+  </Shell>
+}
+
+function ReplacementModal({ purchase, user, onClose }: { purchase: PurchaseDetail; user: MeUser; onClose: () => void }) {
+  const qc = useQueryClient()
+  // Each replacement row: original item selected, outgoing qty, replacement product (defaults to same), incoming qty, incoming unit cost
+  const [rows, setRows] = useState<Array<{
+    originalItemId: string
+    outgoingQty: string
+    incomingProductId: string
+    incomingProductName: string
+    incomingQty: string
+    incomingUnitCost: string
+  }>>([])
+  const [notes, setNotes] = useState('')
+
+  const productsQ = useQuery<{ rows: Product[] }>({ queryKey: ['products'], queryFn: () => fetch('/api/products').then(r => r.json()) })
+
+  function addRow(originalItemId: string) {
+    const it = purchase.items?.find(i => i.id === originalItemId)
+    if (!it) return
+    setRows(ls => [...ls, {
+      originalItemId,
+      outgoingQty: '1',
+      incomingProductId: it.productId ?? '',
+      incomingProductName: it.productName,
+      incomingQty: '1',
+      incomingUnitCost: formatMoney(BigInt(it.unitCost), false),
+    }])
+  }
+
+  const mut = useMutation({
+    mutationFn: async () => {
+      const items = rows.map(r => {
+        const orig = purchase.items?.find(i => i.id === r.originalItemId)
+        if (!orig) throw new Error('Original item not found')
+        return {
+          originalPurchaseItemId: r.originalItemId,
+          outgoingProductId: orig.productId ?? null,
+          outgoingProductName: orig.productName,
+          outgoingQuantity: parseInt(r.outgoingQty) || 0,
+          outgoingUnitCostPaisas: orig.unitCost,
+          incomingProductId: r.incomingProductId || null,
+          incomingProductName: r.incomingProductName,
+          incomingQuantity: parseInt(r.incomingQty) || 0,
+          incomingUnitCostPaisas: (parseMoney(r.incomingUnitCost) ?? 0n).toString(),
+        }
+      })
+      const r = await fetch(`/api/purchases/${purchase.id}/replacement`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ replacementItems: items, notes: notes || undefined }) })
+      const j = await r.json(); if (!r.ok) throw new Error(j?.error ?? 'Failed'); return j
+    },
+    onSuccess: (j) => { toast.success(`Replacement posted: ${j.replacementNo}`); void qc.invalidateQueries({ queryKey: ['purchases'] }); void qc.invalidateQueries({ queryKey: ['purchase', purchase.id] }); void qc.invalidateQueries({ queryKey: ['purchase-replacements', purchase.id] }); void qc.invalidateQueries({ queryKey: ['products'] }); onClose() },
+    onError: (e: Error) => toast.error(`Failed: ${e.message}`),
+  })
+
+  // Compute preview
+  let outgoingValue = 0n; let incomingValue = 0n
+  for (const r of rows) {
+    const orig = purchase.items?.find(i => i.id === r.originalItemId)
+    if (orig) { outgoingValue += BigInt(orig.unitCost) * BigInt(r.outgoingQty || '0') }
+    incomingValue += (parseMoney(r.incomingUnitCost) ?? 0n) * BigInt(r.incomingQty || '0')
+  }
+  const valueDiff = incomingValue - outgoingValue
+
+  const availableItems = (purchase.items ?? []).filter(it => !rows.find(r => r.originalItemId === it.id))
+
+  return <Shell title="Vendor Replacement" onClose={onClose} wide>
+    <div className="space-y-3">
+      <div className="text-xs text-muted-foreground bg-muted/40 p-2 rounded border border-border">
+        Send defective item back to vendor, receive replacement. For equal value: no accounting impact (audit trail only). For value difference: a balanced voucher is posted.
+      </div>
+      <div className="text-sm text-muted-foreground">{purchase.purchaseNo} · {purchase.vendorName}</div>
+
+      {/* Add original item to replace */}
+      {availableItems.length > 0 && (
+        <div>
+          <Label className="text-xs text-muted-foreground">Select original purchase item to replace:</Label>
+          <div className="space-y-1 mt-1">{availableItems.map(it => <button key={it.id} onClick={() => addRow(it.id)} className="w-full flex items-center justify-between p-2 border border-border/50 rounded hover:bg-muted/40 press-sm text-left"><span className="text-sm">{it.productName}</span><span className="text-xs text-muted-foreground">Qty: {it.quantity} · {formatMoney(BigInt(it.unitCost), false)}</span><Plus className="size-3 text-primary" /></button>)}</div>
+        </div>
+      )}
+
+      {/* Replacement rows */}
+      {rows.map((r, i) => {
+        const orig = purchase.items?.find(i => i.id === r.originalItemId)
+        if (!orig) return null
+        return <div key={i} className="border border-border rounded-lg p-3 space-y-2">
+          <div className="flex items-center justify-between">
+            <div className="text-xs font-medium">{orig.productName}</div>
+            <button onClick={() => setRows(ls => ls.filter((_, j) => j !== i))} className="text-muted-foreground"><X className="size-3.5" /></button>
+          </div>
+          <div className="grid grid-cols-2 gap-2 text-xs">
+            <div>
+              <Label className="text-[10px] text-muted-foreground">Outgoing (defective) Qty</Label>
+              <Input type="number" value={r.outgoingQty} onChange={e => setRows(ls => ls.map((x, j) => j === i ? { ...x, outgoingQty: e.target.value } : x))} className="h-8 bg-background text-sm" data-num />
+              <div className="text-[9px] text-muted-foreground mt-0.5">Cost: {formatMoney(BigInt(orig.unitCost), false)}</div>
+            </div>
+            <div>
+              <Label className="text-[10px] text-muted-foreground">Incoming (replacement) Qty</Label>
+              <Input type="number" value={r.incomingQty} onChange={e => setRows(ls => ls.map((x, j) => j === i ? { ...x, incomingQty: e.target.value } : x))} className="h-8 bg-background text-sm" data-num />
+            </div>
+          </div>
+          <div>
+            <Label className="text-[10px] text-muted-foreground">Replacement Product (change if different)</Label>
+            <Select value={r.incomingProductId} onValueChange={v => { const p = productsQ.data?.rows.find(x => x.id === v); setRows(ls => ls.map((x, j) => j === i ? { ...x, incomingProductId: v, incomingProductName: p?.name ?? x.incomingProductName } : x)) }}>
+              <SelectTrigger className="h-8 bg-background text-sm"><SelectValue placeholder="Select product…" /></SelectTrigger>
+              <SelectContent>{productsQ.data?.rows.map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}</SelectContent>
+            </Select>
+          </div>
+          <div>
+            <Label className="text-[10px] text-muted-foreground">Replacement Unit Cost (Rs)</Label>
+            <Input type="text" value={r.incomingUnitCost} onChange={e => setRows(ls => ls.map((x, j) => j === i ? { ...x, incomingUnitCost: e.target.value } : x))} className="h-8 bg-background text-sm" data-num />
+          </div>
+        </div>
+      })}
+
+      {/* Preview */}
+      {rows.length > 0 && <div className="border border-border rounded-lg p-3 bg-muted/30 space-y-1 text-xs">
+        <div className="flex justify-between"><span className="text-muted-foreground">Outgoing Value:</span><span data-num>{formatMoney(outgoingValue, false)}</span></div>
+        <div className="flex justify-between"><span className="text-muted-foreground">Incoming Value:</span><span data-num>{formatMoney(incomingValue, false)}</span></div>
+        <div className="flex justify-between font-medium border-t border-border pt-1"><span className="text-muted-foreground">Value Difference:</span><span className={valueDiff > 0n ? 'text-amber-600' : valueDiff < 0n ? 'text-emerald-600' : 'text-muted-foreground'} data-num>{valueDiff === 0n ? 'Equal (no voucher)' : formatMoney(valueDiff, false)}</span></div>
+      </div>}
+
+      <div><Label className="text-xs text-muted-foreground">Reference / Note</Label><Input value={notes} onChange={e => setNotes(e.target.value)} placeholder="Optional" className="h-9 bg-background" /></div>
+      <Button className="w-full" disabled={mut.isPending || rows.length === 0} onClick={() => mut.mutate()}>{mut.isPending ? 'Posting…' : 'Post Replacement'}</Button>
     </div>
   </Shell>
 }
