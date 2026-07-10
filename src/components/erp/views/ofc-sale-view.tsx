@@ -51,7 +51,7 @@ export function OfcSaleView({ user }: { user: MeUser }) {
             productName: it.productName || productsQ.data?.rows.find(p => p.id === it.productId)?.name || 'Item',
             qty: parseInt(it.qty) || 1, unitPrice: it.unitPrice,
           })),
-          payments: [{ accountId: paymentAccountId, amount: String(Number(subtotal) / 100) }],
+          payments: [{ accountId: paymentAccountId, amount: subtotal.toString() }],
           customerName: form.customerName, customerPhone: form.customerPhone,
           customerAddress: form.customerAddress, customerCity: form.customerCity,
           memo: form.courierNote ? `Courier: ${form.courierNote}` : undefined,

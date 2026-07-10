@@ -54,6 +54,8 @@ export async function POST(req: Request) {
   }
 
   // Parse money strings to BigInt.
+  // Items: unitPrice is in RUPEES (e.g. "1800") → parseMoney converts to paisas (180000).
+  // Payments: amount is already in PAISAS (e.g. "180000") → BigInt directly, no parseMoney.
   let items, payments
   try {
     items = parsed.data.items.map((i) => {
@@ -62,8 +64,8 @@ export async function POST(req: Request) {
       return { ...i, unitPrice: up }
     })
     payments = parsed.data.payments.map((p) => {
-      const amt = parseMoney(p.amount)
-      if (amt === null) throw new Error('Invalid amount')
+      const amt = BigInt(p.amount)
+      if (amt <= 0n) throw new Error('Invalid amount')
       return { ...p, amount: amt }
     })
   } catch (e) {

@@ -59,8 +59,8 @@ export async function POST(req: Request) {
       return { ...i, unitPrice: up }
     })
     payments = parsed.data.payments.map((p) => {
-      const amt = parseMoney(p.amount)
-      if (amt === null) throw new Error('Invalid amount')
+      const amt = BigInt(p.amount)
+      if (amt <= 0n) throw new Error('Invalid amount')
       return { ...p, amount: amt }
     })
   } catch (e) {
