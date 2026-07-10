@@ -410,3 +410,64 @@ Preview login emails/passwords (UNCHANGED):
 
 Stage Summary:
 - Phase 3 Products & Stock complete. Product categories, products (with temporary items + merge foundation), stock movements (with negative stock allowed), Negative Stock Report, Pending Stock Report all built. Dual-path Supabase/Prisma data-access layer ready. All 17 browser gates pass. Stopping for approval before Phase 4.
+
+---
+Task ID: P3.1
+Agent: Main (fullstack-dev)
+Task: Phase 3.1 Navigation Cleanup — grouped collapsible sidebar + simplified mobile nav. No Phase 4.
+
+What was updated:
+- Rewrote src/components/erp/dashboard-shell.tsx with a grouped navigation model:
+  * 8 main categories: Dashboard, Setup, Accounting, Products & Stock, Sales, Purchases, Delivery / Riders, Reports.
+  * Each category has sub-items with permission/ownerOnly gates.
+  * Categories with only 1 visible item render as a direct button (no expand/collapse).
+  * Categories with multiple items show a chevron and expand/collapse with smooth framer-motion height animation.
+  * Active sub-page highlights with the emerald accent bar (layoutId animation).
+  * Categories with 0 visible items for the current role are hidden entirely.
+  * Active item's category auto-expands when selected.
+  * Expanded state is remembered during the session (useState Set).
+- Mobile nav redesigned: 5 primary slots — Home, Work, Stock, Reports, More.
+  * Home → home
+  * Work → journal-voucher (Accountant/Owner) or trial-balance or sales or riders, role-dependent
+  * Stock → products (if can_view_products)
+  * Reports → negative-stock (if can_view_stock_report) or trial-balance
+  * More → opens grouped sheet showing all remaining items by category
+- Mobile More sheet: clean glass-card drawer with category headers + 3-column grid of items, scrollable, safe-area aware.
+- Desktop sidebar width increased from w-60 to w-64 to accommodate the grouped layout.
+- All existing views, accounting logic, stock logic, Supabase connection, auth, and permissions are untouched.
+
+Files changed:
+- src/components/erp/dashboard-shell.tsx (full rewrite of navigation structure)
+
+Browser verification log (all 15 gates passed):
+1. Login as Owner/Admin → "Welcome, Bilal." badge "Supabase live" ✓
+2. Sidebar shows 8 grouped categories (Dashboard, Setup, Accounting, Products & Stock, Sales, Purchases, Delivery / Riders, Reports) — not 21 flat items ✓
+3. Expand Setup → Setup Overview, Business Accounts, Chart of Accounts, Users & Roles, Permission Matrix ✓
+4. Expand Accounting → Journal Voucher, Opening Balance, Trial Balance, Vouchers, Audit Log, Biz-Day Test ✓
+5. Expand Products & Stock → Product Categories, Products, Stock Adjustment, Negative Stock, Pending Stock ✓
+6. Active page highlight works (bg-accent class on active sub-item, emerald accent bar) ✓
+7. Login as Accountant → sees 8 categories; Setup expands to only Setup Overview, Business Accounts, Chart of Accounts (no Users/Perms — Owner-only) ✓
+8. Login as Salesman → sees only 3 categories (Dashboard, Accounting, Products & Stock) — simplified ✓
+9. Login as Rider → sees only 2 categories (Dashboard, Accounting) — simplified ✓
+10. Mobile (390×844): liquid-glass pill bottom nav shows Home, Work, Stock, Reports, More — no horizontal overflow ✓
+11. More sheet opens with grouped categories (Setup, Accounting, Products & Stock headers with items in 3-col grid) ✓
+12. Phase 2 Trial Balance works on mobile (via More → TB) ✓
+13. Phase 3 Products works on mobile (via Stock button) ✓
+14. Supabase badge shows "Supabase live" (green) ✓
+15. Sales still shows "Phase 4 — not built" Coming Soon — no Phase 4+ features ✓
+
+lint/tsc/build result:
+- lint: clean ✓
+- tsc --noEmit: clean ✓
+- next build: succeeds, 23 routes ✓
+
+Known issues: None.
+
+Preview login emails/passwords (UNCHANGED):
+- owner@test.local / password123 (Owner/Admin)
+- accountant@test.local / password123 (Accountant)
+- salesman@test.local / password123 (Salesman)
+- rider@test.local / password123 (Rider)
+
+Stage Summary:
+- Navigation cleanup complete. Desktop sidebar is now 8 clean grouped categories with expand/collapse. Mobile nav is 5 primary slots with a grouped More sheet. Role-based permissions fully respected — Salesman and Rider see dramatically simplified navigation. All Phase 1-3 functionality intact. Stopping for approval before Phase 4.

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { signOut } from 'next-auth/react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
@@ -23,11 +23,14 @@ import {
   MoreHorizontal,
   Scale,
   Plus,
-  Sparkles,
   Tag,
   PackagePlus,
   TrendingDown,
   Clock,
+  ChevronDown,
+  Briefcase,
+  BarChart3,
+  Home as HomeIcon,
 } from 'lucide-react'
 import { useSearchParams } from 'next/navigation'
 import type { MeUser } from '@/components/erp/erp-app'
@@ -55,7 +58,13 @@ import { NegativeStockReportView } from '@/components/erp/views/negative-stock-r
 import { PendingStockReportView } from '@/components/erp/views/pending-stock-report-view'
 import { SupabaseStatusBadge } from '@/components/erp/supabase-status-badge'
 
-type NavItem = {
+// ─────────────────────────────────────────────────────────────
+// Navigation model: 8 main categories, each with sub-items.
+// Each sub-item has a permission/ownerOnly gate. A category is visible
+// only if at least one of its sub-items is visible to the user.
+// ─────────────────────────────────────────────────────────────
+
+type SubItem = {
   key: string
   label: string
   short: string
@@ -64,51 +73,223 @@ type NavItem = {
   ownerOnly?: boolean
 }
 
-const NAV: NavItem[] = [
-  { key: 'home', label: 'Home', short: 'Home', icon: LayoutDashboard },
-  { key: 'setup', label: 'Setup', short: 'Setup', icon: Settings, perm: 'can_view_setup' },
-  { key: 'business-accounts', label: 'Business Accounts', short: 'Accounts', icon: Wallet, perm: 'can_view_setup' },
-  { key: 'coa', label: 'Chart of Accounts', short: 'CoA', icon: BookOpen, perm: 'can_view_setup' },
-  { key: 'users', label: 'Users & Roles', short: 'Users', icon: Users, ownerOnly: true },
-  { key: 'permissions', label: 'Permission Matrix', short: 'Perms', icon: Shield, ownerOnly: true },
-  { key: 'journal-voucher', label: 'Journal Voucher', short: 'JV', icon: ClipboardList, perm: 'can_post_journal_voucher' },
-  { key: 'opening-balance', label: 'Opening Balance', short: 'Opening', icon: Plus, perm: 'can_post_opening_voucher' },
-  { key: 'trial-balance', label: 'Trial Balance', short: 'TB', icon: Scale, perm: 'can_view_trial_balance' },
-  { key: 'audit', label: 'Audit Log', short: 'Audit', icon: ScrollText, perm: 'can_view_audit_log' },
-  { key: 'biz-day-test', label: 'Biz-Day Test', short: 'Date', icon: FileText },
-  { key: 'product-categories', label: 'Product Categories', short: 'Cats', icon: Tag, perm: 'can_view_products' },
-  { key: 'products', label: 'Products', short: 'Products', icon: Package, perm: 'can_view_products' },
-  { key: 'stock-adjustment', label: 'Stock Adjustment', short: 'Adjust', icon: PackagePlus, perm: 'can_view_products' },
-  { key: 'negative-stock', label: 'Negative Stock', short: 'Neg', icon: TrendingDown, perm: 'can_view_stock_report' },
-  { key: 'pending-stock', label: 'Pending Stock', short: 'Pending', icon: Clock, perm: 'can_view_stock_report' },
-  { key: 'sales', label: 'Sales', short: 'Sales', icon: ShoppingCart, perm: 'can_view_sales' },
-  { key: 'purchases', label: 'Purchases', short: 'Buy', icon: Receipt, perm: 'can_view_purchases' },
-  { key: 'riders', label: 'Riders', short: 'Riders', icon: Bike, perm: 'can_view_riders' },
-  { key: 'vouchers', label: 'Vouchers', short: 'Vouchers', icon: ClipboardList, perm: 'can_view_vouchers' },
-  { key: 'reports', label: 'Reports', short: 'Reports', icon: FileText, perm: 'can_view_trial_balance' },
+type NavCategory = {
+  id: string
+  label: string
+  icon: React.ComponentType<{ className?: string }>
+  /** Optional direct key for categories that are also a page (e.g. Home). */
+  directKey?: string
+  items: SubItem[]
+}
+
+const NAV_CATEGORIES: NavCategory[] = [
+  // 1. Dashboard
+  {
+    id: 'dashboard',
+    label: 'Dashboard',
+    icon: LayoutDashboard,
+    items: [
+      { key: 'home', label: 'Home', short: 'Home', icon: HomeIcon },
+    ],
+  },
+  // 2. Setup
+  {
+    id: 'setup',
+    label: 'Setup',
+    icon: Settings,
+    items: [
+      { key: 'setup', label: 'Setup Overview', short: 'Setup', icon: Settings, perm: 'can_view_setup' },
+      { key: 'business-accounts', label: 'Business Accounts', short: 'Accounts', icon: Wallet, perm: 'can_view_setup' },
+      { key: 'coa', label: 'Chart of Accounts', short: 'CoA', icon: BookOpen, perm: 'can_view_setup' },
+      { key: 'users', label: 'Users & Roles', short: 'Users', icon: Users, ownerOnly: true },
+      { key: 'permissions', label: 'Permission Matrix', short: 'Perms', icon: Shield, ownerOnly: true },
+    ],
+  },
+  // 3. Accounting
+  {
+    id: 'accounting',
+    label: 'Accounting',
+    icon: Briefcase,
+    items: [
+      { key: 'journal-voucher', label: 'Journal Voucher', short: 'JV', icon: ClipboardList, perm: 'can_post_journal_voucher' },
+      { key: 'opening-balance', label: 'Opening Balance', short: 'Opening', icon: Plus, perm: 'can_post_opening_voucher' },
+      { key: 'trial-balance', label: 'Trial Balance', short: 'TB', icon: Scale, perm: 'can_view_trial_balance' },
+      { key: 'vouchers', label: 'Vouchers', short: 'Vouchers', icon: ClipboardList, perm: 'can_view_vouchers' },
+      { key: 'audit', label: 'Audit Log', short: 'Audit', icon: ScrollText, perm: 'can_view_audit_log' },
+      { key: 'biz-day-test', label: 'Biz-Day Test', short: 'Date', icon: FileText },
+    ],
+  },
+  // 4. Products & Stock
+  {
+    id: 'products-stock',
+    label: 'Products & Stock',
+    icon: Package,
+    items: [
+      { key: 'product-categories', label: 'Product Categories', short: 'Cats', icon: Tag, perm: 'can_view_products' },
+      { key: 'products', label: 'Products', short: 'Products', icon: Package, perm: 'can_view_products' },
+      { key: 'stock-adjustment', label: 'Stock Adjustment', short: 'Adjust', icon: PackagePlus, perm: 'can_view_products' },
+      { key: 'negative-stock', label: 'Negative Stock', short: 'Neg', icon: TrendingDown, perm: 'can_view_stock_report' },
+      { key: 'pending-stock', label: 'Pending Stock', short: 'Pending', icon: Clock, perm: 'can_view_stock_report' },
+    ],
+  },
+  // 5. Sales (Phase 4 placeholder)
+  {
+    id: 'sales',
+    label: 'Sales',
+    icon: ShoppingCart,
+    items: [
+      { key: 'sales', label: 'Sales', short: 'Sales', icon: ShoppingCart, perm: 'can_view_sales' },
+    ],
+  },
+  // 6. Purchases (Phase 5 placeholder)
+  {
+    id: 'purchases',
+    label: 'Purchases',
+    icon: Receipt,
+    items: [
+      { key: 'purchases', label: 'Purchases', short: 'Buy', icon: Receipt, perm: 'can_view_purchases' },
+    ],
+  },
+  // 7. Delivery / Riders (Phase 7 placeholder)
+  {
+    id: 'delivery',
+    label: 'Delivery / Riders',
+    icon: Bike,
+    items: [
+      { key: 'riders', label: 'Riders', short: 'Riders', icon: Bike, perm: 'can_view_riders' },
+    ],
+  },
+  // 8. Reports (Phase 8 placeholder)
+  {
+    id: 'reports',
+    label: 'Reports',
+    icon: BarChart3,
+    items: [
+      { key: 'reports', label: 'Reports', short: 'Reports', icon: FileText, perm: 'can_view_trial_balance' },
+    ],
+  },
 ]
 
-function visibleNav(user: MeUser): NavItem[] {
-  return NAV.filter((n) => {
-    if (n.ownerOnly) return user.roleName === 'Owner/Admin'
-    if (n.perm) return user.permissions.includes(n.perm)
-    return true
-  })
+function isItemVisible(user: MeUser, item: SubItem): boolean {
+  if (item.ownerOnly) return user.roleName === 'Owner/Admin'
+  if (item.perm) return user.permissions.includes(item.perm)
+  return true
 }
+
+function visibleCategories(user: MeUser): Array<NavCategory & { visibleItems: SubItem[] }> {
+  return NAV_CATEGORIES.map((cat) => ({
+    ...cat,
+    visibleItems: cat.items.filter((item) => isItemVisible(user, item)),
+  })).filter((cat) => cat.visibleItems.length > 0)
+}
+
+/** Find which category contains a given item key. */
+function categoryForKey(key: string): string | null {
+  for (const cat of NAV_CATEGORIES) {
+    if (cat.items.some((i) => i.key === key)) return cat.id
+  }
+  return null
+}
+
+// ─────────────────────────────────────────────────────────────
+// Mobile nav: 5 primary slots — Home, Work, Stock, Reports, More.
+// "Work" maps to the first available accounting action for the role.
+// "Stock" maps to Products. "Reports" maps to Trial Balance / Negative Stock.
+// ─────────────────────────────────────────────────────────────
+
+type MobileSlot = {
+  id: string
+  label: string
+  icon: React.ComponentType<{ className?: string }>
+  /** Resolve to a nav key, or null if not available for this role. */
+  resolve: (user: MeUser) => string | null
+}
+
+const MOBILE_SLOTS: MobileSlot[] = [
+  { id: 'home', label: 'Home', icon: HomeIcon, resolve: () => 'home' },
+  { id: 'work', label: 'Work', icon: Briefcase, resolve: (u) => {
+    if (u.permissions.includes('can_post_journal_voucher')) return 'journal-voucher'
+    if (u.permissions.includes('can_view_trial_balance')) return 'trial-balance'
+    if (u.permissions.includes('can_create_sales')) return 'sales'
+    if (u.permissions.includes('can_view_own_orders')) return 'riders'
+    return null
+  }},
+  { id: 'stock', label: 'Stock', icon: Package, resolve: (u) => {
+    if (u.permissions.includes('can_view_products')) return 'products'
+    return null
+  }},
+  { id: 'reports', label: 'Reports', icon: BarChart3, resolve: (u) => {
+    if (u.permissions.includes('can_view_stock_report')) return 'negative-stock'
+    if (u.permissions.includes('can_view_trial_balance')) return 'trial-balance'
+    return null
+  }},
+]
+
+// ─────────────────────────────────────────────────────────────
+// Main shell
+// ─────────────────────────────────────────────────────────────
 
 export function DashboardShell({ user, onSignOut }: { user: MeUser; onSignOut: () => void }) {
   const [active, setActive] = useState('home')
   const [moreOpen, setMoreOpen] = useState(false)
-  const nav = visibleNav(user)
   const searchParams = useSearchParams()
   const ledgerAccountId = searchParams.get('ledger')
 
-  // If ?ledger= is in the URL, show the ledger drill-down instead.
-  const effectiveActive = ledgerAccountId ? 'ledger-drilldown' : (nav.some((n) => n.key === active) ? active : 'home')
+  const cats = useMemo(() => visibleCategories(user), [user])
 
-  // Mobile: first 4 items + "More" entry.
-  const mobilePrimary = nav.slice(0, 4)
-  const mobileOverflow = nav.slice(4)
+  // Expand state: default-expand the category that contains the active item.
+  const [expanded, setExpanded] = useState<Set<string>>(() => {
+    const init = new Set<string>(['dashboard']) // dashboard always expanded
+    const cat = categoryForKey('home')
+    if (cat) init.add(cat)
+    return init
+  })
+
+  // If ?ledger= is in the URL, show the ledger drill-down instead.
+  const effectiveActive = ledgerAccountId
+    ? 'ledger-drilldown'
+    : cats.some((c) => c.visibleItems.some((i) => i.key === active))
+    ? active
+    : 'home'
+
+  // When active changes, auto-expand its category.
+  function selectItem(key: string) {
+    if (ledgerAccountId) window.history.pushState({}, '', '/')
+    setActive(key)
+    const cat = categoryForKey(key)
+    if (cat) {
+      setExpanded((prev) => {
+        const next = new Set(prev)
+        next.add(cat)
+        return next
+      })
+    }
+  }
+
+  function toggleCategory(id: string) {
+    setExpanded((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  // Mobile: resolve the 4 primary slots + "More" for everything else.
+  const mobilePrimary: MobilePrimarySlot[] = MOBILE_SLOTS.map((slot) => ({
+    ...slot,
+    key: slot.resolve(user),
+  })).filter((s): s is MobilePrimarySlot => s.key !== null)
+
+  // Mobile "More": all visible items grouped by category, EXCLUDING the ones
+  // already shown as primary slots.
+  const mobilePrimaryKeys = new Set(mobilePrimary.map((s) => s.key))
+  const mobileMoreCategories = cats
+    .map((cat) => ({
+      ...cat,
+      visibleItems: cat.visibleItems.filter((item) => !mobilePrimaryKeys.has(item.key)),
+    }))
+    .filter((cat) => cat.visibleItems.length > 0)
 
   return (
     <div className="min-h-[100dvh] flex flex-col bg-background text-foreground">
@@ -144,19 +325,17 @@ export function DashboardShell({ user, onSignOut }: { user: MeUser; onSignOut: (
 
       {/* Desktop: sidebar + main / Mobile: main + bottom pill nav */}
       <div className="flex-1 flex">
-        {/* Sidebar (desktop) */}
-        <aside className="hidden md:flex w-60 border-r border-border bg-sidebar/60 flex-col backdrop-blur-sm">
+        {/* Sidebar (desktop) — grouped collapsible categories */}
+        <aside className="hidden md:flex w-64 border-r border-border bg-sidebar/60 flex-col backdrop-blur-sm">
           <nav className="flex-1 overflow-y-auto p-3 space-y-1">
-            {nav.map((n) => (
-              <SidebarNavButton
-                key={n.key}
-                item={n}
-                active={effectiveActive === n.key}
-                onClick={() => {
-                  // Strip ?ledger= when switching nav items.
-                  if (ledgerAccountId) window.history.pushState({}, '', '/')
-                  setActive(n.key)
-                }}
+            {cats.map((cat) => (
+              <SidebarCategory
+                key={cat.id}
+                category={cat}
+                activeKey={effectiveActive}
+                isExpanded={expanded.has(cat.id)}
+                onToggle={() => toggleCategory(cat.id)}
+                onSelect={selectItem}
               />
             ))}
           </nav>
@@ -199,24 +378,20 @@ export function DashboardShell({ user, onSignOut }: { user: MeUser; onSignOut: (
       <MobilePillNav
         primary={mobilePrimary}
         active={effectiveActive}
-        onSelect={(k) => {
-          if (ledgerAccountId) window.history.pushState({}, '', '/')
-          setActive(k)
-        }}
-        hasMore={mobileOverflow.length > 0}
+        onSelect={selectItem}
+        hasMore={mobileMoreCategories.some((c) => c.visibleItems.length > 0)}
         onMore={() => setMoreOpen(true)}
       />
 
-      {/* Mobile "more" sheet */}
-      {mobileOverflow.length > 0 && (
+      {/* Mobile "more" sheet — grouped by category */}
+      {mobileMoreCategories.some((c) => c.visibleItems.length > 0) && (
         <MobileMoreSheet
-          items={mobileOverflow}
+          categories={mobileMoreCategories}
           active={active}
           open={moreOpen}
           onOpenChange={setMoreOpen}
           onSelect={(k) => {
-            if (ledgerAccountId) window.history.pushState({}, '', '/')
-            setActive(k)
+            selectItem(k)
             setMoreOpen(false)
           }}
         />
@@ -225,37 +400,124 @@ export function DashboardShell({ user, onSignOut }: { user: MeUser; onSignOut: (
   )
 }
 
-function SidebarNavButton({
-  item,
-  active,
-  onClick,
+// ─────────────────────────────────────────────────────────────
+// Desktop sidebar: collapsible category with sub-items
+// ─────────────────────────────────────────────────────────────
+
+function SidebarCategory({
+  category,
+  activeKey,
+  isExpanded,
+  onToggle,
+  onSelect,
 }: {
-  item: NavItem
-  active: boolean
-  onClick: () => void
+  category: NavCategory & { visibleItems: SubItem[] }
+  activeKey: string
+  isExpanded: boolean
+  onToggle: () => void
+  onSelect: (k: string) => void
 }) {
+  // Special case: categories with exactly 1 visible item behave as a direct
+  // button (no expand/collapse) — clicking goes straight to that item.
+  const isDirect = category.visibleItems.length === 1
+  const directItem = isDirect ? category.visibleItems[0] : null
+  const isActive = directItem ? activeKey === directItem.key : activeKey !== 'home' && category.items.some((i) => i.key === activeKey)
+
+  if (isDirect && directItem) {
+    return (
+      <button
+        onClick={() => onSelect(directItem.key)}
+        className={cn(
+          'relative w-full flex items-center gap-2.5 px-3 py-2 text-sm rounded-lg press-sm',
+          isActive
+            ? 'bg-accent text-accent-foreground font-medium'
+            : 'text-muted-foreground hover:text-foreground hover:bg-muted/60',
+        )}
+      >
+        {isActive && (
+          <motion.span
+            layoutId="sidebar-active"
+            className="absolute left-0 top-1/2 -translate-y-1/2 h-5 w-1 rounded-full bg-primary"
+            transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
+          />
+        )}
+        <directItem.icon className={cn('size-4 shrink-0', isActive && 'text-primary')} />
+        <span className="truncate">{category.label}</span>
+      </button>
+    )
+  }
+
   return (
-    <button
-      onClick={onClick}
-      className={cn(
-        'relative w-full flex items-center gap-2.5 px-3 py-2 text-sm rounded-lg press-sm',
-        active
-          ? 'bg-accent text-accent-foreground font-medium'
-          : 'text-muted-foreground hover:text-foreground hover:bg-muted/60',
-      )}
-    >
-      {active && (
-        <motion.span
-          layoutId="sidebar-active"
-          className="absolute left-0 top-1/2 -translate-y-1/2 h-5 w-1 rounded-full bg-primary"
-          transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
+    <div>
+      {/* Category header (click to expand/collapse) */}
+      <button
+        onClick={onToggle}
+        className={cn(
+          'w-full flex items-center gap-2.5 px-3 py-2 text-sm rounded-lg press-sm',
+          isActive
+            ? 'text-foreground font-medium'
+            : 'text-muted-foreground hover:text-foreground hover:bg-muted/60',
+        )}
+      >
+        <category.icon className={cn('size-4 shrink-0', isActive && 'text-primary')} />
+        <span className="truncate flex-1 text-left">{category.label}</span>
+        <ChevronDown
+          className={cn(
+            'size-3.5 shrink-0 transition-transform',
+            isExpanded && 'rotate-180',
+          )}
         />
-      )}
-      <item.icon className={cn('size-4 shrink-0', active && 'text-primary')} />
-      <span className="truncate">{item.label}</span>
-    </button>
+      </button>
+
+      {/* Sub-items (collapsible) */}
+      <AnimatePresence initial={false}>
+        {isExpanded && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+            className="overflow-hidden"
+          >
+            <div className="ml-3 mt-0.5 space-y-0.5 border-l border-border pl-2">
+              {category.visibleItems.map((item) => {
+                const isActive = activeKey === item.key
+                return (
+                  <button
+                    key={item.key}
+                    onClick={() => onSelect(item.key)}
+                    className={cn(
+                      'relative w-full flex items-center gap-2 px-2.5 py-1.5 text-[13px] rounded-md press-sm',
+                      isActive
+                        ? 'bg-accent text-accent-foreground font-medium'
+                        : 'text-muted-foreground hover:text-foreground hover:bg-muted/40',
+                    )}
+                  >
+                    {isActive && (
+                      <motion.span
+                        layoutId="sidebar-active"
+                        className="absolute -left-2 top-1/2 -translate-y-1/2 h-4 w-0.5 rounded-full bg-primary"
+                        transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
+                      />
+                    )}
+                    <item.icon className={cn('size-3.5 shrink-0', isActive && 'text-primary')} />
+                    <span className="truncate">{item.label}</span>
+                  </button>
+                )
+              })}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
   )
 }
+
+// ─────────────────────────────────────────────────────────────
+// Mobile: liquid-glass pill bottom nav
+// ─────────────────────────────────────────────────────────────
+
+type MobilePrimarySlot = MobileSlot & { key: string }
 
 function MobilePillNav({
   primary,
@@ -264,7 +526,7 @@ function MobilePillNav({
   hasMore,
   onMore,
 }: {
-  primary: NavItem[]
+  primary: MobilePrimarySlot[]
   active: string
   onSelect: (k: string) => void
   hasMore: boolean
@@ -279,14 +541,14 @@ function MobilePillNav({
       }}
       aria-label="Primary"
     >
-      {primary.map((n) => {
-        const isActive = active === n.key
+      {primary.map((slot) => {
+        const isActive = active === slot.key
         return (
           <button
-            key={n.key}
-            onClick={() => onSelect(n.key)}
+            key={slot.id}
+            onClick={() => onSelect(slot.key!)}
             className="relative flex items-center justify-center press-sm"
-            aria-label={n.label}
+            aria-label={slot.label}
             aria-current={isActive ? 'page' : undefined}
           >
             {isActive && (
@@ -302,7 +564,7 @@ function MobilePillNav({
                 isActive ? 'text-primary-foreground' : 'text-muted-foreground',
               )}
             >
-              <n.icon className="size-5" />
+              <slot.icon className="size-5" />
             </span>
           </button>
         )
@@ -322,14 +584,18 @@ function MobilePillNav({
   )
 }
 
+// ─────────────────────────────────────────────────────────────
+// Mobile "More" sheet — grouped by category
+// ─────────────────────────────────────────────────────────────
+
 function MobileMoreSheet({
-  items,
+  categories,
   active,
   open,
   onOpenChange,
   onSelect,
 }: {
-  items: NavItem[]
+  categories: Array<NavCategory & { visibleItems: SubItem[] }>
   active: string
   open: boolean
   onOpenChange: (v: boolean) => void
@@ -347,7 +613,7 @@ function MobileMoreSheet({
           onClick={() => onOpenChange(false)}
         >
           <motion.div
-            className="absolute left-1/2 -translate-x-1/2 glass-card rounded-2xl p-3 w-[calc(100vw-2rem)] max-w-sm"
+            className="absolute left-1/2 -translate-x-1/2 glass-card rounded-2xl p-4 w-[calc(100vw-2rem)] max-w-md max-h-[70vh] overflow-y-auto"
             style={{ bottom: 'calc(5rem + env(safe-area-inset-bottom, 0px))' }}
             initial={{ opacity: 0, y: 20, scale: 0.96 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
@@ -355,35 +621,44 @@ function MobileMoreSheet({
             transition={{ duration: 0.25, ease: [0.34, 1.4, 0.64, 1] }}
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2 px-2">
-              More
-            </div>
-            <div className="grid grid-cols-3 gap-1.5">
-              {items.map((n) => {
-                const isActive = active === n.key
-                return (
-                  <button
-                    key={n.key}
-                    onClick={() => onSelect(n.key)}
-                    className={cn(
-                      'flex flex-col items-center gap-1.5 p-3 rounded-xl press-sm',
-                      isActive ? 'bg-accent text-accent-foreground' : 'text-foreground hover:bg-muted/60',
-                    )}
-                  >
-                    <n.icon className={cn('size-5', isActive && 'text-primary')} />
-                    <span className="text-[11px] font-medium truncate w-full text-center">
-                      {n.short}
-                    </span>
-                  </button>
-                )
-              })}
-            </div>
+            {categories.map((cat) => (
+              <div key={cat.id} className="mb-4 last:mb-0">
+                <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mb-2 px-1 flex items-center gap-1.5">
+                  <cat.icon className="size-3" />
+                  {cat.label}
+                </div>
+                <div className="grid grid-cols-3 gap-1.5">
+                  {cat.visibleItems.map((item) => {
+                    const isActive = active === item.key
+                    return (
+                      <button
+                        key={item.key}
+                        onClick={() => onSelect(item.key)}
+                        className={cn(
+                          'flex flex-col items-center gap-1.5 p-3 rounded-xl press-sm',
+                          isActive ? 'bg-accent text-accent-foreground' : 'text-foreground hover:bg-muted/60',
+                        )}
+                      >
+                        <item.icon className={cn('size-5', isActive && 'text-primary')} />
+                        <span className="text-[11px] font-medium truncate w-full text-center">
+                          {item.short}
+                        </span>
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            ))}
           </motion.div>
         </motion.div>
       )}
     </AnimatePresence>
   )
 }
+
+// ─────────────────────────────────────────────────────────────
+// View router (unchanged logic)
+// ─────────────────────────────────────────────────────────────
 
 function ViewRouter({
   user,
@@ -432,6 +707,3 @@ function ViewRouter({
 
   return <OwnerDashboard user={user} />
 }
-
-// Avoid unused-import error.
-void Sparkles
