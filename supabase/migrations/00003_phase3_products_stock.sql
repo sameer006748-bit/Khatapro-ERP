@@ -130,13 +130,18 @@ begin
     raise exception 'Invalid or foreign product_id: %', p_product_id;
   end if;
 
+  -- Validate quantity is positive.
+  if p_quantity <= 0 then
+    raise exception 'Quantity must be positive for type %', p_movement_type;
+  end if;
+
   -- Compute signed delta.
-  v_delta := case
-    when p_movement_type in ('opening', 'adjustment_in', 'temporary_item', 'correction') and p_quantity > 0 then p_quantity
-    when p_movement_type = 'adjustment_out' and p_quantity > 0 then -p_quantity
-    when p_movement_type = 'correction' then p_quantity  -- correction can be +/-
-    else raise exception 'Quantity must be positive for type %', p_movement_type
-  end;
+  if p_movement_type = 'adjustment_out' then
+    v_delta := -p_quantity;
+  else
+    -- opening, adjustment_in, temporary_item, correction
+    v_delta := p_quantity;
+  end if;
 
   -- Lock the product row and get current stock.
   select current_stock into v_current
