@@ -15,6 +15,7 @@ const Schema = z.object({
   customerId: z.string().nullable().optional(),
   reference: z.string().optional(),
   notes: z.string().optional(),
+  invoiceId: z.string().nullable().optional(),
 })
 
 export async function POST(req: Request) {
@@ -41,6 +42,7 @@ export async function POST(req: Request) {
       customerId: parsed.data.customerId ?? null,
       reference: parsed.data.reference ?? null,
       notes: parsed.data.notes ?? null,
+      invoiceId: parsed.data.invoiceId ?? null,
       createdBy: su.userId,
     })
     return NextResponse.json({ ok: true, ...result })

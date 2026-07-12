@@ -51,6 +51,7 @@ export async function postPaymentVoucher(input: {
 export async function postReceiptVoucher(input: {
   businessId: string; receiptDate: Date; receivedIntoAccountId: string; creditAccountId: string
   amountPaisas: bigint; customerId?: string | null; reference?: string | null; notes?: string | null; createdBy?: string | null
+  invoiceId?: string | null
 }): Promise<{ receiptId: string; receiptNo: string; voucherId: string }> {
   const admin = getAdminSupabase()
   const supabaseCreatedBy = await resolveSupabaseUuid(input.createdBy)
@@ -64,6 +65,7 @@ export async function postReceiptVoucher(input: {
     p_reference: input.reference ?? null,
     p_notes: input.notes ?? null,
     p_created_by: supabaseCreatedBy,
+    p_invoice_id: input.invoiceId ?? null,
   })
   if (error) throw new Error(`post_receipt_voucher: ${error.message}`)
   const r = data as any
