@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { X, Printer } from 'lucide-react'
 import { formatMoney } from '@/lib/format'
@@ -91,11 +91,34 @@ export function InvoicePrintDialog({
     localStorage.setItem(STORAGE_KEY, mode)
   }, [mode])
 
+  // Real rendered-height overflow detection (hooks must be before early return)
+  const HALF_A4_PRINTABLE_PX = 516
+  const printRootRef = useRef<HTMLDivElement>(null)
+  const [measuredHeight, setMeasuredHeight] = useState(0)
+  const [overflowDetected, setOverflowDetected] = useState(false)
+
+  useEffect(() => {
+    if (!open || !printRootRef.current) return
+    const measure = () => {
+      const root = printRootRef.current
+      if (!root) return
+      const invoiceEl = root.querySelector('.invoice-half') || root.querySelector('.invoice-full-a4')
+      if (invoiceEl) {
+        const h = (invoiceEl as HTMLElement).scrollHeight
+        setMeasuredHeight(h)
+        const isHalfMode = mode === 'single' || mode === 'two-up' || mode === 'top-half' || mode === 'bottom-half'
+        setOverflowDetected(isHalfMode && h > HALF_A4_PRINTABLE_PX)
+      }
+    }
+    const timer = setTimeout(measure, 100)
+    return () => clearTimeout(timer)
+  }, [open, invoices, mode])
+
   if (!open) return null
 
   const maxItems = Math.max(...invoices.map(inv => inv.items.length), 0)
   const tooManyItems = mode !== 'full-a4' && maxItems > 12
-  const overflowWarning = mode !== 'full-a4' && maxItems > 10
+  const overflowWarning = mode !== 'full-a4' && (maxItems > 10 || overflowDetected)
 
   function handlePrint() {
     // Add body class for reliable print isolation (no :has() dependency).
@@ -198,14 +221,20 @@ export function InvoicePrintDialog({
                     <p className="text-xs font-medium text-amber-800">
                       ⚠ This invoice has {maxItems} line items. Half A4 may be tight — consider using &quot;Full A4 — Single Invoice&quot; mode for best readability.
                     </p>
+                    {measuredHeight > 0 && (
+                      <p className="text-[10px] text-amber-700 mt-1">
+                        Measured content height: {measuredHeight}px · Available Half-A4 height: {HALF_A4_PRINTABLE_PX}px
+                      </p>
+                    )}
                   </div>
                 )}
 
-                {tooManyItems && (
+                {overflowDetected && mode !== 'full-a4' && (
                   <div className="p-3 rounded-lg border border-rose-200 bg-rose-50">
                     <p className="text-xs font-medium text-rose-800">
-                      ⚠ This invoice has {maxItems} line items — more than Half A4 can fit without shrinking text. Use &quot;Full A4 — Single Invoice&quot; mode to avoid clipping.
+                      ⚠ Content overflow detected! Rendered height ({measuredHeight}px) exceeds Half-A4 printable height ({HALF_A4_PRINTABLE_PX}px). Half-A4 printing is blocked to prevent clipping.
                     </p>
+                    <p className="text-[10px] text-rose-700 mt-1">Switch to &quot;Full A4 — Single Invoice&quot; mode to print without clipping.</p>
                     <button
                       onClick={() => setMode('full-a4')}
                       className="mt-2 px-3 py-1.5 rounded-md bg-rose-600 text-white text-xs font-medium press-sm"
@@ -237,7 +266,8 @@ export function InvoicePrintDialog({
                   <button onClick={onClose} className="px-4 py-2 rounded-md text-sm font-medium border border-border press-sm">Cancel</button>
                   <button
                     onClick={handlePrint}
-                    className="px-4 py-2 rounded-md text-sm font-medium bg-primary text-primary-foreground press-sm flex items-center gap-1.5"
+                    disabled={overflowDetected && mode !== 'full-a4'}
+                    className="px-4 py-2 rounded-md text-sm font-medium bg-primary text-primary-foreground press-sm flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     <Printer className="size-4" /> Print
                   </button>
@@ -246,6 +276,10 @@ export function InvoicePrintDialog({
             </motion.div>
           </div>
 
+          <div ref={printRootRef} className="hidden">
+            <InvoicePrintRoot mode={mode} invoices={invoices} businessName={businessName} businessContact={businessContact} />
+          </div>
+          {/* Also render the print root at top level for actual printing */}
           <InvoicePrintRoot mode={mode} invoices={invoices} businessName={businessName} businessContact={businessContact} />
         </>
       )}
