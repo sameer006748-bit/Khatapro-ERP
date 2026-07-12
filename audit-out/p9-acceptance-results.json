@@ -1,168 +1,199 @@
 {
-  "passed": 39,
+  "passed": 48,
   "failed": 0,
-  "blocked": 1,
+  "blocked": 0,
   "details": [
     {
-      "name": "Owner login",
-      "status": "PASS"
+      "n": "Owner login",
+      "s": "PASS"
     },
     {
-      "name": "Accountant login",
-      "status": "PASS"
+      "n": "Accountant login",
+      "s": "PASS"
     },
     {
-      "name": "Salesman login",
-      "status": "PASS"
+      "n": "Salesman login",
+      "s": "PASS"
     },
     {
-      "name": "Rider login",
-      "status": "PASS"
+      "n": "Rider login",
+      "s": "PASS"
     },
     {
-      "name": "TB before: Dr=345593081 Cr=345593081 Diff=0",
-      "status": "PASS"
+      "n": "TB before: Dr=1393040581 Cr=1393040581 Diff=0",
+      "s": "PASS"
     },
     {
-      "name": "BS before: Diff=0",
-      "status": "PASS"
+      "n": "Product: b7613069...",
+      "s": "PASS"
     },
     {
-      "name": "Product created: c38f4fae...",
-      "status": "PASS"
+      "n": "Counter Sale: INV-0110",
+      "s": "PASS"
     },
     {
-      "name": "Counter Sale: INV-0074",
-      "status": "PASS"
+      "n": "Online Sale: INV-0111 (delivery: created)",
+      "s": "PASS"
     },
     {
-      "name": "Online Sale: INV-0075",
-      "status": "PASS"
+      "n": "OFC Sale: INV-0112",
+      "s": "PASS"
     },
     {
-      "name": "OFC Sale: INV-0076",
-      "status": "PASS"
+      "n": "Partial Sale: INV-0113",
+      "s": "PASS"
     },
     {
-      "name": "Partial Sale: INV-0077",
-      "status": "PASS"
+      "n": "Purchase: PUR-0056",
+      "s": "PASS"
     },
     {
-      "name": "Purchase: PUR-0047",
-      "status": "PASS"
+      "n": "Purchase Return: PRN-0018",
+      "s": "PASS"
     },
     {
-      "name": "Journal Voucher",
-      "status": "PASS"
+      "n": "Purchase Replacement: REP-0021",
+      "s": "PASS"
     },
     {
-      "name": "Receipt Voucher",
-      "status": "PASS"
+      "n": "Journal Voucher",
+      "s": "PASS"
     },
     {
-      "name": "Payment Voucher",
-      "status": "PASS"
+      "n": "Receipt Voucher",
+      "s": "PASS"
     },
     {
-      "name": "Delivery/COD flow",
-      "status": "BLOCKED",
-      "reason": "No pending delivery orders found"
+      "n": "Payment Voucher",
+      "s": "PASS"
     },
     {
-      "name": "TB after: Dr=459110581 Cr=459110581 Diff=0",
-      "status": "PASS"
+      "n": "Fresh delivery order: 755fd5a1... status=pending",
+      "s": "PASS"
     },
     {
-      "name": "BS after: Diff=0",
-      "status": "PASS"
+      "n": "Rider assigned",
+      "s": "PASS"
     },
     {
-      "name": "P&L: 4 rows, 0 zeros, 0 non-PL",
-      "status": "PASS"
+      "n": "Status: out_for_delivery",
+      "s": "PASS"
     },
     {
-      "name": "Salesman blocked from profit-loss",
-      "status": "PASS"
+      "n": "Marked delivered",
+      "s": "PASS"
     },
     {
-      "name": "Salesman blocked from balance-sheet",
-      "status": "PASS"
+      "n": "COD submitted: CS-0012",
+      "s": "PASS"
     },
     {
-      "name": "Salesman blocked from trial-balance",
-      "status": "PASS"
+      "n": "COD confirmed",
+      "s": "PASS"
     },
     {
-      "name": "Salesman own reports",
-      "status": "PASS"
+      "n": "Duplicate COD blocked",
+      "s": "PASS"
     },
     {
-      "name": "Rider blocked from reports",
-      "status": "PASS"
+      "n": "Over-allocation blocked",
+      "s": "PASS"
     },
     {
-      "name": "CSV export",
-      "status": "PASS"
+      "n": "TB after: Dr=1547338081 Cr=1547338081 Diff=0",
+      "s": "PASS"
     },
     {
-      "name": "PWA metadata",
-      "status": "PASS"
+      "n": "BS after: Diff=0",
+      "s": "PASS"
     },
     {
-      "name": "SW registered: state=activated, controller=true",
-      "status": "PASS"
+      "n": "P&L: 4 rows, 0 zeros, 0 non-PL",
+      "s": "PASS"
     },
     {
-      "name": "Cache security: no API cached (1 cache(s))",
-      "status": "PASS"
+      "n": "Salesman blocked: profit-loss",
+      "s": "PASS"
     },
     {
-      "name": "PDF single: 1 page(s), 594.96 x 420.96 pts (A5)",
-      "status": "PASS"
+      "n": "Salesman blocked: balance-sheet",
+      "s": "PASS"
     },
     {
-      "name": "PDF two-up: 1 page(s), 594.96 x 841.92 pts (A4)",
-      "status": "PASS"
+      "n": "Salesman blocked: trial-balance",
+      "s": "PASS"
     },
     {
-      "name": "PDF top-half: 1 page(s), 594.96 x 841.92 pts (A4)",
-      "status": "PASS"
+      "n": "Salesman own reports",
+      "s": "PASS"
     },
     {
-      "name": "PDF bottom-half: 1 page(s), 594.96 x 841.92 pts (A4)",
-      "status": "PASS"
+      "n": "Rider blocked from reports",
+      "s": "PASS"
     },
     {
-      "name": "PDF full-a4: 1 page(s), 594.96 x 841.92 pts (A4)",
-      "status": "PASS"
+      "n": "CSV export",
+      "s": "PASS"
     },
     {
-      "name": "Responsive 360x800: no overflow",
-      "status": "PASS"
+      "n": "PWA metadata",
+      "s": "PASS"
     },
     {
-      "name": "Responsive 390x844: no overflow",
-      "status": "PASS"
+      "n": "SW: state=activated controller=true",
+      "s": "PASS"
     },
     {
-      "name": "Responsive 412x915: no overflow",
-      "status": "PASS"
+      "n": "Cache security: no API cached",
+      "s": "PASS"
     },
     {
-      "name": "Responsive 768x1024: no overflow",
-      "status": "PASS"
+      "n": "PDF single: 1p 594.96 x 420.96 pts (A5) | GT=false Paid=false noUUID=true noCost=true noFabSKU=true",
+      "s": "PASS"
     },
     {
-      "name": "Responsive 1280x800: no overflow",
-      "status": "PASS"
+      "n": "PDF two-up: 1p 594.96 x 841.92 pts (A4) | GT=false Paid=false noUUID=true noCost=true noFabSKU=true",
+      "s": "PASS"
     },
     {
-      "name": "Responsive 1440x900: no overflow",
-      "status": "PASS"
+      "n": "PDF top-half: 1p 594.96 x 841.92 pts (A4) | GT=false Paid=false noUUID=true noCost=true noFabSKU=true",
+      "s": "PASS"
     },
     {
-      "name": "Console: 0 errors",
-      "status": "PASS"
+      "n": "PDF bottom-half: 1p 594.96 x 841.92 pts (A4) | GT=false Paid=false noUUID=true noCost=true noFabSKU=true",
+      "s": "PASS"
+    },
+    {
+      "n": "PDF full-a4: 1p 594.96 x 841.92 pts (A4) | GT=false Paid=false noUUID=true noCost=true noFabSKU=true",
+      "s": "PASS"
+    },
+    {
+      "n": "Responsive 360x800",
+      "s": "PASS"
+    },
+    {
+      "n": "Responsive 390x844",
+      "s": "PASS"
+    },
+    {
+      "n": "Responsive 412x915",
+      "s": "PASS"
+    },
+    {
+      "n": "Responsive 768x1024",
+      "s": "PASS"
+    },
+    {
+      "n": "Responsive 1280x800",
+      "s": "PASS"
+    },
+    {
+      "n": "Responsive 1440x900",
+      "s": "PASS"
+    },
+    {
+      "n": "Console: 0 errors",
+      "s": "PASS"
     }
   ]
 }
