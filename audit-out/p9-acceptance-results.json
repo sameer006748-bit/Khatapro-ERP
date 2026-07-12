@@ -1,0 +1,168 @@
+{
+  "passed": 39,
+  "failed": 0,
+  "blocked": 1,
+  "details": [
+    {
+      "name": "Owner login",
+      "status": "PASS"
+    },
+    {
+      "name": "Accountant login",
+      "status": "PASS"
+    },
+    {
+      "name": "Salesman login",
+      "status": "PASS"
+    },
+    {
+      "name": "Rider login",
+      "status": "PASS"
+    },
+    {
+      "name": "TB before: Dr=345593081 Cr=345593081 Diff=0",
+      "status": "PASS"
+    },
+    {
+      "name": "BS before: Diff=0",
+      "status": "PASS"
+    },
+    {
+      "name": "Product created: c38f4fae...",
+      "status": "PASS"
+    },
+    {
+      "name": "Counter Sale: INV-0074",
+      "status": "PASS"
+    },
+    {
+      "name": "Online Sale: INV-0075",
+      "status": "PASS"
+    },
+    {
+      "name": "OFC Sale: INV-0076",
+      "status": "PASS"
+    },
+    {
+      "name": "Partial Sale: INV-0077",
+      "status": "PASS"
+    },
+    {
+      "name": "Purchase: PUR-0047",
+      "status": "PASS"
+    },
+    {
+      "name": "Journal Voucher",
+      "status": "PASS"
+    },
+    {
+      "name": "Receipt Voucher",
+      "status": "PASS"
+    },
+    {
+      "name": "Payment Voucher",
+      "status": "PASS"
+    },
+    {
+      "name": "Delivery/COD flow",
+      "status": "BLOCKED",
+      "reason": "No pending delivery orders found"
+    },
+    {
+      "name": "TB after: Dr=459110581 Cr=459110581 Diff=0",
+      "status": "PASS"
+    },
+    {
+      "name": "BS after: Diff=0",
+      "status": "PASS"
+    },
+    {
+      "name": "P&L: 4 rows, 0 zeros, 0 non-PL",
+      "status": "PASS"
+    },
+    {
+      "name": "Salesman blocked from profit-loss",
+      "status": "PASS"
+    },
+    {
+      "name": "Salesman blocked from balance-sheet",
+      "status": "PASS"
+    },
+    {
+      "name": "Salesman blocked from trial-balance",
+      "status": "PASS"
+    },
+    {
+      "name": "Salesman own reports",
+      "status": "PASS"
+    },
+    {
+      "name": "Rider blocked from reports",
+      "status": "PASS"
+    },
+    {
+      "name": "CSV export",
+      "status": "PASS"
+    },
+    {
+      "name": "PWA metadata",
+      "status": "PASS"
+    },
+    {
+      "name": "SW registered: state=activated, controller=true",
+      "status": "PASS"
+    },
+    {
+      "name": "Cache security: no API cached (1 cache(s))",
+      "status": "PASS"
+    },
+    {
+      "name": "PDF single: 1 page(s), 594.96 x 420.96 pts (A5)",
+      "status": "PASS"
+    },
+    {
+      "name": "PDF two-up: 1 page(s), 594.96 x 841.92 pts (A4)",
+      "status": "PASS"
+    },
+    {
+      "name": "PDF top-half: 1 page(s), 594.96 x 841.92 pts (A4)",
+      "status": "PASS"
+    },
+    {
+      "name": "PDF bottom-half: 1 page(s), 594.96 x 841.92 pts (A4)",
+      "status": "PASS"
+    },
+    {
+      "name": "PDF full-a4: 1 page(s), 594.96 x 841.92 pts (A4)",
+      "status": "PASS"
+    },
+    {
+      "name": "Responsive 360x800: no overflow",
+      "status": "PASS"
+    },
+    {
+      "name": "Responsive 390x844: no overflow",
+      "status": "PASS"
+    },
+    {
+      "name": "Responsive 412x915: no overflow",
+      "status": "PASS"
+    },
+    {
+      "name": "Responsive 768x1024: no overflow",
+      "status": "PASS"
+    },
+    {
+      "name": "Responsive 1280x800: no overflow",
+      "status": "PASS"
+    },
+    {
+      "name": "Responsive 1440x900: no overflow",
+      "status": "PASS"
+    },
+    {
+      "name": "Console: 0 errors",
+      "status": "PASS"
+    }
+  ]
+}
