@@ -117,15 +117,13 @@ export function CounterSaleView({ user }: { user: MeUser }) {
     }, 0n)
   }, [cart])
 
-  // Discount
+  // Discount — NO silent clamping. Invalid discount stays visible and blocks submit.
   const discountPaisas = useMemo(() => {
     const parsed = parseMoney(discountInput) ?? 0n
-    if (parsed < 0n) return 0n
-    if (parsed > subtotal) return subtotal
-    return parsed
-  }, [discountInput, subtotal])
-  const discountExceedsSubtotal = (parseMoney(discountInput) ?? 0n) > subtotal
-  const finalTotal = subtotal - discountPaisas
+    return parsed < 0n ? 0n : parsed
+  }, [discountInput])
+  const discountExceedsSubtotal = discountPaisas > subtotal
+  const finalTotal = discountExceedsSubtotal ? 0n : subtotal - discountPaisas
 
   const salesman = salesmenQ.data?.rows.find(s => s.id === salesmanId)
 

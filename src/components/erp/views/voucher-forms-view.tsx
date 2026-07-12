@@ -84,6 +84,7 @@ export function ReceiptVoucherView({ user }: { user: MeUser }) {
   const [amount, setAmount] = useState('')
   const [reference, setReference] = useState('')
   const [notes, setNotes] = useState('')
+  const [allocations, setAllocations] = useState<Array<{ key: string; invoiceId: string; allocatedAmount: string }>>([])
   const [result, setResult] = useState<{ ok: boolean; receiptNo?: string; error?: string } | null>(null)
 
   const coaQ = useQuery({ queryKey: ['coa'], queryFn: () => fetch('/api/setup/coa').then(r => r.json()) })
@@ -92,7 +93,11 @@ export function ReceiptVoucherView({ user }: { user: MeUser }) {
 
   const mut = useMutation({
     mutationFn: async () => {
-      const r = await fetch('/api/receipt-voucher', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ receiptDate, receivedIntoAccountId, creditAccountId, amount, reference: reference || undefined, notes: notes || undefined }) })
+      const body: any = { receiptDate, receivedIntoAccountId, creditAccountId, amount, reference: reference || undefined, notes: notes || undefined }
+      if (allocations.length > 0) {
+        body.allocations = allocations.filter(a => a.invoiceId && a.allocatedAmount).map(a => ({ invoiceId: a.invoiceId, allocatedAmount: a.allocatedAmount }))
+      }
+      const r = await fetch('/api/receipt-voucher', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
       const j = await r.json(); if (!r.ok) throw new Error(j?.error ?? 'Failed'); return j
     },
     onSuccess: (j) => { toast.success(`Receipt Voucher posted: ${j.receiptNo}`); setResult({ ok: true, receiptNo: j.receiptNo }); void qc.invalidateQueries({ queryKey: ['day-book'] }); void qc.invalidateQueries({ queryKey: ['trial-balance'] }) },
@@ -100,20 +105,22 @@ export function ReceiptVoucherView({ user }: { user: MeUser }) {
   })
 
   const amtPaisas = parseMoney(amount) ?? 0n
-  const canPost = receivedIntoAccountId && creditAccountId && amtPaisas > 0n && receivedIntoAccountId !== creditAccountId
+  const allocTotal = allocations.reduce((s, a) => s + (parseMoney(a.allocatedAmount) ?? 0n), 0n)
+  const allocExceeds = allocTotal > amtPaisas
+  const canPost = receivedIntoAccountId && creditAccountId && amtPaisas > 0n && receivedIntoAccountId !== creditAccountId && !allocExceeds
 
   if (result?.ok) return (
     <div className="card-3d p-6 max-w-md mx-auto text-center">
       <CheckCircle2 className="size-12 text-primary mx-auto mb-3" />
       <p className="text-xs text-muted-foreground mb-1">Receipt Voucher Posted</p>
       <p className="text-2xl font-bold text-primary" data-num>{result.receiptNo}</p>
-      <Button variant="ghost" size="sm" className="mt-4" onClick={() => { setResult(null); setAmount(''); setReference(''); setNotes('') }}>New Receipt</Button>
+      <Button variant="ghost" size="sm" className="mt-4" onClick={() => { setResult(null); setAmount(''); setReference(''); setNotes(''); setAllocations([]) }}>New Receipt</Button>
     </div>
   )
 
   return (
     <div className="space-y-4 max-w-2xl">
-      <div><h1 className="text-xl font-semibold tracking-tight text-foreground">Receipt Voucher</h1><p className="text-xs text-muted-foreground mt-0.5">Record money received into a business account</p></div>
+      <div><h1 className="text-xl font-semibold tracking-tight text-foreground">Receipt Voucher</h1><p className="text-xs text-muted-foreground mt-0.5">Record money received into a business account. Optionally allocate to one or more outstanding invoices.</p></div>
       <div className="card-3d p-5 space-y-3">
         <div className="grid sm:grid-cols-2 gap-3">
           <div><Label className="text-xs text-muted-foreground">Date</Label><Input type="date" value={receiptDate} onChange={e => setReceiptDate(e.target.value)} className="h-9 bg-background" data-num /></div>
@@ -129,6 +136,29 @@ export function ReceiptVoucherView({ user }: { user: MeUser }) {
         </div>
         <div><Label className="text-xs text-muted-foreground">Amount (Rs)</Label><Input type="text" value={amount} onChange={e => setAmount(e.target.value)} placeholder="0.00" className="h-9 bg-background" data-num /></div>
         {amtPaisas > 0n && <div className="text-xs text-muted-foreground bg-muted/40 p-2 rounded border border-border">Voucher will post: <strong>Dr {businessAccounts.find(a => a.id === receivedIntoAccountId)?.name ?? '—'} {formatMoney(amtPaisas)}</strong>, <strong>Cr {accounts.find(a => a.id === creditAccountId)?.name ?? '—'} {formatMoney(amtPaisas)}</strong></div>}
+
+        {/* ── Invoice Allocations (optional, multi-invoice) ── */}
+        <div className="pt-2 border-t border-border">
+          <div className="flex items-center justify-between mb-2">
+            <Label className="text-xs text-muted-foreground">Invoice Allocations (optional)</Label>
+            <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => setAllocations(ls => [...ls, { key: String(Date.now()), invoiceId: '', allocatedAmount: '' }])}>+ Add Allocation</Button>
+          </div>
+          {allocations.map((a) => (
+            <div key={a.key} className="grid grid-cols-3 gap-2 mb-2">
+              <Input value={a.invoiceId} onChange={e => setAllocations(ls => ls.map(x => x.key === a.key ? { ...x, invoiceId: e.target.value } : x))} placeholder="Invoice UUID" className="h-8 bg-background text-xs" />
+              <Input value={a.allocatedAmount} onChange={e => setAllocations(ls => ls.map(x => x.key === a.key ? { ...x, allocatedAmount: e.target.value } : x))} placeholder="Rs" className="h-8 bg-background text-xs" data-num />
+              <button onClick={() => setAllocations(ls => ls.filter(x => x.key !== a.key))} className="text-muted-foreground hover:text-destructive text-xs">Remove</button>
+            </div>
+          ))}
+          {allocations.length > 0 && (
+            <div className="flex justify-between text-xs">
+              <span className="text-muted-foreground">Total Allocated</span>
+              <span className={allocExceeds ? 'text-destructive font-medium' : 'font-medium'} data-num>{formatMoney(allocTotal, false)}</span>
+            </div>
+          )}
+          {allocExceeds && <div className="text-[10px] text-destructive flex items-center gap-1"><AlertCircle className="size-3" /> Total allocations exceed receipt amount</div>}
+        </div>
+
         <div><Label className="text-xs text-muted-foreground">Notes</Label><Input value={notes} onChange={e => setNotes(e.target.value)} placeholder="Optional" className="h-9 bg-background" /></div>
         {receivedIntoAccountId === creditAccountId && creditAccountId && <div className="text-xs text-destructive flex items-center gap-1"><AlertCircle className="size-3" /> Received-into and credit accounts must differ</div>}
         {result && !result.ok && <div className="text-xs text-destructive flex items-center gap-1"><AlertCircle className="size-3" /> {result.error}</div>}

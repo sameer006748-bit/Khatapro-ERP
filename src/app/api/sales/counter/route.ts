@@ -19,13 +19,13 @@ const ItemSchema = z.object({
   productId: z.string().nullable().optional(),
   productName: z.string().min(1),
   qty: z.number().int().positive(),
-  unitPrice: z.string().min(1),  // paisas as string
+  unitPrice: z.string().min(1),
   isTemporary: z.boolean().optional(),
 })
 
 const PaymentSchema = z.object({
   accountId: z.string().min(1),
-  amount: z.string().min(1),  // paisas as string
+  amount: z.string().min(1),
   isChange: z.boolean().optional(),
 })
 
@@ -58,7 +58,8 @@ export async function POST(req: Request) {
   // Parse money strings to BigInt.
   // Items: unitPrice is in RUPEES (e.g. "1800") → parseMoney converts to paisas (180000).
   // Payments: amount is already in PAISAS (e.g. "180000") → BigInt directly, no parseMoney.
-  let items, payments
+  let items: Array<{ productId?: string | null; productName: string; qty: number; unitPrice: bigint; isTemporary?: boolean }>
+  let payments: Array<{ accountId: string; amount: bigint; isChange?: boolean }>
   try {
     items = parsed.data.items.map((i) => {
       const up = parseMoney(i.unitPrice)
@@ -92,6 +93,11 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: smResult.error }, { status: smResult.status })
     }
 
+    // Server-side discount validation (no silent clamping)
+    const subtotal = items.reduce((s, i) => s + i.unitPrice * BigInt(i.qty), 0n)
+    const discountPaisas = parsed.data.discount ? parseDiscountPaisas(parsed.data.discount) : 0n
+    validateDiscountNotExceedingSubtotal(discountPaisas, subtotal)
+
     const result = await postSale({
       businessId: su.businessId,
       invoiceType: 'COUNTER',
@@ -104,7 +110,7 @@ export async function POST(req: Request) {
       customerPhone: parsed.data.customerPhone ?? null,
       memo: parsed.data.memo ?? null,
       createdBy: su.userId,
-      discount: parsed.data.discount ? parseDiscountPaisas(parsed.data.discount) : 0n,
+      discount: discountPaisas,
     })
     return NextResponse.json({ ok: true, invoiceId: result.invoiceId, invoiceNo: result.invoiceNo })
   } catch (e) {

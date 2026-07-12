@@ -7,6 +7,12 @@ import { postReceiptVoucher } from '@/lib/vouchers/data-access'
 import { parseMoney } from '@/lib/format'
 
 const isUuid = (s: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s)
+
+const AllocationSchema = z.object({
+  invoiceId: z.string().min(1),
+  allocatedAmount: z.string().min(1),
+})
+
 const Schema = z.object({
   receiptDate: z.string(),
   receivedIntoAccountId: z.string().min(1),
@@ -16,6 +22,7 @@ const Schema = z.object({
   reference: z.string().optional(),
   notes: z.string().optional(),
   invoiceId: z.string().nullable().optional(),
+  allocations: z.array(AllocationSchema).optional(),
 })
 
 export async function POST(req: Request) {
@@ -32,6 +39,28 @@ export async function POST(req: Request) {
   if (parsed.data.receivedIntoAccountId === parsed.data.creditAccountId) return NextResponse.json({ error: 'Received-into and credit accounts must differ' }, { status: 400 })
   const amountPaisas = parseMoney(parsed.data.amount)
   if (amountPaisas === null || amountPaisas <= 0n) return NextResponse.json({ error: 'Invalid amount' }, { status: 400 })
+
+  // Build allocations array if provided
+  let allocations: Array<{ invoiceId: string; allocatedAmount: bigint }> | null = null
+  if (parsed.data.allocations && parsed.data.allocations.length > 0) {
+    allocations = []
+    for (const a of parsed.data.allocations) {
+      if (!isUuid(a.invoiceId)) {
+        return NextResponse.json({ error: `Invalid invoice ID in allocation: ${a.invoiceId}` }, { status: 400 })
+      }
+      const allocAmount = parseMoney(a.allocatedAmount)
+      if (allocAmount === null || allocAmount <= 0n) {
+        return NextResponse.json({ error: 'Invalid allocation amount' }, { status: 400 })
+      }
+      allocations.push({ invoiceId: a.invoiceId, allocatedAmount: allocAmount })
+    }
+    // Client-side validation: total allocations must not exceed receipt amount
+    const totalAlloc = allocations.reduce((s, a) => s + a.allocatedAmount, 0n)
+    if (totalAlloc > amountPaisas) {
+      return NextResponse.json({ error: `Total allocations (${totalAlloc}) exceed receipt amount (${amountPaisas})` }, { status: 400 })
+    }
+  }
+
   try {
     const result = await postReceiptVoucher({
       businessId: su.businessId,
@@ -43,6 +72,7 @@ export async function POST(req: Request) {
       reference: parsed.data.reference ?? null,
       notes: parsed.data.notes ?? null,
       invoiceId: parsed.data.invoiceId ?? null,
+      allocations,
       createdBy: su.userId,
     })
     return NextResponse.json({ ok: true, ...result })

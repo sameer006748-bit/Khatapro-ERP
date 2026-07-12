@@ -19,12 +19,16 @@ type Item = { key: string; productId: string; productName: string; qty: string; 
 
 export function OnlineSaleView({ user }: { user: MeUser }) {
   const qc = useQueryClient()
-  const [form, setForm] = useState({ customerName: '', customerPhone: '', customerAddress: '', customerCity: '', source: 'WhatsApp', codAmount: '', deliveryFee: '', riderEarning: '', companyDeliveryIncome: '', discount: '', invoiceDate: new Date().toISOString().slice(0, 10) })
+  const [form, setForm] = useState({
+    customerName: '', customerPhone: '', customerAddress: '', customerCity: '',
+    source: 'WhatsApp', codAmount: '', deliveryFee: '', riderEarning: '',
+    companyDeliveryIncome: '', discount: '', advanceReceived: '',
+    invoiceDate: new Date().toISOString().slice(0, 10),
+  })
   const [items, setItems] = useState<Item[]>([{ key: '1', productId: '', productName: '', qty: '1', unitPrice: '' }])
   const [paymentAccountId, setPaymentAccountId] = useState('')
-  const [result, setResult] = useState<{ ok: boolean; invoiceNo?: string; invoiceId?: string; error?: string } | null>(null)
+  const [result, setResult] = useState<{ ok: boolean; invoiceNo?: string; invoiceId?: string; error?: string; remainingCod?: string; customerGrandTotal?: string } | null>(null)
 
-  // Use CoA for accounts (Supabase UUIDs)
   const coaQ = useQuery({ queryKey: ['coa'], queryFn: () => fetch('/api/setup/coa').then(r => r.json()) })
   const productsQ = useQuery<{ rows: Product[] }>({ queryKey: ['products'], queryFn: () => fetch('/api/products').then(r => r.json()) })
 
@@ -40,14 +44,33 @@ export function OnlineSaleView({ user }: { user: MeUser }) {
     }
   }, [businessAccounts, paymentAccountId])
 
+  // ── Reconciled totals ──
   const subtotal = items.reduce((acc, it) => acc + (parseMoney(it.unitPrice) ?? 0n) * BigInt(parseInt(it.qty) || 0), 0n)
   const discountPaisas = parseMoney(form.discount) ?? 0n
-  const netProductTotal = subtotal - (discountPaisas > subtotal ? subtotal : discountPaisas)
+  const discountExceedsSubtotal = discountPaisas > subtotal
+  const netProductTotal = discountExceedsSubtotal ? 0n : subtotal - discountPaisas
   const deliveryFeePaisas = parseMoney(form.deliveryFee) ?? 0n
-  const grandTotal = netProductTotal + deliveryFeePaisas
+  const riderEarningPaisas = parseMoney(form.riderEarning) ?? 0n
+  const companyDeliveryIncomePaisas = parseMoney(form.companyDeliveryIncome) ?? 0n
+  const customerGrandTotal = netProductTotal + deliveryFeePaisas
+
+  // Advance and change
+  const advanceReceived = parseMoney(form.advanceReceived) ?? 0n
+  const changeAmount = advanceReceived > customerGrandTotal ? advanceReceived - customerGrandTotal : 0n
+  const netAdvance = advanceReceived - changeAmount
+  const outstanding = customerGrandTotal > netAdvance ? customerGrandTotal - netAdvance : 0n
+  const codExpected = outstanding // COD = remaining outstanding
 
   const postMut = useMutation({
     mutationFn: async () => {
+      // Build payments: advance received, plus change if needed
+      const payments: Array<{ accountId: string; amount: string; isChange?: boolean }> = [
+        { accountId: paymentAccountId, amount: advanceReceived.toString() },
+      ]
+      if (changeAmount > 0n) {
+        payments.push({ accountId: paymentAccountId, amount: changeAmount.toString(), isChange: true })
+      }
+
       const r = await fetch('/api/sales/online', {
         method: 'POST', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
@@ -57,7 +80,7 @@ export function OnlineSaleView({ user }: { user: MeUser }) {
             productName: it.productName || productsQ.data?.rows.find(p => p.id === it.productId)?.name || 'Item',
             qty: parseInt(it.qty) || 1, unitPrice: it.unitPrice,
           })),
-          payments: [{ accountId: paymentAccountId, amount: netProductTotal.toString() }],
+          payments,
           customerName: form.customerName, customerPhone: form.customerPhone,
           customerAddress: form.customerAddress, customerCity: form.customerCity || undefined,
           memo: form.source ? `Source: ${form.source}${form.deliveryFee ? ` · Delivery: Rs ${form.deliveryFee}` : ''}` : undefined,
@@ -74,7 +97,7 @@ export function OnlineSaleView({ user }: { user: MeUser }) {
     },
     onSuccess: (j) => {
       toast.success(`Online sale posted: ${j.invoiceNo}`)
-      setResult({ ok: true, invoiceNo: j.invoiceNo, invoiceId: j.invoiceId })
+      setResult({ ok: true, invoiceNo: j.invoiceNo, invoiceId: j.invoiceId, remainingCod: j.remainingCod, customerGrandTotal: j.customerGrandTotal })
       void qc.invalidateQueries({ queryKey: ['invoices'] })
       void qc.invalidateQueries({ queryKey: ['trial-balance'] })
       void qc.invalidateQueries({ queryKey: ['products'] })
@@ -94,20 +117,34 @@ export function OnlineSaleView({ user }: { user: MeUser }) {
           <div className="grid place-items-center size-16 rounded-2xl icon-3d mx-auto mb-4"><CheckCircle2 className="size-8 text-primary-foreground" /></div>
           <h2 className="text-xl font-semibold text-foreground">Online Sale Posted!</h2>
           <p className="text-3xl font-bold text-primary mt-1" data-num>{result.invoiceNo}</p>
+          {result.customerGrandTotal && (
+            <p className="text-sm text-muted-foreground mt-2">Grand Total: <span className="font-medium text-foreground" data-num>{formatMoney(BigInt(result.customerGrandTotal))}</span></p>
+          )}
+          {result.remainingCod && (
+            <p className="text-sm text-muted-foreground">COD Expected: <span className="font-medium text-amber-600" data-num>{formatMoney(BigInt(result.remainingCod))}</span></p>
+          )}
           <div className="mt-6 flex flex-col gap-2">
             <Button className="press-md shadow-sm" onClick={() => window.open(`/?invoice=${result.invoiceId}`, '_self')}><FileText className="size-4" /> View Invoice</Button>
             <PrintInvoiceButton invoiceId={result.invoiceId} label="Print Invoice" size="default" className="w-full justify-center" icon={Printer} />
-            <Button variant="ghost" className="press-sm" onClick={() => { setResult(null); setItems([{ key: String(Date.now()), productId: '', productName: '', qty: '1', unitPrice: '' }]); setForm({ customerName: '', customerPhone: '', customerAddress: '', customerCity: '', source: 'WhatsApp', codAmount: '', deliveryFee: '', riderEarning: '', companyDeliveryIncome: '', discount: '', invoiceDate: new Date().toISOString().slice(0, 10) }) }}><Globe className="size-4" /> New Order</Button>
+            <Button variant="ghost" className="press-sm" onClick={() => {
+              setResult(null)
+              setItems([{ key: String(Date.now()), productId: '', productName: '', qty: '1', unitPrice: '' }])
+              setForm({ customerName: '', customerPhone: '', customerAddress: '', customerCity: '', source: 'WhatsApp', codAmount: '', deliveryFee: '', riderEarning: '', companyDeliveryIncome: '', discount: '', advanceReceived: '', invoiceDate: new Date().toISOString().slice(0, 10) })
+            }}><Globe className="size-4" /> New Order</Button>
           </div>
         </motion.div>
       </div>
     )
   }
 
+  const canPost = form.customerName && form.customerPhone && form.customerAddress &&
+    items.some(it => it.productId || it.productName) && !discountExceedsSubtotal
+
   return (
     <div className="space-y-4">
       <h1 className="text-xl font-semibold tracking-tight text-foreground">Online Sale</h1>
 
+      {/* ── Customer ── */}
       <div className="card-3d p-4 space-y-3">
         <h2 className="text-sm font-semibold text-foreground">Customer</h2>
         <div className="grid sm:grid-cols-2 gap-2">
@@ -116,7 +153,7 @@ export function OnlineSaleView({ user }: { user: MeUser }) {
           <Input value={form.customerAddress} onChange={e => setForm(s => ({ ...s, customerAddress: e.target.value }))} placeholder="Address *" className="h-9 bg-background press-sm" />
           <Input value={form.customerCity} onChange={e => setForm(s => ({ ...s, customerCity: e.target.value }))} placeholder="City" className="h-9 bg-background press-sm" />
         </div>
-        <div className="grid sm:grid-cols-3 gap-2">
+        <div className="grid sm:grid-cols-2 gap-2">
           <div>
             <Label className="text-[10px] text-muted-foreground">Source</Label>
             <Select value={form.source} onValueChange={v => setForm(s => ({ ...s, source: v }))}>
@@ -130,13 +167,10 @@ export function OnlineSaleView({ user }: { user: MeUser }) {
             <Label className="text-[10px] text-muted-foreground">Discount (Rs)</Label>
             <Input type="text" inputMode="decimal" value={form.discount} onChange={e => setForm(s => ({ ...s, discount: e.target.value }))} placeholder="0" className="h-9 bg-background press-sm" data-num />
           </div>
-          <div>
-            <Label className="text-[10px] text-muted-foreground">Delivery Fee (Rs)</Label>
-            <Input type="text" value={form.deliveryFee} onChange={e => setForm(s => ({ ...s, deliveryFee: e.target.value }))} placeholder="0" className="h-9 bg-background press-sm" data-num />
-          </div>
         </div>
       </div>
 
+      {/* ── Items ── */}
       <div className="card-3d p-4">
         <div className="flex items-center justify-between mb-2">
           <h2 className="text-sm font-semibold text-foreground">Items</h2>
@@ -159,37 +193,102 @@ export function OnlineSaleView({ user }: { user: MeUser }) {
             </div>
           ))}
         </div>
-        <div className="mt-2 pt-2 border-t border-border space-y-1">
-          <div className="flex items-center justify-between text-sm">
-            <span className="text-muted-foreground">Subtotal</span><span className="font-medium" data-num>{formatMoney(subtotal, false)}</span>
+      </div>
+
+      {/* ── Delivery ── */}
+      <div className="card-3d p-4 space-y-3">
+        <h2 className="text-sm font-semibold text-foreground">Delivery</h2>
+        <div className="grid sm:grid-cols-3 gap-2">
+          <div>
+            <Label className="text-[10px] text-muted-foreground">Delivery Fee (Rs)</Label>
+            <Input type="text" value={form.deliveryFee} onChange={e => setForm(s => ({ ...s, deliveryFee: e.target.value }))} placeholder="0" className="h-9 bg-background press-sm" data-num />
           </div>
-          {discountPaisas > 0n && (
-            <div className="flex items-center justify-between text-sm">
-              <span className="text-muted-foreground">Discount</span><span className="font-medium text-destructive" data-num>−{formatMoney(discountPaisas > subtotal ? subtotal : discountPaisas, false)}</span>
-            </div>
-          )}
-          {deliveryFeePaisas > 0n && (
-            <div className="flex items-center justify-between text-sm">
-              <span className="text-muted-foreground">Delivery Fee</span><span className="font-medium" data-num>{formatMoney(deliveryFeePaisas, false)}</span>
-            </div>
-          )}
-          <div className="flex items-center justify-between text-sm">
-            <span className="font-semibold text-foreground">Grand Total</span><span className="font-bold text-primary" data-num>{formatMoney(grandTotal)}</span>
+          <div>
+            <Label className="text-[10px] text-muted-foreground">Rider Earning (Rs)</Label>
+            <Input type="text" value={form.riderEarning} onChange={e => setForm(s => ({ ...s, riderEarning: e.target.value }))} placeholder="0" className="h-9 bg-background press-sm" data-num />
+          </div>
+          <div>
+            <Label className="text-[10px] text-muted-foreground">Company Income (Rs)</Label>
+            <Input type="text" value={form.companyDeliveryIncome} onChange={e => setForm(s => ({ ...s, companyDeliveryIncome: e.target.value }))} placeholder="0" className="h-9 bg-background press-sm" data-num />
+          </div>
+        </div>
+        {deliveryFeePaisas > 0n && (riderEarningPaisas + companyDeliveryIncomePaisas !== deliveryFeePaisas) && (
+          <div className="text-[10px] text-amber-600">Warning: Rider earning + Company income must equal Delivery Fee</div>
+        )}
+      </div>
+
+      {/* ── Advance ── */}
+      <div className="card-3d p-4 space-y-3">
+        <h2 className="text-sm font-semibold text-foreground">Advance Payment</h2>
+        <div className="grid sm:grid-cols-2 gap-2">
+          <div>
+            <Label className="text-[10px] text-muted-foreground">Advance Received (Rs)</Label>
+            <Input type="text" value={form.advanceReceived} onChange={e => setForm(s => ({ ...s, advanceReceived: e.target.value }))} placeholder="0" className="h-9 bg-background press-sm" data-num />
+          </div>
+          <div>
+            <Label className="text-[10px] text-muted-foreground">Payment Account</Label>
+            <Select value={paymentAccountId} onValueChange={setPaymentAccountId}>
+              <SelectTrigger className="h-9 bg-background press-sm text-sm"><SelectValue /></SelectTrigger>
+              <SelectContent>{businessAccounts.map(a => <SelectItem key={a.id} value={a.id}>{a.name} ({a.code})</SelectItem>)}</SelectContent>
+            </Select>
           </div>
         </div>
       </div>
 
-      <div className="card-3d p-4">
-        <Label className="text-[10px] text-muted-foreground">Payment Account</Label>
-        <Select value={paymentAccountId} onValueChange={setPaymentAccountId}>
-          <SelectTrigger className="h-9 bg-background press-sm text-sm"><SelectValue /></SelectTrigger>
-          <SelectContent>{businessAccounts.map(a => <SelectItem key={a.id} value={a.id}>{a.name} ({a.code})</SelectItem>)}</SelectContent>
-        </Select>
+      {/* ── Reconciled Totals ── */}
+      <div className="card-3d p-4 space-y-1">
+        <h2 className="text-sm font-semibold text-foreground mb-2">Reconciled Totals</h2>
+        <div className="flex items-center justify-between text-sm">
+          <span className="text-muted-foreground">Product Subtotal</span><span className="font-medium" data-num>{formatMoney(subtotal, false)}</span>
+        </div>
+        {discountPaisas > 0n && (
+          <div className="flex items-center justify-between text-sm">
+            <span className="text-muted-foreground">Discount</span>
+            <span className={`font-medium ${discountExceedsSubtotal ? 'text-destructive' : 'text-destructive'}`} data-num>−{formatMoney(discountPaisas, false)}</span>
+          </div>
+        )}
+        {discountExceedsSubtotal && <div className="text-[10px] text-destructive">Discount exceeds subtotal — submit blocked</div>}
+        <div className="flex items-center justify-between text-sm">
+          <span className="text-muted-foreground">Net Product Total</span><span className="font-medium" data-num>{formatMoney(netProductTotal, false)}</span>
+        </div>
+        {deliveryFeePaisas > 0n && (
+          <>
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-muted-foreground">Customer Delivery Charge</span><span className="font-medium" data-num>{formatMoney(deliveryFeePaisas, false)}</span>
+            </div>
+            <div className="flex items-center justify-between text-xs pl-4">
+              <span className="text-muted-foreground">Rider Earning</span><span data-num>{formatMoney(riderEarningPaisas, false)}</span>
+            </div>
+            <div className="flex items-center justify-between text-xs pl-4">
+              <span className="text-muted-foreground">Company Delivery Income</span><span data-num>{formatMoney(companyDeliveryIncomePaisas, false)}</span>
+            </div>
+          </>
+        )}
+        <div className="flex items-center justify-between text-sm pt-1 border-t border-border">
+          <span className="font-semibold text-foreground">Customer Grand Total</span><span className="font-bold text-primary" data-num>{formatMoney(customerGrandTotal)}</span>
+        </div>
+        <div className="flex items-center justify-between text-sm">
+          <span className="text-muted-foreground">Advance Received</span><span className="font-medium" data-num>{formatMoney(advanceReceived, false)}</span>
+        </div>
+        {changeAmount > 0n && (
+          <div className="flex items-center justify-between text-sm">
+            <span className="text-muted-foreground">Change</span><span className="font-medium text-amber-600" data-num>−{formatMoney(changeAmount, false)}</span>
+          </div>
+        )}
+        <div className="flex items-center justify-between text-sm">
+          <span className="text-muted-foreground">Net Advance</span><span className="font-medium text-primary" data-num>{formatMoney(netAdvance, false)}</span>
+        </div>
+        <div className="flex items-center justify-between text-sm">
+          <span className="text-muted-foreground">Outstanding</span><span className="font-medium text-destructive" data-num>{formatMoney(outstanding, false)}</span>
+        </div>
+        <div className="flex items-center justify-between text-sm pt-1 border-t border-border">
+          <span className="font-semibold text-foreground">COD Expected</span><span className="font-bold text-amber-600" data-num>{formatMoney(codExpected)}</span>
+        </div>
       </div>
 
       {result && !result.ok && <div className="card-3d p-3 border-destructive/40 flex items-center gap-2"><AlertCircle className="size-4 text-destructive" /><span className="text-xs text-destructive">{result.error}</span></div>}
 
-      <Button className="w-full press-md shadow-sm" disabled={postMut.isPending || !form.customerName || !form.customerPhone || !form.customerAddress} onClick={() => postMut.mutate()}>
+      <Button className="w-full press-md shadow-sm" disabled={postMut.isPending || !canPost} onClick={() => postMut.mutate()}>
         {postMut.isPending ? 'Posting…' : <><Globe className="size-4" /> Post Online Sale</>}
       </Button>
     </div>

@@ -19,7 +19,11 @@ type Item = { key: string; productId: string; productName: string; qty: string; 
 
 export function OfcSaleView({ user }: { user: MeUser }) {
   const qc = useQueryClient()
-  const [form, setForm] = useState({ customerName: '', customerPhone: '', customerCity: '', customerAddress: '', courierNote: '', discount: '', invoiceDate: new Date().toISOString().slice(0, 10) })
+  const [form, setForm] = useState({
+    customerName: '', customerPhone: '', customerCity: '', customerAddress: '',
+    courierNote: '', discount: '', advanceReceived: '',
+    invoiceDate: new Date().toISOString().slice(0, 10),
+  })
   const [items, setItems] = useState<Item[]>([{ key: '1', productId: '', productName: '', qty: '1', unitPrice: '' }])
   const [paymentAccountId, setPaymentAccountId] = useState('')
   const [result, setResult] = useState<{ ok: boolean; invoiceNo?: string; invoiceId?: string; error?: string } | null>(null)
@@ -39,12 +43,31 @@ export function OfcSaleView({ user }: { user: MeUser }) {
     }
   }, [businessAccounts, paymentAccountId])
 
+  // ── Totals (no silent clamping) ──
   const subtotal = items.reduce((acc, it) => acc + (parseMoney(it.unitPrice) ?? 0n) * BigInt(parseInt(it.qty) || 0), 0n)
   const discountPaisas = parseMoney(form.discount) ?? 0n
-  const finalTotal = subtotal - (discountPaisas > subtotal ? subtotal : discountPaisas)
+  const discountExceedsSubtotal = discountPaisas > subtotal
+  const finalTotal = discountExceedsSubtotal ? 0n : subtotal - discountPaisas
+
+  // Advance
+  const advanceReceived = parseMoney(form.advanceReceived) ?? 0n
+  const changeAmount = advanceReceived > finalTotal ? advanceReceived - finalTotal : 0n
+  const netCollected = advanceReceived - changeAmount
+  const outstanding = finalTotal > netCollected ? finalTotal - netCollected : 0n
+
+  // OFC requires full advance: netCollected must equal finalTotal
+  const ofcUnderpayment = netCollected < finalTotal
+  const ofcValid = !ofcUnderpayment && !discountExceedsSubtotal && finalTotal > 0n
 
   const postMut = useMutation({
     mutationFn: async () => {
+      const payments: Array<{ accountId: string; amount: string; isChange?: boolean }> = [
+        { accountId: paymentAccountId, amount: advanceReceived.toString() },
+      ]
+      if (changeAmount > 0n) {
+        payments.push({ accountId: paymentAccountId, amount: changeAmount.toString(), isChange: true })
+      }
+
       const r = await fetch('/api/sales/ofc', {
         method: 'POST', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
@@ -54,7 +77,7 @@ export function OfcSaleView({ user }: { user: MeUser }) {
             productName: it.productName || productsQ.data?.rows.find(p => p.id === it.productId)?.name || 'Item',
             qty: parseInt(it.qty) || 1, unitPrice: it.unitPrice,
           })),
-          payments: [{ accountId: paymentAccountId, amount: finalTotal.toString() }],
+          payments,
           customerName: form.customerName, customerPhone: form.customerPhone,
           customerAddress: form.customerAddress, customerCity: form.customerCity,
           memo: form.courierNote ? `Courier: ${form.courierNote}` : undefined,
@@ -90,17 +113,26 @@ export function OfcSaleView({ user }: { user: MeUser }) {
           <div className="mt-6 flex flex-col gap-2">
             <Button className="press-md shadow-sm" onClick={() => window.open(`/?invoice=${result.invoiceId}`, '_self')}><FileText className="size-4" /> View Invoice</Button>
             <PrintInvoiceButton invoiceId={result.invoiceId} label="Print Invoice" size="default" className="w-full justify-center" icon={Printer} />
-            <Button variant="ghost" className="press-sm" onClick={() => { setResult(null); setItems([{ key: String(Date.now()), productId: '', productName: '', qty: '1', unitPrice: '' }]); setForm({ customerName: '', customerPhone: '', customerCity: '', customerAddress: '', courierNote: '', discount: '', invoiceDate: new Date().toISOString().slice(0, 10) }) }}><Truck className="size-4" /> New Order</Button>
+            <Button variant="ghost" className="press-sm" onClick={() => {
+              setResult(null)
+              setItems([{ key: String(Date.now()), productId: '', productName: '', qty: '1', unitPrice: '' }])
+              setForm({ customerName: '', customerPhone: '', customerCity: '', customerAddress: '', courierNote: '', discount: '', advanceReceived: '', invoiceDate: new Date().toISOString().slice(0, 10) })
+            }}><Truck className="size-4" /> New Order</Button>
           </div>
         </motion.div>
       </div>
     )
   }
 
+  const canPost = form.customerName && form.customerPhone && form.customerCity && form.customerAddress &&
+    items.some(it => it.productId || it.productName) && ofcValid && paymentAccountId
+
   return (
     <div className="space-y-4">
       <h1 className="text-xl font-semibold tracking-tight text-foreground">OFC / Out-of-City Sale</h1>
+      <p className="text-xs text-muted-foreground">Fully advance-paid. Net collected must equal final total.</p>
 
+      {/* ── Customer ── */}
       <div className="card-3d p-4 space-y-3">
         <h2 className="text-sm font-semibold text-foreground">Customer</h2>
         <div className="grid sm:grid-cols-2 gap-2">
@@ -121,6 +153,7 @@ export function OfcSaleView({ user }: { user: MeUser }) {
         </div>
       </div>
 
+      {/* ── Items ── */}
       <div className="card-3d p-4">
         <div className="flex items-center justify-between mb-2">
           <h2 className="text-sm font-semibold text-foreground">Items</h2>
@@ -143,32 +176,67 @@ export function OfcSaleView({ user }: { user: MeUser }) {
             </div>
           ))}
         </div>
-        <div className="mt-2 pt-2 border-t border-border space-y-1">
-          <div className="flex items-center justify-between text-sm">
-            <span className="text-muted-foreground">Subtotal</span><span className="font-medium" data-num>{formatMoney(subtotal, false)}</span>
+      </div>
+
+      {/* ── Advance ── */}
+      <div className="card-3d p-4 space-y-3">
+        <h2 className="text-sm font-semibold text-foreground">Advance Payment (Full)</h2>
+        <div className="grid sm:grid-cols-2 gap-2">
+          <div>
+            <Label className="text-[10px] text-muted-foreground">Advance Received (Rs)</Label>
+            <Input type="text" value={form.advanceReceived} onChange={e => setForm(s => ({ ...s, advanceReceived: e.target.value }))} placeholder="0" className="h-9 bg-background press-sm" data-num />
           </div>
-          {discountPaisas > 0n && (
-            <div className="flex items-center justify-between text-sm">
-              <span className="text-muted-foreground">Discount</span><span className="font-medium text-destructive" data-num>−{formatMoney(discountPaisas > subtotal ? subtotal : discountPaisas, false)}</span>
-            </div>
-          )}
-          <div className="flex items-center justify-between text-sm">
-            <span className="text-muted-foreground">Total (advance)</span><span className="font-bold text-primary" data-num>{formatMoney(finalTotal)}</span>
+          <div>
+            <Label className="text-[10px] text-muted-foreground">Advance Received Into</Label>
+            <Select value={paymentAccountId} onValueChange={setPaymentAccountId}>
+              <SelectTrigger className="h-9 bg-background press-sm text-sm"><SelectValue /></SelectTrigger>
+              <SelectContent>{businessAccounts.map(a => <SelectItem key={a.id} value={a.id}>{a.name} ({a.code})</SelectItem>)}</SelectContent>
+            </Select>
           </div>
         </div>
       </div>
 
-      <div className="card-3d p-4">
-        <Label className="text-[10px] text-muted-foreground">Advance Received Into</Label>
-        <Select value={paymentAccountId} onValueChange={setPaymentAccountId}>
-          <SelectTrigger className="h-9 bg-background press-sm text-sm"><SelectValue /></SelectTrigger>
-          <SelectContent>{businessAccounts.map(a => <SelectItem key={a.id} value={a.id}>{a.name} ({a.code})</SelectItem>)}</SelectContent>
-        </Select>
+      {/* ── Totals ── */}
+      <div className="card-3d p-4 space-y-1">
+        <h2 className="text-sm font-semibold text-foreground mb-2">Totals</h2>
+        <div className="flex items-center justify-between text-sm">
+          <span className="text-muted-foreground">Subtotal</span><span className="font-medium" data-num>{formatMoney(subtotal, false)}</span>
+        </div>
+        {discountPaisas > 0n && (
+          <div className="flex items-center justify-between text-sm">
+            <span className="text-muted-foreground">Discount</span>
+            <span className="font-medium text-destructive" data-num>−{formatMoney(discountPaisas, false)}</span>
+          </div>
+        )}
+        {discountExceedsSubtotal && <div className="text-[10px] text-destructive">Discount exceeds subtotal — submit blocked</div>}
+        <div className="flex items-center justify-between text-sm pt-1 border-t border-border">
+          <span className="font-semibold text-foreground">Final Total</span><span className="font-bold text-primary" data-num>{formatMoney(finalTotal)}</span>
+        </div>
+        <div className="flex items-center justify-between text-sm">
+          <span className="text-muted-foreground">Paid</span><span className="font-medium" data-num>{formatMoney(advanceReceived, false)}</span>
+        </div>
+        {changeAmount > 0n && (
+          <div className="flex items-center justify-between text-sm">
+            <span className="text-muted-foreground">Change</span><span className="font-medium text-amber-600" data-num>−{formatMoney(changeAmount, false)}</span>
+          </div>
+        )}
+        <div className="flex items-center justify-between text-sm">
+          <span className="text-muted-foreground">Net Collected</span><span className="font-medium text-primary" data-num>{formatMoney(netCollected, false)}</span>
+        </div>
+        <div className="flex items-center justify-between text-sm">
+          <span className="text-muted-foreground">Outstanding</span>
+          <span className={`font-medium ${outstanding > 0n ? 'text-destructive' : 'text-emerald-600'}`} data-num>{formatMoney(outstanding, false)}</span>
+        </div>
+        {ofcUnderpayment && (
+          <div className="text-[10px] text-destructive flex items-center gap-1 pt-1">
+            <AlertCircle className="size-3" /> OFC requires full advance. Shortfall: {formatMoney(outstanding, false)}
+          </div>
+        )}
       </div>
 
       {result && !result.ok && <div className="card-3d p-3 border-destructive/40 flex items-center gap-2"><AlertCircle className="size-4 text-destructive" /><span className="text-xs text-destructive">{result.error}</span></div>}
 
-      <Button className="w-full press-md shadow-sm" disabled={postMut.isPending || !form.customerName || !form.customerPhone || !form.customerCity || !form.customerAddress} onClick={() => postMut.mutate()}>
+      <Button className="w-full press-md shadow-sm" disabled={postMut.isPending || !canPost} onClick={() => postMut.mutate()}>
         {postMut.isPending ? 'Posting…' : <><Truck className="size-4" /> Post OFC Sale</>}
       </Button>
     </div>

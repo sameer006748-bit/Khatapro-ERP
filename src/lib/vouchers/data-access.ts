@@ -48,13 +48,30 @@ export async function postPaymentVoucher(input: {
 }
 
 // ─── Post Receipt Voucher ───
+// Supports optional multi-invoice allocation. Each allocation has an invoice_id
+// and allocated_amount (paisas). The RPC validates, creates receipt_allocation
+// rows, updates invoice paid/outstanding, and creates per-invoice commission.
 export async function postReceiptVoucher(input: {
   businessId: string; receiptDate: Date; receivedIntoAccountId: string; creditAccountId: string
   amountPaisas: bigint; customerId?: string | null; reference?: string | null; notes?: string | null; createdBy?: string | null
   invoiceId?: string | null
-}): Promise<{ receiptId: string; receiptNo: string; voucherId: string }> {
+  allocations?: Array<{ invoiceId: string; allocatedAmount: bigint }> | null
+}): Promise<{ receiptId: string; receiptNo: string; voucherId: string; allocationsTotal?: string; commissionIds?: string[] }> {
   const admin = getAdminSupabase()
   const supabaseCreatedBy = await resolveSupabaseUuid(input.createdBy)
+
+  // Build allocations JSONB for the RPC
+  let allocationsJson: Array<{ invoice_id: string; allocated_amount: string }> | null = null
+  if (input.allocations && input.allocations.length > 0) {
+    allocationsJson = input.allocations.map(a => ({
+      invoice_id: a.invoiceId,
+      allocated_amount: a.allocatedAmount.toString(),
+    }))
+  } else if (input.invoiceId) {
+    // Backward compat: single invoiceId → single allocation
+    allocationsJson = [{ invoice_id: input.invoiceId, allocated_amount: input.amountPaisas.toString() }]
+  }
+
   const { data, error } = await admin.rpc('post_receipt_voucher', {
     p_business_id: input.businessId,
     p_receipt_date: bizDateString(input.receiptDate),
@@ -65,11 +82,17 @@ export async function postReceiptVoucher(input: {
     p_reference: input.reference ?? null,
     p_notes: input.notes ?? null,
     p_created_by: supabaseCreatedBy,
-    p_invoice_id: input.invoiceId ?? null,
+    p_allocations: allocationsJson,
   })
   if (error) throw new Error(`post_receipt_voucher: ${error.message}`)
   const r = data as any
-  return { receiptId: r.receipt_id, receiptNo: r.receipt_no, voucherId: r.voucher_id }
+  return {
+    receiptId: r.receipt_id,
+    receiptNo: r.receipt_no,
+    voucherId: r.voucher_id,
+    allocationsTotal: r.allocations_total != null ? String(r.allocations_total) : undefined,
+    commissionIds: Array.isArray(r.commission_ids) ? r.commission_ids : undefined,
+  }
 }
 
 // ─── Post Journal Voucher ───

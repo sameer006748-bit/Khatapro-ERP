@@ -438,10 +438,158 @@ async function main(){
     const longR=await api(page,'POST','/api/sales/counter',{invoiceType:'COUNTER',invoiceDate:TODAY,items:[{productId:pid,productName:longName,qty:1,unitPrice:'100000',isTemporary:false}],payments:[{accountId:cashId,amount:'100000',isChange:false}],salesmanId:SM,customerName:'P9 Long Name Customer'})
     const longInvId=longR.json?.invoiceId
 
-    // Discount invoice — Sale API doesn't support discount (hardcoded to 0)
-    // Report as missing feature
-    log('  Discount: Sale API does not support discount (hardcoded to 0n). Reporting as missing feature.')
-    skip('Discount invoice PDF', 'Sale API does not support non-zero discount — missing business feature')
+    // ═══ 3b. DISCOUNT TESTS ═══
+    log('═══ 3b. DISCOUNT TESTS ═══')
+
+    // Zero discount sale
+    const zeroDiscR=await api(page,'POST','/api/sales/counter',{invoiceType:'COUNTER',invoiceDate:TODAY,items:[{productId:pid,productName:'Zero Disc Item',qty:1,unitPrice:'100000',isTemporary:false}],payments:[{accountId:cashId,amount:'100000',isChange:false}],salesmanId:SM,customerName:'P9 Zero Disc',discount:'0'})
+    if(zeroDiscR.json?.invoiceId)pass('Discount: zero discount accepted');else fail('Discount: zero discount',JSON.stringify(zeroDiscR.json).slice(0,150))
+
+    // Valid discount sale (Rs 1000 discount on Rs 2000 subtotal = Rs 1000 total)
+    const validDiscR=await api(page,'POST','/api/sales/counter',{invoiceType:'COUNTER',invoiceDate:TODAY,items:[{productId:pid,productName:'Disc Item',qty:2,unitPrice:'100000',isTemporary:false}],payments:[{accountId:cashId,amount:'100000',isChange:false}],salesmanId:SM,customerName:'P9 Valid Disc',discount:'100000'})
+    const validDiscId=validDiscR.json?.invoiceId
+    if(validDiscId){
+      const{data:discInv}=await sb.from('invoices').select('subtotal,discount,total,paid_amount').eq('id',validDiscId).single()
+      if(discInv&&String(discInv.discount)==='100000'&&String(discInv.total)==='100000')pass('Discount: valid discount (Rs 1000 on Rs 2000)')
+      else fail('Discount: valid discount',`discount=${discInv?.discount} total=${discInv?.total}`)
+    } else fail('Discount: valid discount',JSON.stringify(validDiscR.json).slice(0,150))
+
+    // Discount equal to subtotal
+    const equalDiscR=await api(page,'POST','/api/sales/counter',{invoiceType:'COUNTER',invoiceDate:TODAY,items:[{productId:pid,productName:'Full Disc',qty:1,unitPrice:'50000',isTemporary:false}],payments:[],salesmanId:SM,customerName:'P9 Full Disc',discount:'50000'})
+    if(equalDiscR.json?.invoiceId)pass('Discount: equal to subtotal accepted');else fail('Discount: equal to subtotal',JSON.stringify(equalDiscR.json).slice(0,150))
+
+    // Excessive discount rejected
+    const excessDiscR=await api(page,'POST','/api/sales/counter',{invoiceType:'COUNTER',invoiceDate:TODAY,items:[{productId:pid,productName:'Excess Disc',qty:1,unitPrice:'50000',isTemporary:false}],payments:[{accountId:cashId,amount:'50000',isChange:false}],salesmanId:SM,customerName:'P9 Excess Disc',discount:'60000'})
+    if(excessDiscR.status>=400||excessDiscR.json?.error)pass('Discount: excessive rejected');else fail('Discount: excessive rejected','NOT rejected')
+
+    // Negative discount rejected
+    const negDiscR=await api(page,'POST','/api/sales/counter',{invoiceType:'COUNTER',invoiceDate:TODAY,items:[{productId:pid,productName:'Neg Disc',qty:1,unitPrice:'50000',isTemporary:false}],payments:[{accountId:cashId,amount:'50000',isChange:false}],salesmanId:SM,customerName:'P9 Neg Disc',discount:'-1000'})
+    if(negDiscR.status>=400||negDiscR.json?.error)pass('Discount: negative rejected');else fail('Discount: negative rejected','NOT rejected')
+
+    // Malformed discount rejected
+    const malDiscR=await api(page,'POST','/api/sales/counter',{invoiceType:'COUNTER',invoiceDate:TODAY,items:[{productId:pid,productName:'Mal Disc',qty:1,unitPrice:'50000',isTemporary:false}],payments:[{accountId:cashId,amount:'50000',isChange:false}],salesmanId:SM,customerName:'P9 Mal Disc',discount:'abc'})
+    if(malDiscR.status>=400||malDiscR.json?.error)pass('Discount: malformed rejected');else fail('Discount: malformed rejected','NOT rejected')
+
+    // Real discount PDF
+    if(validDiscId){
+      try{
+        const{pi,domContent}=await generatePrintPdf(page,validDiscId,'single','Half A4 — Single Sheet',`${PDF_DIR}/p9-discount.pdf`)
+        if(pi.Pages==='1'&&domContent.hasDiscount)pass('Discount: real discount PDF with discount line')
+        else fail('Discount: real discount PDF',`pages=${pi.Pages} hasDiscount=${domContent.hasDiscount}`)
+      }catch(e){fail('Discount: real discount PDF',e.message?.slice(0,100))}
+    }
+
+    // ═══ 3c. OFC FULL-ADVANCE TESTS ═══
+    log('═══ 3c. OFC FULL-ADVANCE TESTS ═══')
+
+    // OFC underpayment rejected (server-side)
+    const ofcUnderR=await api(page,'POST','/api/sales/ofc',{invoiceType:'OFC',invoiceDate:TODAY,items:[{productId:pid,productName:'OFC Under',qty:1,unitPrice:'100000',isTemporary:false}],payments:[{accountId:cashId,amount:'50000',isChange:false}],salesmanId:SM,customerName:'P9 OFC Under',customerPhone:'0300-1111111',customerAddress:'Test Addr',customerCity:'Lahore'})
+    if(ofcUnderR.status>=400||ofcUnderR.json?.error)pass('OFC: underpayment rejected');else fail('OFC: underpayment rejected','NOT rejected')
+
+    // OFC exact full advance accepted
+    const ofcExactR=await api(page,'POST','/api/sales/ofc',{invoiceType:'OFC',invoiceDate:TODAY,items:[{productId:pid,productName:'OFC Exact',qty:1,unitPrice:'100000',isTemporary:false}],payments:[{accountId:cashId,amount:'100000',isChange:false}],salesmanId:SM,customerName:'P9 OFC Exact',customerPhone:'0300-2222222',customerAddress:'Test Addr',customerCity:'Lahore'})
+    if(ofcExactR.json?.invoiceId)pass('OFC: exact full advance accepted');else fail('OFC: exact full advance',JSON.stringify(ofcExactR.json).slice(0,150))
+
+    // OFC zero outstanding
+    if(ofcExactR.json?.invoiceId){
+      const{data:ofcInv}=await sb.from('invoices').select('total,paid_amount').eq('id',ofcExactR.json.invoiceId).single()
+      const outstanding=BigInt(ofcInv.total)-BigInt(ofcInv.paid_amount)
+      if(outstanding===0n)pass('OFC: zero outstanding');else fail('OFC: zero outstanding',`outstanding=${outstanding}`)
+    }
+
+    // ═══ 3d. COMMISSION TESTS ═══
+    log('═══ 3d. COMMISSION TESTS ═══')
+
+    // Unpaid sale → zero commission
+    const unpaidSaleR=await api(page,'POST','/api/sales/counter',{invoiceType:'COUNTER',invoiceDate:TODAY,items:[{productId:pid,productName:'Unpaid Item',qty:1,unitPrice:'100000',isTemporary:false}],payments:[],salesmanId:SM,customerName:'P9 Unpaid'})
+    if(unpaidSaleR.json?.invoiceId){
+      const{data:comms}=await sb.from('salesman_commissions').select('id,commission_amount').eq('invoice_id',unpaidSaleR.json.invoiceId)
+      if(!comms||comms.length===0)pass('Commission: unpaid sale → zero commission rows');else fail('Commission: unpaid sale',`${comms.length} rows found`)
+    }
+
+    // Partial payment commission (Rs 1000 of Rs 2000, 5% → Rs 50)
+    const partialCommR=await api(page,'POST','/api/sales/counter',{invoiceType:'COUNTER',invoiceDate:TODAY,items:[{productId:pid,productName:'Partial Comm',qty:2,unitPrice:'100000',isTemporary:false}],payments:[{accountId:cashId,amount:'100000',isChange:false}],salesmanId:SM,customerName:'P9 Partial Comm'})
+    if(partialCommR.json?.invoiceId){
+      const{data:comms}=await sb.from('salesman_commissions').select('commission_amount,collected_amount,source_type,source_allocation_id').eq('invoice_id',partialCommR.json.invoiceId)
+      if(comms&&comms.length===1){
+        const commAmt=BigInt(comms[0].commission_amount)
+        const collAmt=BigInt(comms[0].collected_amount)
+        if(commAmt===5000n&&collAmt===100000n)pass(`Commission: partial (Rs 1000 collected → Rs 50 comm)`)
+        else fail('Commission: partial',`comm=${commAmt} collected=${collAmt}`)
+      } else fail('Commission: partial',`${comms?.length||0} rows (expected 1)`)
+    }
+
+    // Change excluded: pay Rs 1200, change Rs 200, net Rs 1000, 5% → Rs 50 (NOT Rs 60)
+    const changeCommR=await api(page,'POST','/api/sales/counter',{invoiceType:'COUNTER',invoiceDate:TODAY,items:[{productId:pid,productName:'Change Comm',qty:1,unitPrice:'100000',isTemporary:false}],payments:[{accountId:cashId,amount:'120000',isChange:false},{accountId:cashId,amount:'20000',isChange:true}],salesmanId:SM,customerName:'P9 Change Comm'})
+    if(changeCommR.json?.invoiceId){
+      const{data:comms}=await sb.from('salesman_commissions').select('commission_amount,collected_amount').eq('invoice_id',changeCommR.json.invoiceId)
+      if(comms&&comms.length===1){
+        const commAmt=BigInt(comms[0].commission_amount)
+        const collAmt=BigInt(comms[0].collected_amount)
+        if(commAmt===5000n&&collAmt===100000n)pass('Commission: change excluded (Rs 1200 paid, Rs 200 change → comm on Rs 1000)')
+        else fail('Commission: change excluded',`comm=${commAmt} collected=${collAmt}`)
+      } else fail('Commission: change excluded',`${comms?.length||0} rows`)
+    }
+
+    // Split payment: 3 accounts → ONE commission row
+    const splitPayR=await api(page,'POST','/api/sales/counter',{invoiceType:'COUNTER',invoiceDate:TODAY,items:[{productId:pid,productName:'Split Pay',qty:1,unitPrice:'300000',isTemporary:false}],payments:[{accountId:cashId,amount:'100000',isChange:false},{accountId:pettyId,amount:'100000',isChange:false},{accountId:cashId,amount:'100000',isChange:false}],salesmanId:SM,customerName:'P9 Split Pay'})
+    if(splitPayR.json?.invoiceId){
+      const{data:comms}=await sb.from('salesman_commissions').select('id,commission_amount').eq('invoice_id',splitPayR.json.invoiceId)
+      if(comms&&comms.length===1)pass(`Commission: split payment → ONE row (not ${comms.length})`)
+      else fail('Commission: split payment',`${comms?.length||0} rows (expected 1)`)
+    }
+
+    // ═══ 3e. RECEIPT ALLOCATION TESTS ═══
+    log('═══ 3e. RECEIPT ALLOCATION TESTS ═══')
+
+    // Create two partial invoices for the same salesman
+    const allocInv1R=await api(page,'POST','/api/sales/counter',{invoiceType:'COUNTER',invoiceDate:TODAY,items:[{productId:pid,productName:'Alloc Inv 1',qty:1,unitPrice:'100000',isTemporary:false}],payments:[],salesmanId:SM,customerName:'P9 Alloc Cust'})
+    const allocInv2R=await api(page,'POST','/api/sales/counter',{invoiceType:'COUNTER',invoiceDate:TODAY,items:[{productId:pid,productName:'Alloc Inv 2',qty:1,unitPrice:'100000',isTemporary:false}],payments:[],salesmanId:SM,customerName:'P9 Alloc Cust'})
+    const allocInv1Id=allocInv1R.json?.invoiceId
+    const allocInv2Id=allocInv2R.json?.invoiceId
+
+    // Split receipt across two invoices
+    if(allocInv1Id&&allocInv2Id){
+      const arAcctId=accts?.find(a=>a.code==='1200')?.id
+      const splitReceiptR=await api(page,'POST','/api/receipt-voucher',{receiptDate:TODAY,receivedIntoAccountId:cashId,creditAccountId:arAcctId,amount:'1500',customerId:null,allocations:[{invoiceId:allocInv1Id,allocatedAmount:'1000'},{invoiceId:allocInv2Id,allocatedAmount:'500'}]})
+      if(splitReceiptR.json?.ok||splitReceiptR.json?.receiptId){
+        pass('Receipt: split allocation across 2 invoices accepted')
+        // Verify each invoice got a commission
+        const{data:comm1}=await sb.from('salesman_commissions').select('id').eq('invoice_id',allocInv1Id).eq('source_type','receipt_collection')
+        const{data:comm2}=await sb.from('salesman_commissions').select('id').eq('invoice_id',allocInv2Id).eq('source_type','receipt_collection')
+        if(comm1&&comm1.length===1&&comm2&&comm2.length===1)pass('Receipt: each allocation created one commission')
+        else fail('Receipt: commission per allocation',`inv1=${comm1?.length||0} inv2=${comm2?.length||0}`)
+
+        // Duplicate replay — call the same receipt again should fail or create zero duplicate
+        const replayR=await api(page,'POST','/api/receipt-voucher',{receiptDate:TODAY,receivedIntoAccountId:cashId,creditAccountId:arAcctId,amount:'1500',customerId:null,allocations:[{invoiceId:allocInv1Id,allocatedAmount:'1000'},{invoiceId:allocInv2Id,allocatedAmount:'500'}]})
+        // This should fail because invoice outstanding is now 0 (allocation > outstanding)
+        if(replayR.status>=400||replayR.json?.error)pass('Receipt: duplicate replay blocked (outstanding=0)')
+        else fail('Receipt: duplicate replay blocked','NOT blocked')
+      } else fail('Receipt: split allocation',JSON.stringify(splitReceiptR.json).slice(0,200))
+    }
+
+    // General receipt (no customer, no allocations) → zero commission
+    const genReceiptR=await api(page,'POST','/api/receipt-voucher',{receiptDate:TODAY,receivedIntoAccountId:cashId,creditAccountId:pettyId,amount:'50',reference:'P9 General RV'})
+    if(genReceiptR.json?.ok||genReceiptR.json?.receiptId){
+      const{data:genComms}=await sb.from('salesman_commissions').select('id').eq('source_type','receipt_collection').eq('source_allocation_id',genReceiptR.json?.receiptId||'none')
+      if(!genComms||genComms.length===0)pass('Receipt: general (no invoice) → zero commission')
+      else fail('Receipt: general → zero commission',`${genComms.length} rows found`)
+    }
+
+    // ═══ 3f. SECURITY TESTS ═══
+    log('═══ 3f. SECURITY TESTS ═══')
+
+    // Try to call internal commission helper directly — should be blocked
+    const supabaseUrl=env.NEXT_PUBLIC_SUPABASE_URL
+    const supabaseKey=env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
+    const secR=await page.evaluate(async({url,key})=>{
+      try{
+        const r=await fetch(`${url}/rest/v1/rpc/_post_salesman_collection_commission`,{method:'POST',headers:{'Content-Type':'application/json','apikey':key,'Authorization':`Bearer ${key}`},body:JSON.stringify({p_business_id:'biz-default',p_invoice_id:'test',p_net_collected:100,p_source_type:'sale_payment',p_source_allocation_id:'test',p_collection_date:'2026-07-12'})})
+        return{status:r.status}
+      }catch(e){return{status:'error',err:e.message}}
+    },{url:supabaseUrl,key:supabaseKey}).catch(()=>({status:'error'}))
+    if(secR.status===404||secR.status===401||secR.status===403||secR.status==='error')pass('Security: internal helper not directly callable')
+    else fail('Security: internal helper',`status=${secR.status}`)
 
     const pdfTests=[
       {id:counterInv?.id,mode:'single',label:'Half A4 — Single Sheet',file:'p9-01-counter-half-a4.pdf',desc:'Counter Half-A4'},
