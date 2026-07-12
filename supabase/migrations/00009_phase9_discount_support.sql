@@ -330,14 +330,20 @@ begin
     end if;
   end loop;
 
-  -- Commission (accrued at sale time; based on subtotal, not discounted total)
+  -- Commission (COLLECTION-BASED: earned on amount actually collected, not subtotal)
+  -- Business rule: commission is earned on payment collected, not invoice creation.
+  -- At sale time, commission = collected_amount × pct.
+  -- Later receipts create additional commission via the receipt/collection flow.
+  -- Discount does not affect commission because commission is on collected cash, not billed amount.
+  -- Change: previous version (00008b) used v_subtotal × pct — this was invoice-time, not collection-time.
+  -- Fix: use v_paid (actual cash/transfer received) instead of v_subtotal.
   if p_salesman_id is not null then
     select commission_pct into v_comm_pct
     from public.salesmen
     where id = p_salesman_id and business_id = p_business_id and is_active = true;
 
-    if found and v_comm_pct > 0 then
-      v_comm_amount := (v_subtotal * v_comm_pct) / 100;
+    if found and v_comm_pct > 0 and v_paid > 0 then
+      v_comm_amount := (v_paid * v_comm_pct) / 100;
       if v_comm_amount > 0 then
         insert into public.salesman_commissions (
           business_id, salesman_id, invoice_id, commission_pct, commission_amount, status

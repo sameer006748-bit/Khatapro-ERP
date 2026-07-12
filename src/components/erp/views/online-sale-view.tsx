@@ -19,7 +19,7 @@ type Item = { key: string; productId: string; productName: string; qty: string; 
 
 export function OnlineSaleView({ user }: { user: MeUser }) {
   const qc = useQueryClient()
-  const [form, setForm] = useState({ customerName: '', customerPhone: '', customerAddress: '', customerCity: '', source: 'WhatsApp', codAmount: '', deliveryFee: '', invoiceDate: new Date().toISOString().slice(0, 10) })
+  const [form, setForm] = useState({ customerName: '', customerPhone: '', customerAddress: '', customerCity: '', source: 'WhatsApp', codAmount: '', deliveryFee: '', riderEarning: '', companyDeliveryIncome: '', discount: '', invoiceDate: new Date().toISOString().slice(0, 10) })
   const [items, setItems] = useState<Item[]>([{ key: '1', productId: '', productName: '', qty: '1', unitPrice: '' }])
   const [paymentAccountId, setPaymentAccountId] = useState('')
   const [result, setResult] = useState<{ ok: boolean; invoiceNo?: string; invoiceId?: string; error?: string } | null>(null)
@@ -41,6 +41,10 @@ export function OnlineSaleView({ user }: { user: MeUser }) {
   }, [businessAccounts, paymentAccountId])
 
   const subtotal = items.reduce((acc, it) => acc + (parseMoney(it.unitPrice) ?? 0n) * BigInt(parseInt(it.qty) || 0), 0n)
+  const discountPaisas = parseMoney(form.discount) ?? 0n
+  const netProductTotal = subtotal - (discountPaisas > subtotal ? subtotal : discountPaisas)
+  const deliveryFeePaisas = parseMoney(form.deliveryFee) ?? 0n
+  const grandTotal = netProductTotal + deliveryFeePaisas
 
   const postMut = useMutation({
     mutationFn: async () => {
@@ -53,10 +57,15 @@ export function OnlineSaleView({ user }: { user: MeUser }) {
             productName: it.productName || productsQ.data?.rows.find(p => p.id === it.productId)?.name || 'Item',
             qty: parseInt(it.qty) || 1, unitPrice: it.unitPrice,
           })),
-          payments: [{ accountId: paymentAccountId, amount: subtotal.toString() }],
+          payments: [{ accountId: paymentAccountId, amount: netProductTotal.toString() }],
           customerName: form.customerName, customerPhone: form.customerPhone,
           customerAddress: form.customerAddress, customerCity: form.customerCity || undefined,
           memo: form.source ? `Source: ${form.source}${form.deliveryFee ? ` · Delivery: Rs ${form.deliveryFee}` : ''}` : undefined,
+          discount: discountPaisas.toString(),
+          deliveryCharge: form.deliveryFee || undefined,
+          riderEarning: form.riderEarning || undefined,
+          companyDeliveryIncome: form.companyDeliveryIncome || undefined,
+          source: form.source || undefined,
         }),
       })
       const j = await r.json()
@@ -88,7 +97,7 @@ export function OnlineSaleView({ user }: { user: MeUser }) {
           <div className="mt-6 flex flex-col gap-2">
             <Button className="press-md shadow-sm" onClick={() => window.open(`/?invoice=${result.invoiceId}`, '_self')}><FileText className="size-4" /> View Invoice</Button>
             <PrintInvoiceButton invoiceId={result.invoiceId} label="Print Invoice" size="default" className="w-full justify-center" icon={Printer} />
-            <Button variant="ghost" className="press-sm" onClick={() => { setResult(null); setItems([{ key: String(Date.now()), productId: '', productName: '', qty: '1', unitPrice: '' }]); setForm({ customerName: '', customerPhone: '', customerAddress: '', customerCity: '', source: 'WhatsApp', codAmount: '', deliveryFee: '', invoiceDate: new Date().toISOString().slice(0, 10) }) }}><Globe className="size-4" /> New Order</Button>
+            <Button variant="ghost" className="press-sm" onClick={() => { setResult(null); setItems([{ key: String(Date.now()), productId: '', productName: '', qty: '1', unitPrice: '' }]); setForm({ customerName: '', customerPhone: '', customerAddress: '', customerCity: '', source: 'WhatsApp', codAmount: '', deliveryFee: '', riderEarning: '', companyDeliveryIncome: '', discount: '', invoiceDate: new Date().toISOString().slice(0, 10) }) }}><Globe className="size-4" /> New Order</Button>
           </div>
         </motion.div>
       </div>
@@ -118,8 +127,8 @@ export function OnlineSaleView({ user }: { user: MeUser }) {
             </Select>
           </div>
           <div>
-            <Label className="text-[10px] text-muted-foreground">COD Amount (Rs)</Label>
-            <Input type="text" value={form.codAmount} onChange={e => setForm(s => ({ ...s, codAmount: e.target.value }))} placeholder={String(Number(subtotal) / 100)} className="h-9 bg-background press-sm" data-num />
+            <Label className="text-[10px] text-muted-foreground">Discount (Rs)</Label>
+            <Input type="text" inputMode="decimal" value={form.discount} onChange={e => setForm(s => ({ ...s, discount: e.target.value }))} placeholder="0" className="h-9 bg-background press-sm" data-num />
           </div>
           <div>
             <Label className="text-[10px] text-muted-foreground">Delivery Fee (Rs)</Label>
@@ -150,8 +159,23 @@ export function OnlineSaleView({ user }: { user: MeUser }) {
             </div>
           ))}
         </div>
-        <div className="mt-2 pt-2 border-t border-border flex items-center justify-between text-sm">
-          <span className="text-muted-foreground">Total</span><span className="font-bold text-primary" data-num>{formatMoney(subtotal)}</span>
+        <div className="mt-2 pt-2 border-t border-border space-y-1">
+          <div className="flex items-center justify-between text-sm">
+            <span className="text-muted-foreground">Subtotal</span><span className="font-medium" data-num>{formatMoney(subtotal, false)}</span>
+          </div>
+          {discountPaisas > 0n && (
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-muted-foreground">Discount</span><span className="font-medium text-destructive" data-num>−{formatMoney(discountPaisas > subtotal ? subtotal : discountPaisas, false)}</span>
+            </div>
+          )}
+          {deliveryFeePaisas > 0n && (
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-muted-foreground">Delivery Fee</span><span className="font-medium" data-num>{formatMoney(deliveryFeePaisas, false)}</span>
+            </div>
+          )}
+          <div className="flex items-center justify-between text-sm">
+            <span className="font-semibold text-foreground">Grand Total</span><span className="font-bold text-primary" data-num>{formatMoney(grandTotal)}</span>
+          </div>
         </div>
       </div>
 

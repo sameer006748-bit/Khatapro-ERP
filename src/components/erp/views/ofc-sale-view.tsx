@@ -19,7 +19,7 @@ type Item = { key: string; productId: string; productName: string; qty: string; 
 
 export function OfcSaleView({ user }: { user: MeUser }) {
   const qc = useQueryClient()
-  const [form, setForm] = useState({ customerName: '', customerPhone: '', customerCity: '', customerAddress: '', courierNote: '', invoiceDate: new Date().toISOString().slice(0, 10) })
+  const [form, setForm] = useState({ customerName: '', customerPhone: '', customerCity: '', customerAddress: '', courierNote: '', discount: '', invoiceDate: new Date().toISOString().slice(0, 10) })
   const [items, setItems] = useState<Item[]>([{ key: '1', productId: '', productName: '', qty: '1', unitPrice: '' }])
   const [paymentAccountId, setPaymentAccountId] = useState('')
   const [result, setResult] = useState<{ ok: boolean; invoiceNo?: string; invoiceId?: string; error?: string } | null>(null)
@@ -40,6 +40,8 @@ export function OfcSaleView({ user }: { user: MeUser }) {
   }, [businessAccounts, paymentAccountId])
 
   const subtotal = items.reduce((acc, it) => acc + (parseMoney(it.unitPrice) ?? 0n) * BigInt(parseInt(it.qty) || 0), 0n)
+  const discountPaisas = parseMoney(form.discount) ?? 0n
+  const finalTotal = subtotal - (discountPaisas > subtotal ? subtotal : discountPaisas)
 
   const postMut = useMutation({
     mutationFn: async () => {
@@ -52,10 +54,11 @@ export function OfcSaleView({ user }: { user: MeUser }) {
             productName: it.productName || productsQ.data?.rows.find(p => p.id === it.productId)?.name || 'Item',
             qty: parseInt(it.qty) || 1, unitPrice: it.unitPrice,
           })),
-          payments: [{ accountId: paymentAccountId, amount: subtotal.toString() }],
+          payments: [{ accountId: paymentAccountId, amount: finalTotal.toString() }],
           customerName: form.customerName, customerPhone: form.customerPhone,
           customerAddress: form.customerAddress, customerCity: form.customerCity,
           memo: form.courierNote ? `Courier: ${form.courierNote}` : undefined,
+          discount: discountPaisas.toString(),
         }),
       })
       const j = await r.json()
@@ -87,7 +90,7 @@ export function OfcSaleView({ user }: { user: MeUser }) {
           <div className="mt-6 flex flex-col gap-2">
             <Button className="press-md shadow-sm" onClick={() => window.open(`/?invoice=${result.invoiceId}`, '_self')}><FileText className="size-4" /> View Invoice</Button>
             <PrintInvoiceButton invoiceId={result.invoiceId} label="Print Invoice" size="default" className="w-full justify-center" icon={Printer} />
-            <Button variant="ghost" className="press-sm" onClick={() => { setResult(null); setItems([{ key: String(Date.now()), productId: '', productName: '', qty: '1', unitPrice: '' }]); setForm({ customerName: '', customerPhone: '', customerCity: '', customerAddress: '', courierNote: '', invoiceDate: new Date().toISOString().slice(0, 10) }) }}><Truck className="size-4" /> New Order</Button>
+            <Button variant="ghost" className="press-sm" onClick={() => { setResult(null); setItems([{ key: String(Date.now()), productId: '', productName: '', qty: '1', unitPrice: '' }]); setForm({ customerName: '', customerPhone: '', customerCity: '', customerAddress: '', courierNote: '', discount: '', invoiceDate: new Date().toISOString().slice(0, 10) }) }}><Truck className="size-4" /> New Order</Button>
           </div>
         </motion.div>
       </div>
@@ -106,9 +109,15 @@ export function OfcSaleView({ user }: { user: MeUser }) {
           <Input value={form.customerCity} onChange={e => setForm(s => ({ ...s, customerCity: e.target.value }))} placeholder="City *" className="h-9 bg-background press-sm" />
           <Input value={form.customerAddress} onChange={e => setForm(s => ({ ...s, customerAddress: e.target.value }))} placeholder="Address *" className="h-9 bg-background press-sm" />
         </div>
-        <div>
-          <Label className="text-[10px] text-muted-foreground">Courier / Transport note (optional)</Label>
-          <Input value={form.courierNote} onChange={e => setForm(s => ({ ...s, courierNote: e.target.value }))} placeholder="e.g. Daewoo Cargo, TCS" className="h-9 bg-background press-sm" />
+        <div className="grid sm:grid-cols-2 gap-2">
+          <div>
+            <Label className="text-[10px] text-muted-foreground">Courier / Transport note (optional)</Label>
+            <Input value={form.courierNote} onChange={e => setForm(s => ({ ...s, courierNote: e.target.value }))} placeholder="e.g. Daewoo Cargo, TCS" className="h-9 bg-background press-sm" />
+          </div>
+          <div>
+            <Label className="text-[10px] text-muted-foreground">Discount (Rs)</Label>
+            <Input type="text" inputMode="decimal" value={form.discount} onChange={e => setForm(s => ({ ...s, discount: e.target.value }))} placeholder="0" className="h-9 bg-background press-sm" data-num />
+          </div>
         </div>
       </div>
 
@@ -134,8 +143,18 @@ export function OfcSaleView({ user }: { user: MeUser }) {
             </div>
           ))}
         </div>
-        <div className="mt-2 pt-2 border-t border-border flex items-center justify-between text-sm">
-          <span className="text-muted-foreground">Total (advance)</span><span className="font-bold text-primary" data-num>{formatMoney(subtotal)}</span>
+        <div className="mt-2 pt-2 border-t border-border space-y-1">
+          <div className="flex items-center justify-between text-sm">
+            <span className="text-muted-foreground">Subtotal</span><span className="font-medium" data-num>{formatMoney(subtotal, false)}</span>
+          </div>
+          {discountPaisas > 0n && (
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-muted-foreground">Discount</span><span className="font-medium text-destructive" data-num>−{formatMoney(discountPaisas > subtotal ? subtotal : discountPaisas, false)}</span>
+            </div>
+          )}
+          <div className="flex items-center justify-between text-sm">
+            <span className="text-muted-foreground">Total (advance)</span><span className="font-bold text-primary" data-num>{formatMoney(finalTotal)}</span>
+          </div>
         </div>
       </div>
 
