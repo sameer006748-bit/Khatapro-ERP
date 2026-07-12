@@ -100,12 +100,25 @@ export function InvoicePrintDialog({
   function handlePrint() {
     // Add body class for reliable print isolation (no :has() dependency).
     document.body.classList.add('printing-invoice')
+    // Inject mode-specific @page style for true physical page sizing.
+    // Physical Half-A4: 210mm × 148.5mm. Full A4: 210mm × 297mm.
+    const pageStyle = document.createElement('style')
+    pageStyle.id = 'invoice-print-page-size'
+    if (mode === 'single') {
+      // Physical Half-A4 sheet
+      pageStyle.textContent = '@page { size: 210mm 148.5mm; margin: 0; }'
+    } else {
+      // Full A4 for two-up, top-half, bottom-half, full-a4
+      pageStyle.textContent = '@page { size: A4 portrait; margin: 0; }'
+    }
+    document.head.appendChild(pageStyle)
     // Use setTimeout to ensure DOM updates before print dialog opens.
     setTimeout(() => {
       window.print()
-      // Clean up after print dialog closes (after a short delay).
+      // Clean up after print dialog closes.
       setTimeout(() => {
         document.body.classList.remove('printing-invoice')
+        pageStyle.remove()
       }, 500)
     }, 100)
   }

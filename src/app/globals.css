@@ -611,7 +611,9 @@
     flex-direction: column;
   }
 
-  /* Page setup: A4 portrait, no margins. */
+  /* Page setup: @page is injected dynamically by InvoicePrintDialog handlePrint()
+     based on mode: 210mm × 148.5mm for Half-A4, A4 portrait for others.
+     The default fallback (no dynamic style) is A4 portrait. */
   @page {
     size: A4 portrait;
     margin: 0;
