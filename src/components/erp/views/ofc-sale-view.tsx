@@ -10,6 +10,7 @@ import { toast } from 'sonner'
 import { Plus, Trash2, Truck, CheckCircle2, AlertCircle, Printer, FileText } from 'lucide-react'
 import { formatMoney, parseMoney } from '@/lib/format'
 import { motion } from 'framer-motion'
+import { PrintInvoiceButton } from '@/components/invoice/print-invoice-button'
 import type { MeUser } from '@/components/erp/erp-app'
 
 type Product = { id: string; name: string; salePrice: number }
@@ -85,7 +86,7 @@ export function OfcSaleView({ user }: { user: MeUser }) {
           <p className="text-3xl font-bold text-primary mt-1" data-num>{result.invoiceNo}</p>
           <div className="mt-6 flex flex-col gap-2">
             <Button className="press-md shadow-sm" onClick={() => window.open(`/?invoice=${result.invoiceId}`, '_self')}><FileText className="size-4" /> View Invoice</Button>
-            <Button variant="outline" className="press-sm" onClick={() => window.print()}><Printer className="size-4" /> Print</Button>
+            <PrintInvoiceButton invoiceId={result.invoiceId} label="Print Invoice" size="default" className="w-full justify-center" icon={Printer} />
             <Button variant="ghost" className="press-sm" onClick={() => { setResult(null); setItems([{ key: String(Date.now()), productId: '', productName: '', qty: '1', unitPrice: '' }]); setForm({ customerName: '', customerPhone: '', customerCity: '', customerAddress: '', courierNote: '', invoiceDate: new Date().toISOString().slice(0, 10) }) }}><Truck className="size-4" /> New Order</Button>
           </div>
         </motion.div>

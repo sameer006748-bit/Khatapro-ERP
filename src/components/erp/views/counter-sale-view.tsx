@@ -13,6 +13,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { toast } from 'sonner'
+import { PrintInvoiceButton } from '@/components/invoice/print-invoice-button'
 import {
   Plus, Trash2, ShoppingCart, AlertCircle, CheckCircle2,
   Printer, FileText, Wallet, Banknote, Smartphone, Split,
@@ -215,7 +216,7 @@ export function CounterSaleView({ user }: { user: MeUser }) {
           <p className="text-3xl font-bold text-primary mt-1" data-num>{result.invoiceNo}</p>
           <div className="mt-6 flex flex-col gap-2">
             <Button className="press-md shadow-sm" onClick={() => window.open(`/?invoice=${result.invoiceId}`, '_self')}><FileText className="size-4" /> View Invoice</Button>
-            <Button variant="outline" className="press-sm" onClick={() => window.print()}><Printer className="size-4" /> Print</Button>
+            <PrintInvoiceButton invoiceId={result.invoiceId} label="Print Invoice" size="default" className="w-full justify-center" icon={Printer} />
             <Button variant="ghost" className="press-sm" onClick={() => { setResult(null); setCart([]); setCustomerName(''); setShowCustomer(false); }}><ShoppingCart className="size-4" /> New Sale</Button>
           </div>
         </motion.div>

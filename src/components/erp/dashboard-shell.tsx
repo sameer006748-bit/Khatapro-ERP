@@ -72,6 +72,11 @@ import { OnlineSaleView } from '@/components/erp/views/online-sale-view'
 import { OfcSaleView } from '@/components/erp/views/ofc-sale-view'
 import { SalesListView } from '@/components/erp/views/sales-list-view'
 import { InvoiceDetailView } from '@/components/erp/views/invoice-detail-view'
+import { DeliveryView } from '@/components/erp/views/delivery-view'
+import { ReportsView } from '@/components/erp/views/reports-view'
+import { SalesmanReportsView } from '@/components/erp/views/salesman-reports-view'
+import { AccountsView } from '@/components/erp/views/accounts-view'
+import { AdvancedView } from '@/components/erp/views/advanced-view'
 import { SupabaseStatusBadge } from '@/components/erp/supabase-status-badge'
 
 // ─────────────────────────────────────────────────────────────
@@ -136,7 +141,6 @@ const NAV_CATEGORIES: NavCategory[] = [
       { key: 'expense-batch', label: 'Expenses', short: 'Expenses', icon: Receipt, perm: 'can_create_expense_batch' },
       { key: 'trial-balance', label: 'Trial Balance', short: 'TB', icon: Scale, perm: 'can_view_trial_balance' },
       { key: 'opening-balance', label: 'Opening Balance', short: 'Opening', icon: Plus, perm: 'can_post_opening_voucher' },
-      { key: 'audit', label: 'Audit Log', short: 'Audit', icon: ScrollText, perm: 'can_view_audit_log' },
     ],
   },
   // 4. Inventory (merged Products & Stock)
@@ -170,22 +174,35 @@ const NAV_CATEGORIES: NavCategory[] = [
       { key: 'vendors', label: 'Vendors', short: 'Vendors', icon: Users, perm: 'can_view_purchases' },
     ],
   },
-  // 7. Delivery / Riders (Phase 7 placeholder)
+  // 7. Delivery / Riders (Phase 7)
   {
     id: 'delivery',
-    label: 'Delivery / Riders',
+    label: 'Delivery',
     icon: Bike,
     items: [
-      { key: 'riders', label: 'Riders', short: 'Riders', icon: Bike, perm: 'can_view_riders' },
+      { key: 'delivery', label: 'Delivery Orders', short: 'Delivery', icon: Bike, perm: 'can_view_delivery_orders' },
+      { key: 'riders', label: 'Riders', short: 'Riders', icon: Users, perm: 'can_view_riders' },
     ],
   },
-  // 8. Reports (Phase 8 placeholder)
+  // 8. Reports (Phase 8)
   {
     id: 'reports',
     label: 'Reports',
     icon: BarChart3,
     items: [
       { key: 'reports', label: 'Reports', short: 'Reports', icon: FileText, perm: 'can_view_trial_balance' },
+      { key: 'my-reports', label: 'My Reports', short: 'My Reports', icon: BarChart3, perm: 'can_view_own_sales' },
+    ],
+  },
+  // 9. Advanced (Accounts, Audit, Biz-Day Test)
+  {
+    id: 'advanced',
+    label: 'Advanced',
+    icon: Settings,
+    items: [
+      { key: 'accounts', label: 'Accounts', short: 'Accounts', icon: Wallet, perm: 'can_view_account_balances' },
+      { key: 'audit', label: 'Audit Log', short: 'Audit', icon: ScrollText, perm: 'can_view_audit_log' },
+      { key: 'biz-day-test', label: 'Biz-Day Test', short: 'Biz-Day', icon: Clock, ownerOnly: true },
     ],
   },
 ]
@@ -228,10 +245,14 @@ type MobileSlot = {
 const MOBILE_SLOTS: MobileSlot[] = [
   { id: 'home', label: 'Home', icon: HomeIcon, resolve: () => 'home' },
   { id: 'work', label: 'Work', icon: Briefcase, resolve: (u) => {
+    // Rider: go to delivery work view
+    if (u.roleName === 'Rider' && u.permissions.includes('can_view_own_orders')) return 'delivery'
+    // Salesman: go to counter sale
+    if (u.permissions.includes('can_create_sales')) return 'counter-sale'
+    // Accountant/Owner: go to day book
+    if (u.permissions.includes('can_view_day_book')) return 'day-book'
     if (u.permissions.includes('can_post_journal_voucher')) return 'journal-voucher'
     if (u.permissions.includes('can_view_trial_balance')) return 'trial-balance'
-    if (u.permissions.includes('can_create_sales')) return 'sales'
-    if (u.permissions.includes('can_view_own_orders')) return 'riders'
     return null
   }},
   { id: 'stock', label: 'Stock', icon: Package, resolve: (u) => {
@@ -239,8 +260,10 @@ const MOBILE_SLOTS: MobileSlot[] = [
     return null
   }},
   { id: 'reports', label: 'Reports', icon: BarChart3, resolve: (u) => {
-    if (u.permissions.includes('can_view_stock_report')) return 'inventory'
-    if (u.permissions.includes('can_view_trial_balance')) return 'trial-balance'
+    // Salesman: My Reports
+    if (u.permissions.includes('can_view_own_sales') && !u.permissions.includes('can_view_trial_balance')) return 'my-reports'
+    // Owner/Accountant: full Reports
+    if (u.permissions.includes('can_view_trial_balance')) return 'reports'
     return null
   }},
 ]
@@ -751,9 +774,20 @@ function ViewRouter({
 
   if (active === 'purchases') return <PurchasesView user={user} />
   if (active === 'vendors') return <VendorsView user={user} />
-  if (active === 'riders') return <ComingSoonView title="Riders & COD" phase="Phase 7" />
+
+  // Phase 7 — Delivery & Riders
+  if (active === 'delivery') return <DeliveryView user={user} />
+  if (active === 'riders') return <DeliveryView user={user} />
+
+  // Phase 8 — Reports
+  if (active === 'reports') return <ReportsView user={user} />
+  if (active === 'my-reports') return <SalesmanReportsView user={user} />
+
+  // Advanced
+  if (active === 'accounts') return <AccountsView user={user} />
+  if (active === 'advanced') return <AdvancedView user={user} />
+
   if (active === 'vouchers') return <DayBookView user={user} onSelectVoucher={(id) => { window.history.pushState({}, '', `/?voucher=${id}`); window.dispatchEvent(new PopStateEvent('popstate')) }} />
-  if (active === 'reports') return <ComingSoonView title="Reports" phase="Phase 8" />
 
   return <OwnerDashboard user={user} />
 }

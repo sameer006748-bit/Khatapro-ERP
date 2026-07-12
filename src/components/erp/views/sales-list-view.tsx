@@ -3,10 +3,11 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { formatMoney, formatTableDate } from '@/lib/format'
-import { FileText, Search, RotateCcw } from 'lucide-react'
+import { FileText, Search, Printer, X } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { useRouter } from 'next/navigation'
+import { PrintInvoiceButton } from '@/components/invoice/print-invoice-button'
 
 type Invoice = {
   id: string
@@ -32,6 +33,8 @@ export function SalesListView() {
   const router = useRouter()
   const [filter, setFilter] = useState('')
   const [typeFilter, setTypeFilter] = useState<string>('')
+  const [selected, setSelected] = useState<string[]>([])
+  const [selectMode, setSelectMode] = useState(false)
 
   const q = useQuery<{ rows: Invoice[] }>({
     queryKey: ['invoices', typeFilter],
@@ -50,6 +53,19 @@ export function SalesListView() {
       (r.salesmanName ?? '').toLowerCase().includes(f)
   })
 
+  function toggleSelect(id: string) {
+    setSelected(prev => {
+      if (prev.includes(id)) return prev.filter(x => x !== id)
+      if (prev.length >= 2) return [prev[1], id]
+      return [...prev, id]
+    })
+  }
+
+  function exitSelectMode() {
+    setSelectMode(false)
+    setSelected([])
+  }
+
   return (
     <div className="space-y-6">
       <div>
@@ -66,7 +82,34 @@ export function SalesListView() {
         <Button variant={typeFilter === 'COUNTER' ? 'default' : 'outline'} size="sm" className="h-10 press-sm" onClick={() => setTypeFilter('COUNTER')}>Counter</Button>
         <Button variant={typeFilter === 'ONLINE' ? 'default' : 'outline'} size="sm" className="h-10 press-sm" onClick={() => setTypeFilter('ONLINE')}>Online</Button>
         <Button variant={typeFilter === 'OFC' ? 'default' : 'outline'} size="sm" className="h-10 press-sm" onClick={() => setTypeFilter('OFC')}>OFC</Button>
+        <Button
+          variant={selectMode ? 'default' : 'outline'}
+          size="sm"
+          className="h-10 press-sm"
+          onClick={() => selectMode ? exitSelectMode() : setSelectMode(true)}
+        >
+          {selectMode ? <><X className="size-4" /> Cancel</> : <><Printer className="size-4" /> Batch Print</>}
+        </Button>
       </div>
+
+      {selectMode && (
+        <div className="card-3d p-3 flex items-center justify-between gap-3 border-primary/30">
+          <div className="text-xs text-muted-foreground">
+            <span className="font-medium text-foreground">{selected.length}</span> of 2 selected for two-up A4 printing
+          </div>
+          <div className="flex gap-2">
+            {selected.length > 0 && (
+              <Button variant="outline" size="sm" className="press-sm" onClick={() => setSelected([])}>Clear</Button>
+            )}
+            <PrintInvoiceButton
+              invoiceIds={selected}
+              label={`Print ${selected.length} Invoice${selected.length === 1 ? '' : 's'}`}
+              size="sm"
+              icon={Printer}
+            />
+          </div>
+        </div>
+      )}
 
       {q.isLoading ? (
         <div className="card-3d p-8 text-sm text-muted-foreground">Loading…</div>
@@ -87,6 +130,7 @@ export function SalesListView() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border text-[11px] uppercase tracking-wider text-muted-foreground bg-muted/40">
+                  {selectMode && <th className="text-center p-3.5 font-medium w-12">Pick</th>}
                   <th className="text-left p-3.5 font-medium">Invoice #</th>
                   <th className="text-left p-3.5 font-medium">Type</th>
                   <th className="text-left p-3.5 font-medium">Date</th>
@@ -100,8 +144,31 @@ export function SalesListView() {
               <tbody>
                 {rows.map((r) => {
                   const outstanding = BigInt(r.total) - BigInt(r.paidAmount)
+                  const isSelected = selected.includes(r.id)
                   return (
-                    <tr key={r.id} onClick={() => router.push(`/?invoice=${r.id}`)} className="border-b border-border/60 last:border-0 hover:bg-accent/30 transition-colors cursor-pointer">
+                    <tr
+                      key={r.id}
+                      onClick={(e) => {
+                        if (selectMode) {
+                          e.stopPropagation()
+                          toggleSelect(r.id)
+                        } else {
+                          router.push(`/?invoice=${r.id}`)
+                        }
+                      }}
+                      className={`border-b border-border/60 last:border-0 hover:bg-accent/30 transition-colors cursor-pointer ${isSelected ? 'bg-primary/5' : ''}`}
+                    >
+                      {selectMode && (
+                        <td className="p-3.5 text-center">
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={() => toggleSelect(r.id)}
+                            onClick={(e) => e.stopPropagation()}
+                            className="size-4 accent-primary"
+                          />
+                        </td>
+                      )}
                       <td className="p-3.5 font-medium text-foreground" data-num>{r.invoiceNo}</td>
                       <td className="p-3.5"><span className={`text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-md font-medium ${TYPE_BADGE[r.invoiceType] ?? 'bg-muted text-muted-foreground'}`} data-num>{r.invoiceType}</span></td>
                       <td className="p-3.5 text-xs text-muted-foreground" data-num>{formatTableDate(r.invoiceDate)}</td>
@@ -128,10 +195,27 @@ export function SalesListView() {
           <div className="md:hidden space-y-3">
             {rows.map((r) => {
               const outstanding = BigInt(r.total) - BigInt(r.paidAmount)
+              const isSelected = selected.includes(r.id)
               return (
-                <button key={r.id} onClick={() => router.push(`/?invoice=${r.id}`)} className="card-3d card-3d-hover p-4 w-full text-left">
+                <button
+                  key={r.id}
+                  onClick={() => {
+                    if (selectMode) toggleSelect(r.id)
+                    else router.push(`/?invoice=${r.id}`)
+                  }}
+                  className={`card-3d card-3d-hover p-4 w-full text-left ${isSelected ? 'border-primary ring-2 ring-primary/20' : ''}`}
+                >
                   <div className="flex items-start justify-between gap-3">
                     <div className="flex items-center gap-2 min-w-0">
+                      {selectMode && (
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => toggleSelect(r.id)}
+                          onClick={(e) => e.stopPropagation()}
+                          className="size-4 accent-primary shrink-0"
+                        />
+                      )}
                       <span className={`text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-md font-medium shrink-0 ${TYPE_BADGE[r.invoiceType] ?? 'bg-muted text-muted-foreground'}`} data-num>{r.invoiceType}</span>
                       <div className="min-w-0">
                         <div className="font-medium text-foreground truncate" data-num>{r.invoiceNo}</div>

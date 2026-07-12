@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button'
 import { useState } from 'react'
 import { motion } from 'framer-motion'
 import { toast } from 'sonner'
+import { PrintInvoiceButton } from '@/components/invoice/print-invoice-button'
 
 type Invoice = {
   id: string
@@ -41,6 +42,7 @@ export function InvoiceDetailView({ invoiceId }: { invoiceId: string }) {
   const qc = useQueryClient()
   const [returnOpen, setReturnOpen] = useState(false)
   const [returnReason, setReturnReason] = useState('')
+  const [printOpen, setPrintOpen] = useState(false)
 
   const q = useQuery<{ invoice: Invoice }>({
     queryKey: ['invoice', invoiceId],
@@ -100,10 +102,6 @@ export function InvoiceDetailView({ invoiceId }: { invoiceId: string }) {
 
   function back() { router.push('/') }
 
-  function printInvoice() {
-    window.print()
-  }
-
   return (
     <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
       <button onClick={back} className="flex items-center text-xs text-muted-foreground hover:text-foreground press-sm"><ArrowLeft className="size-3.5 mr-1.5" /> Back</button>
@@ -120,7 +118,7 @@ export function InvoiceDetailView({ invoiceId }: { invoiceId: string }) {
             {inv.salesmanName && <div className="text-xs text-muted-foreground mt-1">Salesman: {inv.salesmanName}</div>}
           </div>
           <div className="flex gap-2">
-            <Button variant="outline" size="sm" className="press-sm" onClick={printInvoice}><Printer className="size-3.5" /> Print</Button>
+            <PrintInvoiceButton invoiceId={inv.id} label="Print" size="sm" icon={Printer} />
             {!inv.isReturned && !inv.isCancelled && (
               <Button variant="outline" size="sm" className="press-sm text-amber-700" onClick={() => setReturnOpen(true)}><RotateCcw className="size-3.5" /> Return</Button>
             )}

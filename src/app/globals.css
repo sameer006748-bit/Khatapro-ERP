@@ -323,3 +323,301 @@
     display: none !important;
   }
 }
+
+/* ============================================================================
+   INVOICE PRINT — Half-A4 system
+   A4 portrait: 210mm × 297mm. Each half: 210mm × 148.5mm.
+   Uses .printing-invoice body class for reliable isolation (no :has() dependency).
+   ============================================================================ */
+
+@media print {
+  /* When body has .printing-invoice class, hide everything except the print root. */
+  body.printing-invoice > *:not(.invoice-print-root) {
+    display: none !important;
+  }
+
+  body.printing-invoice {
+    background: white !important;
+  }
+
+  .invoice-print-root {
+    display: block !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  /* A4 page container for two-up / top-half / bottom-half / full-a4 modes. */
+  .a4-page {
+    width: 210mm;
+    height: 297mm;
+    display: flex;
+    flex-direction: column;
+    page-break-after: avoid;
+  }
+
+  /* Full A4 single invoice — uses entire page. */
+  .a4-single {
+    padding: 10mm 12mm;
+    box-sizing: border-box;
+  }
+
+  /* Each half: 210mm × 148.5mm. */
+  .a4-half {
+    width: 210mm;
+    height: 148.5mm;
+    overflow: hidden;
+    box-sizing: border-box;
+    position: relative;
+  }
+
+  .a4-half-top {
+    padding: 6mm 8mm 4mm 8mm;
+  }
+
+  .a4-half-bottom {
+    padding: 4mm 8mm 6mm 8mm;
+  }
+
+  /* Cut line between halves. */
+  .a4-half-top::after {
+    content: "";
+    position: absolute;
+    bottom: 0;
+    left: 8mm;
+    right: 8mm;
+    border-bottom: 1px dashed #999;
+  }
+
+  /* Single half-A4 invoice. */
+  .invoice-half {
+    width: 210mm;
+    height: 148.5mm;
+    padding: 6mm 8mm;
+    box-sizing: border-box;
+    overflow: hidden;
+    font-family: var(--font-geist-sans), system-ui, sans-serif;
+    color: #000;
+    font-size: 9pt;
+    line-height: 1.3;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* Header. */
+  .inv-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    border-bottom: 1.5pt solid #000;
+    padding-bottom: 2mm;
+    margin-bottom: 2mm;
+  }
+
+  .inv-business-name {
+    font-size: 13pt;
+    font-weight: 700;
+    color: #000;
+  }
+
+  .inv-business-contact {
+    font-size: 8pt;
+    color: #444;
+    margin-top: 0.5mm;
+  }
+
+  .inv-title-block {
+    text-align: right;
+  }
+
+  .inv-title {
+    font-size: 11pt;
+    font-weight: 700;
+    letter-spacing: 0.5mm;
+    color: #000;
+  }
+
+  .inv-no {
+    font-size: 10pt;
+    font-weight: 600;
+    margin-top: 0.5mm;
+  }
+
+  .inv-type-badge {
+    display: inline-block;
+    font-size: 7pt;
+    font-weight: 600;
+    padding: 0.5mm 1.5mm;
+    border: 0.5pt solid #000;
+    border-radius: 1mm;
+    margin-top: 0.5mm;
+    text-transform: uppercase;
+  }
+
+  /* Meta row. */
+  .inv-meta {
+    display: flex;
+    justify-content: space-between;
+    gap: 4mm;
+    margin-bottom: 2mm;
+    font-size: 8pt;
+  }
+
+  .inv-meta-col {
+    flex: 1;
+  }
+
+  .inv-meta-row {
+    display: flex;
+    gap: 1mm;
+    margin-bottom: 0.3mm;
+  }
+
+  .inv-meta-label {
+    font-weight: 600;
+    color: #555;
+    min-width: 16mm;
+  }
+
+  .inv-meta-value {
+    color: #000;
+  }
+
+  /* Items table. */
+  .inv-items-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 8.5pt;
+    margin-bottom: 2mm;
+  }
+
+  .inv-items-table th {
+    background: #f0f0f0 !important;
+    border: 0.5pt solid #000;
+    padding: 1mm 1.5mm;
+    text-align: left;
+    font-weight: 600;
+    font-size: 8pt;
+  }
+
+  .inv-items-table td {
+    border: 0.5pt solid #999;
+    padding: 0.8mm 1.5mm;
+    vertical-align: top;
+  }
+
+  .inv-col-item { width: 50%; }
+  .inv-col-qty  { width: 12%; text-align: right; }
+  .inv-col-rate { width: 19%; text-align: right; }
+  .inv-col-total { width: 19%; text-align: right; }
+
+  .inv-sku {
+    color: #666;
+    font-size: 7.5pt;
+  }
+
+  /* Totals. */
+  .inv-totals {
+    margin-left: auto;
+    width: 60%;
+    font-size: 8.5pt;
+    margin-bottom: 1.5mm;
+  }
+
+  .inv-totals-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 0.4mm 0;
+  }
+
+  .inv-totals-discount { color: #666; }
+
+  .inv-totals-grand {
+    border-top: 1pt solid #000;
+    border-bottom: 1pt solid #000;
+    font-weight: 700;
+    font-size: 10pt;
+    padding: 1mm 0;
+    margin: 0.5mm 0;
+  }
+
+  .inv-totals-outstanding { font-weight: 600; color: #000; }
+  .inv-totals-cod { font-weight: 600; }
+
+  /* Payment summary. */
+  .inv-payments {
+    border: 0.5pt solid #999;
+    padding: 1mm 1.5mm;
+    font-size: 7.5pt;
+    margin-bottom: 1.5mm;
+  }
+
+  .inv-payments-title {
+    font-weight: 600;
+    margin-bottom: 0.5mm;
+    font-size: 8pt;
+  }
+
+  .inv-payment-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 0.2mm 0;
+  }
+
+  /* Status banners. */
+  .inv-status-banner {
+    display: inline-block;
+    padding: 1mm 3mm;
+    font-size: 9pt;
+    font-weight: 700;
+    border: 1pt solid #000;
+    margin-bottom: 1mm;
+  }
+
+  /* Footer. */
+  .inv-footer {
+    margin-top: auto;
+    border-top: 0.5pt solid #999;
+    padding-top: 1mm;
+    font-size: 7.5pt;
+    color: #555;
+    display: flex;
+    justify-content: space-between;
+  }
+
+  .inv-footer-message {
+    font-style: italic;
+  }
+
+  /* Blank half (for top-half-only / bottom-half-only modes). */
+  .a4-half-blank {
+    background: repeating-linear-gradient(
+      45deg,
+      transparent,
+      transparent 5mm,
+      #f5f5f5 5mm,
+      #f5f5f5 10mm
+    );
+  }
+
+  /* Full A4 single invoice — uses entire page for long invoices. */
+  .invoice-full-a4 {
+    width: 100%;
+    height: 100%;
+    font-family: var(--font-geist-sans), system-ui, sans-serif;
+    color: #000;
+    font-size: 10pt;
+    line-height: 1.4;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* Page setup: A4 portrait, no margins. */
+  @page {
+    size: A4 portrait;
+    margin: 0;
+  }
+
+  .invoice-print-root .invoice-half {
+    page-break-after: avoid;
+  }
+}
