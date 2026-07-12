@@ -1,5 +1,5 @@
 {
-  "passed": 48,
+  "passed": 57,
   "failed": 0,
   "blocked": 0,
   "details": [
@@ -20,39 +20,39 @@
       "s": "PASS"
     },
     {
-      "n": "TB before: Dr=1393040581 Cr=1393040581 Diff=0",
+      "n": "TB before: Dr=2153003923 Cr=2153003923 Diff=0",
       "s": "PASS"
     },
     {
-      "n": "Product: b7613069...",
+      "n": "Product: d9ee6bc0...",
       "s": "PASS"
     },
     {
-      "n": "Counter Sale: INV-0110",
+      "n": "Counter Sale: INV-0130",
       "s": "PASS"
     },
     {
-      "n": "Online Sale: INV-0111 (delivery: created)",
+      "n": "Online Sale: INV-0131 (delivery: created)",
       "s": "PASS"
     },
     {
-      "n": "OFC Sale: INV-0112",
+      "n": "OFC Sale: INV-0132",
       "s": "PASS"
     },
     {
-      "n": "Partial Sale: INV-0113",
+      "n": "Partial Sale: INV-0133",
       "s": "PASS"
     },
     {
-      "n": "Purchase: PUR-0056",
+      "n": "Purchase: PUR-0060",
       "s": "PASS"
     },
     {
-      "n": "Purchase Return: PRN-0018",
+      "n": "Purchase Return: PRN-0022",
       "s": "PASS"
     },
     {
-      "n": "Purchase Replacement: REP-0021",
+      "n": "Purchase Replacement: REP-0025",
       "s": "PASS"
     },
     {
@@ -68,7 +68,7 @@
       "s": "PASS"
     },
     {
-      "n": "Fresh delivery order: 755fd5a1... status=pending",
+      "n": "Fresh delivery order: 0a6cf9a1... status=pending",
       "s": "PASS"
     },
     {
@@ -84,7 +84,7 @@
       "s": "PASS"
     },
     {
-      "n": "COD submitted: CS-0012",
+      "n": "COD submitted: CS-0016",
       "s": "PASS"
     },
     {
@@ -100,7 +100,7 @@
       "s": "PASS"
     },
     {
-      "n": "TB after: Dr=1547338081 Cr=1547338081 Diff=0",
+      "n": "TB after: Dr=2307301423 Cr=2307301423 Diff=0",
       "s": "PASS"
     },
     {
@@ -144,27 +144,63 @@
       "s": "PASS"
     },
     {
+      "n": "Offline page shown",
+      "s": "PASS"
+    },
+    {
       "n": "Cache security: no API cached",
       "s": "PASS"
     },
     {
-      "n": "PDF single: 1p 594.96 x 420.96 pts (A5) | GT=false Paid=false noUUID=true noCost=true noFabSKU=true",
+      "n": "PDF Counter Half-A4: 1p 594.96 x 420.96 pts (A5) | content=OK security=OK items=1",
       "s": "PASS"
     },
     {
-      "n": "PDF two-up: 1p 594.96 x 841.92 pts (A4) | GT=false Paid=false noUUID=true noCost=true noFabSKU=true",
+      "n": "PDF Online Half-A4: 1p 594.96 x 420.96 pts (A5) | content=OK security=OK items=1",
       "s": "PASS"
     },
     {
-      "n": "PDF top-half: 1p 594.96 x 841.92 pts (A4) | GT=false Paid=false noUUID=true noCost=true noFabSKU=true",
+      "n": "PDF OFC Half-A4: 1p 594.96 x 420.96 pts (A5) | content=OK security=OK items=1",
       "s": "PASS"
     },
     {
-      "n": "PDF bottom-half: 1p 594.96 x 841.92 pts (A4) | GT=false Paid=false noUUID=true noCost=true noFabSKU=true",
+      "n": "PDF Two-Up: 1p 594.96 x 841.92 pts (A4) | content=OK security=OK items=2",
       "s": "PASS"
     },
     {
-      "n": "PDF full-a4: 1p 594.96 x 841.92 pts (A4) | GT=false Paid=false noUUID=true noCost=true noFabSKU=true",
+      "n": "PDF Top Half: 1p 594.96 x 841.92 pts (A4) | content=OK security=OK items=1",
+      "s": "PASS"
+    },
+    {
+      "n": "PDF Bottom Half: 1p 594.96 x 841.92 pts (A4) | content=OK security=OK items=1",
+      "s": "PASS"
+    },
+    {
+      "n": "PDF Full A4: 1p 594.96 x 841.92 pts (A4) | content=OK security=OK items=1",
+      "s": "PASS"
+    },
+    {
+      "n": "PDF Partial Payment: 1p 594.96 x 420.96 pts (A5) | content=OK security=OK items=1",
+      "s": "PASS"
+    },
+    {
+      "n": "PDF Delivery Fee: 1p 594.96 x 420.96 pts (A5) | content=OK security=OK items=1",
+      "s": "PASS"
+    },
+    {
+      "n": "PDF Long Product Name: 1p 594.96 x 420.96 pts (A5) | content=OK security=OK items=1",
+      "s": "PASS"
+    },
+    {
+      "n": "PDF 12 Items: 1p 594.96 x 420.96 pts (A5) | content=OK security=OK items=12",
+      "s": "PASS"
+    },
+    {
+      "n": "PDF Overflow Full-A4: 1p 594.96 x 841.92 pts (A4) | content=OK security=OK items=12",
+      "s": "PASS"
+    },
+    {
+      "n": "PDF Discount (uses same invoice): 1p 594.96 x 420.96 pts (A5) | content=OK security=OK items=1",
       "s": "PASS"
     },
     {
