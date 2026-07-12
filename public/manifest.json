@@ -1,0 +1,60 @@
+{
+  "name": "KhataPro ERP",
+  "short_name": "KhataPro",
+  "description": "Accounting-first ERP for Pakistani garments & SMB. Counter/Online/OFC sales, purchases, vouchers, daily closing, reports.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#ffffff",
+  "theme_color": "#059669",
+  "categories": ["business", "finance", "productivity"],
+  "lang": "en",
+  "dir": "ltr",
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Counter Sale",
+      "short_name": "Counter",
+      "description": "Create a new counter sale",
+      "url": "/?nav=counter-sale"
+    },
+    {
+      "name": "Online Sale",
+      "short_name": "Online",
+      "description": "Create a new online sale",
+      "url": "/?nav=online-sale"
+    },
+    {
+      "name": "Reports",
+      "short_name": "Reports",
+      "description": "View financial reports",
+      "url": "/?nav=reports"
+    }
+  ]
+}
