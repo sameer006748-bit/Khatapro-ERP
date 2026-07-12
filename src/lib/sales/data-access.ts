@@ -63,6 +63,7 @@ export type InvoiceRow = {
   customerName: string | null
   salesmanName: string | null
   subtotal: string
+  discount?: string
   total: string
   paidAmount: string
   isCancelled: boolean
@@ -114,6 +115,7 @@ export type PostSaleInput = {
   customerCity?: string | null
   memo?: string | null
   createdBy?: string | null
+  discount?: bigint
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -305,6 +307,7 @@ async function postSaleViaSupabase(input: PostSaleInput): Promise<{ invoiceId: s
     p_customer_city: input.customerCity ?? null,
     p_memo: input.memo ?? null,
     p_created_by: supabaseCreatedBy,
+    p_discount_paisas: (input.discount ?? 0n).toString(),
   })
 
   if (error) throw new Error(`Supabase post_sale: ${error.message}`)
@@ -327,7 +330,10 @@ async function postSaleViaPrisma(input: PostSaleInput): Promise<{ invoiceId: str
   for (const item of input.items) {
     subtotal += item.unitPrice * BigInt(item.qty)
   }
-  const total = subtotal
+  const discount = input.discount ?? 0n
+  if (discount < 0n) throw new Error('Discount cannot be negative')
+  if (discount > subtotal) throw new Error('Discount cannot exceed subtotal')
+  const total = subtotal - discount
   let paidAmount = 0n
   for (const p of input.payments) {
     if (!p.isChange) paidAmount += p.amount
@@ -405,7 +411,7 @@ async function postSaleViaPrisma(input: PostSaleInput): Promise<{ invoiceId: str
       customerAddress: input.customerAddress ?? null,
       customerCity: input.customerCity ?? null,
       subtotal,
-      discount: 0n,
+      discount,
       total,
       paidAmount,
       voucherId,
@@ -564,7 +570,7 @@ export async function getInvoice(businessId: string, invoiceId: string): Promise
       .select(`
         id, invoice_no, invoice_type, invoice_date,
         customer_name, customer_phone, customer_address, customer_city,
-        subtotal, total, paid_amount,
+        subtotal, discount, total, paid_amount,
         is_cancelled, is_returned, memo,
         salesmen(name),
         invoice_items(id, product_id, product_name, qty, unit_price, line_total, is_temporary),
@@ -583,6 +589,7 @@ export async function getInvoice(businessId: string, invoiceId: string): Promise
       customerName: r.customer_name,
       salesmanName: r.salesmen?.name ?? null,
       subtotal: String(r.subtotal),
+      discount: String(r.discount ?? 0),
       total: String(r.total),
       paidAmount: String(r.paid_amount),
       isCancelled: r.is_cancelled,

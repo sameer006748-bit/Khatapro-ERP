@@ -33,11 +33,12 @@ const PostSaleSchema = z.object({
   invoiceDate: z.string(),
   items: z.array(ItemSchema).min(1),
   payments: z.array(PaymentSchema).min(1),
-  salesmanId: z.string().nullable().optional(),  // optional — resolved server-side for salesmen
+  salesmanId: z.string().nullable().optional(),
   customerId: z.string().nullable().optional(),
   customerName: z.string().optional(),
   customerPhone: z.string().optional(),
   memo: z.string().optional(),
+  discount: z.string().optional(),  // paisas as string, default '0'
 })
 
 export async function POST(req: Request) {
@@ -102,6 +103,7 @@ export async function POST(req: Request) {
       customerPhone: parsed.data.customerPhone ?? null,
       memo: parsed.data.memo ?? null,
       createdBy: su.userId,
+      discount: parsed.data.discount ? BigInt(parsed.data.discount) : 0n,
     })
     return NextResponse.json({ ok: true, invoiceId: result.invoiceId, invoiceNo: result.invoiceNo })
   } catch (e) {

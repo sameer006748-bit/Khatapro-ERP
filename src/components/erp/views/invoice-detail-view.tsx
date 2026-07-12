@@ -22,6 +22,7 @@ type Invoice = {
   customerCity: string | null
   salesmanName: string | null
   subtotal: string
+  discount?: string
   total: string
   paidAmount: string
   isCancelled: boolean

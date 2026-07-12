@@ -36,6 +36,7 @@ const OfcSaleSchema = z.object({
   customerAddress: z.string().min(1),
   customerCity: z.string().min(1),
   memo: z.string().optional(),
+  discount: z.string().optional(),  // paisas as string, default '0'
 })
 
 export async function POST(req: Request) {
@@ -87,6 +88,7 @@ export async function POST(req: Request) {
       customerCity: parsed.data.customerCity,
       memo: parsed.data.memo ?? null,
       createdBy: su.userId,
+      discount: parsed.data.discount ? BigInt(parsed.data.discount) : 0n,
     })
     return NextResponse.json({ ok: true, invoiceId: result.invoiceId, invoiceNo: result.invoiceNo })
   } catch (e) {

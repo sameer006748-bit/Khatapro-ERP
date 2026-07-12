@@ -61,7 +61,7 @@ export function PrintInvoiceButton({
           source: null,
           memo: inv.memo,
           subtotal: inv.subtotal,
-          discount: '0',
+          discount: inv.discount || '0',
           deliveryFee: null,
           total: inv.total,
           paidAmount: inv.paidAmount,

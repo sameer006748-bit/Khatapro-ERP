@@ -37,6 +37,7 @@ const OnlineSaleSchema = z.object({
   customerAddress: z.string().min(1),
   customerCity: z.string().optional(),
   memo: z.string().optional(),
+  discount: z.string().optional(),  // paisas as string, default '0'
   // Phase 7 delivery fields (optional — if absent, no delivery order is created)
   deliveryCharge: z.string().optional(),
   riderEarning: z.string().optional(),
@@ -92,6 +93,7 @@ export async function POST(req: Request) {
       customerCity: parsed.data.customerCity ?? null,
       memo: parsed.data.memo ?? null,
       createdBy: su.userId,
+      discount: parsed.data.discount ? BigInt(parsed.data.discount) : 0n,
     })
 
     // Phase 7: Create delivery order if delivery charge is specified

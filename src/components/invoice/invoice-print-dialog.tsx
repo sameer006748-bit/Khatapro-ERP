@@ -102,15 +102,15 @@ export function InvoicePrintDialog({
     const measure = () => {
       const root = printRootRef.current
       if (!root) return
-      const invoiceEl = root.querySelector('.invoice-half') || root.querySelector('.invoice-full-a4')
-      if (invoiceEl) {
-        const h = (invoiceEl as HTMLElement).scrollHeight
-        setMeasuredHeight(h)
-        const isHalfMode = mode === 'single' || mode === 'two-up' || mode === 'top-half' || mode === 'bottom-half'
-        setOverflowDetected(isHalfMode && h > HALF_A4_PRINTABLE_PX)
-      }
+      // Measure the MeasurementInvoice child div (the one with inline styles)
+      const invoiceEl = root.firstElementChild as HTMLElement
+      if (!invoiceEl) return
+      const h = invoiceEl.scrollHeight
+      setMeasuredHeight(h)
+      const isHalfMode = mode === 'single' || mode === 'two-up' || mode === 'top-half' || mode === 'bottom-half'
+      setOverflowDetected(isHalfMode && h > HALF_A4_PRINTABLE_PX)
     }
-    const timer = setTimeout(measure, 100)
+    const timer = setTimeout(measure, 200)
     return () => clearTimeout(timer)
   }, [open, invoices, mode])
 
@@ -276,10 +276,12 @@ export function InvoicePrintDialog({
             </motion.div>
           </div>
 
-          <div ref={printRootRef} className="hidden">
-            <InvoicePrintRoot mode={mode} invoices={invoices} businessName={businessName} businessContact={businessContact} />
+          {/* Off-screen measurement container — visible (not display:none) but positioned off-screen.
+              Uses MeasurementInvoice with inline styles that mimic print CSS for accurate height measurement. */}
+          <div ref={printRootRef} style={{ position: 'absolute', left: '-9999px', top: '0', width: '210mm', visibility: 'hidden' }} aria-hidden="true">
+            {invoices[0] && <MeasurementInvoice inv={invoices[0]} businessName={businessName} />}
           </div>
-          {/* Also render the print root at top level for actual printing */}
+          {/* Actual print root for printing */}
           <InvoicePrintRoot mode={mode} invoices={invoices} businessName={businessName} businessContact={businessContact} />
         </>
       )}
@@ -342,6 +344,105 @@ function MiniInvoice({ inv, businessName }: { inv?: PrintableInvoice; businessNa
         {inv.items.length > 3 && <div className="text-[6px] text-muted-foreground">+{inv.items.length - 3} more</div>}
       </div>
       <div className="mt-1 font-bold border-t border-foreground/20 pt-0.5">Total: Rs {(Number(inv.total) / 100).toFixed(0)}</div>
+    </div>
+  )
+}
+
+// ─── Measurement container — renders invoice content off-screen for height measurement ───
+// Uses inline styles that mimic the print CSS so the measurement is accurate in screen media.
+function MeasurementInvoice({ inv, businessName }: { inv: PrintableInvoice; businessName: string }) {
+  if (!inv) return null
+  const paid = BigInt(inv.paidAmount)
+  const total = BigInt(inv.total)
+  const outstanding = total - paid
+
+  return (
+    <div style={{
+      width: '194mm',  /* 210mm - 16mm padding (8mm each side) */
+      padding: '6mm 8mm',
+      boxSizing: 'border-box',
+      fontFamily: 'system-ui, sans-serif',
+      fontSize: '9pt',
+      lineHeight: '1.3',
+      color: '#000',
+    }}>
+      {/* Header */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: '1.5pt solid #000', paddingBottom: '2mm', marginBottom: '2mm' }}>
+        <div>
+          <div style={{ fontSize: '13pt', fontWeight: 700 }}>{businessName}</div>
+        </div>
+        <div style={{ textAlign: 'right' }}>
+          <div style={{ fontSize: '11pt', fontWeight: 700 }}>INVOICE</div>
+          <div style={{ fontSize: '10pt', fontWeight: 600 }}>{inv.invoiceNo}</div>
+          <div style={{ display: 'inline-block', fontSize: '7pt', fontWeight: 600, padding: '0.5mm 1.5mm', border: '0.5pt solid #000', borderRadius: '1mm' }}>{inv.invoiceType}</div>
+        </div>
+      </div>
+
+      {/* Meta */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: '4mm', marginBottom: '2mm', fontSize: '8pt' }}>
+        <div>
+          <div><strong>Date:</strong> {bizDate(inv.invoiceDate)}</div>
+          {inv.salesmanName && <div><strong>Salesman:</strong> {inv.salesmanName}</div>}
+          {inv.source && <div><strong>Source:</strong> {inv.source}</div>}
+        </div>
+        <div>
+          {inv.customerName && <div><strong>Customer:</strong> {inv.customerName}</div>}
+          {inv.customerPhone && <div><strong>Phone:</strong> {inv.customerPhone}</div>}
+          {inv.customerAddress && <div><strong>Address:</strong> {inv.customerAddress}{inv.customerCity ? `, ${inv.customerCity}` : ''}</div>}
+        </div>
+      </div>
+
+      {/* Items table */}
+      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '8.5pt', marginBottom: '2mm' }}>
+        <thead>
+          <tr>
+            <th style={{ background: '#f0f0f0', border: '0.5pt solid #000', padding: '1mm 1.5mm', textAlign: 'left', fontWeight: 600, fontSize: '8pt' }}>Item</th>
+            <th style={{ background: '#f0f0f0', border: '0.5pt solid #000', padding: '1mm 1.5mm', textAlign: 'right', fontWeight: 600, fontSize: '8pt' }}>Qty</th>
+            <th style={{ background: '#f0f0f0', border: '0.5pt solid #000', padding: '1mm 1.5mm', textAlign: 'right', fontWeight: 600, fontSize: '8pt' }}>Rate</th>
+            <th style={{ background: '#f0f0f0', border: '0.5pt solid #000', padding: '1mm 1.5mm', textAlign: 'right', fontWeight: 600, fontSize: '8pt' }}>Amount</th>
+          </tr>
+        </thead>
+        <tbody>
+          {inv.items.map((it, i) => (
+            <tr key={i}>
+              <td style={{ border: '0.5pt solid #999', padding: '0.8mm 1.5mm', verticalAlign: 'top', width: '50%' }}>
+                {it.productName}{it.sku && <span style={{ color: '#666', fontSize: '7.5pt' }}> [{it.sku}]</span>}
+              </td>
+              <td style={{ border: '0.5pt solid #999', padding: '0.8mm 1.5mm', textAlign: 'right', width: '12%' }}>{it.qty}</td>
+              <td style={{ border: '0.5pt solid #999', padding: '0.8mm 1.5mm', textAlign: 'right', width: '19%' }}>{formatMoney(BigInt(it.unitPrice), false)}</td>
+              <td style={{ border: '0.5pt solid #999', padding: '0.8mm 1.5mm', textAlign: 'right', width: '19%' }}>{formatMoney(BigInt(it.lineTotal), false)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      {/* Totals */}
+      <div style={{ marginLeft: 'auto', width: '60%', fontSize: '8.5pt', marginBottom: '1.5mm' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.4mm 0' }}><span>Subtotal</span><span>{formatMoney(BigInt(inv.subtotal), false)}</span></div>
+        {BigInt(inv.discount) > 0n && <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.4mm 0', color: '#666' }}><span>Discount</span><span>-{formatMoney(BigInt(inv.discount), false)}</span></div>}
+        {inv.deliveryFee && BigInt(inv.deliveryFee) > 0n && <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.4mm 0' }}><span>Delivery Fee</span><span>{formatMoney(BigInt(inv.deliveryFee), false)}</span></div>}
+        <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1pt solid #000', borderBottom: '1pt solid #000', fontWeight: 700, fontSize: '10pt', padding: '1mm 0', margin: '0.5mm 0' }}><span>Grand Total</span><span>{formatMoney(total, false)}</span></div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.4mm 0' }}><span>Paid</span><span>{formatMoney(paid, false)}</span></div>
+        {outstanding > 0n && <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.4mm 0', fontWeight: 600 }}><span>Outstanding</span><span>{formatMoney(outstanding, false)}</span></div>}
+      </div>
+
+      {/* Payment summary */}
+      {inv.payments.length > 0 && (
+        <div style={{ border: '0.5pt solid #999', padding: '1mm 1.5mm', fontSize: '7.5pt', marginBottom: '1.5mm' }}>
+          <div style={{ fontWeight: 600, marginBottom: '0.5mm', fontSize: '8pt' }}>Payment Summary</div>
+          {inv.payments.map((p, i) => (
+            <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '0.2mm 0' }}>
+              <span>[{p.accountCode}] {p.accountName}{p.isChange && ' (Change)'}</span>
+              <span>{formatMoney(BigInt(p.amount), false)}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Footer */}
+      <div style={{ marginTop: 'auto', borderTop: '0.5pt solid #999', paddingTop: '1mm', fontSize: '7.5pt', color: '#555', display: 'flex', justifyContent: 'space-between' }}>
+        <span style={{ fontStyle: 'italic' }}>{inv.memo || 'Thank you for your business!'}</span>
+      </div>
     </div>
   )
 }
