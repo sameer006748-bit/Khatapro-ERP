@@ -13,6 +13,7 @@ import { authOptions } from '@/lib/auth/authOptions'
 import { loadSessionUser, requirePermission, hasPermission } from '@/lib/auth/permissions'
 import { postSale, listInvoices, resolveSalesmanIdForUser, resolveEffectiveSalesmanId } from '@/lib/sales/data-access'
 import { parseMoney } from '@/lib/format'
+import { parseDiscountPaisas, validateDiscountNotExceedingSubtotal } from '@/lib/sales/discount'
 
 const ItemSchema = z.object({
   productId: z.string().nullable().optional(),
@@ -103,7 +104,7 @@ export async function POST(req: Request) {
       customerPhone: parsed.data.customerPhone ?? null,
       memo: parsed.data.memo ?? null,
       createdBy: su.userId,
-      discount: parsed.data.discount ? BigInt(parsed.data.discount) : 0n,
+      discount: parsed.data.discount ? parseDiscountPaisas(parsed.data.discount) : 0n,
     })
     return NextResponse.json({ ok: true, invoiceId: result.invoiceId, invoiceNo: result.invoiceNo })
   } catch (e) {

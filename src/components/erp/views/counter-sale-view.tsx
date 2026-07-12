@@ -60,6 +60,7 @@ export function CounterSaleView({ user }: { user: MeUser }) {
   const [advPayments, setAdvPayments] = useState<Array<{ key: string; accountId: string; amount: string; isChange: boolean }>>([
     { key: '1', accountId: '', amount: '', isChange: false },
   ])
+  const [discountInput, setDiscountInput] = useState('') // rupees string
 
   const [result, setResult] = useState<{ ok: boolean; invoiceNo?: string; invoiceId?: string; error?: string } | null>(null)
 
@@ -116,16 +117,26 @@ export function CounterSaleView({ user }: { user: MeUser }) {
     }, 0n)
   }, [cart])
 
+  // Discount
+  const discountPaisas = useMemo(() => {
+    const parsed = parseMoney(discountInput) ?? 0n
+    if (parsed < 0n) return 0n
+    if (parsed > subtotal) return subtotal
+    return parsed
+  }, [discountInput, subtotal])
+  const discountExceedsSubtotal = (parseMoney(discountInput) ?? 0n) > subtotal
+  const finalTotal = subtotal - discountPaisas
+
   const salesman = salesmenQ.data?.rows.find(s => s.id === salesmanId)
 
   // Change calc
   const cashReceived = parseMoney(cashReceivedAmount) ?? 0n
-  const changeAmount = cashReceived > subtotal ? cashReceived - subtotal : 0n
+  const changeAmount = cashReceived > finalTotal ? cashReceived - finalTotal : 0n
   const changeNeeded = changeAmount > 0n
 
   // Partial calc
   const partialPaid = parseMoney(partialAmount) ?? 0n
-  const partialOutstanding = subtotal - partialPaid
+  const partialOutstanding = finalTotal - partialPaid
 
   // Build payments
   function buildPayments() {
@@ -134,7 +145,7 @@ export function CounterSaleView({ user }: { user: MeUser }) {
         accountId: p.accountId, amount: parseMoney(p.amount) ?? 0n, isChange: p.isChange,
       }))
     }
-    if (paymentMode === 'full') return [{ accountId: paymentAccountId, amount: subtotal }]
+    if (paymentMode === 'full') return [{ accountId: paymentAccountId, amount: finalTotal }]
     if (paymentMode === 'partial') return [{ accountId: paymentAccountId, amount: partialPaid }]
     if (paymentMode === 'change') {
       const ps: Array<{ accountId: string; amount: bigint; isChange?: boolean }> = [{ accountId: paymentAccountId, amount: cashReceived }]
@@ -147,7 +158,7 @@ export function CounterSaleView({ user }: { user: MeUser }) {
   const payments = buildPayments()
   const totalPaid = payments.filter(p => !p.isChange).reduce((a, p) => a + p.amount, 0n)
   const totalChange = payments.filter(p => p.isChange).reduce((a, p) => a + p.amount, 0n)
-  const outstanding = subtotal - totalPaid + totalChange
+  const outstanding = finalTotal - totalPaid + totalChange
   const estimatedCommission = salesman && totalPaid > 0n ? (totalPaid * BigInt(Math.round(salesman.commissionPct * 100))) / 10000n : 0n
 
   const stockWarnings = cart.filter(it => {
@@ -187,6 +198,7 @@ export function CounterSaleView({ user }: { user: MeUser }) {
           })),
           salesmanId,
           customerName: customerName || undefined,
+          discount: discountPaisas.toString(),
         }),
       })
       const j = await r.json()
@@ -441,8 +453,25 @@ export function CounterSaleView({ user }: { user: MeUser }) {
           {cart.length > 0 && (
             <div className="sticky bottom-20 md:bottom-3 z-20">
               <div className="card-3d border-primary/30 p-3 bg-card/95 backdrop-blur-md">
+                {/* Discount input */}
+                <div className="flex items-center gap-2 mb-2">
+                  <Label className="text-[10px] text-muted-foreground whitespace-nowrap">Discount (Rs)</Label>
+                  <Input
+                    type="text"
+                    inputMode="decimal"
+                    value={discountInput}
+                    onChange={e => setDiscountInput(e.target.value)}
+                    placeholder="0"
+                    className="h-8 bg-background text-sm w-24 press-sm"
+                    data-num
+                  />
+                  {discountPaisas > 0n && <span className="text-xs text-muted-foreground">− {formatMoney(discountPaisas, false)}</span>}
+                  {discountExceedsSubtotal && <span className="text-[10px] text-destructive">Cannot exceed subtotal</span>}
+                </div>
                 <div className="flex items-center gap-3 mb-2 text-sm">
-                  <div><span className="text-[9px] uppercase text-muted-foreground">Total</span><div className="font-bold text-foreground" data-num>{formatMoney(subtotal, false)}</div></div>
+                  <div><span className="text-[9px] uppercase text-muted-foreground">Subtotal</span><div className="font-semibold text-foreground" data-num>{formatMoney(subtotal, false)}</div></div>
+                  {discountPaisas > 0n && <div><span className="text-[9px] uppercase text-muted-foreground">Discount</span><div className="font-semibold text-destructive" data-num>−{formatMoney(discountPaisas, false)}</div></div>}
+                  <div><span className="text-[9px] uppercase text-muted-foreground">Total</span><div className="font-bold text-foreground" data-num>{formatMoney(finalTotal, false)}</div></div>
                   <div><span className="text-[9px] uppercase text-muted-foreground">Paid</span><div className="font-semibold text-primary" data-num>{formatMoney(totalPaid, false)}</div></div>
                   {totalChange > 0n && <div><span className="text-[9px] uppercase text-muted-foreground">Change</span><div className="font-semibold text-amber-600" data-num>{formatMoney(totalChange, false)}</div></div>}
                   {outstanding > 0n && <div><span className="text-[9px] uppercase text-muted-foreground">Outstanding</span><div className="font-semibold text-destructive" data-num>{formatMoney(outstanding, false)}</div></div>}
@@ -450,8 +479,8 @@ export function CounterSaleView({ user }: { user: MeUser }) {
                 </div>
                 {stockWarnings.length > 0 && <div className="mb-1.5 flex items-center gap-1 text-[10px] text-amber-600"><TrendingDown className="size-2.5" /> {stockWarnings.length} item(s) will go negative</div>}
                 {result && !result.ok && <div className="mb-1.5 p-1.5 bg-destructive/10 rounded text-[10px] text-destructive flex items-center gap-1"><AlertCircle className="size-3" /> {result.error}</div>}
-                <Button className="w-full press-md shadow-sm" disabled={!canPost || postMut.isPending} onClick={() => postMut.mutate()}>
-                  {postMut.isPending ? 'Posting…' : <><CheckCircle2 className="size-4" /> Post Sale — {formatMoney(subtotal)}</>}
+                <Button className="w-full press-md shadow-sm" disabled={!canPost || postMut.isPending || discountExceedsSubtotal} onClick={() => postMut.mutate()}>
+                  {postMut.isPending ? 'Posting…' : <><CheckCircle2 className="size-4" /> Post Sale — {formatMoney(finalTotal)}</>}
                 </Button>
               </div>
             </div>

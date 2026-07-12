@@ -159,6 +159,11 @@ export function InvoiceDetailView({ invoiceId }: { invoiceId: string }) {
         <div className="px-5 py-3 border-t border-border bg-muted/30 flex items-center justify-between text-sm">
           <span className="text-muted-foreground">Subtotal</span><span className="font-semibold text-foreground" data-num>{formatMoney(BigInt(inv.subtotal))}</span>
         </div>
+        {inv.discount && BigInt(inv.discount) > 0n && (
+          <div className="px-5 py-2 border-t border-border/40 bg-muted/20 flex items-center justify-between text-sm">
+            <span className="text-muted-foreground">Discount</span><span className="font-semibold text-destructive" data-num>−{formatMoney(BigInt(inv.discount))}</span>
+          </div>
+        )}
       </div>
 
       {/* Payments */}

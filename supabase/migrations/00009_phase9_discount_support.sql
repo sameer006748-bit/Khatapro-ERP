@@ -1,24 +1,53 @@
 -- ============================================================================
 -- KhataPro ERP — Phase 9: Add discount support to post_sale() RPC
 --
--- BUG: post_sale() does not accept a discount parameter. The invoices table
---      has a `discount` column (default 0) but the RPC never sets it to
---      anything other than 0. The application Sale API routes also have no
---      discount field.
+-- ROOT CAUSE:
+--   post_sale() does not accept a discount parameter. The invoices table has a
+--   `discount` column (default 0) but the RPC always inserts 0. The application
+--   Sale API routes have no discount field.
 --
--- FIX: Add p_discount_paisas parameter to post_sale() with default 0.
---      Compute total = subtotal - discount.
---      Validate discount >= 0 and discount <= subtotal.
---      Insert the discount value into the invoices row.
+-- OVERLOAD PREVENTION:
+--   PostgreSQL treats CREATE OR REPLACE FUNCTION with a different parameter
+--   signature as a NEW overloaded function. This would leave TWO callable
+--   post_sale functions, causing PostgREST PGRST203 ambiguity errors.
 --
--- This is the ONLY SQL change required. The application code changes
--- (API routes, PostSaleInput, Prisma path, print template) are in the
--- TypeScript source files.
+--   FIX: DROP the exact old signature first, then CREATE the new one.
+--   The old signature is: post_sale(text, text, date, jsonb, jsonb, text, text,
+--   text, text, text, text, text, uuid) — 13 parameters, no p_discount_paisas.
 --
--- Rerunnable: CREATE OR REPLACE FUNCTION. Safe to re-run.
+--   The DROP uses the exact argument TYPE list (not names) which is the
+--   PostgreSQL canonical form. No CASCADE — safe, only drops this one function.
+--
+-- PRESERVED LOGIC:
+--   The function body is based on the latest version (00008h) which includes:
+--   - Sequential invoice numbering via next_invoice_no()
+--   - COGS posting (Dr 5010, Cr 1100) using WAC × qty (00008b)
+--   - AR (1200) debit for partial/credit sales (00008h)
+--   - unit_cost_paisas capture in invoice_items (00008b)
+--   - Commission accrual (00008b)
+--   - Stock movement via create_stock_movement (00008b)
+--   All of the above is preserved exactly — only the discount computation
+--   and storage is added.
+--
+-- DELIVERY FEE:
+--   Delivery fee is NOT part of post_sale(). Online sales with delivery
+--   create a separate delivery_orders row via the application layer
+--   (src/app/api/sales/online/route.ts → createDeliveryOrder()).
+--   The delivery charge is stored in delivery_orders.customer_delivery_charge
+--   and is NOT included in the invoice total. The invoice total = subtotal - discount.
+--   COD amount = product_amount + delivery_charge (computed in the app layer).
+--   This is the existing design and is not changed by this migration.
+--
+-- Rerunnable: DROP IF EXISTS + CREATE. Safe to re-run.
 -- ============================================================================
 
-create or replace function public.post_sale(
+-- Step 1: Drop the exact old 13-parameter signature (no CASCADE)
+drop function if exists public.post_sale(
+  text, text, date, jsonb, jsonb, text, text, text, text, text, text, text, uuid
+);
+
+-- Step 2: Create the canonical 14-parameter signature with p_discount_paisas
+create function public.post_sale(
   p_business_id    text,
   p_invoice_type   text,
   p_invoice_date   date,
@@ -59,6 +88,7 @@ declare
   v_cogs_account  text;
   v_inventory_acct text;
   v_ar_account    text;
+  v_outstanding   numeric(20,0);
   v_stock_sm_id   text;
   v_alloc_id      text;
   v_comm_pct      numeric(5,2);
@@ -84,6 +114,7 @@ begin
 
   v_invoice_no := public.next_invoice_no(p_business_id);
 
+  -- Compute subtotal from items
   for v_item in select * from jsonb_array_elements(p_items)
   loop
     v_qty := (v_item->>'qty')::integer;
@@ -97,9 +128,13 @@ begin
     raise exception 'Discount (%) cannot exceed subtotal (%)', v_discount, v_subtotal;
   end if;
 
-  -- *** FIX: total = subtotal - discount (no delivery fee in post_sale; delivery is separate) ***
+  -- *** DISCOUNT FIX: total = subtotal - discount ***
+  -- Note: Delivery fee is NOT part of post_sale(). Online sales with delivery
+  -- create a separate delivery_orders row in the application layer.
+  -- The invoice total = subtotal - discount.
   v_total := v_subtotal - v_discount;
 
+  -- Compute paid and change from payments
   for v_payment in select * from jsonb_array_elements(p_payments)
   loop
     if not coalesce((v_payment->>'is_change')::boolean, false) then
@@ -109,6 +144,7 @@ begin
     end if;
   end loop;
 
+  -- Resolve Sales (4010), COGS (5010), Inventory (1100), AR (1200)
   select id into v_sales_account
   from public.accounts
   where business_id = p_business_id and code = '4010' and is_active = true;
@@ -130,11 +166,14 @@ begin
     raise exception 'Inventory account (1100) not found';
   end if;
 
+  -- AR (1200) may be NULL — only used for partial/credit sales
   select id into v_ar_account
   from public.accounts
   where business_id = p_business_id and code = '1200' and is_active = true;
 
-  -- Line 1: Credit Sales by total (net of discount)
+  -- Build voucher lines:
+
+  -- Line 1: Credit Sales by total (net of discount — revenue posts the discounted amount)
   v_voucher_lines := v_voucher_lines || jsonb_build_object(
     'account_id', v_sales_account,
     'debit', '0',
@@ -168,7 +207,20 @@ begin
     end if;
   end loop;
 
-  -- COGS lines for each non-temporary product item
+  -- AR (1200) debit for outstanding (partial / credit sales)
+  -- outstanding = total + change_given - cash_received
+  v_outstanding := v_total + v_change_total - v_paid;
+  if v_outstanding > 0 and v_ar_account is not null then
+    v_voucher_lines := v_voucher_lines || jsonb_build_object(
+      'account_id', v_ar_account,
+      'debit', v_outstanding::text,
+      'credit', '0',
+      'memo', 'Outstanding ' || v_invoice_no
+    );
+  end if;
+
+  -- COGS lines for each non-temporary product item (Dr COGS, Cr Inventory using WAC)
+  -- Discount does NOT reduce COGS — COGS is based on product cost, not sale price
   for v_item in select * from jsonb_array_elements(p_items)
   loop
     v_qty := (v_item->>'qty')::integer;
@@ -200,21 +252,7 @@ begin
     end if;
   end loop;
 
-  -- Partial payment: debit outstanding to AR (1200)
-  declare
-    v_outstanding numeric(20,0);
-  begin
-    v_outstanding := v_total + v_change_total - v_paid;
-    if v_outstanding > 0 and v_ar_account is not null then
-      v_voucher_lines := v_voucher_lines || jsonb_build_object(
-        'account_id', v_ar_account,
-        'debit', v_outstanding::text,
-        'credit', '0',
-        'memo', 'Outstanding ' || v_invoice_no
-      );
-    end if;
-  end;
-
+  -- Post the voucher
   v_voucher_id := public.post_voucher(
     p_business_id, 'SI', p_invoice_date, p_memo, v_voucher_lines,
     null, null, p_created_by
@@ -266,7 +304,7 @@ begin
     );
   end loop;
 
-  -- Insert payment allocations
+  -- Insert payment allocations (non-change)
   for v_payment in select * from jsonb_array_elements(p_payments)
   loop
     if not coalesce((v_payment->>'is_change')::boolean, false) then
@@ -292,7 +330,7 @@ begin
     end if;
   end loop;
 
-  -- Commission
+  -- Commission (accrued at sale time; based on subtotal, not discounted total)
   if p_salesman_id is not null then
     select commission_pct into v_comm_pct
     from public.salesmen
@@ -312,23 +350,35 @@ begin
 
   insert into public.audit_logs (business_id, user_id, action, entity, entity_id, details)
   values (p_business_id, p_created_by, 'POST_SALE', 'invoice', v_invoice_id,
-    jsonb_build_object('invoice_no', v_invoice_no, 'type', p_invoice_type, 'total', v_total, 'discount', v_discount, 'cogs', v_total_cogs));
+    jsonb_build_object('invoice_no', v_invoice_no, 'type', p_invoice_type, 'total', v_total,
+      'discount', v_discount, 'paid', v_paid, 'change', v_change_total, 'outstanding', v_outstanding,
+      'cogs', v_total_cogs, 'voucher_id', v_voucher_id));
 
   return v_invoice_id;
 end;
 $$;
 
--- Restore EXECUTE permissions
-grant execute on function public.post_sale(text, text, date, jsonb, jsonb, text, text, text, text, text, text, text, uuid, numeric) to authenticated, anon;
+-- Step 3: Grant execute to authenticated only (NOT anon — sales require authentication)
+grant execute on function public.post_sale(
+  text, text, date, jsonb, jsonb, text, text, text, text, text, text, text, uuid, numeric
+) to authenticated;
 
--- Refresh PostgREST schema cache
+-- Step 4: Refresh PostgREST schema cache
 NOTIFY pgrst, 'reload schema';
 
 -- ============================================================================
--- Done. post_sale() now accepts p_discount_paisas (default 0).
+-- Done. post_sale() now has exactly one signature with p_discount_paisas.
+--   ✓ Old 13-param signature DROPped (no overload ambiguity)
+--   ✓ New 14-param signature CREATEd (p_discount_paisas default 0)
+--   ✓ Callers omitting discount still work (default 0)
 --   ✓ Discount validated: >= 0 and <= subtotal
 --   ✓ total = subtotal - discount
---   ✓ Invoice row stores the discount value
---   ✓ Audit log records discount
---   ✓ Existing callers without p_discount_paisas still work (default 0)
+--   ✓ Revenue posts net of discount (v_total credited to Sales)
+--   ✓ COGS unchanged (based on WAC, not sale price)
+--   ✓ AR outstanding uses discounted total
+--   ✓ Commission based on subtotal (pre-discount) — preserved from 00008h
+--   ✓ Delivery fee NOT in post_sale (separate delivery_orders row)
+--   ✓ SECURITY DEFINER, set search_path = public
+--   ✓ Grant to authenticated only (NOT anon)
+--   ✓ NOTIFY pgrst reload schema
 -- ============================================================================

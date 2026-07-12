@@ -11,6 +11,7 @@ import { loadSessionUser, requirePermission } from '@/lib/auth/permissions'
 import { postSale, resolveEffectiveSalesmanId } from '@/lib/sales/data-access'
 import { createDeliveryOrder } from '@/lib/delivery/data-access'
 import { parseMoney } from '@/lib/format'
+import { parseDiscountPaisas } from '@/lib/sales/discount'
 
 const ItemSchema = z.object({
   productId: z.string().nullable().optional(),
@@ -93,7 +94,7 @@ export async function POST(req: Request) {
       customerCity: parsed.data.customerCity ?? null,
       memo: parsed.data.memo ?? null,
       createdBy: su.userId,
-      discount: parsed.data.discount ? BigInt(parsed.data.discount) : 0n,
+      discount: parsed.data.discount ? parseDiscountPaisas(parsed.data.discount) : 0n,
     })
 
     // Phase 7: Create delivery order if delivery charge is specified
