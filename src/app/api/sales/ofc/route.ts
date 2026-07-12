@@ -43,6 +43,7 @@ const OfcSaleSchema = z.object({
   customerCity: z.string().min(1),
   memo: z.string().optional(),
   discount: z.string().optional(),
+  idempotencyKey: z.string().min(1).max(200).optional(),
 })
 
 export async function POST(req: Request) {
@@ -118,6 +119,7 @@ export async function POST(req: Request) {
       memo: parsed.data.memo ?? null,
       createdBy: su.userId,
       discount: discountPaisas,
+      idempotencyKey: parsed.data.idempotencyKey ?? null,
     })
     return NextResponse.json({ ok: true, invoiceId: result.invoiceId, invoiceNo: result.invoiceNo })
   } catch (e) {

@@ -591,6 +591,85 @@ async function main(){
     if(secR.status===404||secR.status===401||secR.status===403||secR.status==='error')pass('Security: internal helper not directly callable')
     else fail('Security: internal helper',`status=${secR.status}`)
 
+    // Direct receipt_allocations INSERT blocked by RLS
+    const raInsertR=await page.evaluate(async({url,key})=>{
+      try{
+        const r=await fetch(`${url}/rest/v1/receipt_allocations`,{method:'POST',headers:{'Content-Type':'application/json','apikey':key,'Authorization':`Bearer ${key}`},body:JSON.stringify({business_id:'biz-default',receipt_id:'test',invoice_id:'test',allocated_amount:100})})
+        return{status:r.status}
+      }catch(e){return{status:'error'}}
+    },{url:supabaseUrl,key:supabaseKey}).catch(()=>({status:'error'}))
+    if(raInsertR.status===401||raInsertR.status===403||raInsertR.status===404||raInsertR.status==='error')pass('Security: direct receipt_allocations INSERT blocked')
+    else fail('Security: direct RA insert',`status=${raInsertR.status}`)
+
+    // ═══ 3g. IDEMPOTENCY TESTS ═══
+    log('═══ 3g. IDEMPOTENCY TESTS ═══')
+
+    // Sale idempotency: same key → same invoice, zero duplicates
+    const saleKey=`idemp-test-sale-${Date.now()}`
+    const saleBody={invoiceType:'COUNTER',invoiceDate:TODAY,items:[{productId:pid,productName:'Idemp Sale',qty:1,unitPrice:'50000',isTemporary:false}],payments:[{accountId:cashId,amount:'50000',isChange:false}],salesmanId:SM,customerName:'P9 Idemp Cust',idempotencyKey:saleKey}
+    const sale1=await api(page,'POST','/api/sales/counter',saleBody)
+    const sale2=await api(page,'POST','/api/sales/counter',saleBody)
+    if(sale1.json?.invoiceId&&sale1.json.invoiceId===sale2.json?.invoiceId)pass('Idempotency: sale replay returns same invoice_id')
+    else fail('Idempotency: sale replay',`first=${sale1.json?.invoiceId} second=${sale2.json?.invoiceId}`)
+
+    // Receipt idempotency: same key → same receipt, zero duplicates
+    const rvKey=`idemp-test-rv-${Date.now()}`
+    const rvBody={receiptDate:TODAY,receivedIntoAccountId:cashId,creditAccountId:pettyId,amount:'50',reference:'P9 Idemp RV',idempotencyKey:rvKey}
+    const rv1=await api(page,'POST','/api/receipt-voucher',rvBody)
+    const rv2=await api(page,'POST','/api/receipt-voucher',rvBody)
+    if(rv1.json?.receiptId&&rv1.json.receiptId===rv2.json?.receiptId)pass('Idempotency: receipt replay returns same receipt_id')
+    else fail('Idempotency: receipt replay',`first=${rv1.json?.receiptId} second=${rv2.json?.receiptId}`)
+
+    // Verify voucher count unchanged on receipt replay
+    const{count:vcBefore}=await sb.from('vouchers').select('id',{count:'exact'}).eq('business_id','biz-default').eq('reference_type','receipt_voucher')
+    const rv3=await api(page,'POST','/api/receipt-voucher',rvBody) // replay again
+    const{count:vcAfter}=await sb.from('vouchers').select('id',{count:'exact'}).eq('business_id','biz-default').eq('reference_type','receipt_voucher')
+    if(vcBefore===vcAfter)pass('Idempotency: voucher count unchanged on receipt replay')
+    else fail('Idempotency: voucher count',`before=${vcBefore} after=${vcAfter}`)
+
+    // ═══ 3h. ONLINE ADVANCE SPLIT TESTS ═══
+    log('═══ 3h. ONLINE ADVANCE SPLIT TESTS ═══')
+
+    // Online: no advance (full COD)
+    const onlineNoAdvR=await api(page,'POST','/api/sales/online',{invoiceType:'ONLINE',invoiceDate:TODAY,items:[{productId:pid,productName:'Online No Adv',qty:1,unitPrice:'100000',isTemporary:false}],payments:[],salesmanId:SM,customerName:'P9 Online No Adv',customerPhone:'0300-3333333',customerAddress:'Test',customerCity:'Khi',deliveryCharge:'300',riderEarning:'200',companyDeliveryIncome:'100',source:'WhatsApp',idempotencyKey:`online-noadv-${Date.now()}`})
+    if(onlineNoAdvR.json?.invoiceId){
+      const{data:oinv}=await sb.from('invoices').select('total,paid_amount,product_advance,delivery_advance,delivery_charge').eq('id',onlineNoAdvR.json.invoiceId).single()
+      if(oinv&&String(oinv.product_advance)==='0'&&String(oinv.delivery_advance)==='0')pass('Online: no advance → product_advance=0, delivery_advance=0')
+      else fail('Online: no advance',`product=${oinv?.product_advance} delivery=${oinv?.delivery_advance}`)
+    } else fail('Online: no advance',JSON.stringify(onlineNoAdvR.json).slice(0,150))
+
+    // Online: full grand total advance (product + delivery)
+    const onlineFullAdvR=await api(page,'POST','/api/sales/online',{invoiceType:'ONLINE',invoiceDate:TODAY,items:[{productId:pid,productName:'Online Full Adv',qty:1,unitPrice:'100000',isTemporary:false}],payments:[{accountId:cashId,amount:'130000',isChange:false}],salesmanId:SM,customerName:'P9 Online Full Adv',customerPhone:'0300-4444444',customerAddress:'Test',customerCity:'Khi',deliveryCharge:'300',riderEarning:'200',companyDeliveryIncome:'100',source:'WhatsApp',idempotencyKey:`online-fulladv-${Date.now()}`})
+    if(onlineFullAdvR.json?.invoiceId){
+      const{data:oinv}=await sb.from('invoices').select('total,paid_amount,product_advance,delivery_advance,delivery_charge').eq('id',onlineFullAdvR.json.invoiceId).single()
+      if(oinv&&String(oinv.product_advance)==='100000'&&String(oinv.delivery_advance)==='30000')pass('Online: full advance → product=100000, delivery=30000')
+      else fail('Online: full advance',`product=${oinv?.product_advance} delivery=${oinv?.delivery_advance}`)
+      // COD should be 0 (full grand total paid)
+      if(onlineFullAdvR.json?.remainingCod==='0')pass('Online: full advance → COD=0')
+      else fail('Online: full advance COD',`remainingCod=${onlineFullAdvR.json?.remainingCod}`)
+    } else fail('Online: full advance',JSON.stringify(onlineFullAdvR.json).slice(0,150))
+
+    // ═══ 3i. RECEIPT ALLOCATION EDGE CASES ═══
+    log('═══ 3i. RECEIPT ALLOCATION EDGE CASES ═══')
+
+    // Fully paid invoice rejected
+    if(allocInv1Id){
+      const{data:paidInv}=await sb.from('invoices').select('total,paid_amount').eq('id',allocInv1Id).single()
+      const isFullyPaid=BigInt(paidInv.total)-BigInt(paidInv.paid_amount)<=0n
+      if(isFullyPaid){
+        const overAllocR=await api(page,'POST','/api/receipt-voucher',{receiptDate:TODAY,receivedIntoAccountId:cashId,creditAccountId:cashId,amount:'50',allocations:[{invoiceId:allocInv1Id,allocatedAmount:'50'}],idempotencyKey:`over-alloc-${Date.now()}`})
+        if(overAllocR.status>=400||overAllocR.json?.error)pass('Receipt: fully-paid invoice rejected')
+        else fail('Receipt: fully-paid invoice rejected','NOT rejected')
+      } else skip('Receipt: fully-paid invoice test','invoice not fully paid yet')
+    }
+
+    // Duplicate invoice in same allocation request rejected
+    if(allocInv2Id){
+      const dupInvR=await api(page,'POST','/api/receipt-voucher',{receiptDate:TODAY,receivedIntoAccountId:cashId,creditAccountId:cashId,amount:'100',allocations:[{invoiceId:allocInv2Id,allocatedAmount:'50'},{invoiceId:allocInv2Id,allocatedAmount:'50'}],idempotencyKey:`dup-inv-${Date.now()}`})
+      if(dupInvR.status>=400||dupInvR.json?.error)pass('Receipt: duplicate invoice in request rejected')
+      else fail('Receipt: duplicate invoice rejected','NOT rejected')
+    }
+
     const pdfTests=[
       {id:counterInv?.id,mode:'single',label:'Half A4 — Single Sheet',file:'p9-01-counter-half-a4.pdf',desc:'Counter Half-A4'},
       {id:onlineInv?.id,mode:'single',label:'Half A4 — Single Sheet',file:'p9-02-online-half-a4.pdf',desc:'Online Half-A4'},

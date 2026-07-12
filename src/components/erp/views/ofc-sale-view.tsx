@@ -68,6 +68,7 @@ export function OfcSaleView({ user }: { user: MeUser }) {
         payments.push({ accountId: paymentAccountId, amount: changeAmount.toString(), isChange: true })
       }
 
+      const idempotencyKey = `ofc-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
       const r = await fetch('/api/sales/ofc', {
         method: 'POST', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
@@ -82,6 +83,7 @@ export function OfcSaleView({ user }: { user: MeUser }) {
           customerAddress: form.customerAddress, customerCity: form.customerCity,
           memo: form.courierNote ? `Courier: ${form.courierNote}` : undefined,
           discount: discountPaisas.toString(),
+          idempotencyKey,
         }),
       })
       const j = await r.json()

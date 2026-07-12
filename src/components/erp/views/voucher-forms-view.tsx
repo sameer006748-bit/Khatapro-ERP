@@ -93,7 +93,8 @@ export function ReceiptVoucherView({ user }: { user: MeUser }) {
 
   const mut = useMutation({
     mutationFn: async () => {
-      const body: any = { receiptDate, receivedIntoAccountId, creditAccountId, amount, reference: reference || undefined, notes: notes || undefined }
+      const idempotencyKey = `rv-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+      const body: any = { receiptDate, receivedIntoAccountId, creditAccountId, amount, reference: reference || undefined, notes: notes || undefined, idempotencyKey }
       if (allocations.length > 0) {
         body.allocations = allocations.filter(a => a.invoiceId && a.allocatedAmount).map(a => ({ invoiceId: a.invoiceId, allocatedAmount: a.allocatedAmount }))
       }

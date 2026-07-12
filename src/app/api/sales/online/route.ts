@@ -23,7 +23,6 @@ import { postSale, resolveEffectiveSalesmanId } from '@/lib/sales/data-access'
 import { createDeliveryOrder } from '@/lib/delivery/data-access'
 import { parseMoney } from '@/lib/format'
 import { parseDiscountPaisas, validateDiscountNotExceedingSubtotal } from '@/lib/sales/discount'
-import { getAdminSupabase } from '@/lib/supabase/admin'
 
 const ItemSchema = z.object({
   productId: z.string().nullable().optional(),
@@ -55,6 +54,7 @@ const OnlineSaleSchema = z.object({
   riderEarning: z.string().optional(),
   companyDeliveryIncome: z.string().optional(),
   source: z.string().optional(),
+  idempotencyKey: z.string().min(1).max(200).optional(),
 })
 
 export async function POST(req: Request) {
@@ -115,7 +115,14 @@ export async function POST(req: Request) {
     // ── Post the sale (product only) ──
     // post_sale receives the payments and computes net_collected for commission.
     // The invoice total = net_product_total (product only).
-    // The delivery fields are stored on the invoice after post_sale for display.
+    // The delivery fields are passed to post_sale so the RPC can split the
+    // advance into product_advance + delivery_advance and store them on the invoice.
+    const deliveryChargeBi = parsed.data.deliveryCharge ? (parseMoney(parsed.data.deliveryCharge) ?? 0n) : 0n
+    const riderEarningBi = parsed.data.riderEarning ? (parseMoney(parsed.data.riderEarning) ?? deliveryChargeBi) : deliveryChargeBi
+    const companyIncomeBi = parsed.data.companyDeliveryIncome
+      ? (parseMoney(parsed.data.companyDeliveryIncome) ?? 0n)
+      : (deliveryChargeBi - riderEarningBi)
+
     const result = await postSale({
       businessId: su.businessId,
       invoiceType: 'ONLINE',
@@ -130,40 +137,23 @@ export async function POST(req: Request) {
       memo: parsed.data.memo ?? null,
       createdBy: su.userId,
       discount: discountPaisas,
+      idempotencyKey: parsed.data.idempotencyKey ?? null,
+      deliveryCharge: deliveryChargeBi,
+      riderEarning: riderEarningBi,
+      companyDeliveryIncome: companyIncomeBi,
     })
 
-    // ── Update invoice with delivery fields for grand-total reconciliation ──
-    // This lets invoice detail, delivery order and print all agree on
-    // customer_grand_total = net_product_total + delivery_charge.
+    // ── Create delivery order with correct COD ──
+    // COD = customer_grand_total - net_customer_advance (not product + delivery)
     if (deliveryCharge > 0n) {
-      const riderEarning = parsed.data.riderEarning ? (parseMoney(parsed.data.riderEarning) ?? deliveryCharge) : deliveryCharge
-      const companyIncome = parsed.data.companyDeliveryIncome
-        ? (parseMoney(parsed.data.companyDeliveryIncome) ?? 0n)
-        : (deliveryCharge - riderEarning)
-
-      // Validate: customer_delivery_charge = company_delivery_income + rider_earning
-      if (companyIncome + riderEarning !== deliveryCharge) {
-        // Don't fail the sale — just log and use fallback split
-        console.warn('[online-sale] Delivery split mismatch, using fallback')
-      }
-
-      const admin = getAdminSupabase()
-      await admin.from('invoices').update({
-        delivery_charge: deliveryCharge.toString(),
-        rider_earning: riderEarning.toString(),
-        company_delivery_income: companyIncome.toString(),
-      }).eq('id', result.invoiceId).eq('business_id', su.businessId)
-
-      // ── Create delivery order with correct COD ──
-      // COD = customer_grand_total - net_customer_advance (not product + delivery)
       try {
         await createDeliveryOrder({
           businessId: su.businessId,
           invoiceId: result.invoiceId,
           productAmount: netProductTotal,
           customerDeliveryCharge: deliveryCharge,
-          riderEarningAmount: riderEarning,
-          companyDeliveryIncome: companyIncome,
+          riderEarningAmount: riderEarningBi,
+          companyDeliveryIncome: companyIncomeBi,
           totalCodAmount: remainingCod,
           source: parsed.data.source ?? null,
           createdBy: su.userId,

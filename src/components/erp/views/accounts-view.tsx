@@ -249,7 +249,8 @@ function MoneyReceivedModal({ accounts, businessAccounts, onClose }: { accounts:
     mutationFn: async () => {
       const creditAccount = accounts.find(a => a.code === purposeCode)
       if (!creditAccount) throw new Error('Invalid purpose')
-      const r = await fetch('/api/receipt-voucher', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ receiptDate: date, receivedIntoAccountId: receivedIntoId, creditAccountId: creditAccount.id, amount, reference: reference || undefined, notes: notes || undefined }) })
+      const idempotencyKey = `ar-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+      const r = await fetch('/api/receipt-voucher', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ receiptDate: date, receivedIntoAccountId: receivedIntoId, creditAccountId: creditAccount.id, amount, reference: reference || undefined, notes: notes || undefined, idempotencyKey }) })
       const j = await r.json(); if (!r.ok) throw new Error(j?.error ?? 'Failed'); return j
     },
     onSuccess: (j) => { toast.success(`Money received: ${j.receiptNo}`); setResult({ ok: true, receiptNo: j.receiptNo }); void qc.invalidateQueries({ queryKey: ['day-book'] }); void qc.invalidateQueries({ queryKey: ['trial-balance'] }) },

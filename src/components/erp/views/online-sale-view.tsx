@@ -71,6 +71,7 @@ export function OnlineSaleView({ user }: { user: MeUser }) {
         payments.push({ accountId: paymentAccountId, amount: changeAmount.toString(), isChange: true })
       }
 
+      const idempotencyKey = `os-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
       const r = await fetch('/api/sales/online', {
         method: 'POST', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
@@ -89,6 +90,7 @@ export function OnlineSaleView({ user }: { user: MeUser }) {
           riderEarning: form.riderEarning || undefined,
           companyDeliveryIncome: form.companyDeliveryIncome || undefined,
           source: form.source || undefined,
+          idempotencyKey,
         }),
       })
       const j = await r.json()

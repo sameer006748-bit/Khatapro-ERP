@@ -48,15 +48,16 @@ export async function postPaymentVoucher(input: {
 }
 
 // ─── Post Receipt Voucher ───
-// Supports optional multi-invoice allocation. Each allocation has an invoice_id
-// and allocated_amount (paisas). The RPC validates, creates receipt_allocation
-// rows, updates invoice paid/outstanding, and creates per-invoice commission.
+// Supports optional multi-invoice allocation + stable idempotency key.
+// Replaying the same idempotencyKey returns the existing receipt result
+// (zero new voucher, allocation, AR reduction, or commission).
 export async function postReceiptVoucher(input: {
   businessId: string; receiptDate: Date; receivedIntoAccountId: string; creditAccountId: string
   amountPaisas: bigint; customerId?: string | null; reference?: string | null; notes?: string | null; createdBy?: string | null
   invoiceId?: string | null
   allocations?: Array<{ invoiceId: string; allocatedAmount: bigint }> | null
-}): Promise<{ receiptId: string; receiptNo: string; voucherId: string; allocationsTotal?: string; commissionIds?: string[] }> {
+  idempotencyKey?: string | null
+}): Promise<{ receiptId: string; receiptNo: string; voucherId: string; allocationsTotal?: string; unallocated?: string; commissionIds?: string[]; replay?: boolean }> {
   const admin = getAdminSupabase()
   const supabaseCreatedBy = await resolveSupabaseUuid(input.createdBy)
 
@@ -83,6 +84,7 @@ export async function postReceiptVoucher(input: {
     p_notes: input.notes ?? null,
     p_created_by: supabaseCreatedBy,
     p_allocations: allocationsJson,
+    p_idempotency_key: input.idempotencyKey ?? null,
   })
   if (error) throw new Error(`post_receipt_voucher: ${error.message}`)
   const r = data as any
@@ -91,7 +93,9 @@ export async function postReceiptVoucher(input: {
     receiptNo: r.receipt_no,
     voucherId: r.voucher_id,
     allocationsTotal: r.allocations_total != null ? String(r.allocations_total) : undefined,
+    unallocated: r.unallocated != null ? String(r.unallocated) : undefined,
     commissionIds: Array.isArray(r.commission_ids) ? r.commission_ids : undefined,
+    replay: r.replay === true,
   }
 }
 

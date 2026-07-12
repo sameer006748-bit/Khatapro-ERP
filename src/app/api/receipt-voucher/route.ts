@@ -23,6 +23,7 @@ const Schema = z.object({
   notes: z.string().optional(),
   invoiceId: z.string().nullable().optional(),
   allocations: z.array(AllocationSchema).optional(),
+  idempotencyKey: z.string().min(1).max(200).optional(),
 })
 
 export async function POST(req: Request) {
@@ -73,6 +74,7 @@ export async function POST(req: Request) {
       notes: parsed.data.notes ?? null,
       invoiceId: parsed.data.invoiceId ?? null,
       allocations,
+      idempotencyKey: parsed.data.idempotencyKey ?? null,
       createdBy: su.userId,
     })
     return NextResponse.json({ ok: true, ...result })

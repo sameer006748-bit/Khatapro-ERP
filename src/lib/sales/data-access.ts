@@ -116,6 +116,10 @@ export type PostSaleInput = {
   memo?: string | null
   createdBy?: string | null
   discount?: bigint
+  idempotencyKey?: string | null
+  deliveryCharge?: bigint | null
+  riderEarning?: bigint | null
+  companyDeliveryIncome?: bigint | null
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -308,6 +312,10 @@ async function postSaleViaSupabase(input: PostSaleInput): Promise<{ invoiceId: s
     p_memo: input.memo ?? null,
     p_created_by: supabaseCreatedBy,
     p_discount_paisas: (input.discount ?? 0n).toString(),
+    p_idempotency_key: input.idempotencyKey ?? null,
+    p_delivery_charge: (input.deliveryCharge ?? 0n).toString(),
+    p_rider_earning: (input.riderEarning ?? 0n).toString(),
+    p_company_delivery_income: (input.companyDeliveryIncome ?? 0n).toString(),
   })
 
   if (error) throw new Error(`Supabase post_sale: ${error.message}`)

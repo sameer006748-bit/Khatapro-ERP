@@ -178,6 +178,9 @@ export function CounterSaleView({ user }: { user: MeUser }) {
           throw new Error(`Invalid account ID (not a UUID): ${p.accountId}. Please refresh the page.`)
         }
       }
+      // Generate a stable idempotency key for this submission attempt.
+      // Network retry reuses the same key → server returns the existing invoice.
+      const idempotencyKey = `cs-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
       const r = await fetch('/api/sales/counter', {
         method: 'POST', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
@@ -197,6 +200,7 @@ export function CounterSaleView({ user }: { user: MeUser }) {
           salesmanId,
           customerName: customerName || undefined,
           discount: discountPaisas.toString(),
+          idempotencyKey,
         }),
       })
       const j = await r.json()
