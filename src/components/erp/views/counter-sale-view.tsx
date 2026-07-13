@@ -4,7 +4,6 @@ import { useState, useEffect, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import {
   Select,
   SelectContent,
@@ -60,8 +59,6 @@ export function CounterSaleView({ user }: { user: MeUser }) {
   const [advPayments, setAdvPayments] = useState<Array<{ key: string; accountId: string; amount: string; isChange: boolean }>>([
     { key: '1', accountId: '', amount: '', isChange: false },
   ])
-  const [discountInput, setDiscountInput] = useState('') // rupees string
-
   const [result, setResult] = useState<{ ok: boolean; invoiceNo?: string; invoiceId?: string; error?: string } | null>(null)
 
   // Fetch from CoA (Supabase UUIDs) — NOT business-accounts (Prisma)
@@ -117,13 +114,7 @@ export function CounterSaleView({ user }: { user: MeUser }) {
     }, 0n)
   }, [cart])
 
-  // Discount — NO silent clamping. Invalid discount stays visible and blocks submit.
-  const discountPaisas = useMemo(() => {
-    const parsed = parseMoney(discountInput) ?? 0n
-    return parsed < 0n ? 0n : parsed
-  }, [discountInput])
-  const discountExceedsSubtotal = discountPaisas > subtotal
-  const finalTotal = discountExceedsSubtotal ? 0n : subtotal - discountPaisas
+  const finalTotal = subtotal
 
   const salesman = salesmenQ.data?.rows.find(s => s.id === salesmanId)
 
@@ -178,9 +169,6 @@ export function CounterSaleView({ user }: { user: MeUser }) {
           throw new Error(`Invalid account ID (not a UUID): ${p.accountId}. Please refresh the page.`)
         }
       }
-      // Generate a stable idempotency key for this submission attempt.
-      // Network retry reuses the same key → server returns the existing invoice.
-      const idempotencyKey = `cs-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
       const r = await fetch('/api/sales/counter', {
         method: 'POST', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
@@ -199,8 +187,6 @@ export function CounterSaleView({ user }: { user: MeUser }) {
           })),
           salesmanId,
           customerName: customerName || undefined,
-          discount: discountPaisas.toString(),
-          idempotencyKey,
         }),
       })
       const j = await r.json()
@@ -455,24 +441,8 @@ export function CounterSaleView({ user }: { user: MeUser }) {
           {cart.length > 0 && (
             <div className="sticky bottom-20 md:bottom-3 z-20">
               <div className="card-3d border-primary/30 p-3 bg-card/95 backdrop-blur-md">
-                {/* Discount input */}
-                <div className="flex items-center gap-2 mb-2">
-                  <Label className="text-[10px] text-muted-foreground whitespace-nowrap">Discount (Rs)</Label>
-                  <Input
-                    type="text"
-                    inputMode="decimal"
-                    value={discountInput}
-                    onChange={e => setDiscountInput(e.target.value)}
-                    placeholder="0"
-                    className="h-8 bg-background text-sm w-24 press-sm"
-                    data-num
-                  />
-                  {discountPaisas > 0n && <span className="text-xs text-muted-foreground">− {formatMoney(discountPaisas, false)}</span>}
-                  {discountExceedsSubtotal && <span className="text-[10px] text-destructive">Cannot exceed subtotal</span>}
-                </div>
                 <div className="flex items-center gap-3 mb-2 text-sm">
                   <div><span className="text-[9px] uppercase text-muted-foreground">Subtotal</span><div className="font-semibold text-foreground" data-num>{formatMoney(subtotal, false)}</div></div>
-                  {discountPaisas > 0n && <div><span className="text-[9px] uppercase text-muted-foreground">Discount</span><div className="font-semibold text-destructive" data-num>−{formatMoney(discountPaisas, false)}</div></div>}
                   <div><span className="text-[9px] uppercase text-muted-foreground">Total</span><div className="font-bold text-foreground" data-num>{formatMoney(finalTotal, false)}</div></div>
                   <div><span className="text-[9px] uppercase text-muted-foreground">Paid</span><div className="font-semibold text-primary" data-num>{formatMoney(totalPaid, false)}</div></div>
                   {totalChange > 0n && <div><span className="text-[9px] uppercase text-muted-foreground">Change</span><div className="font-semibold text-amber-600" data-num>{formatMoney(totalChange, false)}</div></div>}
@@ -481,7 +451,7 @@ export function CounterSaleView({ user }: { user: MeUser }) {
                 </div>
                 {stockWarnings.length > 0 && <div className="mb-1.5 flex items-center gap-1 text-[10px] text-amber-600"><TrendingDown className="size-2.5" /> {stockWarnings.length} item(s) will go negative</div>}
                 {result && !result.ok && <div className="mb-1.5 p-1.5 bg-destructive/10 rounded text-[10px] text-destructive flex items-center gap-1"><AlertCircle className="size-3" /> {result.error}</div>}
-                <Button className="w-full press-md shadow-sm" disabled={!canPost || postMut.isPending || discountExceedsSubtotal} onClick={() => postMut.mutate()}>
+                <Button className="w-full press-md shadow-sm" disabled={!canPost || postMut.isPending} onClick={() => postMut.mutate()}>
                   {postMut.isPending ? 'Posting…' : <><CheckCircle2 className="size-4" /> Post Sale — {formatMoney(finalTotal)}</>}
                 </Button>
               </div>

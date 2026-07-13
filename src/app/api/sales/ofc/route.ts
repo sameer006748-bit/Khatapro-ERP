@@ -3,7 +3,7 @@
  * Fully advance-paid. Customer name/phone/city/address required.
  *
  * Server-side enforcement (mirrors the DB-level check in post_sale):
- *   final_total = subtotal - discount
+ *   final_total = subtotal (discounts require the unapplied Phase 9 schema)
  *   net_collected = total_received - change_returned
  *   net_collected must equal final_total (full advance, zero outstanding)
  *   Underpayment rejected. Excessive/negative/malformed discount rejected.
@@ -15,7 +15,8 @@ import { authOptions } from '@/lib/auth/authOptions'
 import { loadSessionUser, requirePermission } from '@/lib/auth/permissions'
 import { postSale, resolveEffectiveSalesmanId } from '@/lib/sales/data-access'
 import { parseMoney } from '@/lib/format'
-import { parseDiscountPaisas, validateDiscountNotExceedingSubtotal } from '@/lib/sales/discount'
+import { parseDiscountPaisas } from '@/lib/sales/discount'
+import { assertPhase8SaleFeatures } from '@/lib/supabase/rpc-compatibility'
 
 const ItemSchema = z.object({
   productId: z.string().nullable().optional(),
@@ -80,8 +81,11 @@ export async function POST(req: Request) {
   const subtotal = items.reduce((s, i) => s + i.unitPrice * BigInt(i.qty), 0n)
   let discountPaisas: bigint
   try {
-    discountPaisas = parsed.data.discount ? parseDiscountPaisas(parsed.data.discount) : 0n
-    validateDiscountNotExceedingSubtotal(discountPaisas, subtotal)
+    discountPaisas = parseDiscountPaisas(parsed.data.discount)
+    assertPhase8SaleFeatures({
+      discountPaisas,
+      idempotencyKey: parsed.data.idempotencyKey,
+    })
   } catch (e) {
     return NextResponse.json({ error: (e as Error).message }, { status: 400 })
   }

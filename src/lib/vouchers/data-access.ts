@@ -6,6 +6,11 @@ import 'server-only'
 import { getAdminSupabase } from '@/lib/supabase/admin'
 import { resolveSupabaseUuid } from '@/lib/accounting/voucher-supabase'
 import { bizDateString } from '@/lib/dates'
+import {
+  assertPhase8ReceiptFeatures,
+  buildPhase8PostReceiptVoucherPayload,
+  type Phase8PostReceiptVoucherPayload,
+} from '@/lib/supabase/rpc-compatibility'
 
 let _p6Checked = false
 let _p6Live = false
@@ -48,32 +53,24 @@ export async function postPaymentVoucher(input: {
 }
 
 // ─── Post Receipt Voucher ───
-// Supports optional multi-invoice allocation + stable idempotency key.
-// Replaying the same idempotencyKey returns the existing receipt result
-// (zero new voucher, allocation, AR reduction, or commission).
+// Phase 8 supports basic receipts only. Allocation and retry inputs remain in
+// this boundary type solely so stale callers can be rejected without data loss.
 export async function postReceiptVoucher(input: {
   businessId: string; receiptDate: Date; receivedIntoAccountId: string; creditAccountId: string
   amountPaisas: bigint; customerId?: string | null; reference?: string | null; notes?: string | null; createdBy?: string | null
   invoiceId?: string | null
   allocations?: Array<{ invoiceId: string; allocatedAmount: bigint }> | null
   idempotencyKey?: string | null
-}): Promise<{ receiptId: string; receiptNo: string; voucherId: string; allocationsTotal?: string; unallocated?: string; commissionIds?: string[]; replay?: boolean }> {
+}): Promise<{ receiptId: string; receiptNo: string; voucherId: string }> {
+  assertPhase8ReceiptFeatures({
+    invoiceId: input.invoiceId,
+    allocations: input.allocations,
+    idempotencyKey: input.idempotencyKey,
+  })
   const admin = getAdminSupabase()
   const supabaseCreatedBy = await resolveSupabaseUuid(input.createdBy)
 
-  // Build allocations JSONB for the RPC
-  let allocationsJson: Array<{ invoice_id: string; allocated_amount: string }> | null = null
-  if (input.allocations && input.allocations.length > 0) {
-    allocationsJson = input.allocations.map(a => ({
-      invoice_id: a.invoiceId,
-      allocated_amount: a.allocatedAmount.toString(),
-    }))
-  } else if (input.invoiceId) {
-    // Backward compat: single invoiceId → single allocation
-    allocationsJson = [{ invoice_id: input.invoiceId, allocated_amount: input.amountPaisas.toString() }]
-  }
-
-  const { data, error } = await admin.rpc('post_receipt_voucher', {
+  const payload: Phase8PostReceiptVoucherPayload = buildPhase8PostReceiptVoucherPayload({
     p_business_id: input.businessId,
     p_receipt_date: bizDateString(input.receiptDate),
     p_received_into_account_id: input.receivedIntoAccountId,
@@ -83,19 +80,17 @@ export async function postReceiptVoucher(input: {
     p_reference: input.reference ?? null,
     p_notes: input.notes ?? null,
     p_created_by: supabaseCreatedBy,
-    p_allocations: allocationsJson,
-    p_idempotency_key: input.idempotencyKey ?? null,
+    invoiceId: input.invoiceId,
+    allocations: input.allocations,
+    idempotencyKey: input.idempotencyKey,
   })
+  const { data, error } = await admin.rpc('post_receipt_voucher', payload)
   if (error) throw new Error(`post_receipt_voucher: ${error.message}`)
-  const r = data as any
+  const r = data as { receipt_id: string; receipt_no: string; voucher_id: string }
   return {
     receiptId: r.receipt_id,
     receiptNo: r.receipt_no,
     voucherId: r.voucher_id,
-    allocationsTotal: r.allocations_total != null ? String(r.allocations_total) : undefined,
-    unallocated: r.unallocated != null ? String(r.unallocated) : undefined,
-    commissionIds: Array.isArray(r.commission_ids) ? r.commission_ids : undefined,
-    replay: r.replay === true,
   }
 }
 

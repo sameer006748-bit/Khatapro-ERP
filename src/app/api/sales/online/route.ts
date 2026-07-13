@@ -3,8 +3,8 @@
  * Customer name/phone/address required. Items allowed.
  * Creates a delivery_orders row for rider COD workflow.
  *
- * Phase 9 reconciliation:
- *   net_product_total = product_subtotal - discount
+ * Phase 8 reconciliation:
+ *   net_product_total = product_subtotal
  *   customer_grand_total = net_product_total + customer_delivery_charge
  *   net_customer_advance = total_received - change_returned
  *   remaining_cod = max(customer_grand_total - net_customer_advance, 0)
@@ -22,7 +22,8 @@ import { loadSessionUser, requirePermission } from '@/lib/auth/permissions'
 import { postSale, resolveEffectiveSalesmanId } from '@/lib/sales/data-access'
 import { createDeliveryOrder } from '@/lib/delivery/data-access'
 import { parseMoney } from '@/lib/format'
-import { parseDiscountPaisas, validateDiscountNotExceedingSubtotal } from '@/lib/sales/discount'
+import { parseDiscountPaisas } from '@/lib/sales/discount'
+import { assertPhase8SaleFeatures } from '@/lib/supabase/rpc-compatibility'
 
 const ItemSchema = z.object({
   productId: z.string().nullable().optional(),
@@ -87,6 +88,17 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: (e as Error).message }, { status: 400 })
   }
 
+  let discountPaisas: bigint
+  try {
+    discountPaisas = parseDiscountPaisas(parsed.data.discount)
+    assertPhase8SaleFeatures({
+      discountPaisas,
+      idempotencyKey: parsed.data.idempotencyKey,
+    })
+  } catch (e) {
+    return NextResponse.json({ error: (e as Error).message }, { status: 400 })
+  }
+
   try {
     const smResult = await resolveEffectiveSalesmanId(su, parsed.data.salesmanId ?? null)
     if (!smResult.ok) {
@@ -95,8 +107,6 @@ export async function POST(req: Request) {
 
     // ── Compute reconciled totals ──
     const productSubtotal = items.reduce((s, i) => s + i.unitPrice * BigInt(i.qty), 0n)
-    const discountPaisas = parsed.data.discount ? parseDiscountPaisas(parsed.data.discount) : 0n
-    validateDiscountNotExceedingSubtotal(discountPaisas, productSubtotal)
     const netProductTotal = productSubtotal - discountPaisas
 
     const deliveryCharge = parsed.data.deliveryCharge ? (parseMoney(parsed.data.deliveryCharge) ?? 0n) : 0n
@@ -114,9 +124,8 @@ export async function POST(req: Request) {
 
     // ── Post the sale (product only) ──
     // post_sale receives the payments and computes net_collected for commission.
-    // The invoice total = net_product_total (product only).
-    // The delivery fields are passed to post_sale so the RPC can split the
-    // advance into product_advance + delivery_advance and store them on the invoice.
+    // The invoice total is the Phase 8 product total. Delivery amounts remain
+    // in the Phase 7 delivery-order workflow and are not post_sale arguments.
     const deliveryChargeBi = parsed.data.deliveryCharge ? (parseMoney(parsed.data.deliveryCharge) ?? 0n) : 0n
     const riderEarningBi = parsed.data.riderEarning ? (parseMoney(parsed.data.riderEarning) ?? deliveryChargeBi) : deliveryChargeBi
     const companyIncomeBi = parsed.data.companyDeliveryIncome
@@ -138,9 +147,6 @@ export async function POST(req: Request) {
       createdBy: su.userId,
       discount: discountPaisas,
       idempotencyKey: parsed.data.idempotencyKey ?? null,
-      deliveryCharge: deliveryChargeBi,
-      riderEarning: riderEarningBi,
-      companyDeliveryIncome: companyIncomeBi,
     })
 
     // ── Create delivery order with correct COD ──

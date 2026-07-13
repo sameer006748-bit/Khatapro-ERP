@@ -13,7 +13,8 @@ import { authOptions } from '@/lib/auth/authOptions'
 import { loadSessionUser, requirePermission, hasPermission } from '@/lib/auth/permissions'
 import { postSale, listInvoices, resolveSalesmanIdForUser, resolveEffectiveSalesmanId } from '@/lib/sales/data-access'
 import { parseMoney } from '@/lib/format'
-import { parseDiscountPaisas, validateDiscountNotExceedingSubtotal } from '@/lib/sales/discount'
+import { parseDiscountPaisas } from '@/lib/sales/discount'
+import { assertPhase8SaleFeatures } from '@/lib/supabase/rpc-compatibility'
 
 const ItemSchema = z.object({
   productId: z.string().nullable().optional(),
@@ -87,17 +88,23 @@ export async function POST(req: Request) {
     }
   }
 
+  let discountPaisas: bigint
+  try {
+    discountPaisas = parseDiscountPaisas(parsed.data.discount)
+    assertPhase8SaleFeatures({
+      discountPaisas,
+      idempotencyKey: parsed.data.idempotencyKey,
+    })
+  } catch (e) {
+    return NextResponse.json({ error: (e as Error).message }, { status: 400 })
+  }
+
   try {
     // Resolve the effective salesman_id (salesmen get their own, owners can assign)
     const smResult = await resolveEffectiveSalesmanId(su, parsed.data.salesmanId ?? null)
     if (!smResult.ok) {
       return NextResponse.json({ error: smResult.error }, { status: smResult.status })
     }
-
-    // Server-side discount validation (no silent clamping)
-    const subtotal = items.reduce((s, i) => s + i.unitPrice * BigInt(i.qty), 0n)
-    const discountPaisas = parsed.data.discount ? parseDiscountPaisas(parsed.data.discount) : 0n
-    validateDiscountNotExceedingSubtotal(discountPaisas, subtotal)
 
     const result = await postSale({
       businessId: su.businessId,

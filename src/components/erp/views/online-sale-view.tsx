@@ -22,7 +22,7 @@ export function OnlineSaleView({ user }: { user: MeUser }) {
   const [form, setForm] = useState({
     customerName: '', customerPhone: '', customerAddress: '', customerCity: '',
     source: 'WhatsApp', codAmount: '', deliveryFee: '', riderEarning: '',
-    companyDeliveryIncome: '', discount: '', advanceReceived: '',
+    companyDeliveryIncome: '', advanceReceived: '',
     invoiceDate: new Date().toISOString().slice(0, 10),
   })
   const [items, setItems] = useState<Item[]>([{ key: '1', productId: '', productName: '', qty: '1', unitPrice: '' }])
@@ -46,9 +46,7 @@ export function OnlineSaleView({ user }: { user: MeUser }) {
 
   // ── Reconciled totals ──
   const subtotal = items.reduce((acc, it) => acc + (parseMoney(it.unitPrice) ?? 0n) * BigInt(parseInt(it.qty) || 0), 0n)
-  const discountPaisas = parseMoney(form.discount) ?? 0n
-  const discountExceedsSubtotal = discountPaisas > subtotal
-  const netProductTotal = discountExceedsSubtotal ? 0n : subtotal - discountPaisas
+  const netProductTotal = subtotal
   const deliveryFeePaisas = parseMoney(form.deliveryFee) ?? 0n
   const riderEarningPaisas = parseMoney(form.riderEarning) ?? 0n
   const companyDeliveryIncomePaisas = parseMoney(form.companyDeliveryIncome) ?? 0n
@@ -71,7 +69,6 @@ export function OnlineSaleView({ user }: { user: MeUser }) {
         payments.push({ accountId: paymentAccountId, amount: changeAmount.toString(), isChange: true })
       }
 
-      const idempotencyKey = `os-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
       const r = await fetch('/api/sales/online', {
         method: 'POST', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
@@ -85,12 +82,10 @@ export function OnlineSaleView({ user }: { user: MeUser }) {
           customerName: form.customerName, customerPhone: form.customerPhone,
           customerAddress: form.customerAddress, customerCity: form.customerCity || undefined,
           memo: form.source ? `Source: ${form.source}${form.deliveryFee ? ` · Delivery: Rs ${form.deliveryFee}` : ''}` : undefined,
-          discount: discountPaisas.toString(),
           deliveryCharge: form.deliveryFee || undefined,
           riderEarning: form.riderEarning || undefined,
           companyDeliveryIncome: form.companyDeliveryIncome || undefined,
           source: form.source || undefined,
-          idempotencyKey,
         }),
       })
       const j = await r.json()
@@ -131,7 +126,7 @@ export function OnlineSaleView({ user }: { user: MeUser }) {
             <Button variant="ghost" className="press-sm" onClick={() => {
               setResult(null)
               setItems([{ key: String(Date.now()), productId: '', productName: '', qty: '1', unitPrice: '' }])
-              setForm({ customerName: '', customerPhone: '', customerAddress: '', customerCity: '', source: 'WhatsApp', codAmount: '', deliveryFee: '', riderEarning: '', companyDeliveryIncome: '', discount: '', advanceReceived: '', invoiceDate: new Date().toISOString().slice(0, 10) })
+              setForm({ customerName: '', customerPhone: '', customerAddress: '', customerCity: '', source: 'WhatsApp', codAmount: '', deliveryFee: '', riderEarning: '', companyDeliveryIncome: '', advanceReceived: '', invoiceDate: new Date().toISOString().slice(0, 10) })
             }}><Globe className="size-4" /> New Order</Button>
           </div>
         </motion.div>
@@ -140,7 +135,7 @@ export function OnlineSaleView({ user }: { user: MeUser }) {
   }
 
   const canPost = form.customerName && form.customerPhone && form.customerAddress &&
-    items.some(it => it.productId || it.productName) && !discountExceedsSubtotal
+    items.some(it => it.productId || it.productName)
 
   return (
     <div className="space-y-4">
@@ -155,8 +150,8 @@ export function OnlineSaleView({ user }: { user: MeUser }) {
           <Input value={form.customerAddress} onChange={e => setForm(s => ({ ...s, customerAddress: e.target.value }))} placeholder="Address *" className="h-9 bg-background press-sm" />
           <Input value={form.customerCity} onChange={e => setForm(s => ({ ...s, customerCity: e.target.value }))} placeholder="City" className="h-9 bg-background press-sm" />
         </div>
-        <div className="grid sm:grid-cols-2 gap-2">
-          <div>
+        <div>
+          <div className="sm:max-w-sm">
             <Label className="text-[10px] text-muted-foreground">Source</Label>
             <Select value={form.source} onValueChange={v => setForm(s => ({ ...s, source: v }))}>
               <SelectTrigger className="h-9 bg-background press-sm text-sm"><SelectValue /></SelectTrigger>
@@ -164,10 +159,6 @@ export function OnlineSaleView({ user }: { user: MeUser }) {
                 {['WhatsApp', 'Facebook', 'Instagram', 'Manual'].map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
               </SelectContent>
             </Select>
-          </div>
-          <div>
-            <Label className="text-[10px] text-muted-foreground">Discount (Rs)</Label>
-            <Input type="text" inputMode="decimal" value={form.discount} onChange={e => setForm(s => ({ ...s, discount: e.target.value }))} placeholder="0" className="h-9 bg-background press-sm" data-num />
           </div>
         </div>
       </div>
@@ -243,13 +234,6 @@ export function OnlineSaleView({ user }: { user: MeUser }) {
         <div className="flex items-center justify-between text-sm">
           <span className="text-muted-foreground">Product Subtotal</span><span className="font-medium" data-num>{formatMoney(subtotal, false)}</span>
         </div>
-        {discountPaisas > 0n && (
-          <div className="flex items-center justify-between text-sm">
-            <span className="text-muted-foreground">Discount</span>
-            <span className={`font-medium ${discountExceedsSubtotal ? 'text-destructive' : 'text-destructive'}`} data-num>−{formatMoney(discountPaisas, false)}</span>
-          </div>
-        )}
-        {discountExceedsSubtotal && <div className="text-[10px] text-destructive">Discount exceeds subtotal — submit blocked</div>}
         <div className="flex items-center justify-between text-sm">
           <span className="text-muted-foreground">Net Product Total</span><span className="font-medium" data-num>{formatMoney(netProductTotal, false)}</span>
         </div>

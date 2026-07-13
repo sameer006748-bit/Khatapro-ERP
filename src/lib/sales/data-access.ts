@@ -11,6 +11,11 @@ import { db } from '@/lib/db'
 import { getAdminSupabase } from '@/lib/supabase/admin'
 import { bizDateString } from '@/lib/dates'
 import { getAccountByCode } from '@/lib/accounting/data-access'
+import {
+  assertPhase8SaleFeatures,
+  buildPhase8PostSalePayload,
+  type Phase8PostSalePayload,
+} from '@/lib/supabase/rpc-compatibility'
 
 let _phase4Checked = false
 let _phase4Applied = false
@@ -117,9 +122,6 @@ export type PostSaleInput = {
   createdBy?: string | null
   discount?: bigint
   idempotencyKey?: string | null
-  deliveryCharge?: bigint | null
-  riderEarning?: bigint | null
-  companyDeliveryIncome?: bigint | null
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -273,6 +275,10 @@ export async function verifyInvoiceOwnership(
 // Post Sale (the main entry point)
 // ─────────────────────────────────────────────────────────────
 export async function postSale(input: PostSaleInput): Promise<{ invoiceId: string; invoiceNo: string }> {
+  assertPhase8SaleFeatures({
+    discountPaisas: input.discount,
+    idempotencyKey: input.idempotencyKey,
+  })
   if (await isPhase4Live()) {
     return postSaleViaSupabase(input)
   }
@@ -297,7 +303,7 @@ async function postSaleViaSupabase(input: PostSaleInput): Promise<{ invoiceId: s
     is_change: p.isChange ?? false,
   }))
 
-  const { data, error } = await admin.rpc('post_sale', {
+  const payload: Phase8PostSalePayload = buildPhase8PostSalePayload({
     p_business_id: input.businessId,
     p_invoice_type: input.invoiceType,
     p_invoice_date: bizDateString(input.invoiceDate),
@@ -311,12 +317,10 @@ async function postSaleViaSupabase(input: PostSaleInput): Promise<{ invoiceId: s
     p_customer_city: input.customerCity ?? null,
     p_memo: input.memo ?? null,
     p_created_by: supabaseCreatedBy,
-    p_discount_paisas: (input.discount ?? 0n).toString(),
-    p_idempotency_key: input.idempotencyKey ?? null,
-    p_delivery_charge: (input.deliveryCharge ?? 0n).toString(),
-    p_rider_earning: (input.riderEarning ?? 0n).toString(),
-    p_company_delivery_income: (input.companyDeliveryIncome ?? 0n).toString(),
+    discountPaisas: input.discount,
+    idempotencyKey: input.idempotencyKey,
   })
+  const { data, error } = await admin.rpc('post_sale', payload)
 
   if (error) throw new Error(`Supabase post_sale: ${error.message}`)
   const invoiceId = data as string
@@ -329,7 +333,7 @@ async function postSaleViaSupabase(input: PostSaleInput): Promise<{ invoiceId: s
     .single()
   if (invErr) throw new Error(`Supabase fetch invoice_no: ${invErr.message}`)
 
-  return { invoiceId, invoiceNo: (inv as any).invoice_no }
+  return { invoiceId, invoiceNo: (inv as { invoice_no: string }).invoice_no }
 }
 
 async function postSaleViaPrisma(input: PostSaleInput): Promise<{ invoiceId: string; invoiceNo: string }> {

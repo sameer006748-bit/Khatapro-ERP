@@ -21,7 +21,7 @@ export function OfcSaleView({ user }: { user: MeUser }) {
   const qc = useQueryClient()
   const [form, setForm] = useState({
     customerName: '', customerPhone: '', customerCity: '', customerAddress: '',
-    courierNote: '', discount: '', advanceReceived: '',
+    courierNote: '', advanceReceived: '',
     invoiceDate: new Date().toISOString().slice(0, 10),
   })
   const [items, setItems] = useState<Item[]>([{ key: '1', productId: '', productName: '', qty: '1', unitPrice: '' }])
@@ -43,11 +43,9 @@ export function OfcSaleView({ user }: { user: MeUser }) {
     }
   }, [businessAccounts, paymentAccountId])
 
-  // ── Totals (no silent clamping) ──
+  // ── Phase 8 totals ──
   const subtotal = items.reduce((acc, it) => acc + (parseMoney(it.unitPrice) ?? 0n) * BigInt(parseInt(it.qty) || 0), 0n)
-  const discountPaisas = parseMoney(form.discount) ?? 0n
-  const discountExceedsSubtotal = discountPaisas > subtotal
-  const finalTotal = discountExceedsSubtotal ? 0n : subtotal - discountPaisas
+  const finalTotal = subtotal
 
   // Advance
   const advanceReceived = parseMoney(form.advanceReceived) ?? 0n
@@ -57,7 +55,7 @@ export function OfcSaleView({ user }: { user: MeUser }) {
 
   // OFC requires full advance: netCollected must equal finalTotal
   const ofcUnderpayment = netCollected < finalTotal
-  const ofcValid = !ofcUnderpayment && !discountExceedsSubtotal && finalTotal > 0n
+  const ofcValid = !ofcUnderpayment && finalTotal > 0n
 
   const postMut = useMutation({
     mutationFn: async () => {
@@ -68,7 +66,6 @@ export function OfcSaleView({ user }: { user: MeUser }) {
         payments.push({ accountId: paymentAccountId, amount: changeAmount.toString(), isChange: true })
       }
 
-      const idempotencyKey = `ofc-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
       const r = await fetch('/api/sales/ofc', {
         method: 'POST', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
@@ -82,8 +79,6 @@ export function OfcSaleView({ user }: { user: MeUser }) {
           customerName: form.customerName, customerPhone: form.customerPhone,
           customerAddress: form.customerAddress, customerCity: form.customerCity,
           memo: form.courierNote ? `Courier: ${form.courierNote}` : undefined,
-          discount: discountPaisas.toString(),
-          idempotencyKey,
         }),
       })
       const j = await r.json()
@@ -118,7 +113,7 @@ export function OfcSaleView({ user }: { user: MeUser }) {
             <Button variant="ghost" className="press-sm" onClick={() => {
               setResult(null)
               setItems([{ key: String(Date.now()), productId: '', productName: '', qty: '1', unitPrice: '' }])
-              setForm({ customerName: '', customerPhone: '', customerCity: '', customerAddress: '', courierNote: '', discount: '', advanceReceived: '', invoiceDate: new Date().toISOString().slice(0, 10) })
+              setForm({ customerName: '', customerPhone: '', customerCity: '', customerAddress: '', courierNote: '', advanceReceived: '', invoiceDate: new Date().toISOString().slice(0, 10) })
             }}><Truck className="size-4" /> New Order</Button>
           </div>
         </motion.div>
@@ -143,14 +138,10 @@ export function OfcSaleView({ user }: { user: MeUser }) {
           <Input value={form.customerCity} onChange={e => setForm(s => ({ ...s, customerCity: e.target.value }))} placeholder="City *" className="h-9 bg-background press-sm" />
           <Input value={form.customerAddress} onChange={e => setForm(s => ({ ...s, customerAddress: e.target.value }))} placeholder="Address *" className="h-9 bg-background press-sm" />
         </div>
-        <div className="grid sm:grid-cols-2 gap-2">
+        <div className="sm:max-w-xl">
           <div>
             <Label className="text-[10px] text-muted-foreground">Courier / Transport note (optional)</Label>
             <Input value={form.courierNote} onChange={e => setForm(s => ({ ...s, courierNote: e.target.value }))} placeholder="e.g. Daewoo Cargo, TCS" className="h-9 bg-background press-sm" />
-          </div>
-          <div>
-            <Label className="text-[10px] text-muted-foreground">Discount (Rs)</Label>
-            <Input type="text" inputMode="decimal" value={form.discount} onChange={e => setForm(s => ({ ...s, discount: e.target.value }))} placeholder="0" className="h-9 bg-background press-sm" data-num />
           </div>
         </div>
       </div>
@@ -204,13 +195,6 @@ export function OfcSaleView({ user }: { user: MeUser }) {
         <div className="flex items-center justify-between text-sm">
           <span className="text-muted-foreground">Subtotal</span><span className="font-medium" data-num>{formatMoney(subtotal, false)}</span>
         </div>
-        {discountPaisas > 0n && (
-          <div className="flex items-center justify-between text-sm">
-            <span className="text-muted-foreground">Discount</span>
-            <span className="font-medium text-destructive" data-num>−{formatMoney(discountPaisas, false)}</span>
-          </div>
-        )}
-        {discountExceedsSubtotal && <div className="text-[10px] text-destructive">Discount exceeds subtotal — submit blocked</div>}
         <div className="flex items-center justify-between text-sm pt-1 border-t border-border">
           <span className="font-semibold text-foreground">Final Total</span><span className="font-bold text-primary" data-num>{formatMoney(finalTotal)}</span>
         </div>
