@@ -94,16 +94,16 @@ Approved SHA-256 values:
 
 | Artifact | SHA-256 |
 |---|---|
-| `supabase/migrations/00008k_p0_security_containment.sql` | `f35f9a7c214c6f3637d7b6dc3f3797d29ddacd3810189a6e20b52aaec56c6b11` |
-| `supabase/rollback/00008k_p0_security_containment_rollback.sql` | `437c278bac1dd6a4c3e4f897a4a4d81326b651dec9a7e26f2f9000fa6a9ddc18` |
+| `supabase/migrations/00008k_p0_security_containment.sql` | `3e4cf7de6d2afd409915e68d4c83a94b374e48f90d65b363b5595412b914465f` |
+| `supabase/rollback/00008k_p0_security_containment_rollback.sql` | `90e0fa69c136cdb17fc65e7820a17b0cf9f4571770a8615b75ab0a28959a33cb` |
 
 From the reviewed repository root, run:
 
 ```powershell
 $MigrationPath = (Resolve-Path -LiteralPath "supabase/migrations/00008k_p0_security_containment.sql").Path
 $RollbackPath = (Resolve-Path -LiteralPath "supabase/rollback/00008k_p0_security_containment_rollback.sql").Path
-$ExpectedMigrationHash = "f35f9a7c214c6f3637d7b6dc3f3797d29ddacd3810189a6e20b52aaec56c6b11"
-$ExpectedRollbackHash = "437c278bac1dd6a4c3e4f897a4a4d81326b651dec9a7e26f2f9000fa6a9ddc18"
+$ExpectedMigrationHash = "3e4cf7de6d2afd409915e68d4c83a94b374e48f90d65b363b5595412b914465f"
+$ExpectedRollbackHash = "90e0fa69c136cdb17fc65e7820a17b0cf9f4571770a8615b75ab0a28959a33cb"
 
 function Assert-ArtifactHash([string]$Path, [string]$ExpectedHash) {
   if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { throw "SQL artifact is absent: $Path" }
@@ -335,7 +335,7 @@ SELECT has_table_privilege('anon','public.profiles','UPDATE') AS anon_table_upda
 
 SELECT p.proname,p.proowner::regrole,p.prosecdef,p.proconfig,p.proacl,md5(p.prosrc)
 FROM pg_proc p WHERE p.pronamespace='public'::regnamespace
- AND p.proname IN ('_contain_purchase_payment_tenant','_contain_purchase_return_header','_contain_purchase_return_item')
+ AND p.proname IN ('_contain_purchase_payment_tenant','_contain_purchase_return_header','_contain_purchase_return_item','_reconcile_return_header_total')
 ORDER BY p.proname;
 ROLLBACK;
 '@
@@ -343,7 +343,7 @@ $PostflightSql | & psql -w -X --dbname=$ValidatedProductionDsn -v ON_ERROR_STOP=
 if ($LASTEXITCODE -ne 0) { throw "Post-deployment database verification failed." }
 ```
 
-Expected: `39/56/24/54`; PUBLIC-executable security-definer functions `11`; anon mutation/report `0/0`; authenticated mutation/report `0/0`; service role `25/16`; profile table UPDATE false/false, display/phone true/true, protected role false, service administration true. The three helpers must be owned by `postgres`, be SECURITY DEFINER, use `pg_catalog, public, pg_temp`, have no direct caller EXECUTE, and retain their reviewed body hashes.
+Expected: `39/57/25/54`; PUBLIC-executable security-definer functions `11`; anon mutation/report `0/0`; authenticated mutation/report `0/0`; service role `25/16`; profile table UPDATE false/false, display/phone true/true, protected role false, service administration true. The four helpers must be owned by `postgres`, be SECURITY DEFINER, use `pg_catalog, public, pg_temp`, have no direct caller EXECUTE, and retain their reviewed body hashes.
 
 ## 7. Controlled application smoke matrix
 
@@ -382,7 +382,7 @@ Assert-ArtifactHash $RollbackPath $ExpectedRollbackHash
 if ($LASTEXITCODE -ne 0) { throw "P0 rollback failed or refused drift; keep maintenance mode and escalate." }
 ```
 
-After rollback, expect `39/53/21/54`, all three containment pairs absent, zero profile column ACLs, the captured profile table ACL restored, all 41 target raw RPC ACLs restored exactly, policies/definitions/data unchanged, and migration `00009` still absent. Repeat the read-only inventory and preserve all logs.
+After rollback, expect `39/53/21/54`, all four containment pairs absent, zero profile column ACLs, the captured profile table ACL restored, all 41 target raw RPC ACLs restored exactly, policies/definitions/data unchanged, and migration `00009` still absent. Repeat the read-only inventory and preserve all logs.
 
 ## 9. Remaining risk and incident record
 

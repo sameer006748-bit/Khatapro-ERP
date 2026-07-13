@@ -15,9 +15,12 @@ DECLARE
   v_policy_fingerprint text;
   v_other_table_acl_fingerprint text;
   v_profile_acl text;
-  v_payment_body_hash constant text := '614fcb75eecb4009c422f02e8e7a38c2';
-  v_return_header_body_hash constant text := '0da9ea634b69a028a61ee634c8b165c7';
-  v_return_item_body_hash constant text := '823587d7da2949e2a0d6aa9e48175bf4';
+  v_profiles_rls boolean;
+  v_profiles_force_rls boolean;
+  v_full_trigger_def text;
+  v_payment_body_hash constant text := 'a6192aab35d12490e5505dfe24db9d9c';
+  v_return_header_body_hash constant text := '88d13088d8a9ace11a98d3027e0a1c7f';
+  v_return_item_body_hash constant text := '0e9a25a9ab8bb6f2efd41d8a0f87bb08';
   v_contained_rpc_acl constant text := '{postgres=X/postgres,service_role=X/postgres}';
   v_contained_profile_acl constant text := '{postgres=arwdDxtm/postgres,anon=ardDxtm/postgres,authenticated=ardDxtm/postgres,service_role=arwdDxtm/postgres}';
 BEGIN
@@ -41,9 +44,17 @@ BEGIN
     RAISE EXCEPTION 'P0 rollback requires migration 00009 to remain unapplied';
   END IF;
 
+  -- Fingerprint profiles RLS state: must still be the expected contained state.
+  SELECT relrowsecurity, relforcerowsecurity
+    INTO v_profiles_rls, v_profiles_force_rls
+  FROM pg_class WHERE oid = 'public.profiles'::regclass;
+  IF v_profiles_rls IS DISTINCT FROM true OR v_profiles_force_rls IS DISTINCT FROM false THEN
+    RAISE EXCEPTION 'Rollback refused: profiles RLS state drifted';
+  END IF;
+
   IF (SELECT count(*) FROM pg_class WHERE relnamespace='public'::regnamespace AND relkind IN ('r','p')) <> 39
-     OR (SELECT count(*) FROM pg_proc WHERE pronamespace='public'::regnamespace) <> 56
-     OR (SELECT count(*) FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid WHERE c.relnamespace='public'::regnamespace AND NOT t.tgisinternal) <> 24
+     OR (SELECT count(*) FROM pg_proc WHERE pronamespace='public'::regnamespace) <> 57
+     OR (SELECT count(*) FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid WHERE c.relnamespace='public'::regnamespace AND NOT t.tgisinternal) <> 25
      OR (SELECT count(*) FROM pg_policy p JOIN pg_class c ON c.oid=p.polrelid WHERE c.relnamespace='public'::regnamespace) <> 54 THEN
     RAISE EXCEPTION 'Rollback refused: public object inventory is not the exact contained state';
   END IF;
@@ -57,7 +68,7 @@ BEGIN
   JOIN pg_roles r ON r.oid=p.proowner
   JOIN pg_language l ON l.oid=p.prolang
   WHERE p.pronamespace='public'::regnamespace
-    AND p.proname NOT IN ('_contain_purchase_payment_tenant','_contain_purchase_return_header','_contain_purchase_return_item');
+    AND p.proname NOT IN ('_contain_purchase_payment_tenant','_contain_purchase_return_header','_contain_purchase_return_item','_reconcile_return_header_total');
   IF v_definition_fingerprint <> 'c6e5c1a2f347475c8da90c3ec1009f95' THEN
     RAISE EXCEPTION 'Rollback refused: pre-00009 function definition/signature fingerprint drifted';
   END IF;
@@ -144,9 +155,9 @@ BEGIN
   END LOOP;
 
   IF (SELECT count(*) FROM pg_proc p WHERE p.pronamespace='public'::regnamespace
-      AND p.proname IN ('_contain_purchase_payment_tenant','_contain_purchase_return_header','_contain_purchase_return_item')) <> 3
+      AND p.proname IN ('_contain_purchase_payment_tenant','_contain_purchase_return_header','_contain_purchase_return_item','_reconcile_return_header_total')) <> 4
      OR (SELECT count(*) FROM pg_trigger t WHERE NOT t.tgisinternal
-      AND t.tgname IN ('contain_purchase_payment_tenant','contain_purchase_return_header','contain_purchase_return_item')) <> 3 THEN
+      AND t.tgname IN ('contain_purchase_payment_tenant','contain_purchase_return_header','contain_purchase_return_item','reconcile_return_header_total_on_item_insert')) <> 4 THEN
     RAISE EXCEPTION 'Rollback refused: containment objects are missing, overloaded, partial or duplicated';
   END IF;
 
@@ -165,6 +176,11 @@ BEGIN
        OR v_proc.prorettype <> 'trigger'::regtype
        OR NOT v_proc.prosecdef
        OR v_proc.proconfig IS DISTINCT FROM ARRAY['search_path=pg_catalog, public, pg_temp']::text[]
+       OR v_proc.provolatile <> 'v'
+       OR v_proc.proparallel <> 'u'
+       OR v_proc.procost <> 100
+       OR v_proc.proleakproof <> false
+       OR v_proc.proisstrict <> false
        OR md5(v_proc.prosrc) <> v_expected.body_hash
        OR v_proc.proacl::text <> '{postgres=X/postgres}' THEN
       RAISE EXCEPTION 'Rollback refused: containment function drifted: %', v_expected.function_name;
@@ -172,18 +188,23 @@ BEGIN
 
     SELECT t.* INTO v_trigger FROM pg_trigger t
     WHERE NOT t.tgisinternal AND t.tgname=v_expected.trigger_name;
+    v_full_trigger_def := pg_get_triggerdef(t.oid);
     IF NOT FOUND
        OR v_trigger.tgrelid <> format('public.%I',v_expected.table_name)::regclass
        OR v_trigger.tgfoid <> format('public.%I()',v_expected.function_name)::regprocedure
        OR v_trigger.tgtype <> 23
        OR v_trigger.tgenabled <> 'O'
-       OR v_trigger.tgnargs <> 0 THEN
+       OR v_trigger.tgnargs <> 0
+       OR v_trigger.tgqual IS NOT NULL
+       OR v_full_trigger_def NOT LIKE 'CREATE TRIGGER ' || v_expected.trigger_name || ' BEFORE INSERT OR UPDATE ON public.' || v_expected.table_name || ' FOR EACH ROW EXECUTE FUNCTION _' || v_expected.trigger_name || '()' THEN
       RAISE EXCEPTION 'Rollback refused: containment trigger drifted: %', v_expected.trigger_name;
     END IF;
   END LOOP;
 END;
 $p0_rollback_preflight$;
 
+DROP TRIGGER IF EXISTS reconcile_return_header_total_on_item_insert ON public.purchase_return_items;
+DROP FUNCTION IF EXISTS public._reconcile_return_header_total();
 DROP TRIGGER contain_purchase_payment_tenant ON public.purchase_payments;
 DROP FUNCTION public._contain_purchase_payment_tenant();
 DROP TRIGGER contain_purchase_return_header ON public.purchase_returns;
@@ -209,7 +230,7 @@ BEGIN
      OR (SELECT count(*) FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid WHERE c.relnamespace='public'::regnamespace AND NOT t.tgisinternal) <> 21
      OR EXISTS (SELECT 1 FROM pg_attribute a WHERE a.attrelid='public.profiles'::regclass AND a.attnum>0 AND NOT a.attisdropped AND a.attacl IS NOT NULL)
      OR (SELECT c.relacl::text FROM pg_class c WHERE c.oid='public.profiles'::regclass) <>
-        '{postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}' THEN
+         '{postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}' THEN
     RAISE EXCEPTION 'Rollback postflight failed to restore exact baseline object/profile state';
   END IF;
   FOR v_signature IN SELECT unnest(ARRAY[

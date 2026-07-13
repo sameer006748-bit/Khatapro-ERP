@@ -24,9 +24,12 @@ DECLARE
   v_definition_fingerprint text;
   v_policy_fingerprint text;
   v_other_table_acl_fingerprint text;
-  v_payment_body_hash constant text := '614fcb75eecb4009c422f02e8e7a38c2';
-  v_return_header_body_hash constant text := '0da9ea634b69a028a61ee634c8b165c7';
-  v_return_item_body_hash constant text := '823587d7da2949e2a0d6aa9e48175bf4';
+  v_profiles_rls boolean;
+  v_profiles_force_rls boolean;
+  v_full_trigger_def text;
+  v_payment_body_hash constant text := 'a6192aab35d12490e5505dfe24db9d9c';
+  v_return_header_body_hash constant text := '88d13088d8a9ace11a98d3027e0a1c7f';
+  v_return_item_body_hash constant text := '0e9a25a9ab8bb6f2efd41d8a0f87bb08';
   v_baseline_rpc_acl constant text := '{=X/postgres,postgres=X/postgres,anon=X/postgres,authenticated=X/postgres,service_role=X/postgres}';
   v_contained_rpc_acl constant text := '{postgres=X/postgres,service_role=X/postgres}';
   v_baseline_profile_acl constant text := '{postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}';
@@ -66,6 +69,14 @@ BEGIN
   IF (SELECT count(*) FROM pg_class WHERE relnamespace = 'public'::regnamespace AND relkind IN ('r','p')) <> 39
      OR (SELECT count(*) FROM pg_policy p JOIN pg_class c ON c.oid = p.polrelid WHERE c.relnamespace = 'public'::regnamespace) <> 54 THEN
     RAISE EXCEPTION 'Public table or policy inventory differs from the approved pre-00009 schema';
+  END IF;
+
+  -- Fingerprint profiles RLS state: relrowsecurity must be TRUE, relforcerowsecurity must be FALSE.
+  SELECT relrowsecurity, relforcerowsecurity
+    INTO v_profiles_rls, v_profiles_force_rls
+  FROM pg_class WHERE oid = 'public.profiles'::regclass;
+  IF v_profiles_rls IS DISTINCT FROM true OR v_profiles_force_rls IS DISTINCT FROM false THEN
+    RAISE EXCEPTION 'profiles RLS state is not the expected baseline (relrowsecurity=true, relforcerowsecurity=false)';
   END IF;
 
   FOR v_required IN
@@ -120,6 +131,29 @@ BEGIN
       RAISE EXCEPTION 'Required column definition drifted: public.%.%', v_required.table_name, v_required.column_name;
     END IF;
   END LOOP;
+
+  -- Exhaustive Phase-9 marker check: detect any Phase-9 column, index, constraint or RPC signature.
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name IN ('invoices', 'receipts', 'purchases', 'purchase_payments', 'accounts', 'vendors')
+      AND column_name IN (
+        'discount_paisas', 'discount_amount', 'discount_percent',
+        'allocation_id', 'idempotency_key',
+        'commission_id', 'net_collected', 'product_advance', 'delivery_advance',
+        'collection_commission_paid'
+      )
+  ) THEN
+    RAISE EXCEPTION 'Phase-9 column marker detected — containment refused';
+  END IF;
+  IF EXISTS (
+    SELECT 1 FROM pg_proc p
+    WHERE p.pronamespace = 'public'::regnamespace
+      AND p.proname IN ('post_sale', 'post_receipt_voucher')
+      AND p.pronargs > 13
+  ) THEN
+    RAISE EXCEPTION 'post_sale or post_receipt_voucher has more arguments than pre-Phase-9 (Phase-9 signature detected)';
+  END IF;
 
   FOR v_signature IN SELECT unnest(ARRAY[
     'public.account_ledger(text,text,date,date)',
@@ -264,6 +298,11 @@ BEGIN
          OR v_proc.prorettype <> 'trigger'::regtype
          OR NOT v_proc.prosecdef
          OR v_proc.proconfig IS DISTINCT FROM ARRAY['search_path=pg_catalog, public, pg_temp']::text[]
+         OR v_proc.provolatile <> 'v'
+         OR v_proc.proparallel <> 'u'
+         OR v_proc.procost <> 100
+         OR v_proc.proleakproof <> false
+         OR v_proc.proisstrict <> false
          OR md5(v_proc.prosrc) <> v_expected.body_hash
          OR v_proc.proacl::text <> '{postgres=X/postgres}' THEN
         RAISE EXCEPTION 'Containment function definition, metadata or ACL drifted: %', v_expected.function_name;
@@ -272,12 +311,16 @@ BEGIN
       SELECT t.* INTO v_trigger
       FROM pg_trigger t
       WHERE NOT t.tgisinternal AND t.tgname = v_expected.trigger_name;
+      -- Verify the full trigger definition including WHEN clause (must be absent)
+      v_full_trigger_def := pg_get_triggerdef(t.oid);
       IF NOT FOUND
          OR v_trigger.tgrelid <> format('public.%I',v_expected.table_name)::regclass
          OR v_trigger.tgfoid <> format('public.%I()',v_expected.function_name)::regprocedure
          OR v_trigger.tgtype <> 23
          OR v_trigger.tgenabled <> 'O'
-         OR v_trigger.tgnargs <> 0 THEN
+         OR v_trigger.tgnargs <> 0
+         OR v_trigger.tgqual IS NOT NULL
+         OR v_full_trigger_def NOT LIKE 'CREATE TRIGGER ' || v_expected.trigger_name || ' BEFORE INSERT OR UPDATE ON public.' || v_expected.table_name || ' FOR EACH ROW EXECUTE FUNCTION _' || v_expected.trigger_name || '()' THEN
         RAISE EXCEPTION 'Containment trigger definition drifted: %', v_expected.trigger_name;
       END IF;
     END LOOP;
@@ -326,21 +369,29 @@ AS $function$
 DECLARE
   v_purchase public.purchases%ROWTYPE;
   v_existing_initial numeric(20,0);
+  v_existing_total numeric(20,0);
+  v_is_notes_only boolean;
 BEGIN
-  IF TG_OP = 'UPDATE' AND (
-       NEW.id IS DISTINCT FROM OLD.id
-       OR NEW.business_id IS DISTINCT FROM OLD.business_id
-       OR NEW.purchase_id IS DISTINCT FROM OLD.purchase_id
-       OR NEW.vendor_id IS DISTINCT FROM OLD.vendor_id
-       OR NEW.account_id IS DISTINCT FROM OLD.account_id
-       OR NEW.amount IS DISTINCT FROM OLD.amount
-       OR NEW.payment_date IS DISTINCT FROM OLD.payment_date
-       OR NEW.payment_type IS DISTINCT FROM OLD.payment_type
-       OR NEW.voucher_id IS DISTINCT FROM OLD.voucher_id
-       OR NEW.created_by IS DISTINCT FROM OLD.created_by
-       OR NEW.created_at IS DISTINCT FROM OLD.created_at
-     ) THEN
+  -- Determine if this is a notes-only UPDATE (only the notes column changed)
+  v_is_notes_only := TG_OP = 'UPDATE'
+    AND OLD.id IS NOT DISTINCT FROM NEW.id
+    AND OLD.business_id IS NOT DISTINCT FROM NEW.business_id
+    AND OLD.purchase_id IS NOT DISTINCT FROM NEW.purchase_id
+    AND OLD.vendor_id IS NOT DISTINCT FROM NEW.vendor_id
+    AND OLD.account_id IS NOT DISTINCT FROM NEW.account_id
+    AND OLD.amount IS NOT DISTINCT FROM NEW.amount
+    AND OLD.payment_date IS NOT DISTINCT FROM NEW.payment_date
+    AND OLD.payment_type IS NOT DISTINCT FROM NEW.payment_type
+    AND OLD.voucher_id IS NOT DISTINCT FROM NEW.voucher_id
+    AND OLD.created_by IS NOT DISTINCT FROM NEW.created_by
+    AND OLD.created_at IS NOT DISTINCT FROM NEW.created_at;
+
+  IF TG_OP = 'UPDATE' AND NOT v_is_notes_only THEN
     RAISE EXCEPTION 'Purchase payment posting fields are immutable; only notes may change';
+  END IF;
+  -- For notes-only UPDATE, skip revalidation of posting fields against current outstanding
+  IF v_is_notes_only THEN
+    RETURN NEW;
   END IF;
 
   IF NEW.payment_type IS NULL OR NEW.payment_type NOT IN (
@@ -396,8 +447,16 @@ BEGIN
        OR v_existing_initial + NEW.amount > v_purchase.total THEN
       RAISE EXCEPTION 'Initial purchase payments exceed the locked purchase totals';
     END IF;
-  ELSIF NEW.amount > v_purchase.outstanding_amount THEN
-    RAISE EXCEPTION 'Purchase-linked settlement exceeds locked outstanding amount';
+  ELSE
+    -- Aggregate all purchase-linked payment types (later_payment, advance_application) for cumulative outstanding check
+    SELECT coalesce(sum(pp.amount),0)::numeric(20,0) INTO v_existing_total
+    FROM public.purchase_payments pp
+    WHERE pp.purchase_id = NEW.purchase_id
+      AND pp.payment_type IN ('later_payment', 'advance_application')
+      AND pp.id IS DISTINCT FROM NEW.id;
+    IF NEW.amount > v_purchase.outstanding_amount - v_existing_total THEN
+      RAISE EXCEPTION 'Purchase-linked settlement exceeds available outstanding amount after accounting for existing linked payments';
+    END IF;
   END IF;
 
   RETURN NEW;
@@ -417,22 +476,29 @@ SET search_path = pg_catalog, public, pg_temp
 AS $function$
 DECLARE
   v_purchase public.purchases%ROWTYPE;
+  v_is_notes_only boolean;
+  v_item_total numeric(20,0);
 BEGIN
-  IF TG_OP = 'UPDATE' AND (
-       NEW.id IS DISTINCT FROM OLD.id
-       OR NEW.business_id IS DISTINCT FROM OLD.business_id
-       OR NEW.purchase_id IS DISTINCT FROM OLD.purchase_id
-       OR NEW.vendor_id IS DISTINCT FROM OLD.vendor_id
-       OR NEW.return_no IS DISTINCT FROM OLD.return_no
-       OR NEW.return_date IS DISTINCT FROM OLD.return_date
-       OR NEW.total_amount IS DISTINCT FROM OLD.total_amount
-       OR NEW.settlement_type IS DISTINCT FROM OLD.settlement_type
-       OR NEW.settlement_account_id IS DISTINCT FROM OLD.settlement_account_id
-       OR NEW.voucher_id IS DISTINCT FROM OLD.voucher_id
-       OR NEW.created_by IS DISTINCT FROM OLD.created_by
-       OR NEW.created_at IS DISTINCT FROM OLD.created_at
-     ) THEN
+  v_is_notes_only := TG_OP = 'UPDATE'
+    AND OLD.id IS NOT DISTINCT FROM NEW.id
+    AND OLD.business_id IS NOT DISTINCT FROM NEW.business_id
+    AND OLD.purchase_id IS NOT DISTINCT FROM NEW.purchase_id
+    AND OLD.vendor_id IS NOT DISTINCT FROM NEW.vendor_id
+    AND OLD.return_no IS NOT DISTINCT FROM NEW.return_no
+    AND OLD.return_date IS NOT DISTINCT FROM NEW.return_date
+    AND OLD.total_amount IS NOT DISTINCT FROM NEW.total_amount
+    AND OLD.settlement_type IS NOT DISTINCT FROM NEW.settlement_type
+    AND OLD.settlement_account_id IS NOT DISTINCT FROM NEW.settlement_account_id
+    AND OLD.voucher_id IS NOT DISTINCT FROM NEW.voucher_id
+    AND OLD.created_by IS NOT DISTINCT FROM NEW.created_by
+    AND OLD.created_at IS NOT DISTINCT FROM NEW.created_at;
+
+  IF TG_OP = 'UPDATE' AND NOT v_is_notes_only THEN
     RAISE EXCEPTION 'Purchase return posting fields are immutable; only notes may change';
+  END IF;
+  -- For notes-only UPDATE, skip revalidation
+  IF v_is_notes_only THEN
+    RETURN NEW;
   END IF;
 
   IF NEW.total_amount IS NULL OR NEW.total_amount <= 0 THEN
@@ -455,11 +521,12 @@ BEGIN
      OR v_purchase.vendor_id IS DISTINCT FROM NEW.vendor_id THEN
     RAISE EXCEPTION 'Purchase return tenant/vendor mismatch';
   END IF;
+  -- Allow historical returns against an inactive vendor provided the tenant/vendor linkage is valid
   IF NOT EXISTS (
     SELECT 1 FROM public.vendors v
-    WHERE v.id = NEW.vendor_id AND v.business_id = NEW.business_id AND v.is_active
+    WHERE v.id = NEW.vendor_id AND v.business_id = NEW.business_id
   ) THEN
-    RAISE EXCEPTION 'Purchase return vendor is invalid, inactive or cross-business';
+    RAISE EXCEPTION 'Purchase return vendor is invalid or cross-business';
   END IF;
 
   IF NEW.settlement_type = 'vendor_refund' THEN
@@ -471,6 +538,22 @@ BEGIN
     END IF;
   ELSIF NEW.settlement_account_id IS NOT NULL THEN
     RAISE EXCEPTION 'reduce_payable and vendor_credit must not supply a settlement account';
+  END IF;
+
+  -- Reconcile header total against persisted items (allow for postgres numeric precision)
+  -- This is a DEFERRED check to accommodate RPC ordering (header may be inserted before items).
+  -- The check is performed here as an immediate guard for direct INSERT/UPDATE, and the deferred
+  -- constraint trigger re-evaluates at COMMIT.
+  IF TG_OP = 'INSERT' THEN
+    -- For INSERT, items may not yet exist; rely on the deferred constraint.
+    NULL;
+  ELSE
+    SELECT coalesce(sum(pri.line_total),0)::numeric(20,0) INTO v_item_total
+    FROM public.purchase_return_items pri
+    WHERE pri.purchase_return_id = NEW.id;
+    IF NEW.total_amount IS DISTINCT FROM v_item_total AND v_item_total > 0 THEN
+      RAISE EXCEPTION 'Purchase return header total does not match sum of items';
+    END IF;
   END IF;
 
   RETURN NEW;
@@ -560,6 +643,11 @@ BEGIN
     RAISE EXCEPTION 'Purchase return quantity exceeds source quantity';
   END IF;
 
+  -- Validate line_total for the individual item
+  IF NEW.line_total <= 0 THEN
+    RAISE EXCEPTION 'Purchase return line total must be positive';
+  END IF;
+
   RETURN NEW;
 END;
 $function$;
@@ -569,13 +657,39 @@ CREATE TRIGGER contain_purchase_return_item
 BEFORE INSERT OR UPDATE ON public.purchase_return_items
 FOR EACH ROW EXECUTE FUNCTION public._contain_purchase_return_item();
 
+-- Deferred constraint to reconcile return header total against items at COMMIT time
+-- This allows the normal RPC ordering (header inserted before items) to proceed
+CREATE OR REPLACE FUNCTION public._reconcile_return_header_total()
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = pg_catalog, public, pg_temp
+AS $function$
+DECLARE
+  v_item_total numeric(20,0);
+BEGIN
+  SELECT coalesce(sum(pri.line_total),0)::numeric(20,0) INTO v_item_total
+  FROM public.purchase_return_items pri
+  WHERE pri.purchase_return_id = COALESCE(NEW.id, OLD.id);
+  IF v_item_total IS DISTINCT FROM (SELECT total_amount FROM public.purchase_returns WHERE id = COALESCE(NEW.id, OLD.id)) THEN
+    RAISE EXCEPTION 'Purchase return header total does not match sum of items at commit';
+  END IF;
+  RETURN NULL;
+END;
+$function$;
+REVOKE ALL ON FUNCTION public._reconcile_return_header_total() FROM PUBLIC, anon, authenticated, service_role;
+DROP TRIGGER IF EXISTS reconcile_return_header_total_on_item_insert ON public.purchase_return_items;
+CREATE CONSTRAINT TRIGGER reconcile_return_header_total_on_item_insert
+AFTER INSERT OR UPDATE OR DELETE ON public.purchase_return_items
+DEFERRABLE INITIALLY DEFERRED
+FOR EACH ROW EXECUTE FUNCTION public._reconcile_return_header_total();
+
 -- Fail the transaction if the intended contained privilege and object state was not reached.
 DO $p0_postflight$
 DECLARE
   v_signature text;
 BEGIN
-  IF (SELECT count(*) FROM pg_proc WHERE pronamespace='public'::regnamespace) <> 56
-     OR (SELECT count(*) FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid WHERE c.relnamespace='public'::regnamespace AND NOT t.tgisinternal) <> 24
+  IF (SELECT count(*) FROM pg_proc WHERE pronamespace='public'::regnamespace) <> 57
+     OR (SELECT count(*) FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid WHERE c.relnamespace='public'::regnamespace AND NOT t.tgisinternal) <> 25
      OR (SELECT count(*) FROM pg_policy p JOIN pg_class c ON c.oid=p.polrelid WHERE c.relnamespace='public'::regnamespace) <> 54 THEN
     RAISE EXCEPTION 'P0 containment postflight object inventory mismatch';
   END IF;
