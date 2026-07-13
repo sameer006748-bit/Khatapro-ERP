@@ -2,7 +2,55 @@
 
 This is a reviewed, direct-`psql` emergency change for the exact pre-00009 KhataPro production schema. It is not a normal migration-history operation. It must be run only by the approved operator, reviewer, and incident commander during a confirmed maintenance window. Migration `00009` must remain unapplied.
 
-The SQL preflight proves schema identity through exact object counts, signatures, definitions, policies, grants, and ACL fingerprints. The operator gate below separately proves routing to the one approved Supabase project. Neither control substitutes for the other.
+The SQL preflight proves schema identity through exact object counts, deterministic signature fingerprints, semantic ACL checks, and containment object state. The operator gate below separately proves routing to the one approved Supabase project. Neither control substitutes for the other.
+
+## Approved file hashes (SHA-256)
+
+Verify these exact hashes before applying or rolling back:
+
+- Forward migration `supabase/migrations/00008k_p0_security_containment.sql`:
+  `e9bfa4062159069ed1fc2f5c445dbdddb1dd14d368907e3f110ba0ae6e424c39`
+- Rollback `supabase/rollback/00008k_p0_security_containment_rollback.sql`:
+  `b1bf14acc21483443d8152ba15148d70510cff6ee4dd8cb4425ba3e1e73ff993`
+
+## Canonical migration chain
+
+The canonical Phase-1 migration is `00001_phase1_foundation.sql`. The file `00001_phase1_schema.sql` is an alternative bootstrap that produces duplicate/extra objects when applied together with the canonical Phase-1 foundation. **Both Phase-1 files must never be applied together.**
+
+The proven rebuild order for the exact Phase-8 baseline is:
+
+1. Supabase-compatible local auth bootstrap
+2. 00001_phase1_foundation.sql
+3. 00002 through 00008j (all numbered migrations in order)
+4. audit_fix_low_stock_threshold.sql
+5. audit_fix_salesmen_user_id.sql
+
+## Pre-containment baseline inventory
+
+The exact Phase-8 baseline contains:
+- 39 public tables
+- 54 public policies
+- 89 public functions/procedures (includes ~40 pgcrypto extension functions + 49 application functions)
+- 21 non-internal public triggers
+- Profiles RLS: relrowsecurity=true, relforcerowsecurity=false
+- No containment functions or triggers
+- No Phase-9 objects
+- RPC ACL: all 41 target RPCs have public, anon, authenticated, service_role EXECUTE
+- Profile table ACL: postgres, anon, authenticated, service_role with full ARWD privileges
+- Profile column ACL: none (NULL for all columns)
+
+## Contained-state inventory
+
+After this migration, the exact contained state has:
+- 93 public functions/procedures
+- 25 non-internal public triggers
+- 54 public policies (unchanged)
+- 39 public tables (unchanged)
+- 4 containment functions: _contain_purchase_payment_tenant, _contain_purchase_return_header, _contain_purchase_return_item, _reconcile_return_header_total
+- 4 containment triggers: contain_purchase_payment_tenant, contain_purchase_return_header, contain_purchase_return_item, reconcile_return_header_total_on_item_insert
+- RPC ACL: all 41 target RPCs have only postgres, service_role EXECUTE
+- Profile table ACL: postgres only
+- Profile column ACL: authenticated=w/postgres on display_name and phone
 
 ## Hard stops
 

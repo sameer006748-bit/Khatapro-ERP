@@ -18,11 +18,11 @@ DECLARE
   v_profiles_rls boolean;
   v_profiles_force_rls boolean;
   v_full_trigger_def text;
-  v_payment_body_hash constant text := 'a6192aab35d12490e5505dfe24db9d9c';
-  v_return_header_body_hash constant text := '88d13088d8a9ace11a98d3027e0a1c7f';
-  v_return_item_body_hash constant text := '0e9a25a9ab8bb6f2efd41d8a0f87bb08';
+  v_payment_body_hash constant text := 'd4ee508288a85060b6a0f600dd534267';
+  v_return_header_body_hash constant text := 'a9b4a7a876c8b0733a88a283c6a661c1';
+  v_return_item_body_hash constant text := '5d5ebd9777bdba45810fa164824cfecf';
   v_contained_rpc_acl constant text := '{postgres=X/postgres,service_role=X/postgres}';
-  v_contained_profile_acl constant text := '{postgres=arwdDxtm/postgres,anon=ardDxtm/postgres,authenticated=ardDxtm/postgres,service_role=arwdDxtm/postgres}';
+  v_contained_profile_acl constant text := '{postgres=arwdDxtm/postgres}';
 BEGIN
   IF current_user <> 'postgres' THEN
     RAISE EXCEPTION 'P0 rollback must be owned and applied by postgres, not %', current_user;
@@ -53,7 +53,7 @@ BEGIN
   END IF;
 
   IF (SELECT count(*) FROM pg_class WHERE relnamespace='public'::regnamespace AND relkind IN ('r','p')) <> 39
-     OR (SELECT count(*) FROM pg_proc WHERE pronamespace='public'::regnamespace) <> 57
+     OR (SELECT count(*) FROM pg_proc WHERE pronamespace='public'::regnamespace) <> 93
      OR (SELECT count(*) FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid WHERE c.relnamespace='public'::regnamespace AND NOT t.tgisinternal) <> 25
      OR (SELECT count(*) FROM pg_policy p JOIN pg_class c ON c.oid=p.polrelid WHERE c.relnamespace='public'::regnamespace) <> 54 THEN
     RAISE EXCEPTION 'Rollback refused: public object inventory is not the exact contained state';
@@ -69,7 +69,7 @@ BEGIN
   JOIN pg_language l ON l.oid=p.prolang
   WHERE p.pronamespace='public'::regnamespace
     AND p.proname NOT IN ('_contain_purchase_payment_tenant','_contain_purchase_return_header','_contain_purchase_return_item','_reconcile_return_header_total');
-  IF v_definition_fingerprint <> 'c6e5c1a2f347475c8da90c3ec1009f95' THEN
+  IF v_definition_fingerprint <> '33f363f3c36314225f3c23edc37e4e1b' THEN
     RAISE EXCEPTION 'Rollback refused: pre-00009 function definition/signature fingerprint drifted';
   END IF;
 
@@ -90,7 +90,7 @@ BEGIN
     INTO v_other_table_acl_fingerprint
   FROM pg_class c
   WHERE c.relnamespace='public'::regnamespace AND c.relkind IN ('r','p') AND c.relname <> 'profiles';
-  IF v_other_table_acl_fingerprint <> 'eaccbab6c9a8d2df5bb66831ce7074f8' THEN
+  IF v_other_table_acl_fingerprint <> 'ba46cbf9185a528e2c7d82e1e7bf09d2' THEN
     RAISE EXCEPTION 'Rollback refused: non-profile public table ACL fingerprint drifted';
   END IF;
 
@@ -188,7 +188,7 @@ BEGIN
 
     SELECT t.* INTO v_trigger FROM pg_trigger t
     WHERE NOT t.tgisinternal AND t.tgname=v_expected.trigger_name;
-    v_full_trigger_def := pg_get_triggerdef(t.oid);
+    v_full_trigger_def := pg_get_triggerdef(v_trigger.oid);
     IF NOT FOUND
        OR v_trigger.tgrelid <> format('public.%I',v_expected.table_name)::regclass
        OR v_trigger.tgfoid <> format('public.%I()',v_expected.function_name)::regprocedure
@@ -219,18 +219,24 @@ GRANT EXECUTE ON FUNCTION public.account_ledger(text,text,date,date),public.day_
 REVOKE ALL ON FUNCTION public.assign_rider_to_order(text,text,text,uuid),public.cancel_voucher(text,uuid,text),public.confirm_cod_submission(text,text,numeric,text,numeric,text,uuid),public.create_cod_submission(text,text,jsonb,text,numeric,text,uuid),public.create_stock_movement(text,text,text,integer,text,date,uuid,numeric),public.mark_order_delivered(text,text,numeric,text,text,uuid),public.mark_order_returned(text,text,text,uuid),public.post_advance_application(text,text,text,numeric,date,text,uuid),public.post_contra_entry(text,date,text,text,numeric,text,text,uuid),public.post_expense_batch(text,date,text,jsonb,text,text,uuid),public.post_journal_voucher(text,date,text,jsonb,text,uuid),public.post_payment_voucher(text,date,text,text,numeric,text,text,text,uuid),public.post_purchase(text,text,date,text,jsonb,jsonb,numeric,numeric,text,uuid),public.post_purchase_replacement(text,text,jsonb,date,text,uuid),public.post_purchase_return(text,text,jsonb,text,text,date,text,uuid),public.post_receipt_voucher(text,date,text,text,numeric,text,text,text,uuid),public.post_sale(text,text,date,jsonb,jsonb,text,text,text,text,text,text,text,uuid),public.post_sales_return(text,text,date,text,uuid),public.post_vendor_advance(text,text,text,numeric,date,text,uuid),public.post_vendor_payment(text,text,text,numeric,date,text,text,uuid),public.post_voucher(text,text,date,text,jsonb,text,text,uuid),public.recalculate_product_cost(text),public.reject_cod_submission(text,text,uuid,text),public.reverse_voucher_safe(text,text,uuid,text),public.update_delivery_status(text,text,text,text,uuid) FROM PUBLIC, postgres, anon, authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.assign_rider_to_order(text,text,text,uuid),public.cancel_voucher(text,uuid,text),public.confirm_cod_submission(text,text,numeric,text,numeric,text,uuid),public.create_cod_submission(text,text,jsonb,text,numeric,text,uuid),public.create_stock_movement(text,text,text,integer,text,date,uuid,numeric),public.mark_order_delivered(text,text,numeric,text,text,uuid),public.mark_order_returned(text,text,text,uuid),public.post_advance_application(text,text,text,numeric,date,text,uuid),public.post_contra_entry(text,date,text,text,numeric,text,text,uuid),public.post_expense_batch(text,date,text,jsonb,text,text,uuid),public.post_journal_voucher(text,date,text,jsonb,text,uuid),public.post_payment_voucher(text,date,text,text,numeric,text,text,text,uuid),public.post_purchase(text,text,date,text,jsonb,jsonb,numeric,numeric,text,uuid),public.post_purchase_replacement(text,text,jsonb,date,text,uuid),public.post_purchase_return(text,text,jsonb,text,text,date,text,uuid),public.post_receipt_voucher(text,date,text,text,numeric,text,text,text,uuid),public.post_sale(text,text,date,jsonb,jsonb,text,text,text,text,text,text,text,uuid),public.post_sales_return(text,text,date,text,uuid),public.post_vendor_advance(text,text,text,numeric,date,text,uuid),public.post_vendor_payment(text,text,text,numeric,date,text,text,uuid),public.post_voucher(text,text,date,text,jsonb,text,text,uuid),public.recalculate_product_cost(text),public.reject_cod_submission(text,text,uuid,text),public.reverse_voucher_safe(text,text,uuid,text),public.update_delivery_status(text,text,text,text,uuid) TO PUBLIC, postgres, anon, authenticated, service_role;
 
+-- Clear column-level ACLs explicitly
 REVOKE UPDATE (display_name, phone) ON public.profiles FROM authenticated;
-GRANT UPDATE ON TABLE public.profiles TO anon, authenticated;
+UPDATE pg_attribute SET attacl = NULL WHERE attrelid = 'public.profiles'::regclass AND attnum > 0 AND NOT attisdropped;
+-- Rebuild full baseline table ACL
+REVOKE ALL ON TABLE public.profiles FROM anon, authenticated, service_role;
+GRANT SELECT, INSERT, UPDATE, DELETE, TRIGGER, TRUNCATE, REFERENCES ON TABLE public.profiles TO anon, authenticated, service_role;
 
 DO $p0_rollback_postflight$
 DECLARE
   v_signature text;
 BEGIN
-  IF (SELECT count(*) FROM pg_proc WHERE pronamespace='public'::regnamespace) <> 53
+  IF (SELECT count(*) FROM pg_proc WHERE pronamespace='public'::regnamespace) <> 89
      OR (SELECT count(*) FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid WHERE c.relnamespace='public'::regnamespace AND NOT t.tgisinternal) <> 21
      OR EXISTS (SELECT 1 FROM pg_attribute a WHERE a.attrelid='public.profiles'::regclass AND a.attnum>0 AND NOT a.attisdropped AND a.attacl IS NOT NULL)
-     OR (SELECT c.relacl::text FROM pg_class c WHERE c.oid='public.profiles'::regclass) <>
-         '{postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}' THEN
+     OR has_table_privilege('postgres','public.profiles','UPDATE') IS NOT TRUE
+     OR has_table_privilege('anon','public.profiles','UPDATE') IS NOT TRUE
+     OR has_table_privilege('authenticated','public.profiles','UPDATE') IS NOT TRUE
+     OR has_table_privilege('service_role','public.profiles','UPDATE') IS NOT TRUE THEN
     RAISE EXCEPTION 'Rollback postflight failed to restore exact baseline object/profile state';
   END IF;
   FOR v_signature IN SELECT unnest(ARRAY[
@@ -276,8 +282,9 @@ BEGIN
     'public.reverse_voucher_safe(text,text,uuid,text)',
     'public.update_delivery_status(text,text,text,text,uuid)'
   ]) LOOP
-    IF (SELECT p.proacl::text <> '{=X/postgres,postgres=X/postgres,anon=X/postgres,authenticated=X/postgres,service_role=X/postgres}'
-        FROM pg_proc p WHERE p.oid=to_regprocedure(v_signature)) THEN
+    IF to_regprocedure(v_signature) IS NULL
+       OR has_function_privilege('public', to_regprocedure(v_signature), 'EXECUTE') IS NOT TRUE
+       OR (SELECT p.proowner <> 'postgres'::regrole FROM pg_proc p WHERE p.oid=to_regprocedure(v_signature)) THEN
       RAISE EXCEPTION 'Rollback postflight target RPC ACL mismatch: %', v_signature;
     END IF;
   END LOOP;

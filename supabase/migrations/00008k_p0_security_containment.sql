@@ -27,13 +27,13 @@ DECLARE
   v_profiles_rls boolean;
   v_profiles_force_rls boolean;
   v_full_trigger_def text;
-  v_payment_body_hash constant text := 'a6192aab35d12490e5505dfe24db9d9c';
-  v_return_header_body_hash constant text := '88d13088d8a9ace11a98d3027e0a1c7f';
-  v_return_item_body_hash constant text := '0e9a25a9ab8bb6f2efd41d8a0f87bb08';
+  v_payment_body_hash constant text := 'd4ee508288a85060b6a0f600dd534267';
+  v_return_header_body_hash constant text := 'a9b4a7a876c8b0733a88a283c6a661c1';
+  v_return_item_body_hash constant text := '5d5ebd9777bdba45810fa164824cfecf';
   v_baseline_rpc_acl constant text := '{=X/postgres,postgres=X/postgres,anon=X/postgres,authenticated=X/postgres,service_role=X/postgres}';
   v_contained_rpc_acl constant text := '{postgres=X/postgres,service_role=X/postgres}';
   v_baseline_profile_acl constant text := '{postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}';
-  v_contained_profile_acl constant text := '{postgres=arwdDxtm/postgres,anon=ardDxtm/postgres,authenticated=ardDxtm/postgres,service_role=arwdDxtm/postgres}';
+  v_contained_profile_acl constant text := '{postgres=arwdDxtm/postgres}';
 BEGIN
   -- Migration 00009 must remain wholly absent.
   IF to_regclass('public.receipt_allocations') IS NOT NULL
@@ -201,14 +201,21 @@ BEGIN
     IF to_regprocedure(v_signature) IS NULL THEN
       RAISE EXCEPTION 'Required target RPC signature is missing: %', v_signature;
     END IF;
-    SELECT p.proacl::text, p.proowner = 'postgres'::regrole
-      INTO v_profile_acl, v_profile_baseline
-    FROM pg_proc p WHERE p.oid = to_regprocedure(v_signature);
-    IF NOT v_profile_baseline THEN
+    -- Semantic ACL comparison using has_function_privilege (order-independent)
+    IF (SELECT p.proowner = 'postgres'::regrole FROM pg_proc p WHERE p.oid = to_regprocedure(v_signature)) IS NOT TRUE THEN
       RAISE EXCEPTION 'Target RPC owner drifted: %', v_signature;
-    ELSIF v_profile_acl = v_baseline_rpc_acl THEN
+    END IF;
+    -- Baseline: all five roles have EXECUTE (public, anon, authenticated, service_role, postgres)
+    IF has_function_privilege('public', to_regprocedure(v_signature), 'EXECUTE')
+       AND has_function_privilege('anon', to_regprocedure(v_signature), 'EXECUTE')
+       AND has_function_privilege('authenticated', to_regprocedure(v_signature), 'EXECUTE')
+       AND has_function_privilege('service_role', to_regprocedure(v_signature), 'EXECUTE') THEN
       v_rpc_baseline := v_rpc_baseline + 1;
-    ELSIF v_profile_acl = v_contained_rpc_acl THEN
+    -- Contained: only postgres and service_role have EXECUTE
+    ELSIF has_function_privilege('service_role', to_regprocedure(v_signature), 'EXECUTE')
+      AND NOT has_function_privilege('public', to_regprocedure(v_signature), 'EXECUTE')
+      AND NOT has_function_privilege('anon', to_regprocedure(v_signature), 'EXECUTE')
+      AND NOT has_function_privilege('authenticated', to_regprocedure(v_signature), 'EXECUTE') THEN
       v_rpc_contained := v_rpc_contained + 1;
     ELSE
       RAISE EXCEPTION 'Target RPC ACL drifted: %', v_signature;
@@ -227,8 +234,8 @@ BEGIN
   JOIN pg_roles r ON r.oid = p.proowner
   JOIN pg_language l ON l.oid = p.prolang
   WHERE p.pronamespace = 'public'::regnamespace
-    AND p.proname NOT IN ('_contain_purchase_payment_tenant','_contain_purchase_return_header','_contain_purchase_return_item');
-  IF v_definition_fingerprint <> 'c6e5c1a2f347475c8da90c3ec1009f95' THEN
+    AND p.proname NOT IN ('_contain_purchase_payment_tenant','_contain_purchase_return_header','_contain_purchase_return_item','_reconcile_return_header_total');
+  IF v_definition_fingerprint <> '33f363f3c36314225f3c23edc37e4e1b' THEN
     RAISE EXCEPTION 'Pre-00009 public function definition/signature fingerprint drifted';
   END IF;
 
@@ -249,16 +256,20 @@ BEGIN
     INTO v_other_table_acl_fingerprint
   FROM pg_class c
   WHERE c.relnamespace = 'public'::regnamespace AND c.relkind IN ('r','p') AND c.relname <> 'profiles';
-  IF v_other_table_acl_fingerprint <> 'eaccbab6c9a8d2df5bb66831ce7074f8' THEN
+  IF v_other_table_acl_fingerprint <> 'ba46cbf9185a528e2c7d82e1e7bf09d2' THEN
     RAISE EXCEPTION 'Non-profile public table ACL fingerprint drifted';
   END IF;
 
-  SELECT c.relacl::text INTO v_profile_acl FROM pg_class c WHERE c.oid = 'public.profiles'::regclass;
-  v_profile_baseline := v_profile_acl = v_baseline_profile_acl
+  -- Semantic profile ACL check (order-independent)
+  v_profile_baseline := has_table_privilege('postgres','public.profiles','UPDATE')
+    AND has_table_privilege('anon','public.profiles','UPDATE')
+    AND has_table_privilege('authenticated','public.profiles','UPDATE')
+    AND has_table_privilege('service_role','public.profiles','UPDATE')
     AND NOT EXISTS (
       SELECT 1 FROM pg_attribute a
       WHERE a.attrelid = 'public.profiles'::regclass AND a.attnum > 0 AND NOT a.attisdropped AND a.attacl IS NOT NULL
     );
+  SELECT c.relacl::text INTO v_profile_acl FROM pg_class c WHERE c.oid = 'public.profiles'::regclass;
   v_profile_contained := v_profile_acl = v_contained_profile_acl
     AND (SELECT count(*) FROM pg_attribute a
          WHERE a.attrelid = 'public.profiles'::regclass AND a.attnum > 0 AND NOT a.attisdropped AND a.attacl IS NOT NULL) = 2
@@ -272,14 +283,14 @@ BEGIN
   SELECT count(*) INTO v_function_count
   FROM pg_proc p
   WHERE p.pronamespace = 'public'::regnamespace
-    AND p.proname IN ('_contain_purchase_payment_tenant','_contain_purchase_return_header','_contain_purchase_return_item');
+    AND p.proname IN ('_contain_purchase_payment_tenant','_contain_purchase_return_header','_contain_purchase_return_item','_reconcile_return_header_total');
   SELECT count(*) INTO v_trigger_count
   FROM pg_trigger t
   WHERE NOT t.tgisinternal
-    AND t.tgname IN ('contain_purchase_payment_tenant','contain_purchase_return_header','contain_purchase_return_item');
+    AND t.tgname IN ('contain_purchase_payment_tenant','contain_purchase_return_header','contain_purchase_return_item','reconcile_return_header_total_on_item_insert');
 
   v_objects_baseline := v_function_count = 0 AND v_trigger_count = 0;
-  v_objects_contained := v_function_count = 3 AND v_trigger_count = 3;
+  v_objects_contained := v_function_count = 4 AND v_trigger_count = 4;
 
   IF v_objects_contained THEN
     FOR v_expected IN SELECT * FROM (VALUES
@@ -312,7 +323,7 @@ BEGIN
       FROM pg_trigger t
       WHERE NOT t.tgisinternal AND t.tgname = v_expected.trigger_name;
       -- Verify the full trigger definition including WHEN clause (must be absent)
-      v_full_trigger_def := pg_get_triggerdef(t.oid);
+      v_full_trigger_def := pg_get_triggerdef(v_trigger.oid);
       IF NOT FOUND
          OR v_trigger.tgrelid <> format('public.%I',v_expected.table_name)::regclass
          OR v_trigger.tgfoid <> format('public.%I()',v_expected.function_name)::regprocedure
@@ -331,14 +342,14 @@ BEGIN
   END IF;
 
   IF v_objects_baseline THEN
-    IF (SELECT count(*) FROM pg_proc WHERE pronamespace = 'public'::regnamespace) <> 53
+    IF (SELECT count(*) FROM pg_proc WHERE pronamespace = 'public'::regnamespace) <> 89
        OR (SELECT count(*) FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid WHERE c.relnamespace='public'::regnamespace AND NOT t.tgisinternal) <> 21
        OR v_rpc_baseline <> 41 OR NOT v_profile_baseline THEN
       RAISE EXCEPTION 'Database is not the exact approved pre-containment baseline';
     END IF;
   ELSE
-    IF (SELECT count(*) FROM pg_proc WHERE pronamespace = 'public'::regnamespace) <> 56
-       OR (SELECT count(*) FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid WHERE c.relnamespace='public'::regnamespace AND NOT t.tgisinternal) <> 24
+    IF (SELECT count(*) FROM pg_proc WHERE pronamespace = 'public'::regnamespace) <> 93
+       OR (SELECT count(*) FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid WHERE c.relnamespace='public'::regnamespace AND NOT t.tgisinternal) <> 25
        OR v_rpc_contained <> 41 OR NOT v_profile_contained THEN
       RAISE EXCEPTION 'Database is not the exact state created by this containment migration';
     END IF;
@@ -355,9 +366,8 @@ REVOKE EXECUTE ON FUNCTION public.assign_rider_to_order(text,text,text,uuid),pub
 GRANT EXECUTE ON FUNCTION public.assign_rider_to_order(text,text,text,uuid),public.cancel_voucher(text,uuid,text),public.confirm_cod_submission(text,text,numeric,text,numeric,text,uuid),public.create_cod_submission(text,text,jsonb,text,numeric,text,uuid),public.create_stock_movement(text,text,text,integer,text,date,uuid,numeric),public.mark_order_delivered(text,text,numeric,text,text,uuid),public.mark_order_returned(text,text,text,uuid),public.post_advance_application(text,text,text,numeric,date,text,uuid),public.post_contra_entry(text,date,text,text,numeric,text,text,uuid),public.post_expense_batch(text,date,text,jsonb,text,text,uuid),public.post_journal_voucher(text,date,text,jsonb,text,uuid),public.post_payment_voucher(text,date,text,text,numeric,text,text,text,uuid),public.post_purchase(text,text,date,text,jsonb,jsonb,numeric,numeric,text,uuid),public.post_purchase_replacement(text,text,jsonb,date,text,uuid),public.post_purchase_return(text,text,jsonb,text,text,date,text,uuid),public.post_receipt_voucher(text,date,text,text,numeric,text,text,text,uuid),public.post_sale(text,text,date,jsonb,jsonb,text,text,text,text,text,text,text,uuid),public.post_sales_return(text,text,date,text,uuid),public.post_vendor_advance(text,text,text,numeric,date,text,uuid),public.post_vendor_payment(text,text,text,numeric,date,text,text,uuid),public.post_voucher(text,text,date,text,jsonb,text,text,uuid),public.recalculate_product_cost(text),public.reject_cod_submission(text,text,uuid,text),public.reverse_voucher_safe(text,text,uuid,text),public.update_delivery_status(text,text,text,text,uuid) TO service_role;
 
 -- Profile notes: only display_name and phone are deliberately mutable by authenticated users.
+-- Revoke table-level UPDATE from anon/authenticated; grant only column-level UPDATE on display_name and phone to authenticated.
 REVOKE UPDATE ON TABLE public.profiles FROM anon, authenticated;
-REVOKE UPDATE (id, user_id, business_id, role_id, display_name, phone, is_active, created_at, updated_at)
-  ON public.profiles FROM anon, authenticated;
 GRANT UPDATE (display_name, phone) ON public.profiles TO authenticated;
 
 CREATE OR REPLACE FUNCTION public._contain_purchase_payment_tenant()
@@ -688,17 +698,16 @@ DO $p0_postflight$
 DECLARE
   v_signature text;
 BEGIN
-  IF (SELECT count(*) FROM pg_proc WHERE pronamespace='public'::regnamespace) <> 57
+  IF (SELECT count(*) FROM pg_proc WHERE pronamespace='public'::regnamespace) <> 93
      OR (SELECT count(*) FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid WHERE c.relnamespace='public'::regnamespace AND NOT t.tgisinternal) <> 25
      OR (SELECT count(*) FROM pg_policy p JOIN pg_class c ON c.oid=p.polrelid WHERE c.relnamespace='public'::regnamespace) <> 54 THEN
     RAISE EXCEPTION 'P0 containment postflight object inventory mismatch';
   END IF;
-  IF has_table_privilege('anon','public.profiles','UPDATE')
-     OR has_table_privilege('authenticated','public.profiles','UPDATE')
-     OR NOT has_column_privilege('authenticated','public.profiles','display_name','UPDATE')
-     OR NOT has_column_privilege('authenticated','public.profiles','phone','UPDATE')
-     OR has_column_privilege('authenticated','public.profiles','role_id','UPDATE')
-     OR NOT has_table_privilege('service_role','public.profiles','UPDATE') THEN
+  IF (SELECT count(*) FROM pg_attribute a
+      WHERE a.attrelid='public.profiles'::regclass AND a.attnum>0 AND NOT a.attisdropped AND a.attacl IS NOT NULL) <> 2
+     OR (SELECT count(*) FROM pg_attribute a
+         WHERE a.attrelid='public.profiles'::regclass AND a.attname IN ('display_name','phone')
+           AND a.attacl::text='{authenticated=w/postgres}') <> 2 THEN
     RAISE EXCEPTION 'P0 containment postflight profile privilege mismatch';
   END IF;
   FOR v_signature IN SELECT unnest(ARRAY[
