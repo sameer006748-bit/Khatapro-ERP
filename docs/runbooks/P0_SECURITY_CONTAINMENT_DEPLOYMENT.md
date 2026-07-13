@@ -1,319 +1,391 @@
-# P0 Security Containment Deployment
+# P0 security containment deployment runbook
 
-## Purpose and scope
+This is a reviewed, direct-`psql` emergency change for the exact pre-00009 KhataPro production schema. It is not a normal migration-history operation. It must be run only by the approved operator, reviewer, and incident commander during a confirmed maintenance window. Migration `00009` must remain unapplied.
 
-This runbook packages the clone-validated emergency containment for the live findings covering broad report/mutation RPC execution, direct profile UPDATE grants, vendor-payment tenant/vendor/overpayment trust, and purchase-return source/account trust. It does not repair historical financial data, change posting RPC bodies, alter UI behavior, or deploy migration `00009_phase9_discount_support.sql`.
+The SQL preflight proves schema identity through exact object counts, signatures, definitions, policies, grants, and ACL fingerprints. The operator gate below separately proves routing to the one approved Supabase project. Neither control substitutes for the other.
 
-Expected live Supabase project ref: `ebcebxwpddltiwrqybqc`.
+## Hard stops
 
-The application currently calls the classified RPCs through a server-side `service_role` boundary. The migration therefore removes PUBLIC/`anon`/`authenticated` execution from 41 exact signatures while explicitly retaining `service_role` execution. Schedule a maintenance window because the three new guards briefly acquire schema locks and vendor/return posting must be smoke-tested before reopening traffic.
+Stop without running `pg_dump`, `psql`, or `pg_restore` against production if any of these is true:
 
-## Prerequisites
+- the reviewed commit or either SQL checksum differs;
+- `KHATAPRO_APPROVED_DATABASE_URL` is missing, malformed, a URI, contains a password, contains an unsupported/duplicate key, or does not identify the approved project exactly;
+- `pgpass.conf` is absent or `-w` authentication fails;
+- the identity query does not return database `postgres`, role `postgres`, and a non-loopback server address;
+- the application maintenance window cannot be confirmed;
+- any relevant active write, blocked lock, ungranted target lock, or transaction older than 60 seconds exists;
+- neither a confirmed provider recovery checkpoint nor a verified full custom-format backup is available;
+- migration `00009` is present or the SQL preflight reports any drift.
 
-- Approved incident/change ticket, named deployer, peer reviewer, incident commander, and rollback owner.
-- Repository checked out at the reviewed containment commit; no local edits to either SQL file.
-- Confirm the approved destination is project ref `ebcebxwpddltiwrqybqc`. Stop on any mismatch.
-- PostgreSQL client tools available and `psql` configured to fail rather than prompt for a password.
-- An approved placeholder connection variable named `KHATAPRO_APPROVED_DATABASE_URL` available only in the operator session. Never print it, write it to a report, or substitute another database variable.
-- A schema backup stored under `%USERPROFILE%\Documents\KhataPro-Backups\P0-PreContainment-<YYYYMMDD-HHMMSS>\`, with its hash and restore-list validation recorded in the incident log.
-- A full-data backup or provider point-in-time recovery checkpoint is strongly recommended before deployment. Encrypt and retain it under the organization backup policy; do not put it in Git.
-- A maintenance window with sale, receipt, vendor-payment, purchase-return, delivery/COD, voucher, and reporting owners available for smoke testing.
-- Migration 00009 must be absent and must remain unapplied throughout this deployment.
+Never paste a password, DSN, access token, service-role value, personal data, or financial row into the incident log.
 
-## Pre-deployment read-only checks
+## 1. Process-only connection validation
 
-Run the following through an approved read-only session. All Boolean results must be `true`, `target_signature_count` must be `41`, and every `missing_signature` result set must be empty. Stop on any difference.
+Open a new PowerShell process. Set the approved keyword DSN only in that process as `KHATAPRO_APPROVED_DATABASE_URL`; authentication must come from `%APPDATA%\postgresql\pgpass.conf`. Do not set or consult any fallback database variable.
 
-```sql
-BEGIN READ ONLY;
-
-SELECT current_database() AS database_name,
-       current_user AS connected_role,
-       inet_server_addr() AS server_address,
-       pg_is_in_recovery() AS is_replica;
-
-SELECT to_regclass('public.receipt_allocations') IS NULL AS receipt_allocations_absent,
-       NOT EXISTS (
-         SELECT 1 FROM information_schema.columns
-         WHERE table_schema = 'public'
-           AND table_name IN ('invoices', 'receipts')
-           AND column_name = 'idempotency_key'
-       ) AS idempotency_columns_absent,
-       NOT EXISTS (
-         SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
-         WHERE n.nspname = 'public'
-           AND p.proname IN ('_block_receipt_allocation_update', '_block_receipt_allocation_delete',
-                             '_post_salesman_collection_commission', '_require_posting_auth')
-       ) AS migration_00009_functions_absent,
-       to_regprocedure('public.post_sale(text,text,date,jsonb,jsonb,text,text,text,text,text,text,text,uuid)') IS NOT NULL
-         AS old_post_sale_present,
-       to_regprocedure('public.post_receipt_voucher(text,date,text,text,numeric,text,text,text,uuid)') IS NOT NULL
-         AS old_post_receipt_present;
-
-WITH target(signature) AS (VALUES
-  ('public.account_ledger(text,text,date,date)'),
-  ('public.day_book(text,date,date,text)'),
-  ('public.negative_stock_report(text)'),
-  ('public.pending_stock_report(text)'),
-  ('public.report_balance_sheet(text,date)'),
-  ('public.report_cash_flow(text,date,date)'),
-  ('public.report_customer_outstanding(text)'),
-  ('public.report_expense_summary(text,date,date)'),
-  ('public.report_inventory_valuation(text)'),
-  ('public.report_profit_loss(text,date,date)'),
-  ('public.report_sales_summary(text,date,date)'),
-  ('public.report_vendor_outstanding(text)'),
-  ('public.rider_dashboard_summary(text,text)'),
-  ('public.rider_ledger(text,text,date,date)'),
-  ('public.trial_balance(text,date,date)'),
-  ('public.vendor_ledger(text,text,date,date)'),
-  ('public.assign_rider_to_order(text,text,text,uuid)'),
-  ('public.cancel_voucher(text,uuid,text)'),
-  ('public.confirm_cod_submission(text,text,numeric,text,numeric,text,uuid)'),
-  ('public.create_cod_submission(text,text,jsonb,text,numeric,text,uuid)'),
-  ('public.create_stock_movement(text,text,text,integer,text,date,uuid,numeric)'),
-  ('public.mark_order_delivered(text,text,numeric,text,text,uuid)'),
-  ('public.mark_order_returned(text,text,text,uuid)'),
-  ('public.post_advance_application(text,text,text,numeric,date,text,uuid)'),
-  ('public.post_contra_entry(text,date,text,text,numeric,text,text,uuid)'),
-  ('public.post_expense_batch(text,date,text,jsonb,text,text,uuid)'),
-  ('public.post_journal_voucher(text,date,text,jsonb,text,uuid)'),
-  ('public.post_payment_voucher(text,date,text,text,numeric,text,text,text,uuid)'),
-  ('public.post_purchase(text,text,date,text,jsonb,jsonb,numeric,numeric,text,uuid)'),
-  ('public.post_purchase_replacement(text,text,jsonb,date,text,uuid)'),
-  ('public.post_purchase_return(text,text,jsonb,text,text,date,text,uuid)'),
-  ('public.post_receipt_voucher(text,date,text,text,numeric,text,text,text,uuid)'),
-  ('public.post_sale(text,text,date,jsonb,jsonb,text,text,text,text,text,text,text,uuid)'),
-  ('public.post_sales_return(text,text,date,text,uuid)'),
-  ('public.post_vendor_advance(text,text,text,numeric,date,text,uuid)'),
-  ('public.post_vendor_payment(text,text,text,numeric,date,text,text,uuid)'),
-  ('public.post_voucher(text,text,date,text,jsonb,text,text,uuid)'),
-  ('public.recalculate_product_cost(text)'),
-  ('public.reject_cod_submission(text,text,uuid,text)'),
-  ('public.reverse_voucher_safe(text,text,uuid,text)'),
-  ('public.update_delivery_status(text,text,text,text,uuid)')
-)
-SELECT count(*) AS target_signature_count,
-       count(*) FILTER (WHERE to_regprocedure(signature) IS NULL) AS missing_signature_count
-FROM target;
-
-WITH required(table_name, column_name) AS (VALUES
-  ('profiles','display_name'), ('profiles','phone'),
-  ('purchases','id'), ('purchases','business_id'), ('purchases','vendor_id'), ('purchases','outstanding_amount'),
-  ('purchase_payments','purchase_id'), ('purchase_payments','business_id'), ('purchase_payments','vendor_id'),
-  ('purchase_payments','amount'), ('purchase_payments','payment_type'),
-  ('purchase_returns','id'), ('purchase_returns','business_id'), ('purchase_returns','purchase_id'),
-  ('purchase_returns','settlement_type'), ('purchase_returns','settlement_account_id'),
-  ('purchase_items','id'), ('purchase_items','business_id'), ('purchase_items','purchase_id'),
-  ('purchase_items','product_id'), ('purchase_items','unit_cost'), ('purchase_items','quantity'),
-  ('purchase_items','returned_quantity'),
-  ('purchase_return_items','purchase_return_id'), ('purchase_return_items','purchase_item_id'),
-  ('purchase_return_items','product_id'), ('purchase_return_items','unit_cost'),
-  ('purchase_return_items','quantity'), ('purchase_return_items','business_id'),
-  ('accounts','id'), ('accounts','business_id'), ('accounts','is_active')
-)
-SELECT r.table_name, r.column_name
-FROM required r
-LEFT JOIN information_schema.columns c
-  ON c.table_schema = 'public'
- AND c.table_name = r.table_name
- AND c.column_name = r.column_name
-WHERE c.column_name IS NULL;
-
-SELECT rolname
-FROM (VALUES ('anon'), ('authenticated'), ('service_role')) expected(rolname)
-WHERE NOT EXISTS (SELECT 1 FROM pg_roles r WHERE r.rolname = expected.rolname);
-
-SELECT t.tgname, c.relname AS table_name, p.proname AS function_name,
-       pg_get_triggerdef(t.oid) AS definition
-FROM pg_trigger t
-JOIN pg_class c ON c.oid = t.tgrelid
-JOIN pg_proc p ON p.oid = t.tgfoid
-WHERE NOT t.tgisinternal
-  AND t.tgname IN ('contain_purchase_payment_tenant', 'contain_purchase_return_header',
-                   'contain_purchase_return_item');
-
-ROLLBACK;
-```
-
-If the containment trigger query returns rows, each must be the expected enabled `BEFORE INSERT FOR EACH ROW` trigger on, respectively, `purchase_payments`, `purchase_returns`, and `purchase_return_items`. The migration independently enforces the same condition and aborts on a name collision.
-
-## Backup
-
-Create and validate a schema-only custom-format backup in the approved path. Record the command, destination, SHA-256, tool version, start/end time, and `pg_restore --list` result in the incident log. Take or confirm a full-data backup/provider recovery point as well. Do not continue if either the approved recovery control or its owner is unavailable.
-
-## Apply
-
-From the repository root, execute exactly:
+Run this entire block before the first database command. It accepts exactly five unquoted `key=value` tokens and no others. The full DSN is never printed.
 
 ```powershell
-psql --dbname="$env:KHATAPRO_APPROVED_DATABASE_URL" -X -w -v ON_ERROR_STOP=1 --file="supabase/migrations/00008k_p0_security_containment.sql"
+Set-StrictMode -Version Latest
+$ErrorActionPreference = "Stop"
+
+$ApprovedDsn = [Environment]::GetEnvironmentVariable(
+  "KHATAPRO_APPROVED_DATABASE_URL",
+  [EnvironmentVariableTarget]::Process
+)
+if ([string]::IsNullOrWhiteSpace($ApprovedDsn)) {
+  throw "KHATAPRO_APPROVED_DATABASE_URL is missing or empty in this process."
+}
+if ($ApprovedDsn -match "://") { throw "URI DSNs are prohibited." }
+if ($ApprovedDsn -match '[''"]') { throw "Quoted DSN values are prohibited." }
+if ($ApprovedDsn -match "(?i)(^|\s)password=") { throw "Embedded passwords are prohibited." }
+if ($ApprovedDsn -match "(?i)(localhost|127\.0\.0\.1|::1)") { throw "Loopback routing is prohibited." }
+
+$Expected = [ordered]@{
+  host    = "aws-1-ap-south-1.pooler.supabase.com"
+  port    = "5432"
+  dbname  = "postgres"
+  user    = "postgres.ebcebxwpddltiwrqybqc"
+  sslmode = "require"
+}
+$Tokens = $ApprovedDsn.Trim() -split "\s+"
+if ($Tokens.Count -ne $Expected.Count) { throw "The DSN must contain exactly five tokens." }
+$Parsed = @{}
+foreach ($Token in $Tokens) {
+  if ($Token -notmatch "^([a-z][a-z0-9_]*)=([^\s=]+)$") { throw "Invalid keyword DSN token." }
+  $Key = $Matches[1]
+  $Value = $Matches[2]
+  if (-not $Expected.Contains($Key)) { throw "Unsupported DSN key: $Key" }
+  if ($Parsed.ContainsKey($Key)) { throw "Duplicate DSN key: $Key" }
+  $Parsed[$Key] = $Value
+}
+foreach ($Key in $Expected.Keys) {
+  if (-not $Parsed.ContainsKey($Key)) { throw "Missing DSN key: $Key" }
+  if ($Parsed[$Key] -cne $Expected[$Key]) { throw "Approved DSN identity mismatch for: $Key" }
+}
+
+$Pgpass = Join-Path $env:APPDATA "postgresql\pgpass.conf"
+if (-not (Test-Path -LiteralPath $Pgpass -PathType Leaf)) { throw "pgpass.conf is absent." }
+$env:PGPASSFILE = $Pgpass
+$ValidatedProductionDsn = $ApprovedDsn.Trim()
 ```
 
-The SQL is transactional, uses a 5-second lock timeout and 30-second statement timeout, and has no `CASCADE`. Any error must leave the deployment unapplied. Do not rerun until the incident log identifies whether the failure was a transient lock or a schema/preflight mismatch.
+Only after that block succeeds, run and assert the database identity. `-w` forbids a password prompt.
 
-## Post-deployment checks
+```powershell
+$Identity = (& psql -w -X --dbname=$ValidatedProductionDsn -At -F "|" -v ON_ERROR_STOP=1 `
+  -c "SELECT current_database(), current_user, coalesce(inet_server_addr()::text,'');").Trim()
+if ($LASTEXITCODE -ne 0) { throw "Production identity query failed." }
+$IdentityParts = $Identity -split "\|", 3
+if ($IdentityParts.Count -ne 3) { throw "Unexpected identity-query output." }
+if ($IdentityParts[0] -cne "postgres") { throw "Wrong production database." }
+if ($IdentityParts[1] -cne "postgres") { throw "Unexpected connected database role." }
+if ([string]::IsNullOrWhiteSpace($IdentityParts[2]) -or
+    $IdentityParts[2] -in @("127.0.0.1", "::1", "0:0:0:0:0:0:0:1")) {
+  throw "Production server address is empty or loopback."
+}
+```
 
-Run these checks immediately. The object-count query is an inventory signal; compare tables/policies with the pre-deployment capture and expect exactly three additional functions and three additional triggers.
+Every database-connected production command below uses only `$ValidatedProductionDsn`. Do not replace it with an environment-variable reference, empty value, default database, or literal DSN.
 
-```sql
-BEGIN READ ONLY;
+## 2. Reviewed artifact and checksum gate
 
-SELECT
-  (SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-   WHERE n.nspname = 'public' AND c.relkind IN ('r','p')) AS public_tables,
-  (SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
-   WHERE n.nspname = 'public') AS public_functions,
-  (SELECT count(*) FROM pg_trigger t JOIN pg_class c ON c.oid = t.tgrelid
-   JOIN pg_namespace n ON n.oid = c.relnamespace
-   WHERE n.nspname = 'public' AND NOT t.tgisinternal) AS public_triggers,
-  (SELECT count(*) FROM pg_policy p JOIN pg_class c ON c.oid = p.polrelid
-   JOIN pg_namespace n ON n.oid = c.relnamespace
-   WHERE n.nspname = 'public') AS public_policies;
+Approved SHA-256 values:
 
-WITH classified(kind, signature) AS (VALUES
-  ('report','public.account_ledger(text,text,date,date)'),
-  ('report','public.day_book(text,date,date,text)'),
-  ('report','public.negative_stock_report(text)'),
-  ('report','public.pending_stock_report(text)'),
-  ('report','public.report_balance_sheet(text,date)'),
-  ('report','public.report_cash_flow(text,date,date)'),
-  ('report','public.report_customer_outstanding(text)'),
-  ('report','public.report_expense_summary(text,date,date)'),
-  ('report','public.report_inventory_valuation(text)'),
-  ('report','public.report_profit_loss(text,date,date)'),
-  ('report','public.report_sales_summary(text,date,date)'),
-  ('report','public.report_vendor_outstanding(text)'),
-  ('report','public.rider_dashboard_summary(text,text)'),
-  ('report','public.rider_ledger(text,text,date,date)'),
-  ('report','public.trial_balance(text,date,date)'),
-  ('report','public.vendor_ledger(text,text,date,date)'),
-  ('mutation','public.assign_rider_to_order(text,text,text,uuid)'),
-  ('mutation','public.cancel_voucher(text,uuid,text)'),
-  ('mutation','public.confirm_cod_submission(text,text,numeric,text,numeric,text,uuid)'),
-  ('mutation','public.create_cod_submission(text,text,jsonb,text,numeric,text,uuid)'),
-  ('mutation','public.create_stock_movement(text,text,text,integer,text,date,uuid,numeric)'),
-  ('mutation','public.mark_order_delivered(text,text,numeric,text,text,uuid)'),
-  ('mutation','public.mark_order_returned(text,text,text,uuid)'),
-  ('mutation','public.post_advance_application(text,text,text,numeric,date,text,uuid)'),
-  ('mutation','public.post_contra_entry(text,date,text,text,numeric,text,text,uuid)'),
-  ('mutation','public.post_expense_batch(text,date,text,jsonb,text,text,uuid)'),
-  ('mutation','public.post_journal_voucher(text,date,text,jsonb,text,uuid)'),
-  ('mutation','public.post_payment_voucher(text,date,text,text,numeric,text,text,text,uuid)'),
-  ('mutation','public.post_purchase(text,text,date,text,jsonb,jsonb,numeric,numeric,text,uuid)'),
-  ('mutation','public.post_purchase_replacement(text,text,jsonb,date,text,uuid)'),
-  ('mutation','public.post_purchase_return(text,text,jsonb,text,text,date,text,uuid)'),
-  ('mutation','public.post_receipt_voucher(text,date,text,text,numeric,text,text,text,uuid)'),
-  ('mutation','public.post_sale(text,text,date,jsonb,jsonb,text,text,text,text,text,text,text,uuid)'),
-  ('mutation','public.post_sales_return(text,text,date,text,uuid)'),
-  ('mutation','public.post_vendor_advance(text,text,text,numeric,date,text,uuid)'),
-  ('mutation','public.post_vendor_payment(text,text,text,numeric,date,text,text,uuid)'),
-  ('mutation','public.post_voucher(text,text,date,text,jsonb,text,text,uuid)'),
-  ('mutation','public.recalculate_product_cost(text)'),
-  ('mutation','public.reject_cod_submission(text,text,uuid,text)'),
-  ('mutation','public.reverse_voucher_safe(text,text,uuid,text)'),
-  ('mutation','public.update_delivery_status(text,text,text,text,uuid)')
+| Artifact | SHA-256 |
+|---|---|
+| `supabase/migrations/00008k_p0_security_containment.sql` | `f35f9a7c214c6f3637d7b6dc3f3797d29ddacd3810189a6e20b52aaec56c6b11` |
+| `supabase/rollback/00008k_p0_security_containment_rollback.sql` | `437c278bac1dd6a4c3e4f897a4a4d81326b651dec9a7e26f2f9000fa6a9ddc18` |
+
+From the reviewed repository root, run:
+
+```powershell
+$MigrationPath = (Resolve-Path -LiteralPath "supabase/migrations/00008k_p0_security_containment.sql").Path
+$RollbackPath = (Resolve-Path -LiteralPath "supabase/rollback/00008k_p0_security_containment_rollback.sql").Path
+$ExpectedMigrationHash = "f35f9a7c214c6f3637d7b6dc3f3797d29ddacd3810189a6e20b52aaec56c6b11"
+$ExpectedRollbackHash = "437c278bac1dd6a4c3e4f897a4a4d81326b651dec9a7e26f2f9000fa6a9ddc18"
+
+function Assert-ArtifactHash([string]$Path, [string]$ExpectedHash) {
+  if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { throw "SQL artifact is absent: $Path" }
+  $Actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $Path).Hash.ToLowerInvariant()
+  if ($Actual -cne $ExpectedHash) { throw "SQL artifact checksum mismatch: $Path" }
+}
+
+Assert-ArtifactHash $MigrationPath $ExpectedMigrationHash
+Assert-ArtifactHash $RollbackPath $ExpectedRollbackHash
+```
+
+Record the reviewed commit and both verified hashes. Never run a differing migration or rollback file.
+
+## 3. Backup and recovery gate
+
+Set `KHATAPRO_APPROVED_BACKUP_DIR` to an existing, access-controlled absolute directory outside the repository. This block creates a public-schema custom backup and a full custom-format backup, verifies nonzero size, computes SHA-256, and proves both archives can be listed.
+
+```powershell
+$BackupRoot = [Environment]::GetEnvironmentVariable(
+  "KHATAPRO_APPROVED_BACKUP_DIR",
+  [EnvironmentVariableTarget]::Process
 )
-SELECT role_name, kind, count(*) FILTER (WHERE has_function_privilege(role_name, signature, 'EXECUTE')) AS executable
-FROM classified
-CROSS JOIN (VALUES ('anon'), ('authenticated'), ('service_role')) roles(role_name)
-GROUP BY role_name, kind
-ORDER BY role_name, kind;
+if ([string]::IsNullOrWhiteSpace($BackupRoot) -or -not [IO.Path]::IsPathRooted($BackupRoot)) {
+  throw "Approved backup directory must be a nonempty absolute path."
+}
+if (-not (Test-Path -LiteralPath $BackupRoot -PathType Container)) {
+  throw "Approved backup directory does not exist."
+}
+$Stamp = Get-Date -Format "yyyyMMdd-HHmmss"
+$SchemaDump = Join-Path $BackupRoot "khatapro-p0-$Stamp-public-schema.dump"
+$FullDump = Join-Path $BackupRoot "khatapro-p0-$Stamp-full.dump"
+
+& pg_dump -w --dbname=$ValidatedProductionDsn --format=custom --schema-only --schema=public `
+  --file=$SchemaDump
+if ($LASTEXITCODE -ne 0) { throw "Schema backup failed." }
+
+& pg_dump -w --dbname=$ValidatedProductionDsn --format=custom --file=$FullDump
+if ($LASTEXITCODE -ne 0) { throw "Full backup failed." }
+
+foreach ($Dump in @($SchemaDump, $FullDump)) {
+  $Item = Get-Item -LiteralPath $Dump
+  if ($Item.Length -le 0) { throw "Backup is empty: $Dump" }
+  $Hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $Dump).Hash.ToLowerInvariant()
+  $null = & pg_restore --list $Dump
+  if ($LASTEXITCODE -ne 0) { throw "pg_restore archive listing failed: $Dump" }
+  [pscustomobject]@{ Path = $Dump; Bytes = $Item.Length; Sha256 = $Hash }
+}
+```
+
+The schema archive includes public functions, ACLs, policies, triggers, and grants. Record paths, nonzero byte sizes, hashes, `pg_dump`/server versions, start/end times, exit codes, and successful `pg_restore --list` results.
+
+Before approval, record either a confirmed Supabase PITR/provider recovery checkpoint with its timestamp and owner, or the verified full dump above. If neither exists, stop.
+
+### Local restore rehearsal
+
+Rehearse only in an empty disposable local database named `khatapro_p0_restore_rehearsal`. In a separate process, obtain a password-free keyword DSN from the local DBA, parse it with the same duplicate/unsupported/password/URI rules, and require `host=localhost`, `dbname=khatapro_p0_restore_rehearsal`, and `user=postgres`. Store it only in `$ValidatedLocalRestoreDsn`; never use `$ValidatedProductionDsn` for a rehearsal restore.
+
+```powershell
+$LocalIdentity = (& psql -w -X --dbname=$ValidatedLocalRestoreDsn -At -F "|" -v ON_ERROR_STOP=1 `
+  -c "SELECT current_database(), current_user, inet_server_addr()::text;").Trim()
+if ($LASTEXITCODE -ne 0 -or $LocalIdentity -notlike "khatapro_p0_restore_rehearsal|postgres|*") {
+  throw "Disposable restore target identity failed."
+}
+& pg_restore -w --exit-on-error --no-owner --dbname=$ValidatedLocalRestoreDsn $FullDump
+if ($LASTEXITCODE -ne 0) { throw "Disposable full restore rehearsal failed." }
+```
+
+After restore, run the object-count, signature, policy, and row-count checks on the local rehearsal database, record results, then have the local DBA destroy that disposable database. A rehearsal must never target production.
+
+## 4. Maintenance, active-session, and lock gate
+
+The incident commander must place the application and workers in maintenance mode and stop new posting traffic. Require an explicit process confirmation:
+
+```powershell
+if ([Environment]::GetEnvironmentVariable(
+      "KHATAPRO_MAINTENANCE_CONFIRMED",
+      [EnvironmentVariableTarget]::Process
+    ) -cne "YES-P0-SECURITY-CONTAINMENT") {
+  throw "Application maintenance mode is not confirmed."
+}
+```
+
+Capture these read-only inventories immediately before deployment:
+
+```powershell
+$SessionInventorySql = @'
+SELECT pid, usename, application_name, client_addr, state,
+       now()-xact_start AS transaction_age, wait_event_type, wait_event,
+       left(query,180) AS query_excerpt
+FROM pg_stat_activity
+WHERE pid <> pg_backend_pid() AND xact_start IS NOT NULL
+ORDER BY xact_start;
+
+SELECT pid, usename, application_name, state, wait_event_type, wait_event,
+       left(query,180) AS query_excerpt
+FROM pg_stat_activity
+WHERE pid <> pg_backend_pid()
+  AND query ~* '\m(profiles|purchases|purchase_payments|purchase_returns|purchase_return_items)\M'
+ORDER BY pid;
+
+SELECT blocked.pid AS blocked_pid, blocker.pid AS blocker_pid,
+       blocked.wait_event_type, blocked.wait_event,
+       left(blocked.query,160) AS blocked_query,
+       left(blocker.query,160) AS blocker_query
+FROM pg_stat_activity blocked
+CROSS JOIN LATERAL unnest(pg_blocking_pids(blocked.pid)) blocker_pid
+JOIN pg_stat_activity blocker ON blocker.pid=blocker_pid
+ORDER BY blocked.pid, blocker.pid;
+
+SELECT c.relname, l.locktype, l.mode, l.granted, l.pid,
+       a.usename, a.state, a.wait_event_type, a.wait_event
+FROM pg_locks l
+JOIN pg_class c ON c.oid=l.relation
+LEFT JOIN pg_stat_activity a ON a.pid=l.pid
+WHERE c.relnamespace='public'::regnamespace
+  AND c.relname IN ('profiles','purchases','purchase_payments','purchase_returns','purchase_return_items')
+ORDER BY c.relname,l.granted,l.mode,l.pid;
+'@
+$SessionInventorySql | & psql -w -X --dbname=$ValidatedProductionDsn -v ON_ERROR_STOP=1
+if ($LASTEXITCODE -ne 0) { throw "Session/lock inventory failed." }
+
+$StopCountsSql = @'
+SELECT
+  (SELECT count(*) FROM pg_stat_activity
+   WHERE pid<>pg_backend_pid() AND xact_start IS NOT NULL
+     AND now()-xact_start > interval '60 seconds') AS long_transactions,
+  (SELECT count(*) FROM pg_stat_activity
+   WHERE pid<>pg_backend_pid() AND state='active'
+     AND query ~* '\m(profiles|purchases|purchase_payments|purchase_returns|purchase_return_items)\M'
+     AND query ~* '(insert|update|delete|merge|post_|record_|create_stock_movement)') AS active_relevant_writes,
+  (SELECT count(*) FROM pg_stat_activity
+   WHERE pid<>pg_backend_pid() AND cardinality(pg_blocking_pids(pid))>0) AS blocked_sessions,
+  (SELECT count(*) FROM pg_locks l JOIN pg_class c ON c.oid=l.relation
+   WHERE NOT l.granted AND c.relnamespace='public'::regnamespace
+     AND c.relname IN ('profiles','purchases','purchase_payments','purchase_returns','purchase_return_items'))
+     AS ungranted_target_locks;
+'@
+$StopCounts = ($StopCountsSql | & psql -w -X --dbname=$ValidatedProductionDsn -At -F "|" -v ON_ERROR_STOP=1).Trim()
+if ($LASTEXITCODE -ne 0) { throw "Session stop-count query failed." }
+if ($StopCounts -cne "0|0|0|0") { throw "Unsafe active-session/lock state: $StopCounts" }
+```
+
+The documented threshold is 60 seconds. Any unexpected active posting transaction, blocked session, ungranted relevant lock, nonzero stop tuple, or inability to confirm maintenance mode is a hard stop. Do not terminate sessions without separate incident-commander authorization.
+
+## 5. Apply
+
+Recheck the exact migration hash immediately before execution, then run the file directly. Do not insert a migration-history row.
+
+```powershell
+Assert-ArtifactHash $MigrationPath $ExpectedMigrationHash
+& psql -w -X --dbname=$ValidatedProductionDsn -v ON_ERROR_STOP=1 --file=$MigrationPath
+if ($LASTEXITCODE -ne 0) { throw "P0 containment migration failed; keep maintenance mode and investigate." }
+```
+
+The file is transactional, has 5-second lock and 30-second statement timeouts, and has no `CASCADE`. Its preflight accepts only the exact baseline or this file's exact contained state. On failure, do not retry until the error is classified as transient locking or reviewed schema drift.
+
+## 6. Immediate database verification
+
+Run the following read-only checks and attach their output to the incident record:
+
+```powershell
+$PostflightSql = @'
+BEGIN READ ONLY;
+SELECT
+ (SELECT count(*) FROM pg_class WHERE relnamespace='public'::regnamespace AND relkind IN ('r','p')) AS tables,
+ (SELECT count(*) FROM pg_proc WHERE pronamespace='public'::regnamespace) AS functions,
+ (SELECT count(*) FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid
+  WHERE c.relnamespace='public'::regnamespace AND NOT t.tgisinternal) AS triggers,
+ (SELECT count(*) FROM pg_policy p JOIN pg_class c ON c.oid=p.polrelid
+  WHERE c.relnamespace='public'::regnamespace) AS policies;
+
+WITH classified(kind,signature) AS (VALUES
+ ('report','public.account_ledger(text,text,date,date)'),
+ ('report','public.day_book(text,date,date,text)'),
+ ('report','public.negative_stock_report(text)'),
+ ('report','public.pending_stock_report(text)'),
+ ('report','public.report_balance_sheet(text,date)'),
+ ('report','public.report_cash_flow(text,date,date)'),
+ ('report','public.report_customer_outstanding(text)'),
+ ('report','public.report_expense_summary(text,date,date)'),
+ ('report','public.report_inventory_valuation(text)'),
+ ('report','public.report_profit_loss(text,date,date)'),
+ ('report','public.report_sales_summary(text,date,date)'),
+ ('report','public.report_vendor_outstanding(text)'),
+ ('report','public.rider_dashboard_summary(text,text)'),
+ ('report','public.rider_ledger(text,text,date,date)'),
+ ('report','public.trial_balance(text,date,date)'),
+ ('report','public.vendor_ledger(text,text,date,date)'),
+ ('mutation','public.assign_rider_to_order(text,text,text,uuid)'),
+ ('mutation','public.cancel_voucher(text,uuid,text)'),
+ ('mutation','public.confirm_cod_submission(text,text,numeric,text,numeric,text,uuid)'),
+ ('mutation','public.create_cod_submission(text,text,jsonb,text,numeric,text,uuid)'),
+ ('mutation','public.create_stock_movement(text,text,text,integer,text,date,uuid,numeric)'),
+ ('mutation','public.mark_order_delivered(text,text,numeric,text,text,uuid)'),
+ ('mutation','public.mark_order_returned(text,text,text,uuid)'),
+ ('mutation','public.post_advance_application(text,text,text,numeric,date,text,uuid)'),
+ ('mutation','public.post_contra_entry(text,date,text,text,numeric,text,text,uuid)'),
+ ('mutation','public.post_expense_batch(text,date,text,jsonb,text,text,uuid)'),
+ ('mutation','public.post_journal_voucher(text,date,text,jsonb,text,uuid)'),
+ ('mutation','public.post_payment_voucher(text,date,text,text,numeric,text,text,text,uuid)'),
+ ('mutation','public.post_purchase(text,text,date,text,jsonb,jsonb,numeric,numeric,text,uuid)'),
+ ('mutation','public.post_purchase_replacement(text,text,jsonb,date,text,uuid)'),
+ ('mutation','public.post_purchase_return(text,text,jsonb,text,text,date,text,uuid)'),
+ ('mutation','public.post_receipt_voucher(text,date,text,text,numeric,text,text,text,uuid)'),
+ ('mutation','public.post_sale(text,text,date,jsonb,jsonb,text,text,text,text,text,text,text,uuid)'),
+ ('mutation','public.post_sales_return(text,text,date,text,uuid)'),
+ ('mutation','public.post_vendor_advance(text,text,text,numeric,date,text,uuid)'),
+ ('mutation','public.post_vendor_payment(text,text,text,numeric,date,text,text,uuid)'),
+ ('mutation','public.post_voucher(text,text,date,text,jsonb,text,text,uuid)'),
+ ('mutation','public.recalculate_product_cost(text)'),
+ ('mutation','public.reject_cod_submission(text,text,uuid,text)'),
+ ('mutation','public.reverse_voucher_safe(text,text,uuid,text)'),
+ ('mutation','public.update_delivery_status(text,text,text,text,uuid)'))
+SELECT role_name,kind,count(*) FILTER(WHERE has_function_privilege(role_name,signature,'EXECUTE')) AS executable
+FROM classified CROSS JOIN (VALUES('anon'),('authenticated'),('service_role')) r(role_name)
+GROUP BY role_name,kind ORDER BY role_name,kind;
 
 SELECT count(*) AS public_executable_security_definer
 FROM pg_proc p
-JOIN pg_namespace n ON n.oid = p.pronamespace
-WHERE n.nspname = 'public'
-  AND p.prosecdef
-  AND has_function_privilege('public', p.oid, 'EXECUTE');
+WHERE p.pronamespace='public'::regnamespace AND p.prosecdef
+  AND has_function_privilege('public',p.oid,'EXECUTE');
 
-SELECT has_table_privilege('anon', 'public.profiles', 'UPDATE') AS anon_table_update,
-       has_table_privilege('authenticated', 'public.profiles', 'UPDATE') AS authenticated_table_update,
-       has_column_privilege('authenticated', 'public.profiles', 'display_name', 'UPDATE') AS authenticated_display_update,
-       has_column_privilege('authenticated', 'public.profiles', 'phone', 'UPDATE') AS authenticated_phone_update,
-       has_column_privilege('authenticated', 'public.profiles', 'role_id', 'UPDATE') AS authenticated_role_update,
-       has_table_privilege('service_role', 'public.profiles', 'UPDATE') AS service_role_table_update;
+SELECT has_table_privilege('anon','public.profiles','UPDATE') AS anon_table_update,
+ has_table_privilege('authenticated','public.profiles','UPDATE') AS authenticated_table_update,
+ has_column_privilege('authenticated','public.profiles','display_name','UPDATE') AS display_update,
+ has_column_privilege('authenticated','public.profiles','phone','UPDATE') AS phone_update,
+ has_column_privilege('authenticated','public.profiles','role_id','UPDATE') AS role_update,
+ has_table_privilege('service_role','public.profiles','UPDATE') AS service_admin;
 
-SELECT p.proname,
-       has_function_privilege('public', p.oid, 'EXECUTE') AS public_execute,
-       has_function_privilege('anon', p.oid, 'EXECUTE') AS anon_execute,
-       has_function_privilege('authenticated', p.oid, 'EXECUTE') AS authenticated_execute,
-       has_function_privilege('service_role', p.oid, 'EXECUTE') AS service_role_execute
-FROM pg_proc p
-JOIN pg_namespace n ON n.oid = p.pronamespace
-WHERE n.nspname = 'public'
-  AND p.proname IN ('_contain_purchase_payment_tenant', '_contain_purchase_return_header',
-                    '_contain_purchase_return_item')
+SELECT p.proname,p.proowner::regrole,p.prosecdef,p.proconfig,p.proacl,md5(p.prosrc)
+FROM pg_proc p WHERE p.pronamespace='public'::regnamespace
+ AND p.proname IN ('_contain_purchase_payment_tenant','_contain_purchase_return_header','_contain_purchase_return_item')
 ORDER BY p.proname;
-
-SELECT to_regclass('public.receipt_allocations') IS NULL AS receipt_allocations_absent,
-       to_regprocedure('public._require_posting_auth(text,text,uuid)') IS NULL AS posting_auth_absent,
-       to_regprocedure('public.post_sale(text,text,date,jsonb,jsonb,text,text,text,text,text,text,text,uuid)') IS NOT NULL
-         AS old_post_sale_present,
-       to_regprocedure('public.post_receipt_voucher(text,date,text,text,numeric,text,text,text,uuid)') IS NOT NULL
-         AS old_post_receipt_present;
-
 ROLLBACK;
+'@
+$PostflightSql | & psql -w -X --dbname=$ValidatedProductionDsn -v ON_ERROR_STOP=1
+if ($LASTEXITCODE -ne 0) { throw "Post-deployment database verification failed." }
 ```
 
-Expected privilege transitions:
+Expected: `39/56/24/54`; PUBLIC-executable security-definer functions `11`; anon mutation/report `0/0`; authenticated mutation/report `0/0`; service role `25/16`; profile table UPDATE false/false, display/phone true/true, protected role false, service administration true. The three helpers must be owned by `postgres`, be SECURITY DEFINER, use `pg_catalog, public, pg_temp`, have no direct caller EXECUTE, and retain their reviewed body hashes.
 
-| Control | Before | After |
-|---|---:|---:|
-| PUBLIC-executable SECURITY DEFINER functions | 52 | 11 |
-| `anon` mutation RPCs | 25 | 0 |
-| `anon` report RPCs | 16 | 0 |
-| `authenticated` mutation/report RPCs | 25/16 | 0/0 |
-| `service_role` mutation/report RPCs | 25/16 | 25/16 |
+## 7. Controlled application smoke matrix
 
-The three containment trigger functions must report `false` for direct execution by PUBLIC, `anon`, `authenticated`, and `service_role`. The old 13-argument sale and 9-argument receipt signatures must remain present; all migration 00009 markers must remain absent.
+Use only the approved test business and approved reversible test records. Never use real customer/vendor records without formal operator approval. Capture the application action, RPC/database identifiers, balanced voucher evidence, relevant ledger/stock result, timestamps, and cleanup outcome. Any unexpected error, tenant mismatch, imbalance, privilege leak, duplicate, unreversible fixture, or protected-profile edit is a stop/rollback candidate.
 
-## Application smoke tests
+| Workflow | Expected outcome | Evidence to capture | Cleanup/reversal | Stop/rollback condition |
+|---|---|---|---|---|
+| Counter/online sale | Normal posting succeeds through the server path; totals, stock and voucher balance agree. | Sale/invoice ID, RPC success, voucher debit=credit, stock movement IDs. | Approved sale-return/cancel procedure. | Posting denial, imbalance, wrong tenant, or stock mismatch. |
+| Receipt voucher | Receipt posts and customer allocation/ledger result remains correct. | Receipt/voucher IDs, balanced lines, customer ledger delta. | Approved voucher reversal. | RPC denial, allocation error, imbalance, or duplicate. |
+| Normal purchase | Purchase with valid initial `purchase_payment` rows succeeds. | Purchase/payment/voucher IDs, paid/outstanding totals, stock-in. | Approved purchase reversal/return protocol. | Initial payments rejected, overpay accepted, imbalance, or stock mismatch. |
+| Vendor advance | Valid active same-business vendor/account with NULL purchase succeeds. | Advance/payment/voucher IDs and vendor ledger delta. | Approved reversal/application cleanup. | NULL path rejected when valid, linked advance accepted, or cross-tenant account accepted. |
+| Vendor later payment | Valid linked amount within locked outstanding succeeds. | Payment/voucher IDs and before/after outstanding. | Approved voucher/payment reversal. | NULL purchase accepted, overpay accepted, or tenant/vendor mismatch accepted. |
+| Valid vendor-refund purchase return | Source item, source price/product and active same-business refund account succeed. | Return/item/voucher/stock IDs and returned quantity. | Approved return reversal protocol. | Forged source, bad account, excess quantity, or item drift accepted. |
+| Reduce-payable return | NULL settlement account succeeds and payable is reduced. | Return/voucher IDs and vendor payable ledger delta. | Approved return reversal protocol. | Supplied unrelated account accepted or payable result wrong. |
+| Purchase replacement | Existing replacement path completes without guard regression. | Replacement/voucher/stock IDs and original/replacement linkage. | Approved replacement reversal. | Posting denial, tenant mismatch, imbalance, or stock mismatch. |
+| General voucher | Balanced approved voucher posts and reverses. | Voucher ID, line totals, ledger delta. | `reverse_voucher_safe`/approved reversal. | Mutation denial, imbalance, or reversal failure. |
+| Delivery assignment/status | Rider assignment and controlled status transition succeed. | Order/rider IDs, before/after status and audit record. | Restore through approved status workflow. | RPC denial, illegal transition, or cross-business change. |
+| COD collection/allocation/settlement | Submission, allocation and settlement preserve net ledger balances. | Submission/item/voucher IDs and rider/COD ledger totals. | Approved rejection/reversal protocol. | Allocation mismatch, imbalance, duplicate, or tenant leak. |
+| Profit & Loss | Report opens through server role and totals match the controlled fixture. | Parameters, response success, expected totals. | None; read-only. | Access denial, anonymous access, or wrong totals. |
+| Balance Sheet | Report opens and balances. | As-of date, response success, assets=liabilities+equity evidence. | None; read-only. | Access denial, anonymous access, or imbalance. |
+| Trial Balance and ledgers | Trial balance and representative account/vendor/rider ledgers open and reconcile. | Parameters, response success, debit/credit and ledger totals. | None; read-only. | Access denial, anonymous access, or reconciliation mismatch. |
+| Profile display name/phone | Authenticated user can update only own approved display fields. | Before/after permitted columns and unchanged protected columns. | Restore prior display values. | Permitted fields denied or protected field changes. |
+| Owner/admin profile administration | Server-side owner/admin workflow can update role/business/active state as approved. | Admin action, audit evidence, protected before/after values. | Restore approved test profile state. | Service administration denied, unaudited change, or direct authenticated bypass. |
 
-- Confirm anonymous and normal authenticated clients are denied `report_profit_loss`, `report_balance_sheet`, and representative mutation RPCs.
-- Through the application server, open representative profit/loss and balance-sheet reports.
-- Post and reverse a controlled voucher according to the production test protocol.
-- Post a controlled sale and receipt without changing the current NextAuth + service-role caller path.
-- Post a valid same-business vendor payment within outstanding; verify wrong-vendor, cross-business, and overpayment attempts are rejected transactionally.
-- In two controlled sessions, contend on the same purchase and confirm the later-payment check serializes on the locked purchase and cannot overpay.
-- Post a valid purchase return using a real source item and valid settlement account.
-- Confirm forged/nonexistent/duplicate source items, product/cost substitution, excessive quantity, cross-business source, and cross-business settlement account are rejected.
-- Confirm authenticated profile editing permits only `display_name` and `phone`; protected columns remain denied while service-side administration still works.
-- Confirm `current_profile()`, `current_business_id()`, `has_permission(text)`, and `is_owner()` remain callable and business-scoped RLS reads still behave normally.
-- Confirm no UI or responsive behavior changed; this package contains only SQL and documentation.
+Keep maintenance mode active through all mandatory smoke tests. Clean up through normal application reversal workflows; do not directly repair the four historical over-return groups, the 27 purchase outstanding inconsistencies, COD mismatches, or any other historical data in this deployment.
 
-Use only approved, reversible production smoke fixtures and clean them up through normal application workflows. Do not repair the four historical over-return groups, 27 purchase outstanding inconsistencies, COD mismatches, or any other historical data during this deployment.
+## 8. Rollback decision and command
 
-## Rollback decision and command
+Rollback requires incident-commander approval when exact postflight counts differ, required service-role workflows fail, profile administration is blocked, a guard rejects a confirmed legitimate workflow, or lock/latency impact cannot be mitigated. Rollback reopens the captured pre-containment RPC/profile privileges; keep traffic stopped until a corrected forward containment is ready.
 
-Rollback only with incident-commander approval when post-deployment privilege counts differ, required `service_role` paths fail, profile administration is blocked, a guard rejects a confirmed valid production workflow, or lock/latency impact cannot be safely mitigated. Do not roll back merely because known historical reconciliation candidates remain. Rollback deliberately reopens the captured pre-containment PUBLIC/role privileges, so restrict traffic while it is active and prepare a corrected forward containment before reopening.
-
-Execute exactly from the repository root:
+Before rollback, reconfirm production identity, maintenance mode, the `0|0|0|0` session/lock stop tuple, and the rollback checksum. The rollback SQL independently refuses any contained-state drift.
 
 ```powershell
-psql --dbname="$env:KHATAPRO_APPROVED_DATABASE_URL" -X -w -v ON_ERROR_STOP=1 --file="supabase/rollback/00008k_p0_security_containment_rollback.sql"
+Assert-ArtifactHash $RollbackPath $ExpectedRollbackHash
+& psql -w -X --dbname=$ValidatedProductionDsn -v ON_ERROR_STOP=1 --file=$RollbackPath
+if ($LASTEXITCODE -ne 0) { throw "P0 rollback failed or refused drift; keep maintenance mode and escalate." }
 ```
 
-After rollback, repeat the read-only inventory. Expect the three containment functions/triggers to be absent, profile column ACL residue to be absent, profile table UPDATE restored to `anon`/`authenticated`, and the captured privilege baseline restored. Preserve logs and take no further action until the incident commander decides whether to reapply or prepare a corrected migration.
+After rollback, expect `39/53/21/54`, all three containment pairs absent, zero profile column ACLs, the captured profile table ACL restored, all 41 target raw RPC ACLs restored exactly, policies/definitions/data unchanged, and migration `00009` still absent. Repeat the read-only inventory and preserve all logs.
 
-## Remaining PUBLIC SECURITY DEFINER helpers
+## 9. Remaining risk and incident record
 
-These eleven functions are intentionally unchanged in this emergency batch. Removing the four identity helpers without a dedicated RLS regression plan could break policy evaluation; the other helpers need caller mapping and authorization design before revocation.
+Eleven pre-existing PUBLIC-executable SECURITY DEFINER helpers remain intentionally unchanged: four RLS identity helpers (`current_profile`, `current_business_id`, `has_permission`, `is_owner`), six numbering helpers, and `no_owner_exists`. They require a separate authorization/RLS/bootstrap compatibility project. This emergency change also does not reconcile historical financial inconsistencies.
 
-| Function/signature | Why it remains PUBLIC now | RLS dependency | Numbering/bootstrap | Residual risk | Recommended future batch |
-|---|---|---|---|---|---|
-| `current_profile()` | Preserves the active-profile authentication contract. | Yes; identity/helper chain. | No. | SECURITY DEFINER identity lookup remains broadly callable, though it filters `auth.uid()` and `is_active`. | Identity/authorization and RLS contract hardening. |
-| `current_business_id()` | Business-scoped policies directly depend on it. | Yes; direct policy dependency. | No. | Broad execution exposes the caller's resolved business context. | Identity/authorization and RLS contract hardening. |
-| `has_permission(text)` | Permission-based policies require it. | Yes; direct policy dependency. | No. | Permission probing remains possible for the caller's JWT context. | Identity/authorization and RLS contract hardening. |
-| `is_owner()` | Owner/admin policies require it. | Yes; direct policy dependency. | No. | Owner-state probing remains possible for the caller's JWT context. | Identity/authorization and RLS contract hardening. |
-| `next_cod_submission_no(text)` | Caller mapping was outside the 41-RPC emergency classification. | No. | Numbering. | Caller-supplied business ID and concurrency/number disclosure surface. | Authorized, collision-safe numbering APIs. |
-| `next_document_no(text,text,text,text)` | Dynamic generic helper needs a separate compatibility review. | No. | Numbering. | Caller-controlled business/table/column parameters create the largest residual numbering surface. | Remove dynamic identifiers; add allowlisted authorized numbering API. |
-| `next_invoice_no(text)` | Required numbering caller mapping is not yet proven. | No. | Numbering. | Caller-supplied business ID and invoice-number disclosure/collision surface. | Authorized, collision-safe numbering APIs. |
-| `next_purchase_no(text)` | Required numbering caller mapping is not yet proven. | No. | Numbering. | Caller-supplied business ID and purchase-number disclosure/collision surface. | Authorized, collision-safe numbering APIs. |
-| `next_purchase_return_no(text)` | Required numbering caller mapping is not yet proven. | No. | Numbering. | Caller-supplied business ID and return-number disclosure/collision surface. | Authorized, collision-safe numbering APIs. |
-| `next_replacement_no(text)` | Required numbering caller mapping is not yet proven. | No. | Numbering. | Caller-supplied business ID and replacement-number disclosure/collision surface. | Authorized, collision-safe numbering APIs. |
-| `no_owner_exists()` | Initial-owner bootstrap semantics need a dedicated enrollment plan. | Bootstrap-related, not normal business RLS. | Bootstrap. | Publicly reveals whether the owner bootstrap condition exists. | Bootstrap lockdown and one-time enrollment controls. |
-
-## Incident log requirements
-
-Record the ticket/change ID; project ref; deployer/reviewer/incident commander; reviewed commit hash; maintenance-window start/end; client/server versions; backup path, hash, restore-list result and recovery-point ID; all pre/post query outputs; migration and rollback command exit codes; lock/statement timeout events; smoke-test cases and fixture identifiers; any exception text; rollback decision, approver and timestamps; final state; and explicit confirmation that migration 00009 remained unapplied. Never record passwords, connection strings, access tokens, service-role values, personal data, or financial row contents.
+Record: ticket/change ID; project ref; deployer/reviewer/incident commander; reviewed commit and SQL hashes; maintenance start/end; client/server versions; identity assertion result without DSN; backup paths/sizes/hashes/archive-list results and recovery checkpoint; all session/lock, preflight, postflight and smoke outputs; command exit codes; timeout events; fixture IDs; cleanup/reversal evidence; exception text; rollback decision/approver/timestamps; final state; and explicit confirmation that migration `00009` remained unapplied.
