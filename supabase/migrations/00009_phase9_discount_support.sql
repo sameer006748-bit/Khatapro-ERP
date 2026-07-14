@@ -724,37 +724,39 @@ begin
     end if;
   end loop;
 
-  -- Insert invoice header FIRST — atomic replay via unique_violation recovery.
-  -- It must happen before voucher/items/stock to prevent duplicate side effects
-  -- when a concurrent request loses the unique index race.
-  begin
-    insert into public.invoices (
-      business_id, invoice_no, invoice_type, invoice_date,
-      customer_id, salesman_id,
-      customer_name, customer_phone, customer_address, customer_city,
-      subtotal, discount, total, paid_amount,
-      voucher_id, memo, created_by,
-      delivery_charge, rider_earning, company_delivery_income,
-      product_advance, delivery_advance, idempotency_key
-    ) values (
-      p_business_id, v_invoice_no, p_invoice_type, p_invoice_date,
-      p_customer_id, p_salesman_id,
-      p_customer_name, p_customer_phone, p_customer_address, p_customer_city,
-      v_subtotal, v_discount, v_total, v_product_advance,
-      null, p_memo, v_auth_uid,
-      v_delivery_charge, coalesce(p_rider_earning, 0), coalesce(p_company_delivery_income, 0),
-      v_product_advance, v_delivery_advance, p_idempotency_key
-    ) returning id into v_invoice_id;
-  exception
-    when unique_violation then
-      select id into v_invoice_id
-      from public.invoices
-      where business_id = p_business_id and idempotency_key = p_idempotency_key;
-      if not found then
-        raise exception 'Idempotency conflict resolved; please retry.';
-      end if;
-      return v_invoice_id;
-  end;
+  -- Insert invoice header FIRST — atomic replay via ON CONFLICT.
+  -- Only catches the idempotency-key unique constraint; other unique
+  -- violations (e.g. invoice_no) bubble up as real errors.
+  insert into public.invoices (
+    business_id, invoice_no, invoice_type, invoice_date,
+    customer_id, salesman_id,
+    customer_name, customer_phone, customer_address, customer_city,
+    subtotal, discount, total, paid_amount,
+    voucher_id, memo, created_by,
+    delivery_charge, rider_earning, company_delivery_income,
+    product_advance, delivery_advance, idempotency_key
+  ) values (
+    p_business_id, v_invoice_no, p_invoice_type, p_invoice_date,
+    p_customer_id, p_salesman_id,
+    p_customer_name, p_customer_phone, p_customer_address, p_customer_city,
+    v_subtotal, v_discount, v_total, v_product_advance,
+    null, p_memo, v_auth_uid,
+    v_delivery_charge, coalesce(p_rider_earning, 0), coalesce(p_company_delivery_income, 0),
+    v_product_advance, v_delivery_advance, p_idempotency_key
+  )
+  on conflict on constraint invoices_idempotency_unique do nothing
+  returning id into v_invoice_id;
+
+  if v_invoice_id is null then
+    -- Another concurrent request already committed this idempotency_key.
+    select id into v_invoice_id
+    from public.invoices
+    where business_id = p_business_id and idempotency_key = p_idempotency_key;
+    if not found then
+      raise exception 'Idempotency conflict resolved; please retry.';
+    end if;
+    return v_invoice_id;
+  end if;
 
   -- Post voucher (only winner executes; loser returns above)
   v_voucher_id := public.post_voucher(
