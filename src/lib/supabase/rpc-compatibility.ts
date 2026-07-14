@@ -8,7 +8,7 @@ export const CURRENT_DATABASE_PHASE = 9 as const
 
 export const CURRENT_DATABASE_CAPABILITIES = {
   salesDiscounts: true,
-  salesIdempotency: false,
+  salesIdempotency: true,
   receiptAllocations: false,
   receiptIdempotency: false,
 } as const
@@ -71,6 +71,7 @@ export type Phase9PostSalePayload = {
   p_memo: string | null
   p_created_by: string | null
   p_discount_paisas: string
+  p_idempotency_key?: string | null
 }
 
 export type BuildPhase9PostSalePayloadInput = Phase9PostSalePayload & {
@@ -112,11 +113,7 @@ export function assertPhase9SaleFeatures(input: {
   discountPaisas?: bigint
   idempotencyKey?: string | null
 }): void {
-  if (input.idempotencyKey) {
-    throw new UnsupportedDatabaseFeatureError(
-      'Sale retry keys are unavailable on the current database. Refresh the sale form and submit once; no sale was posted.',
-    )
-  }
+  // Idempotency keys are now supported — no rejection needed
 }
 
 export function assertPhase8ReceiptFeatures(input: {
@@ -155,6 +152,7 @@ export function buildPhase9PostSalePayload(
     p_memo: input.p_memo,
     p_created_by: input.p_created_by,
     p_discount_paisas: (input.discountPaisas ?? 0n).toString(),
+    p_idempotency_key: input.idempotencyKey || null,
   }
 }
 

@@ -27,6 +27,7 @@ export function OfcSaleView({ user }: { user: MeUser }) {
   const [items, setItems] = useState<Item[]>([{ key: '1', productId: '', productName: '', qty: '1', unitPrice: '' }])
   const [paymentAccountId, setPaymentAccountId] = useState('')
   const [result, setResult] = useState<{ ok: boolean; invoiceNo?: string; invoiceId?: string; error?: string } | null>(null)
+  const [idempotencyKey, setIdempotencyKey] = useState(() => crypto.randomUUID())
 
   const coaQ = useQuery({ queryKey: ['coa'], queryFn: () => fetch('/api/setup/coa').then(r => r.json()) })
   const productsQ = useQuery<{ rows: Product[] }>({ queryKey: ['products'], queryFn: () => fetch('/api/products').then(r => r.json()) })
@@ -87,6 +88,7 @@ export function OfcSaleView({ user }: { user: MeUser }) {
           memo: form.courierNote ? `Courier: ${form.courierNote}` : undefined,
           courierNote: form.courierNote || undefined,
           discountPaisas: discountPaisas.toString(),
+          idempotencyKey,
         }),
       })
       const j = await r.json()
@@ -122,6 +124,7 @@ export function OfcSaleView({ user }: { user: MeUser }) {
               setResult(null)
               setItems([{ key: String(Date.now()), productId: '', productName: '', qty: '1', unitPrice: '' }])
               setForm({ customerName: '', customerPhone: '', customerCity: '', customerAddress: '', courierNote: '', advanceReceived: '', discountRupees: '', invoiceDate: new Date().toISOString().slice(0, 10) })
+              setIdempotencyKey(crypto.randomUUID())
             }}><Truck className="size-4" /> New Sale</Button>
           </div>
         </motion.div>

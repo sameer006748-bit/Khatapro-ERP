@@ -61,6 +61,7 @@ export function CounterSaleView({ user }: { user: MeUser }) {
     { key: '1', accountId: '', amount: '', isChange: false },
   ])
   const [result, setResult] = useState<{ ok: boolean; invoiceNo?: string; invoiceId?: string; error?: string } | null>(null)
+  const [idempotencyKey, setIdempotencyKey] = useState(() => crypto.randomUUID())
 
   // Fetch from CoA (Supabase UUIDs) — NOT business-accounts (Prisma)
   const coaQ = useQuery({
@@ -197,6 +198,7 @@ export function CounterSaleView({ user }: { user: MeUser }) {
           salesmanId,
           customerName: customerName || undefined,
           discountPaisas: discountPaisas.toString(),
+          idempotencyKey,
         }),
       })
       const j = await r.json()
@@ -227,7 +229,7 @@ export function CounterSaleView({ user }: { user: MeUser }) {
           <div className="mt-6 flex flex-col gap-2">
             <Button className="press-md shadow-sm" onClick={() => window.open(`/?invoice=${result.invoiceId}`, '_self')}><FileText className="size-4" /> View Invoice</Button>
             <PrintInvoiceButton invoiceId={result.invoiceId} label="Print Invoice" size="default" className="w-full justify-center" icon={Printer} />
-            <Button variant="ghost" className="press-sm" onClick={() => { setResult(null); setCart([]); setCustomerName(''); setShowCustomer(false); }}><ShoppingCart className="size-4" /> New Sale</Button>
+ <Button variant="ghost" className="press-sm" onClick={() => { setResult(null); setCart([]); setCustomerName(''); setShowCustomer(false); setIdempotencyKey(crypto.randomUUID()); }}><ShoppingCart className="size-4" /> New Sale</Button>
           </div>
         </motion.div>
       </div>

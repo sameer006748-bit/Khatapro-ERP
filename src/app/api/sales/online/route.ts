@@ -94,13 +94,15 @@ export async function POST(req: Request) {
       discountPaisas = BigInt(raw)
       if (discountPaisas < 0n) throw new Error('Discount cannot be negative.')
     }
-    assertPhase9SaleFeatures({
-      discountPaisas,
-      idempotencyKey: parsed.data.idempotencyKey,
-    })
   } catch (e) {
     return NextResponse.json({ error: (e as Error).message }, { status: 400 })
   }
+
+  const idempotencyKey = parsed.data.idempotencyKey || null
+  if (idempotencyKey && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(idempotencyKey)) {
+    return NextResponse.json({ error: 'Invalid idempotencyKey. Must be a valid UUID.' }, { status: 400 })
+  }
+  assertPhase9SaleFeatures({ discountPaisas, idempotencyKey })
 
   try {
     const smResult = await resolveEffectiveSalesmanId(su, parsed.data.salesmanId ?? null)
@@ -149,7 +151,7 @@ export async function POST(req: Request) {
       memo: parsed.data.memo ?? null,
       createdBy: su.userId,
       discount: discountPaisas,
-      idempotencyKey: parsed.data.idempotencyKey ?? null,
+      idempotencyKey,
     })
 
     // ── Create delivery order with correct COD ──

@@ -28,6 +28,7 @@ export function OnlineSaleView({ user }: { user: MeUser }) {
   const [items, setItems] = useState<Item[]>([{ key: '1', productId: '', productName: '', qty: '1', unitPrice: '' }])
   const [paymentAccountId, setPaymentAccountId] = useState('')
   const [result, setResult] = useState<{ ok: boolean; invoiceNo?: string; invoiceId?: string; error?: string; remainingCod?: string; customerGrandTotal?: string } | null>(null)
+  const [idempotencyKey, setIdempotencyKey] = useState(() => crypto.randomUUID())
 
   const coaQ = useQuery({ queryKey: ['coa'], queryFn: () => fetch('/api/setup/coa').then(r => r.json()) })
   const productsQ = useQuery<{ rows: Product[] }>({ queryKey: ['products'], queryFn: () => fetch('/api/products').then(r => r.json()) })
@@ -67,7 +68,6 @@ export function OnlineSaleView({ user }: { user: MeUser }) {
 
   const postMut = useMutation({
     mutationFn: async () => {
-      // Build payments: advance received, plus change if needed
       const payments: Array<{ accountId: string; amount: string; isChange?: boolean }> = [
         { accountId: paymentAccountId, amount: advanceReceived.toString() },
       ]
@@ -93,6 +93,7 @@ export function OnlineSaleView({ user }: { user: MeUser }) {
           companyDeliveryIncome: form.companyDeliveryIncome || undefined,
           source: form.source || undefined,
           discountPaisas: discountPaisas.toString(),
+          idempotencyKey,
         }),
       })
       const j = await r.json()
@@ -134,6 +135,7 @@ export function OnlineSaleView({ user }: { user: MeUser }) {
               setResult(null)
               setItems([{ key: String(Date.now()), productId: '', productName: '', qty: '1', unitPrice: '' }])
               setForm({ customerName: '', customerPhone: '', customerAddress: '', customerCity: '', source: 'WhatsApp', codAmount: '', deliveryFee: '', riderEarning: '', companyDeliveryIncome: '', advanceReceived: '', discountRupees: '', invoiceDate: new Date().toISOString().slice(0, 10) })
+              setIdempotencyKey(crypto.randomUUID())
             }}><Globe className="size-4" /> New Order</Button>
           </div>
         </motion.div>
