@@ -15,8 +15,7 @@ import { authOptions } from '@/lib/auth/authOptions'
 import { loadSessionUser, requirePermission } from '@/lib/auth/permissions'
 import { postSale, resolveEffectiveSalesmanId } from '@/lib/sales/data-access'
 import { parseMoney } from '@/lib/format'
-import { parseDiscountPaisas } from '@/lib/sales/discount'
-import { assertPhase8SaleFeatures } from '@/lib/supabase/rpc-compatibility'
+import { assertPhase9SaleFeatures } from '@/lib/supabase/rpc-compatibility'
 
 const ItemSchema = z.object({
   productId: z.string().nullable().optional(),
@@ -43,7 +42,7 @@ const OfcSaleSchema = z.object({
   customerAddress: z.string().min(1),
   customerCity: z.string().min(1),
   memo: z.string().optional(),
-  discount: z.string().optional(),
+  discountPaisas: z.string().optional(),
   idempotencyKey: z.string().min(1).max(200).optional(),
 })
 
@@ -79,10 +78,14 @@ export async function POST(req: Request) {
 
   // ── Server-side OFC full-advance validation ──
   const subtotal = items.reduce((s, i) => s + i.unitPrice * BigInt(i.qty), 0n)
-  let discountPaisas: bigint
+  let discountPaisas = 0n
   try {
-    discountPaisas = parseDiscountPaisas(parsed.data.discount)
-    assertPhase8SaleFeatures({
+    const raw = parsed.data.discountPaisas
+    if (raw !== undefined && raw !== null && raw !== '') {
+      discountPaisas = BigInt(raw)
+      if (discountPaisas < 0n) throw new Error('Discount cannot be negative.')
+    }
+    assertPhase9SaleFeatures({
       discountPaisas,
       idempotencyKey: parsed.data.idempotencyKey,
     })
