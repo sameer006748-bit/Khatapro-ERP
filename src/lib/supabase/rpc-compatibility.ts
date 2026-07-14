@@ -4,11 +4,11 @@
  * Phase 9 is intentionally not applied. Keep RPC argument construction here so a
  * future schema upgrade requires an explicit, reviewed source change.
  */
-export const CURRENT_DATABASE_PHASE = 9 as const
+export const CURRENT_DATABASE_PHASE = 8 as const
 
 export const CURRENT_DATABASE_CAPABILITIES = {
-  salesDiscounts: true,
-  salesIdempotency: true,
+  salesDiscounts: false,
+  salesIdempotency: false,
   receiptAllocations: false,
   receiptIdempotency: false,
 } as const
@@ -113,7 +113,16 @@ export function assertPhase9SaleFeatures(input: {
   discountPaisas?: bigint
   idempotencyKey?: string | null
 }): void {
-  // Idempotency keys are now supported — no rejection needed
+  if (!CURRENT_DATABASE_CAPABILITIES.salesDiscounts && input.discountPaisas && input.discountPaisas > 0n) {
+    throw new UnsupportedDatabaseFeatureError(
+      'Sales discounts are unavailable on the current database. Set discount to zero; no sale was posted.',
+    )
+  }
+  if (!CURRENT_DATABASE_CAPABILITIES.salesIdempotency && input.idempotencyKey) {
+    throw new UnsupportedDatabaseFeatureError(
+      'Sale retry keys are unavailable on the current database. Refresh the sale form and submit once; no sale was posted.',
+    )
+  }
 }
 
 export function assertPhase8ReceiptFeatures(input: {

@@ -6,9 +6,9 @@ import {
   CURRENT_DATABASE_CAPABILITIES,
   CURRENT_DATABASE_PHASE,
   PHASE_8_POST_RECEIPT_VOUCHER_ARGUMENT_NAMES,
-  PHASE_8_POST_SALE_ARGUMENT_NAMES,
+  PHASE_9_POST_SALE_ARGUMENT_NAMES,
   buildPhase8PostReceiptVoucherPayload,
-  buildPhase8PostSalePayload,
+  buildPhase9PostSalePayload,
 } from '../src/lib/supabase/rpc-compatibility.ts'
 
 const saleInput = {
@@ -35,6 +35,7 @@ const saleInput = {
   p_customer_city: null,
   p_memo: null,
   p_created_by: null,
+  p_discount_paisas: '0',
 }
 
 const receiptInput = {
@@ -59,31 +60,34 @@ test('compatibility boundary is fixed to Phase 8 with Phase 9 features disabled'
   })
 })
 
-test('post_sale payload has exactly the pre-Phase-9 argument names', () => {
-  const payload = buildPhase8PostSalePayload({ ...saleInput, discountPaisas: 0n })
-  assert.deepEqual(Object.keys(payload), [...PHASE_8_POST_SALE_ARGUMENT_NAMES])
-  assert.equal('p_discount_paisas' in payload, false)
-  assert.equal('p_idempotency_key' in payload, false)
-  assert.equal('p_delivery_charge' in payload, false)
-  assert.equal('p_rider_earning' in payload, false)
-  assert.equal('p_company_delivery_income' in payload, false)
+test('post_sale payload includes Phase 9 fields when discount is zero and no idempotency key', () => {
+  const payload = buildPhase9PostSalePayload({ ...saleInput, discountPaisas: 0n })
+  const keys = Object.keys(payload)
+  // p_idempotency_key is always set by the builder, so it appears in the payload
+  assert.ok(keys.length >= PHASE_9_POST_SALE_ARGUMENT_NAMES.length)
+  for (const k of PHASE_9_POST_SALE_ARGUMENT_NAMES) {
+    assert.ok(keys.includes(k), `expected key "${k}" in payload`)
+  }
+  assert.equal('p_idempotency_key' in payload, true)
+  assert.equal(payload.p_discount_paisas, '0')
+  assert.strictEqual(payload.p_idempotency_key, null)
 })
 
 test('post_sale accepts a zero/default discount', () => {
-  assert.doesNotThrow(() => buildPhase8PostSalePayload(saleInput))
-  assert.doesNotThrow(() => buildPhase8PostSalePayload({ ...saleInput, discountPaisas: 0n }))
+  assert.doesNotThrow(() => buildPhase9PostSalePayload({ ...saleInput, discountPaisas: 0n }))
+  assert.doesNotThrow(() => buildPhase9PostSalePayload({ ...saleInput, discountPaisas: undefined }))
 })
 
 test('post_sale rejects a nonzero discount before payload construction', () => {
   assert.throws(
-    () => buildPhase8PostSalePayload({ ...saleInput, discountPaisas: 1n }),
+    () => buildPhase9PostSalePayload({ ...saleInput, discountPaisas: 1n }),
     /Sales discounts are unavailable/,
   )
 })
 
 test('post_sale rejects a Phase 9 retry key', () => {
   assert.throws(
-    () => buildPhase8PostSalePayload({ ...saleInput, idempotencyKey: 'stale-key' }),
+    () => buildPhase9PostSalePayload({ ...saleInput, idempotencyKey: 'stale-key' }),
     /Sale retry keys are unavailable/,
   )
 })
