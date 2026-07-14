@@ -744,7 +744,9 @@ begin
     v_delivery_charge, coalesce(p_rider_earning, 0), coalesce(p_company_delivery_income, 0),
     v_product_advance, v_delivery_advance, p_idempotency_key
   )
-  on conflict on constraint invoices_idempotency_unique do nothing
+  on conflict (business_id, idempotency_key)
+  where idempotency_key is not null
+  do nothing
   returning id into v_invoice_id;
 
   if v_invoice_id is null then
