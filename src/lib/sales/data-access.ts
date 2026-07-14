@@ -12,9 +12,9 @@ import { getAdminSupabase } from '@/lib/supabase/admin'
 import { bizDateString } from '@/lib/dates'
 import { getAccountByCode } from '@/lib/accounting/data-access'
 import {
-  assertPhase8SaleFeatures,
-  buildPhase8PostSalePayload,
-  type Phase8PostSalePayload,
+  assertPhase9SaleFeatures,
+  buildPhase9PostSalePayload,
+  type Phase9PostSalePayload,
 } from '@/lib/supabase/rpc-compatibility'
 
 let _phase4Checked = false
@@ -275,7 +275,7 @@ export async function verifyInvoiceOwnership(
 // Post Sale (the main entry point)
 // ─────────────────────────────────────────────────────────────
 export async function postSale(input: PostSaleInput): Promise<{ invoiceId: string; invoiceNo: string }> {
-  assertPhase8SaleFeatures({
+  assertPhase9SaleFeatures({
     discountPaisas: input.discount,
     idempotencyKey: input.idempotencyKey,
   })
@@ -303,7 +303,7 @@ async function postSaleViaSupabase(input: PostSaleInput): Promise<{ invoiceId: s
     is_change: p.isChange ?? false,
   }))
 
-  const payload: Phase8PostSalePayload = buildPhase8PostSalePayload({
+  const payload: Phase9PostSalePayload = buildPhase9PostSalePayload({
     p_business_id: input.businessId,
     p_invoice_type: input.invoiceType,
     p_invoice_date: bizDateString(input.invoiceDate),
@@ -317,6 +317,7 @@ async function postSaleViaSupabase(input: PostSaleInput): Promise<{ invoiceId: s
     p_customer_city: input.customerCity ?? null,
     p_memo: input.memo ?? null,
     p_created_by: supabaseCreatedBy,
+    p_discount_paisas: (input.discount ?? 0n).toString(),
     discountPaisas: input.discount,
     idempotencyKey: input.idempotencyKey,
   })

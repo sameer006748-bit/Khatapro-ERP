@@ -1,44 +1,30 @@
 /**
- * Shared discount parsing helper.
+ * Discount parsing and validation for Phase 9.1 sale discount support.
  *
- * Accepts a paisa string (e.g. "50000" = Rs 500.00) and returns a BigInt.
- * Rejects:
- * - negative values
- * - decimal/rupee strings (e.g. "500.50")
- * - non-numeric strings
- * - undefined/null (returns 0n)
- *
- * @throws Error if the value is negative, decimal, or malformed
+ * The discount field comes from the client as a decimal rupee string (e.g. "5" or "5.50").
+ * This module safely converts it to integer paisas (e.g. 500 or 550).
  */
-export function parseDiscountPaisas(value: string | undefined | null): bigint {
-  if (value === undefined || value === null || value === '') return 0n
-
-  // Reject decimal strings — API contract is integer paisas
-  if (value.includes('.')) {
-    throw new Error('Discount must be an integer paisa string, not a decimal rupee string')
-  }
-
-  // Reject non-numeric
-  if (!/^-?\d+$/.test(value)) {
-    throw new Error('Discount must be a numeric paisa string')
-  }
-
-  const result = BigInt(value)
-
-  // Reject negative
-  if (result < 0n) {
-    throw new Error('Discount cannot be negative')
-  }
-
-  return result
-}
+import { parseMoney } from '@/lib/format'
 
 /**
- * Validates that discount does not exceed subtotal.
- * @throws Error if discount > subtotal
+ * Parse a client-supplied discount string into BigInt paisas.
+ *
+ * - Accepts a decimal rupee amount (e.g. "5" or "5.50").
+ * - Rejects NaN, Infinity, and values that cannot be safely represented as integer paisas.
+ * - Returns 0n for undefined/null/empty-string (no discount).
+ * - Throws on negative values.
  */
-export function validateDiscountNotExceedingSubtotal(discount: bigint, subtotal: bigint): void {
-  if (discount > subtotal) {
-    throw new Error(`Discount (${discount} paisas) cannot exceed subtotal (${subtotal} paisas)`)
+export function parseDiscountPaisas(rupeeString?: string): bigint {
+  if (rupeeString === undefined || rupeeString === null || rupeeString.trim() === '') {
+    return 0n
   }
+
+  const v = parseMoney(rupeeString)
+  if (v === null) {
+    throw new Error(`Invalid discount amount: "${rupeeString}". Enter a valid rupee amount.`)
+  }
+  if (v < 0n) {
+    throw new Error('Discount cannot be negative.')
+  }
+  return v
 }

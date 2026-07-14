@@ -22,7 +22,7 @@ export function OnlineSaleView({ user }: { user: MeUser }) {
   const [form, setForm] = useState({
     customerName: '', customerPhone: '', customerAddress: '', customerCity: '',
     source: 'WhatsApp', codAmount: '', deliveryFee: '', riderEarning: '',
-    companyDeliveryIncome: '', advanceReceived: '',
+    companyDeliveryIncome: '', advanceReceived: '', discountRupees: '',
     invoiceDate: new Date().toISOString().slice(0, 10),
   })
   const [items, setItems] = useState<Item[]>([{ key: '1', productId: '', productName: '', qty: '1', unitPrice: '' }])
@@ -46,7 +46,13 @@ export function OnlineSaleView({ user }: { user: MeUser }) {
 
   // ── Reconciled totals ──
   const subtotal = items.reduce((acc, it) => acc + (parseMoney(it.unitPrice) ?? 0n) * BigInt(parseInt(it.qty) || 0), 0n)
-  const netProductTotal = subtotal
+  const discountPaisas = useMemo(() => {
+    const v = parseMoney(form.discountRupees)
+    if (v === null) return 0n
+    return v
+  }, [form.discountRupees])
+  const discountError = discountPaisas < 0n ? 'Discount cannot be negative' : discountPaisas > subtotal ? 'Discount exceeds subtotal' : null
+  const netProductTotal = subtotal - discountPaisas
   const deliveryFeePaisas = parseMoney(form.deliveryFee) ?? 0n
   const riderEarningPaisas = parseMoney(form.riderEarning) ?? 0n
   const companyDeliveryIncomePaisas = parseMoney(form.companyDeliveryIncome) ?? 0n
@@ -86,6 +92,7 @@ export function OnlineSaleView({ user }: { user: MeUser }) {
           riderEarning: form.riderEarning || undefined,
           companyDeliveryIncome: form.companyDeliveryIncome || undefined,
           source: form.source || undefined,
+          discountPaisas: discountPaisas.toString(),
         }),
       })
       const j = await r.json()
@@ -126,7 +133,7 @@ export function OnlineSaleView({ user }: { user: MeUser }) {
             <Button variant="ghost" className="press-sm" onClick={() => {
               setResult(null)
               setItems([{ key: String(Date.now()), productId: '', productName: '', qty: '1', unitPrice: '' }])
-              setForm({ customerName: '', customerPhone: '', customerAddress: '', customerCity: '', source: 'WhatsApp', codAmount: '', deliveryFee: '', riderEarning: '', companyDeliveryIncome: '', advanceReceived: '', invoiceDate: new Date().toISOString().slice(0, 10) })
+              setForm({ customerName: '', customerPhone: '', customerAddress: '', customerCity: '', source: 'WhatsApp', codAmount: '', deliveryFee: '', riderEarning: '', companyDeliveryIncome: '', advanceReceived: '', discountRupees: '', invoiceDate: new Date().toISOString().slice(0, 10) })
             }}><Globe className="size-4" /> New Order</Button>
           </div>
         </motion.div>
@@ -135,7 +142,8 @@ export function OnlineSaleView({ user }: { user: MeUser }) {
   }
 
   const canPost = form.customerName && form.customerPhone && form.customerAddress &&
-    items.some(it => it.productId || it.productName)
+    items.some(it => it.productId || it.productName) &&
+    !discountError && (form.discountRupees === '' || discountPaisas >= 0n)
 
   return (
     <div className="space-y-4">
@@ -160,6 +168,11 @@ export function OnlineSaleView({ user }: { user: MeUser }) {
               </SelectContent>
             </Select>
           </div>
+        </div>
+        <div>
+          <Label className="text-[10px] text-muted-foreground">Discount (Rs)</Label>
+          <Input type="text" value={form.discountRupees} onChange={e => setForm(s => ({ ...s, discountRupees: e.target.value }))} placeholder="0" className="h-8 bg-background press-sm text-sm max-w-[200px]" data-num />
+          {discountError && <div className="text-[10px] text-destructive mt-0.5">{discountError}</div>}
         </div>
       </div>
 
@@ -234,6 +247,11 @@ export function OnlineSaleView({ user }: { user: MeUser }) {
         <div className="flex items-center justify-between text-sm">
           <span className="text-muted-foreground">Product Subtotal</span><span className="font-medium" data-num>{formatMoney(subtotal, false)}</span>
         </div>
+        {discountPaisas > 0n && (
+          <div className="flex items-center justify-between text-sm">
+            <span className="text-muted-foreground">Discount</span><span className="font-medium text-amber-600" data-num>−{formatMoney(discountPaisas, false)}</span>
+          </div>
+        )}
         <div className="flex items-center justify-between text-sm">
           <span className="text-muted-foreground">Net Product Total</span><span className="font-medium" data-num>{formatMoney(netProductTotal, false)}</span>
         </div>

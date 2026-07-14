@@ -4,16 +4,16 @@
  * Phase 9 is intentionally not applied. Keep RPC argument construction here so a
  * future schema upgrade requires an explicit, reviewed source change.
  */
-export const CURRENT_DATABASE_PHASE = 8 as const
+export const CURRENT_DATABASE_PHASE = 9 as const
 
 export const CURRENT_DATABASE_CAPABILITIES = {
-  salesDiscounts: false,
+  salesDiscounts: true,
   salesIdempotency: false,
   receiptAllocations: false,
   receiptIdempotency: false,
 } as const
 
-export const PHASE_8_POST_SALE_ARGUMENT_NAMES = [
+export const PHASE_9_POST_SALE_ARGUMENT_NAMES = [
   'p_business_id',
   'p_invoice_type',
   'p_invoice_date',
@@ -27,6 +27,7 @@ export const PHASE_8_POST_SALE_ARGUMENT_NAMES = [
   'p_customer_city',
   'p_memo',
   'p_created_by',
+  'p_discount_paisas',
 ] as const
 
 export const PHASE_8_POST_RECEIPT_VOUCHER_ARGUMENT_NAMES = [
@@ -55,7 +56,7 @@ export type Phase8SalePayment = {
   is_change: boolean
 }
 
-export type Phase8PostSalePayload = {
+export type Phase9PostSalePayload = {
   p_business_id: string
   p_invoice_type: 'COUNTER' | 'ONLINE' | 'OFC'
   p_invoice_date: string
@@ -69,9 +70,10 @@ export type Phase8PostSalePayload = {
   p_customer_city: string | null
   p_memo: string | null
   p_created_by: string | null
+  p_discount_paisas: string
 }
 
-export type BuildPhase8PostSalePayloadInput = Phase8PostSalePayload & {
+export type BuildPhase9PostSalePayloadInput = Phase9PostSalePayload & {
   discountPaisas?: bigint
   idempotencyKey?: string | null
 }
@@ -106,15 +108,10 @@ export class UnsupportedDatabaseFeatureError extends Error {
   }
 }
 
-export function assertPhase8SaleFeatures(input: {
+export function assertPhase9SaleFeatures(input: {
   discountPaisas?: bigint
   idempotencyKey?: string | null
 }): void {
-  if ((input.discountPaisas ?? 0n) !== 0n) {
-    throw new UnsupportedDatabaseFeatureError(
-      'Sales discounts are unavailable on the current database. Remove the discount and submit again; no sale was posted.',
-    )
-  }
   if (input.idempotencyKey) {
     throw new UnsupportedDatabaseFeatureError(
       'Sale retry keys are unavailable on the current database. Refresh the sale form and submit once; no sale was posted.',
@@ -139,10 +136,10 @@ export function assertPhase8ReceiptFeatures(input: {
   }
 }
 
-export function buildPhase8PostSalePayload(
-  input: BuildPhase8PostSalePayloadInput,
-): Phase8PostSalePayload {
-  assertPhase8SaleFeatures(input)
+export function buildPhase9PostSalePayload(
+  input: BuildPhase9PostSalePayloadInput,
+): Phase9PostSalePayload {
+  assertPhase9SaleFeatures(input)
   return {
     p_business_id: input.p_business_id,
     p_invoice_type: input.p_invoice_type,
@@ -157,6 +154,7 @@ export function buildPhase8PostSalePayload(
     p_customer_city: input.p_customer_city,
     p_memo: input.p_memo,
     p_created_by: input.p_created_by,
+    p_discount_paisas: (input.discountPaisas ?? 0n).toString(),
   }
 }
 

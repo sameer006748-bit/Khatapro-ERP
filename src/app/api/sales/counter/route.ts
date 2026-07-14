@@ -14,7 +14,7 @@ import { loadSessionUser, requirePermission, hasPermission } from '@/lib/auth/pe
 import { postSale, listInvoices, resolveSalesmanIdForUser, resolveEffectiveSalesmanId } from '@/lib/sales/data-access'
 import { parseMoney } from '@/lib/format'
 import { parseDiscountPaisas } from '@/lib/sales/discount'
-import { assertPhase8SaleFeatures } from '@/lib/supabase/rpc-compatibility'
+import { assertPhase9SaleFeatures } from '@/lib/supabase/rpc-compatibility'
 
 const ItemSchema = z.object({
   productId: z.string().nullable().optional(),
@@ -40,7 +40,7 @@ const PostSaleSchema = z.object({
   customerName: z.string().optional(),
   customerPhone: z.string().optional(),
   memo: z.string().optional(),
-  discount: z.string().optional(),
+  discountPaisas: z.string().optional(),
   idempotencyKey: z.string().min(1).max(200).optional(),
 })
 
@@ -88,10 +88,14 @@ export async function POST(req: Request) {
     }
   }
 
-  let discountPaisas: bigint
+  let discountPaisas = 0n
   try {
-    discountPaisas = parseDiscountPaisas(parsed.data.discount)
-    assertPhase8SaleFeatures({
+    const rawDiscount = parsed.data.discountPaisas
+    if (rawDiscount !== undefined && rawDiscount !== null && rawDiscount !== '') {
+      discountPaisas = BigInt(rawDiscount)
+      if (discountPaisas < 0n) throw new Error('Discount cannot be negative.')
+    }
+    assertPhase9SaleFeatures({
       discountPaisas,
       idempotencyKey: parsed.data.idempotencyKey,
     })

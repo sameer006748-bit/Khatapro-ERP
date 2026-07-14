@@ -21,7 +21,7 @@ export function OfcSaleView({ user }: { user: MeUser }) {
   const qc = useQueryClient()
   const [form, setForm] = useState({
     customerName: '', customerPhone: '', customerCity: '', customerAddress: '',
-    courierNote: '', advanceReceived: '',
+    courierNote: '', advanceReceived: '', discountRupees: '',
     invoiceDate: new Date().toISOString().slice(0, 10),
   })
   const [items, setItems] = useState<Item[]>([{ key: '1', productId: '', productName: '', qty: '1', unitPrice: '' }])
@@ -43,9 +43,15 @@ export function OfcSaleView({ user }: { user: MeUser }) {
     }
   }, [businessAccounts, paymentAccountId])
 
-  // ── Phase 8 totals ──
+  // ── Phase 9.1 totals with discount ──
   const subtotal = items.reduce((acc, it) => acc + (parseMoney(it.unitPrice) ?? 0n) * BigInt(parseInt(it.qty) || 0), 0n)
-  const finalTotal = subtotal
+  const discountPaisas = useMemo(() => {
+    const v = parseMoney(form.discountRupees)
+    if (v === null) return 0n
+    return v
+  }, [form.discountRupees])
+  const discountError = discountPaisas < 0n ? 'Discount cannot be negative' : discountPaisas > subtotal ? 'Discount exceeds subtotal' : null
+  const finalTotal = subtotal - discountPaisas
 
   // Advance
   const advanceReceived = parseMoney(form.advanceReceived) ?? 0n
@@ -77,8 +83,10 @@ export function OfcSaleView({ user }: { user: MeUser }) {
           })),
           payments,
           customerName: form.customerName, customerPhone: form.customerPhone,
-          customerAddress: form.customerAddress, customerCity: form.customerCity,
+          customerAddress: form.customerAddress, customerCity: form.customerCity || undefined,
           memo: form.courierNote ? `Courier: ${form.courierNote}` : undefined,
+          courierNote: form.courierNote || undefined,
+          discountPaisas: discountPaisas.toString(),
         }),
       })
       const j = await r.json()
@@ -113,21 +121,21 @@ export function OfcSaleView({ user }: { user: MeUser }) {
             <Button variant="ghost" className="press-sm" onClick={() => {
               setResult(null)
               setItems([{ key: String(Date.now()), productId: '', productName: '', qty: '1', unitPrice: '' }])
-              setForm({ customerName: '', customerPhone: '', customerCity: '', customerAddress: '', courierNote: '', advanceReceived: '', invoiceDate: new Date().toISOString().slice(0, 10) })
-            }}><Truck className="size-4" /> New Order</Button>
+              setForm({ customerName: '', customerPhone: '', customerCity: '', customerAddress: '', courierNote: '', advanceReceived: '', discountRupees: '', invoiceDate: new Date().toISOString().slice(0, 10) })
+            }}><Truck className="size-4" /> New Sale</Button>
           </div>
         </motion.div>
       </div>
     )
   }
 
-  const canPost = form.customerName && form.customerPhone && form.customerCity && form.customerAddress &&
-    items.some(it => it.productId || it.productName) && ofcValid && paymentAccountId
+  const canPost = form.customerName && form.customerPhone && form.customerAddress &&
+    items.some(it => it.productId || it.productName) &&
+    !discountError && (form.discountRupees === '' || discountPaisas >= 0n)
 
   return (
     <div className="space-y-4">
-      <h1 className="text-xl font-semibold tracking-tight text-foreground">OFC / Out-of-City Sale</h1>
-      <p className="text-xs text-muted-foreground">Fully advance-paid. Net collected must equal final total.</p>
+      <h1 className="text-xl font-semibold tracking-tight text-foreground">OFC Sale</h1>
 
       {/* ── Customer ── */}
       <div className="card-3d p-4 space-y-3">
@@ -135,23 +143,23 @@ export function OfcSaleView({ user }: { user: MeUser }) {
         <div className="grid sm:grid-cols-2 gap-2">
           <Input value={form.customerName} onChange={e => setForm(s => ({ ...s, customerName: e.target.value }))} placeholder="Name *" className="h-9 bg-background press-sm" />
           <Input value={form.customerPhone} onChange={e => setForm(s => ({ ...s, customerPhone: e.target.value }))} placeholder="Phone *" className="h-9 bg-background press-sm" data-num />
-          <Input value={form.customerCity} onChange={e => setForm(s => ({ ...s, customerCity: e.target.value }))} placeholder="City *" className="h-9 bg-background press-sm" />
           <Input value={form.customerAddress} onChange={e => setForm(s => ({ ...s, customerAddress: e.target.value }))} placeholder="Address *" className="h-9 bg-background press-sm" />
+          <Input value={form.customerCity} onChange={e => setForm(s => ({ ...s, customerCity: e.target.value }))} placeholder="City *" className="h-9 bg-background press-sm" />
         </div>
-        <div className="sm:max-w-xl">
-          <div>
-            <Label className="text-[10px] text-muted-foreground">Courier / Transport note (optional)</Label>
-            <Input value={form.courierNote} onChange={e => setForm(s => ({ ...s, courierNote: e.target.value }))} placeholder="e.g. Daewoo Cargo, TCS" className="h-9 bg-background press-sm" />
-          </div>
+        <div>
+          <Label className="text-[10px] text-muted-foreground">Courier Note</Label>
+          <Input value={form.courierNote} onChange={e => setForm(s => ({ ...s, courierNote: e.target.value }))} placeholder="Courier name, tracking # etc." className="h-9 bg-background press-sm text-sm" />
+        </div>
+        <div>
+          <Label className="text-[10px] text-muted-foreground">Discount (Rs)</Label>
+          <Input type="text" value={form.discountRupees} onChange={e => setForm(s => ({ ...s, discountRupees: e.target.value }))} placeholder="0" className="h-8 bg-background press-sm text-sm max-w-[200px]" data-num />
+          {discountError && <div className="text-[10px] text-destructive mt-0.5">{discountError}</div>}
         </div>
       </div>
 
       {/* ── Items ── */}
-      <div className="card-3d p-4">
-        <div className="flex items-center justify-between mb-2">
-          <h2 className="text-sm font-semibold text-foreground">Items</h2>
-          <Button variant="outline" size="sm" onClick={() => setItems(ls => [...ls, { key: String(Date.now()), productId: '', productName: '', qty: '1', unitPrice: '' }])} className="press-sm"><Plus className="size-3" /> Add</Button>
-        </div>
+      <div className="card-3d p-4 space-y-3">
+        <h2 className="text-sm font-semibold text-foreground">Items</h2>
         <div className="space-y-1.5">
           {items.map((it) => (
             <div key={it.key} className="grid grid-cols-4 gap-1.5 items-end">
@@ -169,18 +177,19 @@ export function OfcSaleView({ user }: { user: MeUser }) {
             </div>
           ))}
         </div>
+        <Button variant="outline" size="sm" className="press-sm" onClick={() => setItems(ls => [...ls, { key: String(Date.now()), productId: '', productName: '', qty: '1', unitPrice: '' }])}><Plus className="size-3" /> Add</Button>
       </div>
 
       {/* ── Advance ── */}
       <div className="card-3d p-4 space-y-3">
-        <h2 className="text-sm font-semibold text-foreground">Advance Payment (Full)</h2>
+        <h2 className="text-sm font-semibold text-foreground">Advance Payment</h2>
         <div className="grid sm:grid-cols-2 gap-2">
           <div>
             <Label className="text-[10px] text-muted-foreground">Advance Received (Rs)</Label>
             <Input type="text" value={form.advanceReceived} onChange={e => setForm(s => ({ ...s, advanceReceived: e.target.value }))} placeholder="0" className="h-9 bg-background press-sm" data-num />
           </div>
           <div>
-            <Label className="text-[10px] text-muted-foreground">Advance Received Into</Label>
+            <Label className="text-[10px] text-muted-foreground">Payment Account</Label>
             <Select value={paymentAccountId} onValueChange={setPaymentAccountId}>
               <SelectTrigger className="h-9 bg-background press-sm text-sm"><SelectValue /></SelectTrigger>
               <SelectContent>{businessAccounts.map(a => <SelectItem key={a.id} value={a.id}>{a.name} ({a.code})</SelectItem>)}</SelectContent>
@@ -195,11 +204,16 @@ export function OfcSaleView({ user }: { user: MeUser }) {
         <div className="flex items-center justify-between text-sm">
           <span className="text-muted-foreground">Subtotal</span><span className="font-medium" data-num>{formatMoney(subtotal, false)}</span>
         </div>
+        {discountPaisas > 0n && (
+          <div className="flex items-center justify-between text-sm">
+            <span className="text-muted-foreground">Discount</span><span className="font-medium text-amber-600" data-num>−{formatMoney(discountPaisas, false)}</span>
+          </div>
+        )}
         <div className="flex items-center justify-between text-sm pt-1 border-t border-border">
-          <span className="font-semibold text-foreground">Final Total</span><span className="font-bold text-primary" data-num>{formatMoney(finalTotal)}</span>
+          <span className="font-semibold text-foreground">Net Total (Full Advance Required)</span><span className="font-bold text-primary" data-num>{formatMoney(finalTotal)}</span>
         </div>
         <div className="flex items-center justify-between text-sm">
-          <span className="text-muted-foreground">Paid</span><span className="font-medium" data-num>{formatMoney(advanceReceived, false)}</span>
+          <span className="text-muted-foreground">Advance Received</span><span className="font-medium" data-num>{formatMoney(advanceReceived, false)}</span>
         </div>
         {changeAmount > 0n && (
           <div className="flex items-center justify-between text-sm">
@@ -209,21 +223,18 @@ export function OfcSaleView({ user }: { user: MeUser }) {
         <div className="flex items-center justify-between text-sm">
           <span className="text-muted-foreground">Net Collected</span><span className="font-medium text-primary" data-num>{formatMoney(netCollected, false)}</span>
         </div>
-        <div className="flex items-center justify-between text-sm">
-          <span className="text-muted-foreground">Outstanding</span>
-          <span className={`font-medium ${outstanding > 0n ? 'text-destructive' : 'text-emerald-600'}`} data-num>{formatMoney(outstanding, false)}</span>
-        </div>
         {ofcUnderpayment && (
-          <div className="text-[10px] text-destructive flex items-center gap-1 pt-1">
-            <AlertCircle className="size-3" /> OFC requires full advance. Shortfall: {formatMoney(outstanding, false)}
+          <div className="flex items-center justify-between text-sm">
+            <span className="text-muted-foreground">Underpayment</span><span className="font-medium text-destructive" data-num>{formatMoney(outstanding, false)}</span>
           </div>
         )}
       </div>
 
+      {ofcUnderpayment && <div className="card-3d p-3 border-destructive/40 flex items-center gap-2"><AlertCircle className="size-4 text-destructive" /><span className="text-xs text-destructive">OFC requires full advance. Received: {formatMoney(netCollected, false)} / Needed: {formatMoney(finalTotal)}</span></div>}
       {result && !result.ok && <div className="card-3d p-3 border-destructive/40 flex items-center gap-2"><AlertCircle className="size-4 text-destructive" /><span className="text-xs text-destructive">{result.error}</span></div>}
 
-      <Button className="w-full press-md shadow-sm" disabled={postMut.isPending || !canPost} onClick={() => postMut.mutate()}>
-        {postMut.isPending ? 'Posting…' : <><Truck className="size-4" /> Post OFC Sale</>}
+      <Button className="w-full press-md shadow-sm" disabled={postMut.isPending || !canPost || !ofcValid} onClick={() => postMut.mutate()}>
+        {!ofcValid && finalTotal > 0n ? 'Full advance required' : postMut.isPending ? 'Posting…' : <><Truck className="size-4" /> Post OFC Sale — {formatMoney(finalTotal)}</>}
       </Button>
     </div>
   )

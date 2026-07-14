@@ -16,7 +16,7 @@ import { PrintInvoiceButton } from '@/components/invoice/print-invoice-button'
 import {
   Plus, Trash2, ShoppingCart, AlertCircle, CheckCircle2,
   Printer, FileText, Wallet, Banknote, Smartphone, Split,
-  TrendingDown, User, Minus, Search, Send,
+  TrendingDown, User, Minus, Search, Send, Percent,
 } from 'lucide-react'
 import { formatMoney, parseMoney } from '@/lib/format'
 import { motion, AnimatePresence } from 'framer-motion'
@@ -56,6 +56,7 @@ export function CounterSaleView({ user }: { user: MeUser }) {
   const [cashReceivedAmount, setCashReceivedAmount] = useState('')
   const [changeAccountId, setChangeAccountId] = useState('')
   const [showAdvanced, setShowAdvanced] = useState(false)
+  const [discountRupees, setDiscountRupees] = useState('')
   const [advPayments, setAdvPayments] = useState<Array<{ key: string; accountId: string; amount: string; isChange: boolean }>>([
     { key: '1', accountId: '', amount: '', isChange: false },
   ])
@@ -114,7 +115,15 @@ export function CounterSaleView({ user }: { user: MeUser }) {
     }, 0n)
   }, [cart])
 
-  const finalTotal = subtotal
+  // Discount
+  const discountPaisas = useMemo(() => {
+    const v = parseMoney(discountRupees)
+    if (v === null) return 0n
+    return v
+  }, [discountRupees])
+  const netTotal = subtotal - discountPaisas
+  const discountError = discountPaisas < 0n ? 'Discount cannot be negative' : discountPaisas > subtotal ? 'Discount exceeds subtotal' : null
+  const finalTotal = netTotal
 
   const salesman = salesmenQ.data?.rows.find(s => s.id === salesmanId)
 
@@ -159,7 +168,7 @@ export function CounterSaleView({ user }: { user: MeUser }) {
   // UUID validation
   const isUuid = (s: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s)
   const allAccountsValid = payments.every(p => isUuid(p.accountId))
-  const canPost = salesmanId && cart.length > 0 && payments.length > 0 && payments.every(p => p.amount > 0n) && allAccountsValid
+  const canPost = salesmanId && cart.length > 0 && payments.length > 0 && payments.every(p => p.amount > 0n) && allAccountsValid && !discountError && (discountRupees === '' || discountPaisas >= 0n)
 
   const postMut = useMutation({
     mutationFn: async () => {
@@ -187,6 +196,7 @@ export function CounterSaleView({ user }: { user: MeUser }) {
           })),
           salesmanId,
           customerName: customerName || undefined,
+          discountPaisas: discountPaisas.toString(),
         }),
       })
       const j = await r.json()
