@@ -724,30 +724,46 @@ begin
     end if;
   end loop;
 
-  -- Post voucher
+  -- Insert invoice header FIRST — atomic replay via unique_violation recovery.
+  -- It must happen before voucher/items/stock to prevent duplicate side effects
+  -- when a concurrent request loses the unique index race.
+  begin
+    insert into public.invoices (
+      business_id, invoice_no, invoice_type, invoice_date,
+      customer_id, salesman_id,
+      customer_name, customer_phone, customer_address, customer_city,
+      subtotal, discount, total, paid_amount,
+      voucher_id, memo, created_by,
+      delivery_charge, rider_earning, company_delivery_income,
+      product_advance, delivery_advance, idempotency_key
+    ) values (
+      p_business_id, v_invoice_no, p_invoice_type, p_invoice_date,
+      p_customer_id, p_salesman_id,
+      p_customer_name, p_customer_phone, p_customer_address, p_customer_city,
+      v_subtotal, v_discount, v_total, v_product_advance,
+      null, p_memo, v_auth_uid,
+      v_delivery_charge, coalesce(p_rider_earning, 0), coalesce(p_company_delivery_income, 0),
+      v_product_advance, v_delivery_advance, p_idempotency_key
+    ) returning id into v_invoice_id;
+  exception
+    when unique_violation then
+      select id into v_invoice_id
+      from public.invoices
+      where business_id = p_business_id and idempotency_key = p_idempotency_key;
+      if not found then
+        raise exception 'Idempotency conflict resolved; please retry.';
+      end if;
+      return v_invoice_id;
+  end;
+
+  -- Post voucher (only winner executes; loser returns above)
   v_voucher_id := public.post_voucher(
     p_business_id, 'SI', p_invoice_date, p_memo, v_voucher_lines,
     null, null, v_auth_uid
   );
 
-  -- Insert invoice header
-  insert into public.invoices (
-    business_id, invoice_no, invoice_type, invoice_date,
-    customer_id, salesman_id,
-    customer_name, customer_phone, customer_address, customer_city,
-    subtotal, discount, total, paid_amount,
-    voucher_id, memo, created_by,
-    delivery_charge, rider_earning, company_delivery_income,
-    product_advance, delivery_advance, idempotency_key
-  ) values (
-    p_business_id, v_invoice_no, p_invoice_type, p_invoice_date,
-    p_customer_id, p_salesman_id,
-    p_customer_name, p_customer_phone, p_customer_address, p_customer_city,
-    v_subtotal, v_discount, v_total, v_product_advance,
-    v_voucher_id, p_memo, v_auth_uid,
-    v_delivery_charge, coalesce(p_rider_earning, 0), coalesce(p_company_delivery_income, 0),
-    v_product_advance, v_delivery_advance, p_idempotency_key
-  ) returning id into v_invoice_id;
+  -- Update invoice with the voucher_id now that we have it
+  update public.invoices set voucher_id = v_voucher_id where id = v_invoice_id;
 
   -- Insert items + stock-out
   for v_item in select * from jsonb_array_elements(p_items)
