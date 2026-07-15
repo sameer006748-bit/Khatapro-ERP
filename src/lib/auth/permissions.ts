@@ -63,8 +63,12 @@ export async function loadSessionUser(userId: string): Promise<SessionUser | nul
   }
 
   // Production: Supabase mode
-  const supabase = createAuthClient()
-  const { data: authData, error: authError } = await supabase.auth.getUser(userId)
+  const supabase = getAdminClient()
+  if (!supabase) {
+    return null
+  }
+
+  const { data: authData, error: authError } = await supabase.auth.admin.getUserById(userId)
   if (authError || !authData.user) {
     return null
   }
@@ -192,10 +196,13 @@ export async function noOwnerExists(): Promise<boolean> {
   }
 
   // Supabase mode: check profiles joined to Owner/Admin role
-  const supabase = createAuthClient()
+  const supabase = getAdminClient()
+  if (!supabase) return true
+
   const { data: ownerRole, error: roleError } = await supabase
     .from('roles')
     .select('id')
+    .eq('business_id', 'biz-default')
     .eq('name', 'Owner/Admin')
     .eq('is_system', true)
     .single()
@@ -205,7 +212,9 @@ export async function noOwnerExists(): Promise<boolean> {
   const { count, error: countError } = await supabase
     .from('profiles')
     .select('*', { count: 'exact', head: true })
+    .eq('business_id', 'biz-default')
     .eq('role_id', ownerRole.id)
+    .eq('is_active', true)
 
   if (countError) return true
   return (count ?? 0) === 0

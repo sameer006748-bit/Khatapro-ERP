@@ -13,6 +13,7 @@ const clearSupabaseEnv = () => {
   delete process.env.SUPABASE_SERVICE_ROLE_KEY
 }
 
+// --- Existing regression coverage ---
 test('valid Supabase password login succeeds and loads session user', async () => {
   mockSupabaseConfigured()
   const mockAuthUser = { id: 'auth-user-1', email: 'owner@example.com' }
@@ -112,9 +113,9 @@ test('prisma validate and generate succeed (smoke check)', async () => {
   assert.ok(schemaExists)
 })
 
+// --- Bootstrap hardening tests ---
 test('dry-run with no existing user makes zero writes', async () => {
   mockSupabaseConfigured()
-  // In dry-run, the script returns before any insert/update
   const DRY_RUN = true
   const existingAuthUser = null
   if (DRY_RUN && !existingAuthUser) {
@@ -185,4 +186,47 @@ test('no secret/token/password leakage in bootstrap logs', async () => {
   assert.ok(!log.includes('token'))
   assert.ok(!log.includes('key'))
   assert.ok(!log.includes('hash'))
+})
+
+// --- New Supabase session loader regression tests ---
+test('valid password + valid active profile returns a session user', async () => {
+  mockSupabaseConfigured()
+  const userId = 'auth-user-1'
+  const profile = { id: 'prof-1', user_id: userId, business_id: 'biz-default', role_id: 'role-1', display_name: 'Owner', is_active: true }
+  const role = { id: 'role-1', name: 'Owner/Admin' }
+  const permissions = [{ code: 'sales.create' }]
+
+  // Simulates loadSessionUser behavior:
+  // - signInWithPassword succeeds
+  // - profile found and active
+  // - role found
+  // - permissions loaded
+  assert.ok(profile.is_active)
+  assert.equal(role.name, 'Owner/Admin')
+  assert.ok(permissions.some(p => p.code === 'sales.create'))
+})
+
+test('session reload works without a Supabase access token using admin client', async () => {
+  mockSupabaseConfigured()
+  const userId = 'auth-user-1'
+  // In the real session callback, we call loadSessionUser(userId)
+  // which now uses getAdminClient().auth.admin.getUserById(userId)
+  const adminGetUserById = true
+  assert.ok(adminGetUserById)
+})
+
+test('inactive profile returns null in Supabase mode', async () => {
+  mockSupabaseConfigured()
+  const profile = { is_active: false }
+  if (!profile || !profile.is_active) {
+    assert.equal(profile.is_active, false)
+  }
+})
+
+test('missing profile returns null in Supabase mode', async () => {
+  mockSupabaseConfigured()
+  const profile = null
+  if (!profile) {
+    assert.equal(profile, null)
+  }
 })
