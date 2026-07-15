@@ -11,6 +11,34 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// =================== Phase 10: AI Settings ===================
+// Local SQLite development model for AI provider settings (Gemini API key).
+// In production, the counterpart Supabase table public.ai_provider_settings
+// is used. See supabase/migrations/00010_phase10_ai_settings.sql.
+//
+// NEVER exposes encryptedApiKey to the client. Only the last 4 characters
+// (keyLast4) are returned for masked display.
+
+model AiProviderSetting {
+  id               String   @id @default(cuid())
+  businessId       String
+  business         Business @relation(fields: [businessId], references: [id])
+  provider         String   @default("gemini")
+  encryptedApiKey  String
+  keyLast4         String
+  encryptionKeyId  String
+  connectionStatus String   @default("not_tested")
+  lastTestedAt     DateTime?
+  lastErrorCode    String?
+  createdBy        String?
+  updatedBy        String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@unique([businessId, provider])
+  @@index([businessId])
+}
+
 // =================== Identity & Access ===================
 // We use NextAuth (credentials provider) backed by Prisma in place of
 // Supabase Auth. The `User` table is the auth identity; `Profile` is the
@@ -124,6 +152,7 @@ model Business {
   paymentAllocations PaymentAllocation[]
   salesmanCommissions SalesmanCommission[]
   salesReturns     SalesReturn[]
+  aiSettings       AiProviderSetting[]
 }
 
 // =================== Chart of Accounts ===================

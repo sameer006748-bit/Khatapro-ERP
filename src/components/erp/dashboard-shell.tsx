@@ -34,6 +34,7 @@ import {
   ArrowLeftRight,
   ArrowDownToLine,
   ArrowUpFromLine,
+  Sparkles,
 } from 'lucide-react'
 import { useSearchParams } from 'next/navigation'
 import type { MeUser } from '@/components/erp/erp-app'
@@ -77,13 +78,14 @@ import { ReportsView } from '@/components/erp/views/reports-view'
 import { SalesmanReportsView } from '@/components/erp/views/salesman-reports-view'
 import { AccountsView } from '@/components/erp/views/accounts-view'
 import { AdvancedView } from '@/components/erp/views/advanced-view'
+import { AiSettingsView } from '@/components/erp/views/ai-settings-view'
 import { SupabaseStatusBadge } from '@/components/erp/supabase-status-badge'
 
-// ─────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Navigation model: 8 main categories, each with sub-items.
 // Each sub-item has a permission/ownerOnly gate. A category is visible
 // only if at least one of its sub-items is visible to the user.
-// ─────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 type SubItem = {
   key: string
@@ -124,6 +126,7 @@ const NAV_CATEGORIES: NavCategory[] = [
       { key: 'coa', label: 'Chart of Accounts', short: 'CoA', icon: BookOpen, perm: 'can_view_setup' },
       { key: 'users', label: 'Users & Roles', short: 'Users', icon: Users, ownerOnly: true },
       { key: 'permissions', label: 'Permission Matrix', short: 'Perms', icon: Shield, ownerOnly: true },
+      { key: 'ai-settings', label: 'AI Settings', short: 'AI', icon: Sparkles, ownerOnly: true },
     ],
   },
   // 3. Accounting
@@ -228,11 +231,11 @@ function categoryForKey(key: string): string | null {
   return null
 }
 
-// ─────────────────────────────────────────────────────────────
-// Mobile nav: 5 primary slots — Home, Work, Stock, Reports, More.
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Mobile nav: 5 primary slots â€” Home, Work, Stock, Reports, More.
 // "Work" maps to the first available accounting action for the role.
 // "Stock" maps to Products. "Reports" maps to Trial Balance / Negative Stock.
-// ─────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 type MobileSlot = {
   id: string
@@ -268,9 +271,9 @@ const MOBILE_SLOTS: MobileSlot[] = [
   }},
 ]
 
-// ─────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Main shell
-// ─────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export function DashboardShell({ user, onSignOut }: { user: MeUser; onSignOut: () => void }) {
   const [active, setActive] = useState('home')
@@ -374,7 +377,7 @@ export function DashboardShell({ user, onSignOut }: { user: MeUser; onSignOut: (
 
       {/* Desktop: sidebar + main / Mobile: main + bottom pill nav */}
       <div className="flex-1 flex">
-        {/* Sidebar (desktop) — grouped collapsible categories */}
+        {/* Sidebar (desktop) â€” grouped collapsible categories */}
         <aside className="hidden md:flex w-64 border-r border-border bg-sidebar/60 flex-col backdrop-blur-sm">
           <nav className="flex-1 overflow-y-auto p-3 space-y-1">
             {cats.map((cat) => (
@@ -432,7 +435,7 @@ export function DashboardShell({ user, onSignOut }: { user: MeUser; onSignOut: (
         onMore={() => setMoreOpen(true)}
       />
 
-      {/* Mobile "more" sheet — grouped by category */}
+      {/* Mobile "more" sheet â€” grouped by category */}
       {mobileMoreCategories.some((c) => c.visibleItems.length > 0) && (
         <MobileMoreSheet
           categories={mobileMoreCategories}
@@ -449,9 +452,9 @@ export function DashboardShell({ user, onSignOut }: { user: MeUser; onSignOut: (
   )
 }
 
-// ─────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Desktop sidebar: collapsible category with sub-items
-// ─────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function SidebarCategory({
   category,
@@ -467,7 +470,7 @@ function SidebarCategory({
   onSelect: (k: string) => void
 }) {
   // Special case: categories with exactly 1 visible item behave as a direct
-  // button (no expand/collapse) — clicking goes straight to that item.
+  // button (no expand/collapse) â€” clicking goes straight to that item.
   const isDirect = category.visibleItems.length === 1
   const directItem = isDirect ? category.visibleItems[0] : null
   const isActive = directItem ? activeKey === directItem.key : activeKey !== 'home' && category.items.some((i) => i.key === activeKey)
@@ -562,9 +565,9 @@ function SidebarCategory({
   )
 }
 
-// ─────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Mobile: liquid-glass pill bottom nav
-// ─────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 type MobilePrimarySlot = MobileSlot & { key: string }
 
@@ -633,9 +636,9 @@ function MobilePillNav({
   )
 }
 
-// ─────────────────────────────────────────────────────────────
-// Mobile "More" sheet — grouped by category
-// ─────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Mobile "More" sheet â€” grouped by category
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function MobileMoreSheet({
   categories,
@@ -705,9 +708,9 @@ function MobileMoreSheet({
   )
 }
 
-// ─────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // View router (unchanged logic)
-// ─────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function ViewRouter({
   user,
@@ -766,7 +769,7 @@ function ViewRouter({
     return <InventoryView user={user} />
   }
 
-  // Phase 4 — Sales
+  // Phase 4 â€” Sales
   if (active === 'counter-sale') return <CounterSaleView user={user} />
   if (active === 'online-sale') return <OnlineSaleView user={user} />
   if (active === 'ofc-sale') return <OfcSaleView user={user} />
@@ -775,13 +778,16 @@ function ViewRouter({
   if (active === 'purchases') return <PurchasesView user={user} />
   if (active === 'vendors') return <VendorsView user={user} />
 
-  // Phase 7 — Delivery & Riders
+  // Phase 7 â€” Delivery & Riders
   if (active === 'delivery') return <DeliveryView user={user} />
   if (active === 'riders') return <DeliveryView user={user} />
 
-  // Phase 8 — Reports
+  // Phase 8 â€” Reports
   if (active === 'reports') return <ReportsView user={user} />
   if (active === 'my-reports') return <SalesmanReportsView user={user} />
+
+  // AI Settings (Phase 10)
+  if (active === 'ai-settings' && user.roleName === 'Owner/Admin') return <AiSettingsView />
 
   // Advanced
   if (active === 'accounts') return <AccountsView user={user} />
