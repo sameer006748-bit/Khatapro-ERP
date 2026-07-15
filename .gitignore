@@ -61,3 +61,6 @@ server.log
 # Audit output and PDFs
 /audit-out/
 /download/
+# Keep the Phase 10 AI connection-test API route
+!src/app/api/ai-settings/test/
+!src/app/api/ai-settings/test/route.ts
