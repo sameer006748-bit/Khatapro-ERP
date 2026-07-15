@@ -7,9 +7,10 @@
  */
 import { NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
-import bcrypt from 'bcryptjs'
 import { z } from 'zod'
-import { db } from '@/lib/db'
+import { isSupabaseConfigured } from '@/lib/supabase/config'
+import { createAuthClient } from '@/lib/supabase/auth'
+import { getAdminClient } from '@/lib/supabase/server-admin'
 import { authOptions } from '@/lib/auth/authOptions'
 import { loadSessionUser, requireOwner, writeAudit } from '@/lib/auth/permissions'
 
@@ -28,37 +29,91 @@ export async function GET() {
   if (!loaded) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
   const su = await requireOwner(loaded)
 
-  const [users, roles] = await Promise.all([
-    db.user.findMany({
-      include: { profile: { include: { role: true } } },
-      orderBy: { createdAt: 'asc' },
-    }),
-    db.role.findMany({
-      where: { businessId: su.businessId },
-      include: { _count: { select: { permissions: true, profiles: true } } },
-      orderBy: { name: 'asc' },
-    }),
-  ])
+  if (!isSupabaseConfigured()) {
+    // Local fallback
+    const { db } = await import('@/lib/db')
+    const [users, roles] = await Promise.all([
+      db.user.findMany({
+        include: { profile: { include: { role: true } } },
+        orderBy: { createdAt: 'asc' },
+      }),
+      db.role.findMany({
+        where: { businessId: su.businessId },
+        include: { _count: { select: { permissions: true, profiles: true } } },
+        orderBy: { name: 'asc' },
+      }),
+    ])
+
+    return NextResponse.json({
+      users: users.map((u) => ({
+        id: u.id,
+        email: u.email,
+        displayName: u.profile?.displayName ?? u.email,
+        phone: u.profile?.phone ?? null,
+        isActive: u.profile?.isActive ?? false,
+        role: u.profile?.role
+          ? { id: u.profile.role.id, name: u.profile.role.name }
+          : null,
+        createdAt: u.createdAt,
+      })),
+      roles: roles.map((r) => ({
+        id: r.id,
+        name: r.name,
+        isSystem: r.isSystem,
+        description: r.description,
+        permissionsCount: r._count.permissions,
+        usersCount: r._count.profiles,
+      })),
+    })
+  }
+
+  // Supabase mode
+  const supabase = createAuthClient()
+  const { data: users, error: usersError }: any = await supabase
+    .from('profiles')
+    .select(`
+      id, user_id, display_name, phone, is_active, created_at,
+      role:roles (id, name),
+      user:user_id (email)
+    `)
+    .eq('business_id', su.businessId)
+    .order('created_at', { ascending: true })
+
+  if (usersError) {
+    return NextResponse.json({ error: 'FETCH_FAILED' }, { status: 500 })
+  }
+
+  const { data: roles, error: rolesError }: any = await supabase
+    .from('roles')
+    .select(`
+      id, name, is_system, description,
+      permissions:role_permissions ( count ),
+      profiles:profiles ( count )
+    `)
+    .eq('business_id', su.businessId)
+    .order('name', { ascending: true })
+
+  if (rolesError) {
+    return NextResponse.json({ error: 'FETCH_FAILED' }, { status: 500 })
+  }
 
   return NextResponse.json({
-    users: users.map((u) => ({
-      id: u.id,
-      email: u.email,
-      displayName: u.profile?.displayName ?? u.email,
-      phone: u.profile?.phone ?? null,
-      isActive: u.profile?.isActive ?? false,
-      role: u.profile?.role
-        ? { id: u.profile.role.id, name: u.profile.role.name }
-        : null,
-      createdAt: u.createdAt,
+    users: (users || []).map((u: any) => ({
+      id: u.user_id,
+      email: u.user?.email ?? u.user_id,
+      displayName: u.display_name,
+      phone: u.phone,
+      isActive: u.is_active,
+      role: u.role ? { id: u.role.id, name: u.role.name } : null,
+      createdAt: u.created_at,
     })),
-    roles: roles.map((r) => ({
+    roles: (roles || []).map((r: any) => ({
       id: r.id,
       name: r.name,
-      isSystem: r.isSystem,
+      isSystem: r.is_system,
       description: r.description,
-      permissionsCount: r._count.permissions,
-      usersCount: r._count.profiles,
+      permissionsCount: r.permissions?.count ?? 0,
+      usersCount: r.profiles?.count ?? 0,
     })),
   })
 }
@@ -77,34 +132,90 @@ export async function POST(req: Request) {
   }
   const { email, password, displayName, roleName, phone } = parsed.data
 
-  const existing = await db.user.findUnique({ where: { email } })
-  if (existing) return NextResponse.json({ error: 'EMAIL_TAKEN' }, { status: 409 })
-
-  const role = await db.role.findFirst({
-    where: { businessId: su.businessId, name: roleName },
-  })
-  if (!role) return NextResponse.json({ error: 'ROLE_NOT_FOUND' }, { status: 400 })
-
-  const passwordHash = await bcrypt.hash(password, 10)
-  const user = await db.user.create({ data: { email, name: displayName, passwordHash } })
-  await db.profile.create({
-    data: {
-      userId: user.id,
+  if (!isSupabaseConfigured()) {
+    // Local fallback
+    const { db } = await import('@/lib/db')
+    const bcrypt = await import('bcryptjs')
+    const existing = await db.user.findUnique({ where: { email } })
+    if (existing) return NextResponse.json({ error: 'EMAIL_TAKEN' }, { status: 409 })
+    const role = await db.role.findFirst({
+      where: { businessId: su.businessId, name: roleName },
+    })
+    if (!role) return NextResponse.json({ error: 'ROLE_NOT_FOUND' }, { status: 400 })
+    const passwordHash = await bcrypt.hash(password, 10)
+    const user = await db.user.create({ data: { email, name: displayName, passwordHash } })
+    await db.profile.create({
+      data: {
+        userId: user.id,
+        businessId: su.businessId,
+        roleId: role.id,
+        displayName,
+        phone: phone ?? null,
+      },
+    })
+    await writeAudit({
       businessId: su.businessId,
-      roleId: role.id,
-      displayName,
-      phone: phone ?? null,
-    },
+      userId: su.userId,
+      action: 'INVITE_USER',
+      entity: 'user',
+      entityId: user.id,
+      details: { email, displayName, roleName },
+    })
+    return NextResponse.json({ ok: true, userId: user.id })
+  }
+
+  // Supabase mode
+  const supabase = createAuthClient()
+  const admin = getAdminClient()
+  if (!admin) {
+    return NextResponse.json({ error: 'SUPABASE_ADMIN_UNAVAILABLE' }, { status: 500 })
+  }
+
+  const { data: role, error: roleError }: any = await supabase
+    .from('roles')
+    .select('id')
+    .eq('business_id', su.businessId)
+    .eq('name', roleName)
+    .single()
+
+  if (roleError || !role) {
+    return NextResponse.json({ error: 'ROLE_NOT_FOUND' }, { status: 400 })
+  }
+
+  const { data: created, error: authCreateError } = await admin.auth.admin.createUser({
+    email,
+    password,
+    email_confirm: true,
   })
+
+  if (authCreateError || !created.user) {
+    return NextResponse.json({ error: 'AUTH_USER_CREATE_FAILED' }, { status: 500 })
+  }
+
+  const newUserId = created.user.id
+
+  const { error: profileError } = await supabase.from('profiles').insert({
+    user_id: newUserId,
+    business_id: su.businessId,
+    role_id: role.id,
+    display_name: displayName,
+    phone: phone ?? null,
+    is_active: true,
+  })
+
+  if (profileError) {
+    try { await admin.auth.admin.deleteUser(newUserId) } catch {}
+    return NextResponse.json({ error: 'PROFILE_CREATE_FAILED' }, { status: 500 })
+  }
 
   await writeAudit({
     businessId: su.businessId,
     userId: su.userId,
     action: 'INVITE_USER',
     entity: 'user',
-    entityId: user.id,
+    entityId: newUserId,
     details: { email, displayName, roleName },
   })
 
-  return NextResponse.json({ ok: true, userId: user.id })
+  return NextResponse.json({ ok: true, userId: newUserId })
 }

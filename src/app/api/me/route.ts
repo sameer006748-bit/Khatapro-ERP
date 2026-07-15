@@ -6,23 +6,29 @@
 import { NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth/authOptions'
+import { loadSessionUser } from '@/lib/auth/permissions'
 
 export async function GET() {
   const session = await getServerSession(authOptions)
   if (!session?.user) {
     return NextResponse.json({ user: null }, { status: 200 })
   }
-  const u = session.user as any
+
+  const loaded = await loadSessionUser((session.user as any).id)
+  if (!loaded) {
+    return NextResponse.json({ user: null }, { status: 200 })
+  }
+
   return NextResponse.json({
     user: {
-      id: u.id,
-      email: u.email,
-      displayName: u.displayName ?? u.name ?? u.email,
-      roleName: u.roleName,
-      roleId: u.roleId,
-      businessId: u.businessId,
-      profileId: u.profileId,
-      permissions: u.permissions ?? [],
+      id: loaded.userId,
+      email: loaded.email,
+      displayName: loaded.displayName,
+      roleName: loaded.roleName,
+      roleId: loaded.roleId,
+      businessId: loaded.businessId,
+      profileId: loaded.profileId,
+      permissions: Array.from(loaded.permissions),
     },
   })
 }

@@ -1,19 +1,15 @@
 /**
  * First-owner bootstrap registration.
  *
- * Rules (from the prompt):
- * 1. If no Owner/Admin exists yet, the first public registrant becomes
- *    Owner/Admin.
- * 2. Once an owner exists, public self-registration is closed. New users
- *    must be invited by Owner/Admin via /api/setup/users.
- *
- * This route is the only public entry point. After bootstrap, the route
- * returns 403 with a clear message.
+ * Rules (Prompt Section 3.2):
+ * 1. If no Owner/Admin exists yet, first registrant becomes Owner/Admin.
+ * 2. Once owner exists, public self-registration closes.
  */
 import { NextResponse } from 'next/server'
-import bcrypt from 'bcryptjs'
 import { z } from 'zod'
-import { db } from '@/lib/db'
+import { isSupabaseConfigured } from '@/lib/supabase/config'
+import { createAuthClient } from '@/lib/supabase/auth'
+import { getAdminClient } from '@/lib/supabase/server-admin'
 import { noOwnerExists, writeAudit } from '@/lib/auth/permissions'
 
 const Schema = z.object({
@@ -31,6 +27,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'INVALID_INPUT', details: parsed.error.flatten() }, { status: 400 })
   }
   const { email, password, displayName, phone } = parsed.data
+  const businessId = 'biz-default'
 
   const bootstrap = await noOwnerExists()
   if (!bootstrap) {
@@ -40,45 +37,109 @@ export async function POST(req: Request) {
     )
   }
 
-  // Email uniqueness
-  const existing = await db.user.findUnique({ where: { email } })
-  if (existing) {
-    return NextResponse.json({ error: 'EMAIL_TAKEN' }, { status: 409 })
+  if (!isSupabaseConfigured()) {
+    // Local dev fallback (SQLite/Prisma)
+    const { db } = await import('@/lib/db')
+    const bcrypt = await import('bcryptjs')
+
+    const existing = await db.user.findUnique({ where: { email } })
+    if (existing) return NextResponse.json({ error: 'EMAIL_TAKEN' }, { status: 409 })
+
+    const passwordHash = await bcrypt.hash(password, 10)
+    const ownerRole = await db.role.findFirst({
+      where: { businessId, name: 'Owner/Admin', isSystem: true },
+    })
+    if (!ownerRole) return NextResponse.json({ error: 'OWNER_ROLE_NOT_SEEDED' }, { status: 500 })
+    if (parsed.data.businessName) {
+      await db.business.update({ where: { id: businessId }, data: { name: parsed.data.businessName } })
+    }
+    const user = await db.user.create({ data: { email, name: displayName, passwordHash } })
+    await db.profile.create({
+      data: { userId: user.id, businessId, roleId: ownerRole.id, displayName, phone: phone ?? null },
+    })
+    await writeAudit({
+      businessId,
+      userId: user.id,
+      action: 'BOOTSTRAP_OWNER',
+      entity: 'user',
+      entityId: user.id,
+      details: { email, displayName, roleId: ownerRole.id },
+    })
+    return NextResponse.json({ ok: true, bootstrap: true, userId: user.id })
   }
 
-  const passwordHash = await bcrypt.hash(password, 10)
-  const businessId = 'biz-default' // single-business MVP
-  const ownerRole = await db.role.findFirst({
-    where: { businessId, name: 'Owner/Admin', isSystem: true },
-  })
-  if (!ownerRole) {
+  // Supabase production mode
+  const supabase = createAuthClient()
+  const admin = getAdminClient()
+  if (!admin) {
+    return NextResponse.json({ error: 'SUPABASE_ADMIN_UNAVAILABLE' }, { status: 500 })
+  }
+
+  const { data: ownerRole, error: roleError } = await supabase
+    .from('roles')
+    .select('id')
+    .eq('business_id', businessId)
+    .eq('name', 'Owner/Admin')
+    .eq('is_system', true)
+    .single()
+
+  if (roleError || !ownerRole) {
     return NextResponse.json({ error: 'OWNER_ROLE_NOT_SEEDED' }, { status: 500 })
   }
 
-  // Optional: rename the default business if the registrant supplied one.
-  if (parsed.data.businessName) {
-    await db.business.update({ where: { id: businessId }, data: { name: parsed.data.businessName } })
+  const { data: created, error: authCreateError } = await admin.auth.admin.createUser({
+    email,
+    password,
+    email_confirm: true,
+  })
+
+  if (authCreateError || !created.user) {
+    return NextResponse.json({ error: 'AUTH_USER_CREATE_FAILED' }, { status: 500 })
   }
 
-  const user = await db.user.create({ data: { email, name: displayName, passwordHash } })
-  await db.profile.create({
-    data: {
-      userId: user.id,
-      businessId,
-      roleId: ownerRole.id,
-      displayName,
+  const newUserId = created.user.id
+
+  try {
+    if (parsed.data.businessName) {
+      const { data: biz } = await supabase
+        .from('businesses')
+        .select('id')
+        .eq('id', businessId)
+        .single()
+      if (biz) {
+        await supabase
+          .from('businesses')
+          .update({ name: parsed.data.businessName })
+          .eq('id', businessId)
+      }
+    }
+
+    const { error: profileError } = await supabase.from('profiles').insert({
+      user_id: newUserId,
+      business_id: businessId,
+      role_id: (ownerRole as any).id,
+      display_name: displayName,
       phone: phone ?? null,
-    },
-  })
+      is_active: true,
+    })
+
+    if (profileError) {
+      await admin.auth.admin.deleteUser(newUserId)
+      return NextResponse.json({ error: 'PROFILE_CREATE_FAILED' }, { status: 500 })
+    }
+  } catch (e) {
+    try { await admin.auth.admin.deleteUser(newUserId) } catch {}
+    throw e
+  }
 
   await writeAudit({
     businessId,
-    userId: user.id,
+    userId: newUserId,
     action: 'BOOTSTRAP_OWNER',
     entity: 'user',
-    entityId: user.id,
-    details: { email, displayName, roleId: ownerRole.id },
+    entityId: newUserId,
+    details: { email, displayName, roleId: (ownerRole as any).id },
   })
 
-  return NextResponse.json({ ok: true, bootstrap: true, userId: user.id })
+  return NextResponse.json({ ok: true, bootstrap: true, userId: newUserId })
 }

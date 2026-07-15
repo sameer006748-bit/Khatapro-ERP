@@ -7,8 +7,8 @@
  */
 import type { NextAuthOptions } from 'next-auth'
 import CredentialsProvider from 'next-auth/providers/credentials'
-import bcrypt from 'bcryptjs'
-import { db } from '@/lib/db'
+import { isSupabaseConfigured } from '@/lib/supabase/config'
+import { createAuthClient } from '@/lib/supabase/auth'
 import { loadSessionUser } from '@/lib/auth/permissions'
 
 export const authOptions: NextAuthOptions = {
@@ -26,16 +26,44 @@ export const authOptions: NextAuthOptions = {
         const password = creds?.password ?? ''
         if (!email || !password) return null
 
-        const u = await db.user.findUnique({
-          where: { email },
-          include: { profile: true },
-        })
-        if (!u || !u.profile || !u.profile.isActive) return null
+        if (isSupabaseConfigured()) {
+          // Production: Supabase Auth password verification
+          const supabase = createAuthClient()
+          const { data, error } = await supabase.auth.signInWithPassword({
+            email,
+            password,
+          })
 
-        const ok = await bcrypt.compare(password, u.passwordHash)
-        if (!ok) return null
+          if (error || !data.user) {
+            return null // Invalid email or password
+          }
 
-        return { id: u.id, email: u.email, name: u.profile.displayName } as any
+          // Load full session user (profile, role, permissions)
+          const su = await loadSessionUser(data.user.id)
+          if (!su) {
+            return null // Profile missing/inactive or role missing
+          }
+
+          return {
+            id: su.userId,
+            email: su.email,
+            name: su.displayName,
+          } as any
+        } else {
+          // Local development fallback: Prisma + SQLite
+          const { db } = await import('@/lib/db')
+          const u = await db.user.findUnique({
+            where: { email },
+            include: { profile: true },
+          })
+          if (!u || !u.profile || !u.profile.isActive) return null
+
+          const bcrypt = await import('bcryptjs')
+          const ok = await bcrypt.compare(password, u.passwordHash)
+          if (!ok) return null
+
+          return { id: u.id, email: u.email, name: u.profile.displayName } as any
+        }
       },
     }),
   ],
