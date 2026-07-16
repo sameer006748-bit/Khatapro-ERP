@@ -31,6 +31,7 @@ const CreateSchema = z.object({
   openingStock: z.number().int().optional(),
   isTemporary: z.boolean().optional(),
   lowStockThreshold: z.number().int().optional(),
+  idempotencyKey: z.string().max(128).optional(),
 })
 
 export async function POST(req: Request) {
@@ -47,9 +48,12 @@ export async function POST(req: Request) {
   }
 
   try {
-    const result = await createProduct(su.businessId, parsed.data)
+    const result = await createProduct(su.businessId, {
+      ...parsed.data,
+      idempotencyKey: parsed.data.idempotencyKey ?? undefined,
+    })
     return NextResponse.json({ row: result.product, stockMovementId: result.stockMovementId })
   } catch (e) {
-    return NextResponse.json({ error: (e as Error).message }, { status: 500 })
+    return NextResponse.json({ error: 'Failed to create product. Please try again.' }, { status: 500 })
   }
 }

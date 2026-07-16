@@ -9,7 +9,7 @@ import {
   PHASE_9_POST_SALE_ARGUMENT_NAMES,
   buildPhase8PostReceiptVoucherPayload,
   buildPhase9PostSalePayload,
-} from '../src/lib/supabase/rpc-compatibility.ts'
+} from '../src/lib/supabase/rpc-compatibility'
 
 const saleInput = {
   p_business_id: 'business-1',
@@ -63,7 +63,6 @@ test('compatibility boundary is fixed to Phase 8 with Phase 9 features disabled'
 test('post_sale payload includes Phase 9 fields when discount is zero and no idempotency key', () => {
   const payload = buildPhase9PostSalePayload({ ...saleInput, discountPaisas: 0n })
   const keys = Object.keys(payload)
-  // p_idempotency_key is always set by the builder, so it appears in the payload
   assert.ok(keys.length >= PHASE_9_POST_SALE_ARGUMENT_NAMES.length)
   for (const k of PHASE_9_POST_SALE_ARGUMENT_NAMES) {
     assert.ok(keys.includes(k), `expected key "${k}" in payload`)

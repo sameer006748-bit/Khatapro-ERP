@@ -9,22 +9,12 @@ import { bizDateString } from '@/lib/dates'
 import { getAccountByCode } from '@/lib/accounting/data-access'
 import { resolveSupabaseUuid } from '@/lib/accounting/voucher-supabase'
 import { writeAudit } from '@/lib/auth/permissions'
+import { probeTable } from '@/lib/supabase/phase-probe'
 
-let _p5Checked = false
-let _p5Live = false
+const _p5cache = { lastChecked: 0, lastResult: false }
 
 async function isPhase5Live(): Promise<boolean> {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL
-  const svc = process.env.SUPABASE_SERVICE_ROLE_KEY
-  if (!url || !svc || url.includes('<') || svc.includes('<')) return false
-  if (_p5Checked) return _p5Live
-  _p5Checked = true
-  try {
-    const admin = getAdminSupabase()
-    const { data, error } = await admin.from('vendors').select('id').limit(1)
-    _p5Live = !error && Array.isArray(data)
-  } catch { _p5Live = false }
-  return _p5Live
+  return probeTable(_p5cache, 'vendors')
 }
 
 // Types

@@ -16,27 +16,12 @@ import {
   buildPhase9PostSalePayload,
   type Phase9PostSalePayload,
 } from '@/lib/supabase/rpc-compatibility'
+import { probeTable } from '@/lib/supabase/phase-probe'
 
-let _phase4Checked = false
-let _phase4Applied = false
+const _p4cache = { lastChecked: 0, lastResult: false }
 
 async function isPhase4Live(): Promise<boolean> {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL
-  const pub = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
-  const svc = process.env.SUPABASE_SERVICE_ROLE_KEY
-  if (!url || !pub || !svc) return false
-  if (url.includes('<') || pub.includes('<') || svc.includes('<')) return false
-
-  if (_phase4Checked) return _phase4Applied
-  _phase4Checked = true
-  try {
-    const admin = getAdminSupabase()
-    const { data, error } = await admin.from('invoices').select('id').limit(1)
-    _phase4Applied = !error && Array.isArray(data)
-  } catch {
-    _phase4Applied = false
-  }
-  return _phase4Applied
+  return probeTable(_p4cache, 'invoices')
 }
 
 /** Resolve a Prisma user ID (cuid) to the Supabase auth.users UUID. */

@@ -11,22 +11,12 @@ import {
   buildPhase8PostReceiptVoucherPayload,
   type Phase8PostReceiptVoucherPayload,
 } from '@/lib/supabase/rpc-compatibility'
+import { probeTable } from '@/lib/supabase/phase-probe'
 
-let _p6Checked = false
-let _p6Live = false
+const _p6cache = { lastChecked: 0, lastResult: false }
 
 async function isPhase6Live(): Promise<boolean> {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL
-  const svc = process.env.SUPABASE_SERVICE_ROLE_KEY
-  if (!url || !svc || url.includes('<') || svc.includes('<')) return false
-  if (_p6Checked) return _p6Live
-  _p6Checked = true
-  try {
-    const admin = getAdminSupabase()
-    const { data, error } = await admin.from('expenses').select('id').limit(1)
-    _p6Live = !error && Array.isArray(data)
-  } catch { _p6Live = false }
-  return _p6Live
+  return probeTable(_p6cache, 'expenses')
 }
 
 // ─── Post Payment Voucher ───

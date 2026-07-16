@@ -346,19 +346,16 @@ export function DashboardShell({ user, onSignOut }: { user: MeUser; onSignOut: (
   return (
     <div className="min-h-[100dvh] flex flex-col bg-background text-foreground">
       {/* Top bar */}
-      <header className="h-14 border-b border-border flex items-center px-4 sm:px-6 bg-card/70 backdrop-blur-md sticky top-0 z-30">
+      <header className="h-14 border-b border-white/10 flex items-center px-4 sm:px-6 bg-white/70 dark:bg-white/5 backdrop-blur-2xl sticky top-0 z-30">
         <div className="flex items-center gap-3">
           <KhataProLogo size="sm" showWordmark={false} />
           <span className="font-semibold tracking-tight text-foreground hidden sm:inline">
             KhataPro <span className="text-primary">ERP</span>
           </span>
-          <span className="hidden md:inline text-xs text-muted-foreground ml-2 px-2 py-0.5 bg-muted rounded-md">
-            {user.roleName}
-          </span>
         </div>
         <div className="ml-auto flex items-center gap-3">
           <SupabaseStatusBadge />
-          <span className="hidden lg:inline text-xs text-muted-foreground" data-num>
+          <span className="hidden lg:inline text-[11px] text-muted-foreground" data-num>
             {new Date().toLocaleString('en-GB', { timeZone: 'Asia/Karachi' })}
           </span>
           <Button
@@ -377,9 +374,9 @@ export function DashboardShell({ user, onSignOut }: { user: MeUser; onSignOut: (
 
       {/* Desktop: sidebar + main / Mobile: main + bottom pill nav */}
       <div className="flex-1 flex">
-        {/* Sidebar (desktop) â€” grouped collapsible categories */}
-        <aside className="hidden md:flex w-64 border-r border-border bg-sidebar/60 flex-col backdrop-blur-sm">
-          <nav className="flex-1 overflow-y-auto p-3 space-y-1">
+        {/* Sidebar (desktop) â€” premium glass surface */}
+        <aside className="hidden md:flex w-72 border-r border-white/10 bg-white/70 dark:bg-white/5 backdrop-blur-2xl flex-col shadow-[0_8px_32px_rgba(0,0,0,0.04)]">
+          <nav className="flex-1 overflow-y-auto p-4 space-y-1">
             {cats.map((cat) => (
               <SidebarCategory
                 key={cat.id}
@@ -391,14 +388,15 @@ export function DashboardShell({ user, onSignOut }: { user: MeUser; onSignOut: (
               />
             ))}
           </nav>
-          <div className="p-3 border-t border-border">
-            <div className="card-3d p-3">
-              <div className="flex items-center gap-2.5">
-                <div className="size-8 rounded-full bg-accent grid place-items-center text-xs font-semibold text-accent-foreground">
+          <div className="p-4 border-t border-white/10">
+            <div className="relative overflow-hidden rounded-2xl border border-white/10 bg-white/60 dark:bg-white/5 backdrop-blur-xl p-3 shadow-[0_4px_16px_rgba(0,0,0,0.04)]">
+              <div className="absolute inset-0 bg-gradient-to-br from-white/40 via-transparent to-transparent" />
+              <div className="relative flex items-center gap-3">
+                <div className="size-10 rounded-full bg-primary/10 text-primary grid place-items-center text-sm font-bold">
                   {user.displayName.charAt(0).toUpperCase()}
                 </div>
                 <div className="min-w-0 flex-1">
-                  <div className="font-medium text-sm text-foreground truncate">
+                  <div className="text-sm font-semibold text-foreground truncate">
                     {user.displayName}
                   </div>
                   <div className="text-[11px] text-muted-foreground truncate">{user.email}</div>
@@ -586,10 +584,11 @@ function MobilePillNav({
 }) {
   return (
     <nav
-      className="md:hidden fixed left-1/2 -translate-x-1/2 z-40 glass-pill rounded-full px-2 py-2 flex items-center gap-1"
+      className="md:hidden fixed left-1/2 -translate-x-1/2 z-40 glass-pill rounded-full px-3 py-3 flex items-center gap-2"
       style={{
-        bottom: 'calc(0.75rem + env(safe-area-inset-bottom, 0px))',
-        maxWidth: 'calc(100vw - 1.5rem)',
+        bottom: 'calc(1rem + env(safe-area-inset-bottom, 0px))',
+        maxWidth: 'calc(100vw - 2rem)',
+        minHeight: '64px',
       }}
       aria-label="Primary"
     >
@@ -602,11 +601,12 @@ function MobilePillNav({
             className="relative flex items-center justify-center press-sm"
             aria-label={slot.label}
             aria-current={isActive ? 'page' : undefined}
+            style={{ minWidth: '48px', minHeight: '48px' }}
           >
             {isActive && (
               <motion.span
                 layoutId="pill-active"
-                className="absolute inset-0 rounded-full bg-primary shadow-sm"
+                className="absolute inset-0 rounded-full bg-primary shadow-md"
                 transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
               />
             )}
@@ -616,7 +616,7 @@ function MobilePillNav({
                 isActive ? 'text-primary-foreground' : 'text-muted-foreground',
               )}
             >
-              <slot.icon className="size-5" />
+              <slot.icon className="size-6" />
             </span>
           </button>
         )
@@ -626,9 +626,10 @@ function MobilePillNav({
           onClick={onMore}
           className="relative flex items-center justify-center press-sm"
           aria-label="More navigation"
+          style={{ minWidth: '48px', minHeight: '48px' }}
         >
           <span className="grid place-items-center size-11 rounded-full text-muted-foreground">
-            <MoreHorizontal className="size-5" />
+            <MoreHorizontal className="size-6" />
           </span>
         </button>
       )}

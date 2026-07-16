@@ -11,30 +11,19 @@
 import 'server-only'
 import { db } from '@/lib/db'
 import { getAdminSupabase } from '@/lib/supabase/admin'
+import { probeTable } from '@/lib/supabase/phase-probe'
 
-let _phase3Checked = false
-let _phase3Applied = false
+/**
+ * Fail-closed Supabase phase probe.
+ *
+ * When Supabase is configured, a failed probe THROWS (never returns false
+ * to avoid silently falling through to Prisma/SQLite).  Prisma fallback is
+ * only permitted when Supabase env vars are genuinely absent.
+ */
+const _p3cache = { lastChecked: 0, lastResult: false }
 
 async function isPhase3Live(): Promise<boolean> {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL
-  const pub = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
-  const svc = process.env.SUPABASE_SERVICE_ROLE_KEY
-  if (!url || !pub || !svc) return false
-  if (url.includes('<') || pub.includes('<') || svc.includes('<')) return false
-
-  if (_phase3Checked) return _phase3Applied
-  _phase3Checked = true
-  try {
-    const admin = getAdminSupabase()
-    const { data, error } = await admin
-      .from('products')
-      .select('id')
-      .limit(1)
-    _phase3Applied = !error && Array.isArray(data)
-  } catch {
-    _phase3Applied = false
-  }
-  return _phase3Applied
+  return probeTable(_p3cache, 'products')
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -226,47 +215,47 @@ export async function createProduct(
     openingStock?: number
     isTemporary?: boolean
     lowStockThreshold?: number
+    idempotencyKey?: string
   },
 ): Promise<{ product: ProductRow; stockMovementId?: string }> {
   const openingStock = input.openingStock ?? 0
 
   if (await isPhase3Live()) {
     const admin = getAdminSupabase()
-    // 1. Create the product.
-    const { data: prod, error: pErr } = await admin
-      .from('products')
-      .insert({
-        business_id: businessId,
-        name: input.name,
-        category_id: input.categoryId ?? null,
-        unit: 'piece',
-        sale_price: input.salePrice ?? 0,
-        purchase_price: input.purchasePrice ?? 0,
-        current_stock: openingStock,
-        is_temporary: input.isTemporary ?? false,
-        is_active: true,
-        marked_for_merge: false,
-      })
-      .select('id, name, category_id, unit, sale_price, purchase_price, current_stock, is_temporary, is_active, marked_for_merge, created_at')
-      .single()
-    if (pErr) throw new Error(`Supabase create product: ${pErr.message}`)
-    const p = prod as any
-
-    // 2. If opening stock != 0, create an 'opening' stock movement.
-    let stockMovementId: string | undefined
-    if (openingStock !== 0) {
-      const { data: smId, error: smErr } = await admin.rpc('create_stock_movement', {
+    // Atomic RPC: create product + opening stock movement in one transaction.
+    // Idempotency key prevents duplicate products from retried POST requests.
+    const { data: rpcResult, error: rpcErr } = await admin.rpc(
+      'atomic_create_product',
+      {
         p_business_id: businessId,
-        p_product_id: p.id,
-        p_movement_type: 'opening',
-        p_quantity: Math.abs(openingStock),
-        p_reason: 'Opening stock',
+        p_name: input.name,
+        p_category_id: input.categoryId ?? null,
+        p_sale_price: input.salePrice ?? 0,
+        p_purchase_price: input.purchasePrice ?? 0,
+        p_opening_stock: openingStock,
+        p_is_temporary: input.isTemporary ?? false,
+        p_low_stock_threshold: input.lowStockThreshold ?? 5,
+        p_idempotency_key: input.idempotencyKey ?? null,
         p_created_by: null,
-      })
-      if (smErr) throw new Error(`Supabase stock movement: ${smErr.message}`)
-      stockMovementId = smId as string
-    }
+      },
+    )
+    if (rpcErr) throw new Error('Failed to create product. Please try again.')
+    const result = rpcResult as any
+    const productId = result.product_id as string
+    const stockMovementId = (result.stock_movement_id as string) || undefined
+    const finalStock = (result.current_stock as number) ?? 0
 
+    // Fetch the full product row.
+    const { data: fresh, error: freshErr } = await admin
+      .from('products')
+      .select(
+        'id, name, category_id, unit, sale_price, purchase_price, current_stock, is_temporary, is_active, marked_for_merge, low_stock_threshold, created_at',
+      )
+      .eq('id', productId)
+      .single()
+    if (freshErr || !fresh) throw new Error('Failed to read created product.')
+
+    const p = fresh as any
     return {
       product: {
         id: p.id,
@@ -276,7 +265,7 @@ export async function createProduct(
         unit: p.unit,
         salePrice: Number(p.sale_price),
         purchasePrice: Number(p.purchase_price),
-        currentStock: p.current_stock,
+        currentStock: finalStock,
         isTemporary: p.is_temporary,
         isActive: p.is_active,
         markedForMerge: p.marked_for_merge,
@@ -287,7 +276,43 @@ export async function createProduct(
     }
   }
 
-  // Prisma fallback
+  // Prisma fallback — duplicate-safe with idempotency key.
+  const idempotencyKey = input.idempotencyKey || null
+  if (idempotencyKey) {
+    const existing = await db.product.findFirst({
+      where: { businessId, idempotencyKey },
+      select: { id: true, currentStock: true },
+    })
+    if (existing) {
+      const sm = await db.stockMovement.findFirst({
+        where: { productId: existing.id, movementType: 'opening' },
+        orderBy: { createdAt: 'asc' },
+        select: { id: true },
+      })
+      const product = await db.product.findUniqueOrThrow({
+        where: { id: existing.id },
+      })
+      return {
+        product: {
+          id: product.id,
+          name: product.name,
+          categoryId: product.categoryId,
+          categoryName: null,
+          unit: product.unit,
+          salePrice: product.salePrice,
+          purchasePrice: product.purchasePrice,
+          currentStock: product.currentStock,
+          isTemporary: product.isTemporary,
+          isActive: product.isActive,
+          markedForMerge: product.markedForMerge,
+          lowStockThreshold: product.lowStockThreshold,
+          createdAt: product.createdAt.toISOString(),
+        },
+        stockMovementId: sm?.id,
+      }
+    }
+  }
+
   const p = await db.product.create({
     data: {
       businessId,
@@ -296,9 +321,10 @@ export async function createProduct(
       unit: 'piece',
       salePrice: input.salePrice ?? 0,
       purchasePrice: input.purchasePrice ?? 0,
-      currentStock: openingStock,
+      currentStock: 0,
       isTemporary: input.isTemporary ?? false,
       lowStockThreshold: input.lowStockThreshold ?? 5,
+      idempotencyKey,
     },
   })
 
@@ -315,6 +341,10 @@ export async function createProduct(
       },
     })
     stockMovementId = sm.id
+    await db.product.update({
+      where: { id: p.id },
+      data: { currentStock: openingStock },
+    })
   }
 
   return {
@@ -326,7 +356,7 @@ export async function createProduct(
       unit: p.unit,
       salePrice: p.salePrice,
       purchasePrice: p.purchasePrice,
-      currentStock: p.currentStock,
+      currentStock: openingStock,
       isTemporary: p.isTemporary,
       isActive: p.isActive,
       markedForMerge: p.markedForMerge,

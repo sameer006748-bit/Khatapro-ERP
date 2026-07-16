@@ -2,26 +2,41 @@ import { NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth/authOptions'
 import { loadSessionUser, hasPermission } from '@/lib/auth/permissions'
-import { riderDashboardSummary, getRiderByUserId } from '@/lib/delivery/data-access'
+import { riderDashboardSummary, getRiderByUserId, listDeliveryOrders } from '@/lib/delivery/data-access'
 
-export async function GET() {
-  const session = await getServerSession(authOptions)
-  if (!session?.user) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
-  const loaded = await loadSessionUser((session.user as any).id)
-  if (!loaded) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
+export async function GET(request: Request) {
+  try {
+    const session = await getServerSession(authOptions)
+    if (!session?.user) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
+    const loaded = await loadSessionUser((session.user as any).id)
+    if (!loaded) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
 
-  // For Rider role: return their own dashboard
-  if (loaded.roleName === 'Rider') {
-    const rider = await getRiderByUserId(loaded.businessId, loaded.userId)
-    if (!rider) return NextResponse.json({ error: 'No rider profile linked to your account' }, { status: 403 })
-    const summary = await riderDashboardSummary(loaded.businessId, rider.id)
-    return NextResponse.json({ summary, riderId: rider.id })
+    // For Rider role: return their own dashboard
+    if (loaded.roleName === 'Rider') {
+      const rider = await getRiderByUserId(loaded.businessId, loaded.userId)
+      if (!rider) return NextResponse.json({ error: 'No rider profile linked to your account' }, { status: 403 })
+      const [summary, orders] = await Promise.all([
+        riderDashboardSummary(loaded.businessId, rider.id),
+        listDeliveryOrders(loaded.businessId, rider.id),
+      ])
+      const recentOrders = orders.slice(0, 10).map(o => ({
+        id: o.id,
+        invoiceNo: o.invoiceNo,
+        status: o.status,
+        customerName: o.customerName,
+        customerAddress: o.customerAddress,
+        totalCodAmount: o.totalCodAmount,
+        codCollectedAmount: o.codCollectedAmount,
+      }))
+      return NextResponse.json({ summary, riderId: rider.id, recentOrders })
+    }
+
+    // For Owner/Accountant: need can_view_delivery_orders
+    if (!hasPermission(loaded, 'can_view_delivery_orders')) {
+      return NextResponse.json({ error: 'FORBIDDEN' }, { status: 403 })
+    }
+    return NextResponse.json({ summary: null })
+  } catch {
+    return NextResponse.json({ error: 'DASHBOARD_LOAD_FAILED' }, { status: 500 })
   }
-
-  // For Owner/Accountant: need can_view_delivery_orders
-  if (!hasPermission(loaded, 'can_view_delivery_orders')) {
-    return NextResponse.json({ error: 'FORBIDDEN' }, { status: 403 })
-  }
-  // Return overview (all riders) — for now return empty, the UI will fetch per-rider
-  return NextResponse.json({ summary: null })
 }
