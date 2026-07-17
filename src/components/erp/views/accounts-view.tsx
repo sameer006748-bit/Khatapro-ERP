@@ -98,14 +98,19 @@ export function AccountsView({ user }: { user: MeUser }) {
         <SummaryCard icon={Wallet} label="Net Movement" value={formatMoney(moneyInToday - moneyOutToday - expensesToday)} color={moneyInToday - moneyOutToday - expensesToday >= 0n ? 'text-emerald-600' : 'text-amber-600'} />
       </div>
 
-      {/* Quick actions */}
+      {/* Capital quick actions */}
       <div className="flex flex-wrap gap-2">
-        {canPostReceipt && <QuickAction icon={ArrowDownToLine} label="Receive" onClick={() => setEntryModal('receive')} />}
-        {canPostPayment && <QuickAction icon={ArrowUpFromLine} label="Pay" onClick={() => setEntryModal('pay')} />}
-        {canPostExpense && <QuickAction icon={ReceiptIcon} label="Expense" onClick={() => setEntryModal('expense')} />}
-        {canPostContra && <QuickAction icon={ArrowLeftRight} label="Transfer" onClick={() => setEntryModal('transfer')} />}
+        {canPostReceipt && <QuickAction icon={ArrowDownToLine} label="Owner Investment" onClick={() => setEntryModal('receive')} />}
+        {canPostPayment && <QuickAction icon={ArrowUpFromLine} label="Owner Drawings" onClick={() => setEntryModal('pay')} />}
+        {canPostJournal && <QuickAction icon={BookOpen} label="Journal Voucher" onClick={() => setEntryModal('adjustment')} />}
+      </div>
+
+      {/* Current Assets quick actions */}
+      <div className="flex flex-wrap gap-2">
+        {canPostContra && <QuickAction icon={ArrowLeftRight} label="Transfer Funds" onClick={() => setEntryModal('transfer')} />}
         {canManagePetty && <QuickAction icon={Coffee} label="Petty Cash" onClick={() => setEntryModal('petty-topup')} />}
-        {canPostJournal && <QuickAction icon={Settings2} label="Adjustment" onClick={() => setEntryModal('adjustment')} />}
+        {canPostReceipt && <QuickAction icon={ArrowDownToLine} label="Receivables" onClick={() => setEntryModal('receive')} />}
+        {canPostExpense && <QuickAction icon={ReceiptIcon} label="Expenses" onClick={() => setEntryModal('expense')} />}
       </div>
 
       {/* Recent activity */}
