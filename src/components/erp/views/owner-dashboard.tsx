@@ -82,12 +82,12 @@ export function OwnerDashboard({ user }: { user: any }) {
   }
 
   const quickActions = [
-    { label: 'Counter Sale', icon: ShoppingCart, action: () => router.push('/counter-sale') },
-    { label: 'Online Sale', icon: ShoppingCart, action: () => router.push('/online-sale') },
-    { label: 'OFC Sale', icon: ShoppingCart, action: () => router.push('/ofc-sale') },
-    { label: 'New Purchase', icon: Receipt, action: () => router.push('/purchases') },
-    { label: 'Receipt Voucher', icon: ArrowDownToLine, action: () => router.push('/receipt-voucher') },
-    { label: 'Payment Voucher', icon: ArrowUpFromLine, action: () => router.push('/payment-voucher') },
+    { label: 'Counter Sale', icon: ShoppingCart, action: () => router.push('/?page=counter-sale') },
+    { label: 'Online Sale', icon: ShoppingCart, action: () => router.push('/?page=online-sale') },
+    { label: 'OFC Sale', icon: ShoppingCart, action: () => router.push('/?page=ofc-sale') },
+    { label: 'New Purchase', icon: Receipt, action: () => router.push('/?page=purchases') },
+    { label: 'Receipt Voucher', icon: ArrowDownToLine, action: () => router.push('/?page=receipt-voucher') },
+    { label: 'Payment Voucher', icon: ArrowUpFromLine, action: () => router.push('/?page=payment-voucher') },
   ]
 
   const kpis = [
@@ -192,7 +192,7 @@ export function OwnerDashboard({ user }: { user: any }) {
         <motion.div variants={item}>
           <GlassPanel padding="p-5 sm:p-6">
             <SectionHeader title="Recent Invoices" subtitle="Latest sales transactions"
-              action={<button onClick={() => router.push('/sales-list')} className="text-xs text-primary hover:underline flex items-center gap-1">View all <ArrowRight className="size-3" /></button>} />
+              action={<button onClick={() => router.push('/?page=sales-list')} className="text-xs text-primary hover:underline flex items-center gap-1">View all <ArrowRight className="size-3" /></button>} />
             {data.recentInvoices.length === 0 ? <EmptyState message="No invoices yet" /> : (
               <div className="space-y-2">
                 {data.recentInvoices.map(inv => (
@@ -218,7 +218,7 @@ export function OwnerDashboard({ user }: { user: any }) {
         <motion.div variants={item}>
           <GlassPanel padding="p-5 sm:p-6">
             <SectionHeader title="Recent Purchases" subtitle="Latest procurement entries"
-              action={<button onClick={() => router.push('/purchases')} className="text-xs text-primary hover:underline flex items-center gap-1">View all <ArrowRight className="size-3" /></button>} />
+              action={<button onClick={() => router.push('/?page=purchases')} className="text-xs text-primary hover:underline flex items-center gap-1">View all <ArrowRight className="size-3" /></button>} />
             {data.recentPurchases.length === 0 ? <EmptyState message="No purchases yet" /> : (
               <div className="space-y-2">
                 {data.recentPurchases.map(pur => (
@@ -246,7 +246,7 @@ export function OwnerDashboard({ user }: { user: any }) {
         <motion.div variants={item}>
           <GlassPanel padding="p-5 sm:p-6">
             <SectionHeader title="Stock Alerts" subtitle={`${data.kpis.lowStockCount + data.kpis.negativeStockCount} items need attention`}
-              action={<button onClick={() => router.push('/inventory')} className="text-xs text-primary hover:underline flex items-center gap-1">Manage stock <ArrowRight className="size-3" /></button>} />
+              action={<button onClick={() => router.push('/?page=inventory')} className="text-xs text-primary hover:underline flex items-center gap-1">Manage stock <ArrowRight className="size-3" /></button>} />
             {(data.kpis.lowStockCount + data.kpis.negativeStockCount) === 0 ? <EmptyState message="All stock levels healthy" /> : (
               <div className="space-y-2">
                 {data.negativeStockProducts.slice(0, 3).map(p => (
@@ -273,7 +273,7 @@ export function OwnerDashboard({ user }: { user: any }) {
         <motion.div variants={item}>
           <GlassPanel padding="p-5 sm:p-6">
             <SectionHeader title="Recent Activity" subtitle="Latest audit trail entries"
-              action={<button onClick={() => router.push('/audit')} className="text-xs text-primary hover:underline flex items-center gap-1">View all <ArrowRight className="size-3" /></button>} />
+              action={<button onClick={() => router.push('/?page=audit')} className="text-xs text-primary hover:underline flex items-center gap-1">View all <ArrowRight className="size-3" /></button>} />
             {data.auditLogs.length === 0 ? <EmptyState message="No activity yet" /> : (
               <div className="space-y-2">
                 {data.auditLogs.map(log => (
@@ -304,7 +304,7 @@ export function OwnerDashboard({ user }: { user: any }) {
                 <p className="text-[11px] text-muted-foreground">{aiSettings?.connected ? 'Gemini connected' : 'Not configured'}</p>
               </div>
             </div>
-            <button onClick={() => router.push('/ai-settings')} className="text-xs text-primary hover:underline flex items-center gap-1">Configure <ArrowRight className="size-3" /></button>
+            <button onClick={() => router.push('/?page=ai-settings')} className="text-xs text-primary hover:underline flex items-center gap-1">Configure <ArrowRight className="size-3" /></button>
           </div>
           <div className="rounded-xl border border-white/10 bg-white/50 p-4">
             <p className="text-xs text-muted-foreground text-center">AI insights will appear here once configured.</p>

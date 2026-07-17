@@ -1,4 +1,4 @@
-﻿'use client'
+﻿ 'use client'
 
 import { motion } from 'framer-motion'
 import { format } from 'date-fns'
@@ -86,10 +86,10 @@ export function RiderDashboard({ user }: { user: any }) {
   const { summary, recentOrders } = data
 
   const quickActions = [
-    { label: 'My Orders', icon: Package, action: () => router.push('/delivery') },
-    { label: 'Delivered', icon: CheckCircle2, action: () => router.push('/delivery') },
-    { label: 'Returned', icon: RotateCcw, action: () => router.push('/delivery') },
-    { label: 'COD Submit', icon: Wallet, action: () => router.push('/delivery') },
+    { label: 'My Orders', icon: Package, action: () => router.push('/?page=delivery') },
+    { label: 'Delivered', icon: CheckCircle2, action: () => router.push('/?page=delivery') },
+    { label: 'Returned', icon: RotateCcw, action: () => router.push('/?page=delivery') },
+    { label: 'COD Submit', icon: Wallet, action: () => router.push('/?page=delivery') },
   ]
 
   const kpis = [
@@ -173,7 +173,7 @@ export function RiderDashboard({ user }: { user: any }) {
       <motion.div variants={item}>
         <GlassPanel padding="p-5 sm:p-6">
           <SectionHeader title="Your Assigned Orders" subtitle="Recent delivery assignments"
-            action={<button onClick={() => router.push('/delivery')} className="text-xs text-primary hover:underline flex items-center gap-1">View all <ArrowRight className="size-3" /></button>} />
+            action={<button onClick={() => router.push('/?page=delivery')} className="text-xs text-primary hover:underline flex items-center gap-1">View all <ArrowRight className="size-3" /></button>} />
           {recentOrders.length === 0 ? (
             <EmptyState message="No orders assigned yet." />
           ) : (

@@ -210,6 +210,14 @@ const NAV_CATEGORIES: NavCategory[] = [
   },
 ]
 
+/** Flat map of every registered page key to its SubItem for quick lookup. */
+const PAGE_REGISTRY: Map<string, SubItem> = new Map()
+for (const cat of NAV_CATEGORIES) {
+  for (const item of cat.items) {
+    PAGE_REGISTRY.set(item.key, item)
+  }
+}
+
 function isItemVisible(user: MeUser, item: SubItem): boolean {
   if (item.ownerOnly) return user.roleName === 'Owner/Admin'
   if (item.perm) return user.permissions.includes(item.perm)
@@ -275,20 +283,30 @@ const MOBILE_SLOTS: MobileSlot[] = [
 // Main shell
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
+function resolveInitialPage(searchParams: URLSearchParams, user: MeUser): string {
+  const page = searchParams.get('page')
+  if (page && PAGE_REGISTRY.has(page)) {
+    const item = PAGE_REGISTRY.get(page)!
+    if (isItemVisible(user, item)) return page
+  }
+  return 'home'
+}
+
 export function DashboardShell({ user, onSignOut }: { user: MeUser; onSignOut: () => void }) {
-  const [active, setActive] = useState('home')
   const [moreOpen, setMoreOpen] = useState(false)
   const searchParams = useSearchParams()
   const ledgerAccountId = searchParams.get('ledger')
   const invoiceId = searchParams.get('invoice')
   const voucherId = searchParams.get('voucher')
 
+  const [active, setActive] = useState(() => resolveInitialPage(searchParams, user))
+
   const cats = useMemo(() => visibleCategories(user), [user])
 
   // Expand state: default-expand the category that contains the active item.
   const [expanded, setExpanded] = useState<Set<string>>(() => {
     const init = new Set<string>(['dashboard']) // dashboard always expanded
-    const cat = categoryForKey('home')
+    const cat = categoryForKey(active)
     if (cat) init.add(cat)
     return init
   })
@@ -304,10 +322,16 @@ export function DashboardShell({ user, onSignOut }: { user: MeUser; onSignOut: (
     ? active
     : 'home'
 
-  // When active changes, auto-expand its category.
+  // When active changes, auto-expand its category and sync ?page= to URL.
   function selectItem(key: string) {
-    if (ledgerAccountId) window.history.pushState({}, '', '/')
+    if (ledgerAccountId || invoiceId || voucherId) {
+      window.history.pushState({}, '', '/')
+    }
     setActive(key)
+    // Sync ?page= to browser URL without reload
+    const url = new URL(window.location.href)
+    url.searchParams.set('page', key)
+    window.history.pushState({}, '', url.toString())
     const cat = categoryForKey(key)
     if (cat) {
       setExpanded((prev) => {

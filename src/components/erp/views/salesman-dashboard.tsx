@@ -71,9 +71,9 @@ export function SalesmanDashboard({ user }: { user: any }) {
   }
 
   const quickActions = [
-    { label: 'New Bill', icon: ShoppingCart, action: () => router.push('/counter-sale') },
-    { label: 'My Sales', icon: FileText, action: () => router.push('/sales-list') },
-    { label: 'Reports', icon: TrendingUp, action: () => router.push('/my-reports') },
+    { label: 'New Bill', icon: ShoppingCart, action: () => router.push('/?page=counter-sale') },
+    { label: 'My Sales', icon: FileText, action: () => router.push('/?page=sales-list') },
+    { label: 'Reports', icon: TrendingUp, action: () => router.push('/?page=my-reports') },
   ]
 
   const kpis = [
@@ -150,7 +150,7 @@ export function SalesmanDashboard({ user }: { user: any }) {
       <motion.div variants={item}>
         <GlassPanel padding="p-5 sm:p-6">
           <SectionHeader title="Recent Invoices" subtitle="Latest sales transactions"
-            action={<button onClick={() => router.push('/sales-list')} className="text-xs text-primary hover:underline flex items-center gap-1">View all <ArrowRight className="size-3" /></button>} />
+            action={<button onClick={() => router.push('/?page=sales-list')} className="text-xs text-primary hover:underline flex items-center gap-1">View all <ArrowRight className="size-3" /></button>} />
           {data.recentInvoices.length === 0 ? <EmptyState message="No invoices yet" /> : (
             <div className="space-y-2">
               {data.recentInvoices.map(inv => (

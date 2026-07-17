@@ -73,12 +73,12 @@ export function AccountantDashboard({ user }: { user: any }) {
   }
 
   const quickActions = [
-    { label: 'Journal Voucher', icon: FileText, action: () => router.push('/journal-voucher') },
-    { label: 'Receipt Voucher', icon: ArrowDownToLine, action: () => router.push('/receipt-voucher') },
-    { label: 'Payment Voucher', icon: ArrowUpFromLine, action: () => router.push('/payment-voucher') },
-    { label: 'Expenses', icon: Wallet, action: () => router.push('/expense-batch') },
-    { label: 'Day Book', icon: FileText, action: () => router.push('/day-book') },
-    { label: 'Trial Balance', icon: TrendingUp, action: () => router.push('/trial-balance') },
+    { label: 'Journal Voucher', icon: FileText, action: () => router.push('/?page=journal-voucher') },
+    { label: 'Receipt Voucher', icon: ArrowDownToLine, action: () => router.push('/?page=receipt-voucher') },
+    { label: 'Payment Voucher', icon: ArrowUpFromLine, action: () => router.push('/?page=payment-voucher') },
+    { label: 'Expenses', icon: Wallet, action: () => router.push('/?page=expense-batch') },
+    { label: 'Day Book', icon: FileText, action: () => router.push('/?page=day-book') },
+    { label: 'Trial Balance', icon: TrendingUp, action: () => router.push('/?page=trial-balance') },
   ]
 
   const kpis = [
@@ -161,7 +161,7 @@ export function AccountantDashboard({ user }: { user: any }) {
         <motion.div variants={item}>
           <GlassPanel padding="p-5 sm:p-6">
             <SectionHeader title="Recent Invoices" subtitle="Latest sales transactions"
-              action={<button onClick={() => router.push('/sales-list')} className="text-xs text-primary hover:underline flex items-center gap-1">View all <ArrowRight className="size-3" /></button>} />
+              action={<button onClick={() => router.push('/?page=sales-list')} className="text-xs text-primary hover:underline flex items-center gap-1">View all <ArrowRight className="size-3" /></button>} />
             {data.recentInvoices.length === 0 ? <EmptyState message="No invoices yet" /> : (
               <div className="space-y-2">
                 {data.recentInvoices.map(inv => (
@@ -187,7 +187,7 @@ export function AccountantDashboard({ user }: { user: any }) {
         <motion.div variants={item}>
           <GlassPanel padding="p-5 sm:p-6">
             <SectionHeader title="Recent Purchases" subtitle="Latest procurement entries"
-              action={<button onClick={() => router.push('/purchases')} className="text-xs text-primary hover:underline flex items-center gap-1">View all <ArrowRight className="size-3" /></button>} />
+              action={<button onClick={() => router.push('/?page=purchases')} className="text-xs text-primary hover:underline flex items-center gap-1">View all <ArrowRight className="size-3" /></button>} />
             {data.recentPurchases.length === 0 ? <EmptyState message="No purchases yet" /> : (
               <div className="space-y-2">
                 {data.recentPurchases.map(pur => (
