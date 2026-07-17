@@ -106,18 +106,15 @@ async function postPurchaseViaPrisma(input: typeof postPurchase extends (x: infe
   const paid = input.payments.filter(p => p.paymentType !== 'credit').reduce((s, p) => s + p.amountPaisas, 0n)
   const outstanding = total - paid
 
-  // Generate purchase number
   const last = await db.purchase.findFirst({ where: { businessId: input.businessId }, orderBy: { purchaseNo: 'desc' } })
   let nextNum = 1; if (last) { const m = last.purchaseNo.match(/^PUR-(\d+)$/); if (m) nextNum = parseInt(m[1], 10) + 1 }
   const purchaseNo = `PUR-${String(nextNum).padStart(4, '0')}`
 
-  // Resolve accounts (read-only lookups)
   const purchasesAcct = await getAccountByCode(input.businessId, '5010')
   if (!purchasesAcct) throw new Error('Purchases account (5010) not found')
   const payableAcct = await getAccountByCode(input.businessId, '2010')
   if (!payableAcct) throw new Error('Vendors Payable account (2010) not found')
 
-  // Build voucher lines
   const voucherLines: Array<{ accountId: string; debit: bigint; credit: bigint; memo?: string }> = [
     { accountId: purchasesAcct.id, debit: total, credit: 0n, memo: `Purchase ${purchaseNo}` }
   ]
@@ -126,132 +123,47 @@ async function postPurchaseViaPrisma(input: typeof postPurchase extends (x: infe
   }
   if (outstanding > 0n) { voucherLines.push({ accountId: payableAcct.id, debit: 0n, credit: outstanding, memo: `Payable ${purchaseNo}` }) }
 
-  // Single $transaction: voucher + purchase + items + stock movements + payment records
-  // all commit or rollback together. Zero orphan risk.
   const result = await db.$transaction(async (tx) => {
-    // 1. Create voucher header
     const vch = await tx.voucher.create({
-      data: {
-        businessId: input.businessId,
-        voucherType: 'PU',
-        voucherDate: input.purchaseDate,
-        memo: `Purchase ${purchaseNo}`,
-        postedBy: input.createdBy ?? null,
-        totalDebit: total,
-        totalCredit: total,
-      },
+      data: { businessId: input.businessId, voucherType: 'PU', voucherDate: input.purchaseDate, memo: `Purchase ${purchaseNo}`, postedBy: input.createdBy ?? null, totalDebit: total, totalCredit: total },
     })
-
-    // 2. Create voucher lines
     await tx.voucherLine.createMany({
-      data: voucherLines.map((l, i) => ({
-        businessId: input.businessId,
-        voucherId: vch.id,
-        accountId: l.accountId,
-        debit: l.debit,
-        credit: l.credit,
-        memo: l.memo ?? null,
-        lineOrder: i,
-      })),
+      data: voucherLines.map((l, i) => ({ businessId: input.businessId, voucherId: vch.id, accountId: l.accountId, debit: l.debit, credit: l.credit, memo: l.memo ?? null, lineOrder: i })),
     })
-
-    // 3. Update account balances
     const deltas = new Map<string, bigint>()
-    for (const l of voucherLines) {
-      const d = l.debit - l.credit
-      deltas.set(l.accountId, (deltas.get(l.accountId) ?? 0n) + d)
-    }
+    for (const l of voucherLines) { const d = l.debit - l.credit; deltas.set(l.accountId, (deltas.get(l.accountId) ?? 0n) + d) }
     for (const [accountId, delta] of deltas) {
       const acc = await tx.account.findUnique({ where: { id: accountId }, select: { balanceCache: true } })
-      if (acc) {
-        await tx.account.update({
-          where: { id: accountId },
-          data: { balanceCache: acc.balanceCache + delta },
-        })
-      }
+      if (acc) { await tx.account.update({ where: { id: accountId }, data: { balanceCache: acc.balanceCache + delta } }) }
     }
-
-    // 4. Validate products
     for (const item of input.items) {
       if (item.productId) {
-        const prod = await tx.product.findFirst({
-          where: { id: item.productId, businessId: input.businessId },
-          select: { id: true },
-        })
+        const prod = await tx.product.findFirst({ where: { id: item.productId, businessId: input.businessId }, select: { id: true } })
         if (!prod) throw new Error(`Product not found: ${item.productName}`)
       }
     }
-
-    // 5. Create purchase header
     const purchase = await tx.purchase.create({
-      data: {
-        businessId: input.businessId, purchaseNo, vendorId: input.vendorId,
-        supplierBillNo: input.supplierBillNo ?? null, purchaseDate: input.purchaseDate,
-        subtotal, discount, additionalCharges: additional, total,
-        paidAmount: paid, outstandingAmount: outstanding,
-        status: outstanding <= 0n ? 'paid' : paid > 0n ? 'partially_paid' : 'posted',
-        notes: input.notes ?? null, voucherId: vch.id, createdBy: input.createdBy ?? null,
-      },
+      data: { businessId: input.businessId, purchaseNo, vendorId: input.vendorId, supplierBillNo: input.supplierBillNo ?? null, purchaseDate: input.purchaseDate, subtotal, discount, additionalCharges: additional, total, paidAmount: paid, outstandingAmount: outstanding, status: outstanding <= 0n ? 'paid' : paid > 0n ? 'partially_paid' : 'posted', notes: input.notes ?? null, voucherId: vch.id, createdBy: input.createdBy ?? null },
     })
-
-    // 6. Purchase items + stock movements
     for (const item of input.items) {
       let smId: string | undefined
       if (item.productId) {
-        const product = await tx.product.findFirst({
-          where: { id: item.productId, businessId: input.businessId },
-          select: { currentStock: true },
-        })
+        const product = await tx.product.findFirst({ where: { id: item.productId, businessId: input.businessId }, select: { currentStock: true } })
         if (!product) throw new Error(`Product not found: ${item.productName}`)
         const newStock = product.currentStock + item.quantity
-
-        const sm = await tx.stockMovement.create({
-          data: {
-            businessId: input.businessId,
-            productId: item.productId,
-            movementType: 'adjustment_in',
-            quantity: item.quantity,
-            balanceAfter: newStock,
-            reason: `Purchase ${purchaseNo}`,
-            createdBy: input.createdBy ?? null,
-          },
-        })
+        const sm = await tx.stockMovement.create({ data: { businessId: input.businessId, productId: item.productId, movementType: 'adjustment_in', quantity: item.quantity, balanceAfter: newStock, reason: `Purchase ${purchaseNo}`, createdBy: input.createdBy ?? null } })
         smId = sm.id
-
-        await tx.product.update({
-          where: { id: item.productId },
-          data: { currentStock: { increment: item.quantity } },
-        })
+        await tx.product.update({ where: { id: item.productId }, data: { currentStock: { increment: item.quantity } } })
       }
-
-      await tx.purchaseItem.create({
-        data: {
-          businessId: input.businessId, purchaseId: purchase.id,
-          productId: item.productId ?? null, productName: item.productName,
-          quantity: item.quantity, unitCost: item.unitCostPaisas,
-          lineTotal: item.unitCostPaisas * BigInt(item.quantity),
-          stockMovementId: smId ?? null,
-        },
-      })
+      await tx.purchaseItem.create({ data: { businessId: input.businessId, purchaseId: purchase.id, productId: item.productId ?? null, productName: item.productName, quantity: item.quantity, unitCost: item.unitCostPaisas, lineTotal: item.unitCostPaisas * BigInt(item.quantity), stockMovementId: smId ?? null } })
     }
-
-    // 7. Payment records
     for (const p of input.payments) {
       if (p.paymentType !== 'credit') {
-        await tx.purchasePayment.create({
-          data: {
-            businessId: input.businessId, purchaseId: purchase.id,
-            vendorId: input.vendorId, accountId: p.accountId,
-            amount: p.amountPaisas, paymentType: p.paymentType ?? 'purchase_payment',
-            voucherId: vch.id, createdBy: input.createdBy ?? null,
-          },
-        })
+        await tx.purchasePayment.create({ data: { businessId: input.businessId, purchaseId: purchase.id, vendorId: input.vendorId, accountId: p.accountId, amount: p.amountPaisas, paymentType: p.paymentType ?? 'purchase_payment', voucherId: vch.id, createdBy: input.createdBy ?? null } })
       }
     }
-
     return { purchaseId: purchase.id, purchaseNo }
   })
-
   return result
 }
 
@@ -274,17 +186,11 @@ export async function getPurchase(businessId: string, purchaseId: string): Promi
     const { data: inv, error } = await admin.from('purchases').select('id, purchase_no, vendor_id, supplier_bill_no, purchase_date, subtotal, discount, additional_charges, total, paid_amount, outstanding_amount, status, notes, voucher_id, vendors(name, phone, address, city), purchase_items(id, product_id, product_name, quantity, unit_cost, line_total, returned_quantity), purchase_payments(id, account_id, amount, payment_type, payment_date, notes)').eq('id', purchaseId).eq('business_id', businessId).single()
     if (error || !inv) return null
     const r = inv as any
-    return { id: r.id, purchaseNo: r.purchase_no, vendorId: r.vendor_id, vendorName: r.vendors?.name ?? null, vendorPhone: r.vendors?.phone ?? null, vendorAddress: r.vendors?.address ?? null, vendorCity: r.vendors?.city ?? null, supplierBillNo: r.supplier_bill_no, purchaseDate: r.purchase_date, subtotal: String(r.subtotal), discount: String(r.discount), additionalCharges: String(r.additional_charges), total: String(r.total), paidAmount: String(r.paid_amount), outstandingAmount: String(r.outstanding_amount), status: r.status, notes: r.notes, voucherId: r.voucher_id,
-      items: (r.purchase_items ?? []).map((it: any) => ({ id: it.id, productId: it.product_id, productName: it.product_name, quantity: it.quantity, unitCost: String(it.unit_cost), lineTotal: String(it.line_total), returnedQuantity: it.returned_quantity })),
-      payments: (r.purchase_payments ?? []).map((pp: any) => ({ id: pp.id, accountId: pp.account_id, amount: String(pp.amount), paymentType: pp.payment_type, paymentDate: pp.payment_date, notes: pp.notes }))
-    }
+    return { id: r.id, purchaseNo: r.purchase_no, vendorId: r.vendor_id, vendorName: r.vendors?.name ?? null, vendorPhone: r.vendors?.phone ?? null, vendorAddress: r.vendors?.address ?? null, vendorCity: r.vendors?.city ?? null, supplierBillNo: r.supplier_bill_no, purchaseDate: r.purchase_date, subtotal: String(r.subtotal), discount: String(r.discount), additionalCharges: String(r.additional_charges), total: String(r.total), paidAmount: String(r.paid_amount), outstandingAmount: String(r.outstanding_amount), status: r.status, notes: r.notes, voucherId: r.voucher_id, items: (r.purchase_items ?? []).map((it: any) => ({ id: it.id, productId: it.product_id, productName: it.product_name, quantity: it.quantity, unitCost: String(it.unit_cost), lineTotal: String(it.line_total), returnedQuantity: it.returned_quantity })), payments: (r.purchase_payments ?? []).map((pp: any) => ({ id: pp.id, accountId: pp.account_id, amount: String(pp.amount), paymentType: pp.payment_type, paymentDate: pp.payment_date, notes: pp.notes })) }
   }
   const p = await db.purchase.findFirst({ where: { id: purchaseId, businessId }, include: { vendor: true, items: true, payments: true } })
   if (!p) return null
-  return { id: p.id, purchaseNo: p.purchaseNo, vendorId: p.vendorId, vendorName: p.vendor?.name ?? null, vendorPhone: p.vendor?.phone ?? null, vendorAddress: p.vendor?.address ?? null, vendorCity: p.vendor?.city ?? null, supplierBillNo: p.supplierBillNo, purchaseDate: p.purchaseDate.toISOString(), subtotal: p.subtotal.toString(), discount: p.discount.toString(), additionalCharges: p.additionalCharges.toString(), total: p.total.toString(), paidAmount: p.paidAmount.toString(), outstandingAmount: p.outstandingAmount.toString(), status: p.status, notes: p.notes, voucherId: p.voucherId,
-    items: p.items.map(it => ({ id: it.id, productId: it.productId, productName: it.productName, quantity: it.quantity, unitCost: it.unitCost.toString(), lineTotal: it.lineTotal.toString(), returnedQuantity: it.returnedQuantity })),
-    payments: p.payments.map(pp => ({ id: pp.id, accountId: pp.accountId, amount: pp.amount.toString(), paymentType: pp.paymentType, paymentDate: pp.paymentDate.toISOString(), notes: pp.notes }))
-  }
+  return { id: p.id, purchaseNo: p.purchaseNo, vendorId: p.vendorId, vendorName: p.vendor?.name ?? null, vendorPhone: p.vendor?.phone ?? null, vendorAddress: p.vendor?.address ?? null, vendorCity: p.vendor?.city ?? null, supplierBillNo: p.supplierBillNo, purchaseDate: p.purchaseDate.toISOString(), subtotal: p.subtotal.toString(), discount: p.discount.toString(), additionalCharges: p.additionalCharges.toString(), total: p.total.toString(), paidAmount: p.paidAmount.toString(), outstandingAmount: p.outstandingAmount.toString(), status: p.status, notes: p.notes, voucherId: p.voucherId, items: p.items.map(it => ({ id: it.id, productId: it.productId, productName: it.productName, quantity: it.quantity, unitCost: it.unitCost.toString(), lineTotal: it.lineTotal.toString(), returnedQuantity: it.returnedQuantity })), payments: p.payments.map(pp => ({ id: pp.id, accountId: pp.accountId, amount: pp.amount.toString(), paymentType: pp.paymentType, paymentDate: pp.paymentDate.toISOString(), notes: pp.notes })) }
 }
 
 // ─── Vendor Payment (later) ───
@@ -292,11 +198,7 @@ export async function postVendorPayment(input: { businessId: string; vendorId: s
   if (await isPhase5Live()) {
     const admin = getAdminSupabase()
     const supabaseCreatedBy = await resolveSupabaseUuid(input.createdBy)
-    const { data, error } = await admin.rpc('post_vendor_payment', {
-      p_business_id: input.businessId, p_vendor_id: input.vendorId, p_account_id: input.accountId,
-      p_amount_paisas: input.amountPaisas.toString(), p_payment_date: input.paymentDate ? bizDateString(input.paymentDate) : null,
-      p_purchase_id: input.purchaseId ?? null, p_notes: input.notes ?? null, p_created_by: supabaseCreatedBy,
-    })
+    const { data, error } = await admin.rpc('post_vendor_payment', { p_business_id: input.businessId, p_vendor_id: input.vendorId, p_account_id: input.accountId, p_amount_paisas: input.amountPaisas.toString(), p_payment_date: input.paymentDate ? bizDateString(input.paymentDate) : null, p_purchase_id: input.purchaseId ?? null, p_notes: input.notes ?? null, p_created_by: supabaseCreatedBy })
     if (error) throw new Error(`Supabase: ${error.message}`)
     return data as string
   }
@@ -314,11 +216,7 @@ export async function postVendorAdvance(input: { businessId: string; vendorId: s
   if (await isPhase5Live()) {
     const admin = getAdminSupabase()
     const supabaseCreatedBy = await resolveSupabaseUuid(input.createdBy)
-    const { data, error } = await admin.rpc('post_vendor_advance', {
-      p_business_id: input.businessId, p_vendor_id: input.vendorId, p_account_id: input.accountId,
-      p_amount_paisas: input.amountPaisas.toString(), p_advance_date: input.advanceDate ? bizDateString(input.advanceDate) : null,
-      p_notes: input.notes ?? null, p_created_by: supabaseCreatedBy,
-    })
+    const { data, error } = await admin.rpc('post_vendor_advance', { p_business_id: input.businessId, p_vendor_id: input.vendorId, p_account_id: input.accountId, p_amount_paisas: input.amountPaisas.toString(), p_advance_date: input.advanceDate ? bizDateString(input.advanceDate) : null, p_notes: input.notes ?? null, p_created_by: supabaseCreatedBy })
     if (error) throw new Error(`Supabase: ${error.message}`)
     return data as string
   }
@@ -340,16 +238,14 @@ export async function postPurchaseReturn(input: {
     const admin = getAdminSupabase()
     const supabaseCreatedBy = await resolveSupabaseUuid(input.createdBy)
     const itemsJson = input.returnItems.map(i => ({ purchase_item_id: i.purchaseItemId, product_id: i.productId ?? null, product_name: i.productName, quantity: i.quantity, unit_cost_paisas: i.unitCostPaisas.toString() }))
-    const { data, error } = await admin.rpc('post_purchase_return', {
-      p_business_id: input.businessId, p_purchase_id: input.purchaseId, p_return_items: itemsJson,
-      p_settlement_type: input.settlementType, p_settlement_account_id: input.settlementAccountId ?? null,
-      p_return_date: input.returnDate ? bizDateString(input.returnDate) : null, p_notes: input.notes ?? null, p_created_by: supabaseCreatedBy,
-    })
+    const { data, error } = await admin.rpc('post_purchase_return', { p_business_id: input.businessId, p_purchase_id: input.purchaseId, p_return_items: itemsJson, p_settlement_type: input.settlementType, p_settlement_account_id: input.settlementAccountId ?? null, p_return_date: input.returnDate ? bizDateString(input.returnDate) : null, p_notes: input.notes ?? null, p_created_by: supabaseCreatedBy })
     if (error) throw new Error(`Supabase: ${error.message}`)
     const returnId = data as string
     const { data: ret } = await admin.from('purchase_returns').select('return_no').eq('id', returnId).single()
     return { returnId, returnNo: (ret as any)?.return_no ?? '' }
   }
+
+  // Prisma fallback — atomic $transaction
   const purchasesAcct = await getAccountByCode(input.businessId, '5010')
   if (!purchasesAcct) throw new Error('Purchases account (5010) not found')
   const payableAcct = await getAccountByCode(input.businessId, '2010')
@@ -358,22 +254,130 @@ export async function postPurchaseReturn(input: {
   const last = await db.purchaseReturn.findFirst({ where: { businessId: input.businessId }, orderBy: { returnNo: 'desc' } })
   let nextNum = 1; if (last) { const m = last.returnNo.match(/^PRN-(\d+)$/); if (m) nextNum = parseInt(m[1], 10) + 1 }
   const returnNo = `PRN-${String(nextNum).padStart(4, '0')}`
-  const lines: Array<{ accountId: string; debit: bigint; credit: bigint }> = [{ accountId: purchasesAcct.id, debit: 0n, credit: total }]
-  if (input.settlementType === 'vendor_refund' && input.settlementAccountId) { lines.push({ accountId: input.settlementAccountId, debit: total, credit: 0n }) }
-  else { lines.push({ accountId: payableAcct.id, debit: total, credit: 0n }) }
-  const { postVoucherSmart } = await import('@/lib/accounting/voucher-supabase')
-  const voucherId = await postVoucherSmart({ businessId: input.businessId, voucherType: 'PR', voucherDate: input.returnDate ?? new Date(), memo: `Purchase return ${returnNo}`, lines, referenceId: input.purchaseId, referenceType: 'purchase_return', postedBy: input.createdBy })
-  const purchase = await db.purchase.findFirst({ where: { id: input.purchaseId, businessId: input.businessId } })
-  if (!purchase) throw new Error('Purchase not found')
-  const ret = await db.purchaseReturn.create({ data: { businessId: input.businessId, purchaseId: input.purchaseId, vendorId: purchase.vendorId, returnNo, returnDate: input.returnDate ?? new Date(), totalAmount: total, settlementType: input.settlementType, settlementAccountId: input.settlementAccountId ?? null, voucherId, notes: input.notes ?? null, createdBy: input.createdBy ?? null } })
-  const { createStockMovement } = await import('@/lib/products/data-access')
-  for (const item of input.returnItems) {
-    let smId: string | undefined
-    if (item.productId) { const sm = await createStockMovement(input.businessId, { productId: item.productId, movementType: 'adjustment_out', quantity: item.quantity, reason: `Return ${returnNo}`, createdBy: input.createdBy }); smId = sm.id }
-    await db.purchaseReturnItem.create({ data: { businessId: input.businessId, purchaseReturnId: ret.id, purchaseItemId: item.purchaseItemId, productId: item.productId ?? null, productName: item.productName, quantity: item.quantity, unitCost: item.unitCostPaisas, lineTotal: item.unitCostPaisas * BigInt(item.quantity), stockMovementId: smId ?? null } })
-    await db.purchaseItem.update({ where: { id: item.purchaseItemId }, data: { returnedQuantity: { increment: item.quantity } } })
+
+  // Build voucher lines for return reversal
+  const voucherLines: Array<{ accountId: string; debit: bigint; credit: bigint }> = [
+    { accountId: purchasesAcct.id, debit: 0n, credit: total }
+  ]
+  if (input.settlementType === 'vendor_refund' && input.settlementAccountId) {
+    voucherLines.push({ accountId: input.settlementAccountId, debit: total, credit: 0n })
+  } else {
+    voucherLines.push({ accountId: payableAcct.id, debit: total, credit: 0n })
   }
-  return { returnId: ret.id, returnNo }
+
+  const result = await db.$transaction(async (tx) => {
+    // 1. Create reversal voucher
+    const vch = await tx.voucher.create({
+      data: {
+        businessId: input.businessId,
+        voucherType: 'PR',
+        voucherDate: input.returnDate ?? new Date(),
+        memo: `Purchase return ${returnNo}`,
+        postedBy: input.createdBy ?? null,
+        referenceId: input.purchaseId,
+        referenceType: 'purchase_return',
+        totalDebit: total,
+        totalCredit: total,
+      },
+    })
+    await tx.voucherLine.createMany({
+      data: voucherLines.map((l, i) => ({
+        businessId: input.businessId,
+        voucherId: vch.id,
+        accountId: l.accountId,
+        debit: l.debit,
+        credit: l.credit,
+        lineOrder: i,
+      })),
+    })
+    // Update account balances
+    const deltas = new Map<string, bigint>()
+    for (const l of voucherLines) {
+      const d = l.debit - l.credit
+      deltas.set(l.accountId, (deltas.get(l.accountId) ?? 0n) + d)
+    }
+    for (const [accountId, delta] of deltas) {
+      const acc = await tx.account.findUnique({ where: { id: accountId }, select: { balanceCache: true } })
+      if (acc) {
+        await tx.account.update({ where: { id: accountId }, data: { balanceCache: acc.balanceCache + delta } })
+      }
+    }
+
+    // 2. Validate purchase exists
+    const purchase = await tx.purchase.findFirst({ where: { id: input.purchaseId, businessId: input.businessId } })
+    if (!purchase) throw new Error('Purchase not found')
+
+    // 3. Create return header
+    const ret = await tx.purchaseReturn.create({
+      data: {
+        businessId: input.businessId,
+        purchaseId: input.purchaseId,
+        vendorId: purchase.vendorId,
+        returnNo,
+        returnDate: input.returnDate ?? new Date(),
+        totalAmount: total,
+        settlementType: input.settlementType,
+        settlementAccountId: input.settlementAccountId ?? null,
+        voucherId: vch.id,
+        notes: input.notes ?? null,
+        createdBy: input.createdBy ?? null,
+      },
+    })
+
+    // 4. Return items + stock decrement + purchase-item update
+    for (const item of input.returnItems) {
+      let smId: string | undefined
+      if (item.productId) {
+        const product = await tx.product.findFirst({
+          where: { id: item.productId, businessId: input.businessId },
+          select: { currentStock: true },
+        })
+        if (!product) throw new Error(`Product not found: ${item.productName}`)
+        const newStock = product.currentStock - item.quantity
+
+        const sm = await tx.stockMovement.create({
+          data: {
+            businessId: input.businessId,
+            productId: item.productId,
+            movementType: 'adjustment_out',
+            quantity: item.quantity,
+            balanceAfter: newStock,
+            reason: `Return ${returnNo}`,
+            createdBy: input.createdBy ?? null,
+          },
+        })
+        smId = sm.id
+
+        await tx.product.update({
+          where: { id: item.productId },
+          data: { currentStock: { decrement: item.quantity } },
+        })
+      }
+
+      await tx.purchaseReturnItem.create({
+        data: {
+          businessId: input.businessId,
+          purchaseReturnId: ret.id,
+          purchaseItemId: item.purchaseItemId,
+          productId: item.productId ?? null,
+          productName: item.productName,
+          quantity: item.quantity,
+          unitCost: item.unitCostPaisas,
+          lineTotal: item.unitCostPaisas * BigInt(item.quantity),
+          stockMovementId: smId ?? null,
+        },
+      })
+
+      await tx.purchaseItem.update({
+        where: { id: item.purchaseItemId },
+        data: { returnedQuantity: { increment: item.quantity } },
+      })
+    }
+
+    return { returnId: ret.id, returnNo }
+  })
+
+  return result
 }
 
 // ─── Vendor Ledger ───
@@ -383,73 +387,28 @@ export type VendorLedgerRow = {
   voucherId: string; referenceId: string | null; referenceType: string | null
 }
 
-export async function vendorLedger(
-  businessId: string,
-  vendorId: string,
-  filters?: { fromDate?: string | null; toDate?: string | null; typeFilter?: string | null; search?: string | null },
-): Promise<VendorLedgerRow[]> {
-  if (await isPhase5Live()) {
-    return vendorLedgerViaSupabase(businessId, vendorId, filters)
-  }
+export async function vendorLedger(businessId: string, vendorId: string, filters?: { fromDate?: string | null; toDate?: string | null; typeFilter?: string | null; search?: string | null }): Promise<VendorLedgerRow[]> {
+  if (await isPhase5Live()) { return vendorLedgerViaSupabase(businessId, vendorId, filters) }
   return []
 }
 
-async function vendorLedgerViaSupabase(
-  businessId: string,
-  vendorId: string,
-  filters?: { fromDate?: string | null; toDate?: string | null; typeFilter?: string | null; search?: string | null },
-): Promise<VendorLedgerRow[]> {
+async function vendorLedgerViaSupabase(businessId: string, vendorId: string, filters?: { fromDate?: string | null; toDate?: string | null; typeFilter?: string | null; search?: string | null }): Promise<VendorLedgerRow[]> {
   const admin = getAdminSupabase()
-  const { data, error } = await admin.rpc('vendor_ledger', {
-    p_business_id: businessId,
-    p_vendor_id: vendorId,
-    p_from_date: filters?.fromDate ?? null,
-    p_to_date: filters?.toDate ?? null,
-  })
+  const { data, error } = await admin.rpc('vendor_ledger', { p_business_id: businessId, p_vendor_id: vendorId, p_from_date: filters?.fromDate ?? null, p_to_date: filters?.toDate ?? null })
   if (error) throw new Error(`vendor_ledger RPC: ${error.message}`)
   if (!data || !Array.isArray(data)) return []
-
-  let rows: VendorLedgerRow[] = (data as any[]).map((r) => ({
-    date: r.line_date,
-    type: r.line_type,
-    reference: r.reference ?? '',
-    description: r.description ?? '',
-    debit: String(r.debit ?? '0'),
-    credit: String(r.credit ?? '0'),
-    runningBalance: String(r.running_balance ?? '0'),
-    voucherId: r.voucher_id ?? '',
-    referenceId: r.reference_id ?? null,
-    referenceType: r.reference_type ?? null,
-  }))
-
+  let rows: VendorLedgerRow[] = (data as any[]).map((r) => ({ date: r.line_date, type: r.line_type, reference: r.reference ?? '', description: r.description ?? '', debit: String(r.debit ?? '0'), credit: String(r.credit ?? '0'), runningBalance: String(r.running_balance ?? '0'), voucherId: r.voucher_id ?? '', referenceId: r.reference_id ?? null, referenceType: r.reference_type ?? null }))
   if (filters?.typeFilter && filters.typeFilter !== 'all') {
-    const typeMap: Record<string, string[]> = {
-      purchase: ['Purchase'],
-      payment: ['Vendor Payment'],
-      advance: ['Vendor Advance'],
-      advance_application: ['Advance Application'],
-      return: ['Purchase Return'],
-      replacement: ['Replacement'],
-      refund: ['Vendor Refund'],
-    }
+    const typeMap: Record<string, string[]> = { purchase: ['Purchase'], payment: ['Vendor Payment'], advance: ['Vendor Advance'], advance_application: ['Advance Application'], return: ['Purchase Return'], replacement: ['Replacement'], refund: ['Vendor Refund'] }
     const allowed = typeMap[filters.typeFilter] ?? []
     rows = rows.filter(r => allowed.includes(r.type))
   }
-
-  if (filters?.search) {
-    const q = filters.search.toLowerCase()
-    rows = rows.filter(r => r.reference.toLowerCase().includes(q) || r.description.toLowerCase().includes(q) || r.type.toLowerCase().includes(q))
-  }
-
+  if (filters?.search) { const q = filters.search.toLowerCase(); rows = rows.filter(r => r.reference.toLowerCase().includes(q) || r.description.toLowerCase().includes(q) || r.type.toLowerCase().includes(q)) }
   return rows
 }
 
 // ─── Update Vendor ───
-export async function updateVendor(
-  businessId: string,
-  vendorId: string,
-  updates: { name?: string; phone?: string | null; email?: string | null; address?: string | null; city?: string | null; isActive?: boolean },
-): Promise<VendorRow | null> {
+export async function updateVendor(businessId: string, vendorId: string, updates: { name?: string; phone?: string | null; email?: string | null; address?: string | null; city?: string | null; isActive?: boolean }): Promise<VendorRow | null> {
   if (await isPhase5Live()) {
     const admin = getAdminSupabase()
     const patch: Record<string, unknown> = { updated_at: new Date().toISOString() }
@@ -459,9 +418,7 @@ export async function updateVendor(
     if (updates.address !== undefined) patch.address = updates.address
     if (updates.city !== undefined) patch.city = updates.city
     if (updates.isActive !== undefined) patch.is_active = updates.isActive
-    const { data, error } = await admin.from('vendors')
-      .update(patch).eq('id', vendorId).eq('business_id', businessId)
-      .select('id, name, phone, email, address, city, is_active, account_id').single()
+    const { data, error } = await admin.from('vendors').update(patch).eq('id', vendorId).eq('business_id', businessId).select('id, name, phone, email, address, city, is_active, account_id').single()
     if (error) throw new Error(`Supabase: ${error.message}`)
     return { id: data.id, name: data.name, phone: data.phone, email: data.email, address: data.address, city: data.city, isActive: data.is_active, accountId: data.account_id }
   }
@@ -470,165 +427,64 @@ export async function updateVendor(
 }
 
 // ─── Advance Application ───
-export async function postAdvanceApplication(input: {
-  businessId: string; vendorId: string; purchaseId: string
-  amountPaisas: bigint; applicationDate?: Date; notes?: string | null; createdBy?: string | null
-}): Promise<string> {
+export async function postAdvanceApplication(input: { businessId: string; vendorId: string; purchaseId: string; amountPaisas: bigint; applicationDate?: Date; notes?: string | null; createdBy?: string | null }): Promise<string> {
   if (await isPhase5Live()) {
     const admin = getAdminSupabase()
     const supabaseCreatedBy = await resolveSupabaseUuid(input.createdBy)
-    const { data, error } = await admin.rpc('post_advance_application', {
-      p_business_id: input.businessId,
-      p_vendor_id: input.vendorId,
-      p_purchase_id: input.purchaseId,
-      p_amount_paisas: input.amountPaisas.toString(),
-      p_application_date: input.applicationDate ? bizDateString(input.applicationDate) : null,
-      p_notes: input.notes ?? null,
-      p_created_by: supabaseCreatedBy,
-    })
+    const { data, error } = await admin.rpc('post_advance_application', { p_business_id: input.businessId, p_vendor_id: input.vendorId, p_purchase_id: input.purchaseId, p_amount_paisas: input.amountPaisas.toString(), p_application_date: input.applicationDate ? bizDateString(input.applicationDate) : null, p_notes: input.notes ?? null, p_created_by: supabaseCreatedBy })
     if (error) throw new Error(`post_advance_application RPC: ${error.message}`)
     return data as string
   }
   const payableAcct = await getAccountByCode(input.businessId, '2010')
   if (!payableAcct) throw new Error('Vendors Payable account (2010) not found')
   const { postVoucherSmart } = await import('@/lib/accounting/voucher-supabase')
-  const voucherId = await postVoucherSmart({
-    businessId: input.businessId, voucherType: 'PM', voucherDate: input.applicationDate ?? new Date(),
-    memo: 'Advance application', lines: [
-      { accountId: payableAcct.id, debit: input.amountPaisas, credit: 0n, memo: 'Advance applied to purchase' },
-      { accountId: payableAcct.id, debit: 0n, credit: input.amountPaisas, memo: 'Advance applied (reclassify)' },
-    ], referenceId: input.purchaseId, referenceType: 'advance_application', postedBy: input.createdBy,
-  })
+  const voucherId = await postVoucherSmart({ businessId: input.businessId, voucherType: 'PM', voucherDate: input.applicationDate ?? new Date(), memo: 'Advance application', lines: [{ accountId: payableAcct.id, debit: input.amountPaisas, credit: 0n, memo: 'Advance applied to purchase' }, { accountId: payableAcct.id, debit: 0n, credit: input.amountPaisas, memo: 'Advance applied (reclassify)' }], referenceId: input.purchaseId, referenceType: 'advance_application', postedBy: input.createdBy })
   const pp = await db.purchasePayment.create({ data: { businessId: input.businessId, purchaseId: input.purchaseId, vendorId: input.vendorId, accountId: payableAcct.id, amount: input.amountPaisas, paymentType: 'advance_application', voucherId, notes: input.notes ?? null, createdBy: input.createdBy ?? null } })
   await db.purchase.update({ where: { id: input.purchaseId }, data: { paidAmount: { increment: input.amountPaisas }, outstandingAmount: { decrement: input.amountPaisas } } })
   return pp.id
 }
 
 // ─── Purchase Replacement ───
-export type ReplacementItemInput = {
-  originalPurchaseItemId: string
-  outgoingProductId?: string | null; outgoingProductName: string
-  outgoingQuantity: number; outgoingUnitCostPaisas: bigint
-  incomingProductId?: string | null; incomingProductName: string
-  incomingQuantity: number; incomingUnitCostPaisas: bigint
-}
+export type ReplacementItemInput = { originalPurchaseItemId: string; outgoingProductId?: string | null; outgoingProductName: string; outgoingQuantity: number; outgoingUnitCostPaisas: bigint; incomingProductId?: string | null; incomingProductName: string; incomingQuantity: number; incomingUnitCostPaisas: bigint }
 
-export async function postPurchaseReplacement(input: {
-  businessId: string; purchaseId: string
-  replacementItems: ReplacementItemInput[]
-  replacementDate?: Date; notes?: string | null; createdBy?: string | null
-}): Promise<{ replacementId: string; replacementNo: string }> {
+export async function postPurchaseReplacement(input: { businessId: string; purchaseId: string; replacementItems: ReplacementItemInput[]; replacementDate?: Date; notes?: string | null; createdBy?: string | null }): Promise<{ replacementId: string; replacementNo: string }> {
   if (await isPhase5Live()) {
     const admin = getAdminSupabase()
     const supabaseCreatedBy = await resolveSupabaseUuid(input.createdBy)
-    const itemsJson = input.replacementItems.map(it => ({
-      original_purchase_item_id: it.originalPurchaseItemId,
-      outgoing_product_id: it.outgoingProductId ?? null,
-      outgoing_product_name: it.outgoingProductName,
-      outgoing_quantity: it.outgoingQuantity,
-      outgoing_unit_cost: it.outgoingUnitCostPaisas.toString(),
-      incoming_product_id: it.incomingProductId ?? null,
-      incoming_product_name: it.incomingProductName,
-      incoming_quantity: it.incomingQuantity,
-      incoming_unit_cost: it.incomingUnitCostPaisas.toString(),
-    }))
-    const { data, error } = await admin.rpc('post_purchase_replacement', {
-      p_business_id: input.businessId,
-      p_purchase_id: input.purchaseId,
-      p_replacement_items: itemsJson,
-      p_replacement_date: input.replacementDate ? bizDateString(input.replacementDate) : null,
-      p_notes: input.notes ?? null,
-      p_created_by: supabaseCreatedBy,
-    })
+    const itemsJson = input.replacementItems.map(it => ({ original_purchase_item_id: it.originalPurchaseItemId, outgoing_product_id: it.outgoingProductId ?? null, outgoing_product_name: it.outgoingProductName, outgoing_quantity: it.outgoingQuantity, outgoing_unit_cost: it.outgoingUnitCostPaisas.toString(), incoming_product_id: it.incomingProductId ?? null, incoming_product_name: it.incomingProductName, incoming_quantity: it.incomingQuantity, incoming_unit_cost: it.incomingUnitCostPaisas.toString() }))
+    const { data, error } = await admin.rpc('post_purchase_replacement', { p_business_id: input.businessId, p_purchase_id: input.purchaseId, p_replacement_items: itemsJson, p_replacement_date: input.replacementDate ? bizDateString(input.replacementDate) : null, p_notes: input.notes ?? null, p_created_by: supabaseCreatedBy })
     if (error) throw new Error(`post_purchase_replacement RPC: ${error.message}`)
     const replacementId = data as string
-    const { data: rep } = await admin.from('purchase_replacements')
-      .select('replacement_no').eq('id', replacementId).single()
+    const { data: rep } = await admin.from('purchase_replacements').select('replacement_no').eq('id', replacementId).single()
     return { replacementId, replacementNo: (rep as any)?.replacement_no ?? '' }
   }
   const purchasesAcct = await getAccountByCode(input.businessId, '5010')
   if (!purchasesAcct) throw new Error('Purchases account (5010) not found')
   const payableAcct = await getAccountByCode(input.businessId, '2010')
   if (!payableAcct) throw new Error('Vendors Payable account (2010) not found')
-
   let outgoingValue = 0n; let incomingValue = 0n
-  for (const item of input.replacementItems) {
-    outgoingValue += item.outgoingUnitCostPaisas * BigInt(item.outgoingQuantity)
-    incomingValue += item.incomingUnitCostPaisas * BigInt(item.incomingQuantity)
-  }
+  for (const item of input.replacementItems) { outgoingValue += item.outgoingUnitCostPaisas * BigInt(item.outgoingQuantity); incomingValue += item.incomingUnitCostPaisas * BigInt(item.incomingQuantity) }
   const valueDiff = incomingValue - outgoingValue
   const replacementNo = `REP-${String(Date.now()).slice(-4)}`
-
   let voucherId: string | null = null
   const { postVoucherSmart } = await import('@/lib/accounting/voucher-supabase')
-  if (valueDiff > 0n) {
-    voucherId = await postVoucherSmart({
-      businessId: input.businessId, voucherType: 'RP', voucherDate: input.replacementDate ?? new Date(),
-      memo: `Replacement (higher) ${replacementNo}`,
-      lines: [
-        { accountId: purchasesAcct.id, debit: valueDiff, credit: 0n, memo: `Replacement diff ${replacementNo}` },
-        { accountId: payableAcct.id, debit: 0n, credit: valueDiff, memo: `Additional payable ${replacementNo}` },
-      ], postedBy: input.createdBy,
-    })
-  } else if (valueDiff < 0n) {
-    const abs = -valueDiff
-    voucherId = await postVoucherSmart({
-      businessId: input.businessId, voucherType: 'RP', voucherDate: input.replacementDate ?? new Date(),
-      memo: `Replacement (lower) ${replacementNo}`,
-      lines: [
-        { accountId: payableAcct.id, debit: abs, credit: 0n, memo: `Vendor credit ${replacementNo}` },
-        { accountId: purchasesAcct.id, debit: 0n, credit: abs, memo: `Value reduction ${replacementNo}` },
-      ], postedBy: input.createdBy,
-    })
-  }
-
+  if (valueDiff > 0n) { voucherId = await postVoucherSmart({ businessId: input.businessId, voucherType: 'RP', voucherDate: input.replacementDate ?? new Date(), memo: `Replacement (higher) ${replacementNo}`, lines: [{ accountId: purchasesAcct.id, debit: valueDiff, credit: 0n, memo: `Replacement diff ${replacementNo}` }, { accountId: payableAcct.id, debit: 0n, credit: valueDiff, memo: `Additional payable ${replacementNo}` }], postedBy: input.createdBy }) }
+  else if (valueDiff < 0n) { const abs = -valueDiff; voucherId = await postVoucherSmart({ businessId: input.businessId, voucherType: 'RP', voucherDate: input.replacementDate ?? new Date(), memo: `Replacement (lower) ${replacementNo}`, lines: [{ accountId: payableAcct.id, debit: abs, credit: 0n, memo: `Vendor credit ${replacementNo}` }, { accountId: purchasesAcct.id, debit: 0n, credit: abs, memo: `Value reduction ${replacementNo}` }], postedBy: input.createdBy }) }
   const { createStockMovement } = await import('@/lib/products/data-access')
-  for (const item of input.replacementItems) {
-    if (item.outgoingProductId) await createStockMovement(input.businessId, { productId: item.outgoingProductId, movementType: 'adjustment_out', quantity: item.outgoingQuantity, reason: `Replacement out ${replacementNo}`, createdBy: input.createdBy })
-    if (item.incomingProductId) await createStockMovement(input.businessId, { productId: item.incomingProductId, movementType: 'adjustment_in', quantity: item.incomingQuantity, reason: `Replacement in ${replacementNo}`, createdBy: input.createdBy })
-  }
-
+  for (const item of input.replacementItems) { if (item.outgoingProductId) await createStockMovement(input.businessId, { productId: item.outgoingProductId, movementType: 'adjustment_out', quantity: item.outgoingQuantity, reason: `Replacement out ${replacementNo}`, createdBy: input.createdBy }); if (item.incomingProductId) await createStockMovement(input.businessId, { productId: item.incomingProductId, movementType: 'adjustment_in', quantity: item.incomingQuantity, reason: `Replacement in ${replacementNo}`, createdBy: input.createdBy }) }
   await writeAudit({ businessId: input.businessId, userId: input.createdBy ?? null, action: 'PURCHASE_REPLACEMENT', entity: 'purchase_replacement', entityId: replacementNo, details: { replacement_no: replacementNo, purchase_id: input.purchaseId, outgoing_value: outgoingValue.toString(), incoming_value: incomingValue.toString(), value_diff: valueDiff.toString(), voucher_id: voucherId, notes: input.notes } })
   return { replacementId: replacementNo, replacementNo }
 }
 
-export type ReplacementRecord = {
-  id: string; replacementNo: string; date: string
-  outgoingValue: string; incomingValue: string; valueDiff: string
-  voucherId: string | null; notes: string | null
-  items: Array<{
-    outgoingProductName: string; outgoingQuantity: number; outgoingUnitCost: string
-    incomingProductName: string; incomingQuantity: number; incomingUnitCost: string
-  }>
-}
+export type ReplacementRecord = { id: string; replacementNo: string; date: string; outgoingValue: string; incomingValue: string; valueDiff: string; voucherId: string | null; notes: string | null; items: Array<{ outgoingProductName: string; outgoingQuantity: number; outgoingUnitCost: string; incomingProductName: string; incomingQuantity: number; incomingUnitCost: string }> }
 
 export async function listReplacementsForPurchase(businessId: string, purchaseId: string): Promise<ReplacementRecord[]> {
   if (await isPhase5Live()) {
     const admin = getAdminSupabase()
-    const { data: reps, error } = await admin.from('purchase_replacements')
-      .select('id, replacement_no, replacement_date, outgoing_value, incoming_value, value_diff, voucher_id, notes, purchase_replacement_items(outgoing_product_name, outgoing_quantity, outgoing_unit_cost, incoming_product_name, incoming_quantity, incoming_unit_cost)')
-      .eq('business_id', businessId).eq('purchase_id', purchaseId)
-      .order('replacement_date', { ascending: false }).order('created_at', { ascending: false })
+    const { data: reps, error } = await admin.from('purchase_replacements').select('id, replacement_no, replacement_date, outgoing_value, incoming_value, value_diff, voucher_id, notes, purchase_replacement_items(outgoing_product_name, outgoing_quantity, outgoing_unit_cost, incoming_product_name, incoming_quantity, incoming_unit_cost)').eq('business_id', businessId).eq('purchase_id', purchaseId).order('replacement_date', { ascending: false }).order('created_at', { ascending: false })
     if (error) throw new Error(`listReplacements: ${error.message}`)
     if (!reps) return []
-    return (reps as any[]).map(r => ({
-      id: r.id,
-      replacementNo: r.replacement_no,
-      date: r.replacement_date,
-      outgoingValue: String(r.outgoing_value ?? '0'),
-      incomingValue: String(r.incoming_value ?? '0'),
-      valueDiff: String(r.value_diff ?? '0'),
-      voucherId: r.voucher_id ?? null,
-      notes: r.notes ?? null,
-      items: (r.purchase_replacement_items ?? []).map((it: any) => ({
-        outgoingProductName: it.outgoing_product_name,
-        outgoingQuantity: it.outgoing_quantity,
-        outgoingUnitCost: String(it.outgoing_unit_cost),
-        incomingProductName: it.incoming_product_name,
-        incomingQuantity: it.incoming_quantity,
-        incomingUnitCost: String(it.incoming_unit_cost),
-      })),
-    }))
+    return (reps as any[]).map(r => ({ id: r.id, replacementNo: r.replacement_no, date: r.replacement_date, outgoingValue: String(r.outgoing_value ?? '0'), incomingValue: String(r.incoming_value ?? '0'), valueDiff: String(r.value_diff ?? '0'), voucherId: r.voucher_id ?? null, notes: r.notes ?? null, items: (r.purchase_replacement_items ?? []).map((it: any) => ({ outgoingProductName: it.outgoing_product_name, outgoingQuantity: it.outgoing_quantity, outgoingUnitCost: String(it.outgoing_unit_cost), incomingProductName: it.incoming_product_name, incomingQuantity: it.incoming_quantity, incomingUnitCost: String(it.incoming_unit_cost) })) }))
   }
   return []
 }
