@@ -35,6 +35,8 @@ import {
   ArrowDownToLine,
   ArrowUpFromLine,
   Sparkles,
+  DollarSign,
+  Banknote,
 } from 'lucide-react'
 import { useSearchParams } from 'next/navigation'
 import type { MeUser } from '@/components/erp/erp-app'
@@ -81,11 +83,12 @@ import { AdvancedView } from '@/components/erp/views/advanced-view'
 import { AiSettingsView } from '@/components/erp/views/ai-settings-view'
 import { SupabaseStatusBadge } from '@/components/erp/supabase-status-badge'
 
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-// Navigation model: 8 main categories, each with sub-items.
+// ──────────────────────────────────────────────────────────────────────────
+// Navigation model: 3 clear sections — Daily Work, Finance & Assets,
+// Accounting & Reports. Each with grouped sub-items.
 // Each sub-item has a permission/ownerOnly gate. A category is visible
 // only if at least one of its sub-items is visible to the user.
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ──────────────────────────────────────────────────────────────────────────
 
 type SubItem = {
   key: string
@@ -103,108 +106,130 @@ type NavCategory = {
   /** Optional direct key for categories that are also a page (e.g. Home). */
   directKey?: string
   items: SubItem[]
+  /** Visual section group for desktop sidebar */
+  section?: 'daily' | 'finance' | 'accounting'
 }
 
 const NAV_CATEGORIES: NavCategory[] = [
-  // 1. Dashboard
+  // ── SECTION 1: Daily Work ──
   {
     id: 'dashboard',
-    label: 'Dashboard',
-    icon: LayoutDashboard,
+    label: 'Home',
+    icon: HomeIcon,
+    section: 'daily',
     items: [
-      { key: 'home', label: 'Home', short: 'Home', icon: HomeIcon },
+      { key: 'home', label: 'Dashboard', short: 'Home', icon: LayoutDashboard },
     ],
   },
-  // 2. Setup
   {
-    id: 'setup',
-    label: 'Setup',
-    icon: Settings,
+    id: 'sales',
+    label: 'Sales',
+    icon: ShoppingCart,
+    section: 'daily',
     items: [
-      { key: 'setup', label: 'Setup Overview', short: 'Setup', icon: Settings, perm: 'can_view_setup' },
-      { key: 'business-accounts', label: 'Business Accounts', short: 'Accounts', icon: Wallet, perm: 'can_view_setup' },
-      { key: 'coa', label: 'Chart of Accounts', short: 'CoA', icon: BookOpen, perm: 'can_view_setup' },
-      { key: 'users', label: 'Users & Roles', short: 'Users', icon: Users, ownerOnly: true },
-      { key: 'permissions', label: 'Permission Matrix', short: 'Perms', icon: Shield, ownerOnly: true },
-      { key: 'ai-settings', label: 'AI Settings', short: 'AI', icon: Sparkles, ownerOnly: true },
+      { key: 'counter-sale', label: 'Counter Sale', short: 'Counter', icon: ShoppingCart, perm: 'can_create_sales' },
+      { key: 'online-sale', label: 'Online Sale', short: 'Online', icon: ShoppingCart, perm: 'can_create_sales' },
+      { key: 'ofc-sale', label: 'OFC Sale', short: 'OFC', icon: ShoppingCart, perm: 'can_create_sales' },
+      { key: 'sales-list', label: 'Sales List', short: 'List', icon: ClipboardList, perm: 'can_view_sales' },
+      { key: 'delivery', label: 'Delivery / Riders', short: 'Delivery', icon: Bike, perm: 'can_view_delivery_orders' },
     ],
   },
-  // 3. Accounting
+  {
+    id: 'purchases',
+    label: 'Purchases',
+    icon: Receipt,
+    section: 'daily',
+    items: [
+      { key: 'purchases', label: 'Purchase Bills', short: 'Purchases', icon: Receipt, perm: 'can_view_purchases' },
+      { key: 'vendors', label: 'Vendors', short: 'Vendors', icon: Users, perm: 'can_view_purchases' },
+    ],
+  },
+  {
+    id: 'expenses',
+    label: 'Expenses',
+    icon: TrendingDown,
+    section: 'daily',
+    items: [
+      { key: 'expense-batch', label: 'Add Expense', short: 'Expenses', icon: Receipt, perm: 'can_create_expense_batch' },
+      { key: 'petty-cash', label: 'Petty Cash', short: 'Petty', icon: Wallet, perm: 'can_manage_petty_cash' },
+    ],
+  },
+  {
+    id: 'salesman',
+    label: 'Salesman',
+    icon: Users,
+    section: 'daily',
+    items: [
+      { key: 'my-reports', label: 'Salesman Reports', short: 'Reports', icon: BarChart3, perm: 'can_view_own_sales' },
+    ],
+  },
+  // ── SECTION 2: Finance & Assets ──
+  {
+    id: 'receivables-payables',
+    label: 'A/c Receivables & Payables',
+    icon: ArrowLeftRight,
+    section: 'finance',
+    items: [
+      { key: 'accounts', label: 'Receivables & Payables', short: 'A/c', icon: ArrowLeftRight, perm: 'can_view_account_balances' },
+    ],
+  },
+  {
+    id: 'capital',
+    label: 'Capital',
+    icon: Briefcase,
+    section: 'finance',
+    items: [
+      { key: 'accounts', label: 'Capital Accounts', short: 'Capital', icon: Briefcase, perm: 'can_view_account_balances' },
+    ],
+  },
+  {
+    id: 'assets',
+    label: 'Current Assets',
+    icon: Wallet,
+    section: 'finance',
+    items: [
+      { key: 'accounts', label: 'Cash, Bank & Wallet', short: 'Cash', icon: DollarSign, perm: 'can_view_account_balances' },
+      { key: 'inventory', label: 'Inventory / Stock', short: 'Stock', icon: Package, perm: 'can_view_products' },
+    ],
+  },
+  // ── SECTION 3: Accounting & Reports ──
   {
     id: 'accounting',
     label: 'Accounting',
     icon: Briefcase,
+    section: 'accounting',
     items: [
       { key: 'day-book', label: 'Day Book', short: 'Day Book', icon: BookOpen, perm: 'can_view_day_book' },
       { key: 'journal-voucher', label: 'Journal Voucher', short: 'JV', icon: ClipboardList, perm: 'can_create_journal_voucher' },
       { key: 'receipt-voucher', label: 'Receipt Voucher', short: 'Receipt', icon: ArrowDownToLine, perm: 'can_create_receipt_voucher' },
       { key: 'payment-voucher', label: 'Payment Voucher', short: 'Payment', icon: ArrowUpFromLine, perm: 'can_create_payment_voucher' },
       { key: 'contra-entry', label: 'Contra Entry', short: 'Contra', icon: ArrowLeftRight, perm: 'can_create_contra' },
-      { key: 'petty-cash', label: 'Petty Cash', short: 'Petty', icon: Wallet, perm: 'can_manage_petty_cash' },
-      { key: 'expense-batch', label: 'Expenses', short: 'Expenses', icon: Receipt, perm: 'can_create_expense_batch' },
       { key: 'trial-balance', label: 'Trial Balance', short: 'TB', icon: Scale, perm: 'can_view_trial_balance' },
       { key: 'opening-balance', label: 'Opening Balance', short: 'Opening', icon: Plus, perm: 'can_post_opening_voucher' },
+      { key: 'coa', label: 'Chart of Accounts', short: 'CoA', icon: BookOpen, perm: 'can_view_setup' },
     ],
   },
-  // 4. Inventory (merged Products & Stock)
-  {
-    id: 'inventory',
-    label: 'Inventory',
-    icon: Package,
-    items: [
-      { key: 'inventory', label: 'Inventory', short: 'Stock', icon: Package, perm: 'can_view_products' },
-    ],
-  },
-  // 5. Sales (Phase 4)
-  {
-    id: 'sales',
-    label: 'Sales',
-    icon: ShoppingCart,
-    items: [
-      { key: 'counter-sale', label: 'Counter Sale', short: 'Counter', icon: ShoppingCart, perm: 'can_create_sales' },
-      { key: 'online-sale', label: 'Online Sale', short: 'Online', icon: ShoppingCart, perm: 'can_create_sales' },
-      { key: 'ofc-sale', label: 'OFC Sale', short: 'OFC', icon: ShoppingCart, perm: 'can_create_sales' },
-      { key: 'sales-list', label: 'Sales List', short: 'List', icon: ClipboardList, perm: 'can_view_sales' },
-    ],
-  },
-  // 6. Purchases (Phase 5)
-  {
-    id: 'purchases',
-    label: 'Purchases',
-    icon: Receipt,
-    items: [
-      { key: 'purchases', label: 'Purchases', short: 'Purchases', icon: Receipt, perm: 'can_view_purchases' },
-      { key: 'vendors', label: 'Vendors', short: 'Vendors', icon: Users, perm: 'can_view_purchases' },
-    ],
-  },
-  // 7. Delivery / Riders (Phase 7)
-  {
-    id: 'delivery',
-    label: 'Delivery',
-    icon: Bike,
-    items: [
-      { key: 'delivery', label: 'Delivery Orders', short: 'Delivery', icon: Bike, perm: 'can_view_delivery_orders' },
-      { key: 'riders', label: 'Riders', short: 'Riders', icon: Users, perm: 'can_view_riders' },
-    ],
-  },
-  // 8. Reports (Phase 8)
   {
     id: 'reports',
     label: 'Reports',
     icon: BarChart3,
+    section: 'accounting',
     items: [
-      { key: 'reports', label: 'Reports', short: 'Reports', icon: FileText, perm: 'can_view_trial_balance' },
-      { key: 'my-reports', label: 'My Reports', short: 'My Reports', icon: BarChart3, perm: 'can_view_own_sales' },
+      { key: 'reports', label: 'Financial Reports', short: 'Reports', icon: FileText, perm: 'can_view_trial_balance' },
     ],
   },
-  // 9. Advanced (Accounts, Audit, Biz-Day Test)
   {
-    id: 'advanced',
-    label: 'Advanced',
+    id: 'settings',
+    label: 'Settings',
     icon: Settings,
+    section: 'accounting',
     items: [
-      { key: 'accounts', label: 'Accounts', short: 'Accounts', icon: Wallet, perm: 'can_view_account_balances' },
+      { key: 'setup', label: 'Setup Overview', short: 'Setup', icon: Settings, perm: 'can_view_setup' },
+      { key: 'business-accounts', label: 'Business Accounts', short: 'Accounts', icon: Wallet, perm: 'can_view_setup' },
+      { key: 'users', label: 'Users & Roles', short: 'Users', icon: Users, ownerOnly: true },
+      { key: 'permissions', label: 'Permission Matrix', short: 'Perms', icon: Shield, ownerOnly: true },
       { key: 'audit', label: 'Audit Log', short: 'Audit', icon: ScrollText, perm: 'can_view_audit_log' },
+      { key: 'ai-settings', label: 'AI Settings', short: 'AI', icon: Sparkles, ownerOnly: true },
       { key: 'biz-day-test', label: 'Biz-Day Test', short: 'Biz-Day', icon: Clock, ownerOnly: true },
     ],
   },
@@ -239,11 +264,22 @@ function categoryForKey(key: string): string | null {
   return null
 }
 
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-// Mobile nav: 5 primary slots â€” Home, Work, Stock, Reports, More.
+/** Get the section label for a category id */
+function sectionLabelFor(id: string): string | null {
+  const cat = NAV_CATEGORIES.find(c => c.id === id)
+  if (!cat || !cat.section) return null
+  switch (cat.section) {
+    case 'daily': return 'Daily Work'
+    case 'finance': return 'Finance & Assets'
+    case 'accounting': return 'Accounting & Reports'
+  }
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Mobile nav: 5 primary slots — Home, Work, Stock, Reports, More.
 // "Work" maps to the first available accounting action for the role.
 // "Stock" maps to Products. "Reports" maps to Trial Balance / Negative Stock.
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ──────────────────────────────────────────────────────────────────────────
 
 type MobileSlot = {
   id: string
@@ -256,11 +292,8 @@ type MobileSlot = {
 const MOBILE_SLOTS: MobileSlot[] = [
   { id: 'home', label: 'Home', icon: HomeIcon, resolve: () => 'home' },
   { id: 'work', label: 'Work', icon: Briefcase, resolve: (u) => {
-    // Rider: go to delivery work view
     if (u.roleName === 'Rider' && u.permissions.includes('can_view_own_orders')) return 'delivery'
-    // Salesman: go to counter sale
     if (u.permissions.includes('can_create_sales')) return 'counter-sale'
-    // Accountant/Owner: go to day book
     if (u.permissions.includes('can_view_day_book')) return 'day-book'
     if (u.permissions.includes('can_post_journal_voucher')) return 'journal-voucher'
     if (u.permissions.includes('can_view_trial_balance')) return 'trial-balance'
@@ -271,17 +304,15 @@ const MOBILE_SLOTS: MobileSlot[] = [
     return null
   }},
   { id: 'reports', label: 'Reports', icon: BarChart3, resolve: (u) => {
-    // Salesman: My Reports
     if (u.permissions.includes('can_view_own_sales') && !u.permissions.includes('can_view_trial_balance')) return 'my-reports'
-    // Owner/Accountant: full Reports
     if (u.permissions.includes('can_view_trial_balance')) return 'reports'
     return null
   }},
 ]
 
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ──────────────────────────────────────────────────────────────────────────
 // Main shell
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ──────────────────────────────────────────────────────────────────────────
 
 function resolveInitialPage(searchParams: URLSearchParams, user: MeUser): string {
   const page = searchParams.get('page')
@@ -303,11 +334,10 @@ export function DashboardShell({ user, onSignOut }: { user: MeUser; onSignOut: (
 
   const cats = useMemo(() => visibleCategories(user), [user])
 
-  // Expand state: default-expand the category that contains the active item.
+  // Expand state: default-expand all categories on first load.
   const [expanded, setExpanded] = useState<Set<string>>(() => {
-    const init = new Set<string>(['dashboard']) // dashboard always expanded
-    const cat = categoryForKey(active)
-    if (cat) init.add(cat)
+    const init = new Set<string>()
+    for (const cat of cats) init.add(cat.id)
     return init
   })
 
@@ -328,7 +358,6 @@ export function DashboardShell({ user, onSignOut }: { user: MeUser; onSignOut: (
       window.history.pushState({}, '', '/')
     }
     setActive(key)
-    // Sync ?page= to browser URL without reload
     const url = new URL(window.location.href)
     url.searchParams.set('page', key)
     window.history.pushState({}, '', url.toString())
@@ -398,19 +427,10 @@ export function DashboardShell({ user, onSignOut }: { user: MeUser; onSignOut: (
 
       {/* Desktop: sidebar + main / Mobile: main + bottom pill nav */}
       <div className="flex-1 flex">
-        {/* Sidebar (desktop) â€” premium glass surface */}
+        {/* Sidebar (desktop) — premium glass surface */}
         <aside className="hidden md:flex w-72 border-r border-white/10 bg-white/70 dark:bg-white/5 backdrop-blur-2xl flex-col shadow-[0_8px_32px_rgba(0,0,0,0.04)]">
           <nav className="flex-1 overflow-y-auto p-4 space-y-1">
-            {cats.map((cat) => (
-              <SidebarCategory
-                key={cat.id}
-                category={cat}
-                activeKey={effectiveActive}
-                isExpanded={expanded.has(cat.id)}
-                onToggle={() => toggleCategory(cat.id)}
-                onSelect={selectItem}
-              />
-            ))}
+            {renderSidebarCategories(cats, effectiveActive, expanded, toggleCategory, selectItem)}
           </nav>
           <div className="p-4 border-t border-white/10">
             <div className="relative overflow-hidden rounded-2xl border border-white/10 bg-white/60 dark:bg-white/5 backdrop-blur-xl p-3 shadow-[0_4px_16px_rgba(0,0,0,0.04)]">
@@ -457,7 +477,7 @@ export function DashboardShell({ user, onSignOut }: { user: MeUser; onSignOut: (
         onMore={() => setMoreOpen(true)}
       />
 
-      {/* Mobile "more" sheet â€” grouped by category */}
+      {/* Mobile "more" sheet — grouped by category */}
       {mobileMoreCategories.some((c) => c.visibleItems.length > 0) && (
         <MobileMoreSheet
           categories={mobileMoreCategories}
@@ -474,9 +494,56 @@ export function DashboardShell({ user, onSignOut }: { user: MeUser; onSignOut: (
   )
 }
 
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+/** Render sidebar categories grouped by section */
+function renderSidebarCategories(
+  cats: Array<NavCategory & { visibleItems: SubItem[] }>,
+  activeKey: string,
+  expanded: Set<string>,
+  onToggle: (id: string) => void,
+  onSelect: (k: string) => void,
+) {
+  const sections: { label: string; cats: typeof cats }[] = []
+  // Group by section in order
+  const sectionOrder = ['daily', 'finance', 'accounting'] as const
+  const sectionLabels: Record<string, string> = {
+    daily: 'Daily Work',
+    finance: 'Finance & Assets',
+    accounting: 'Accounting & Reports',
+  }
+
+  for (const sec of sectionOrder) {
+    const group = cats.filter(c => c.section === sec)
+    if (group.length > 0) {
+      sections.push({ label: sectionLabels[sec], cats: group })
+    }
+  }
+
+  return (
+    <>
+      {sections.map((section) => (
+        <div key={section.label} className="mb-4">
+          <div className="text-[10px] uppercase tracking-widest text-muted-foreground/60 font-semibold px-3 py-1.5">
+            {section.label}
+          </div>
+          {section.cats.map((cat) => (
+            <SidebarCategory
+              key={cat.id}
+              category={cat}
+              activeKey={activeKey}
+              isExpanded={expanded.has(cat.id)}
+              onToggle={() => onToggle(cat.id)}
+              onSelect={onSelect}
+            />
+          ))}
+        </div>
+      ))}
+    </>
+  )
+}
+
+// ──────────────────────────────────────────────────────────────────────────
 // Desktop sidebar: collapsible category with sub-items
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ──────────────────────────────────────────────────────────────────────────
 
 function SidebarCategory({
   category,
@@ -492,7 +559,7 @@ function SidebarCategory({
   onSelect: (k: string) => void
 }) {
   // Special case: categories with exactly 1 visible item behave as a direct
-  // button (no expand/collapse) â€” clicking goes straight to that item.
+  // button (no expand/collapse) — clicking goes straight to that item.
   const isDirect = category.visibleItems.length === 1
   const directItem = isDirect ? category.visibleItems[0] : null
   const isActive = directItem ? activeKey === directItem.key : activeKey !== 'home' && category.items.some((i) => i.key === activeKey)
@@ -555,26 +622,26 @@ function SidebarCategory({
           >
             <div className="ml-3 mt-0.5 space-y-0.5 border-l border-border pl-2">
               {category.visibleItems.map((item) => {
-                const isActive = activeKey === item.key
+                const isItemActive = activeKey === item.key
                 return (
                   <button
                     key={item.key}
                     onClick={() => onSelect(item.key)}
                     className={cn(
                       'relative w-full flex items-center gap-2 px-2.5 py-1.5 text-[13px] rounded-md press-sm',
-                      isActive
+                      isItemActive
                         ? 'bg-accent text-accent-foreground font-medium'
                         : 'text-muted-foreground hover:text-foreground hover:bg-muted/40',
                     )}
                   >
-                    {isActive && (
+                    {isItemActive && (
                       <motion.span
                         layoutId="sidebar-active"
                         className="absolute -left-2 top-1/2 -translate-y-1/2 h-4 w-0.5 rounded-full bg-primary"
                         transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
                       />
                     )}
-                    <item.icon className={cn('size-3.5 shrink-0', isActive && 'text-primary')} />
+                    <item.icon className={cn('size-3.5 shrink-0', isItemActive && 'text-primary')} />
                     <span className="truncate">{item.label}</span>
                   </button>
                 )
@@ -587,9 +654,9 @@ function SidebarCategory({
   )
 }
 
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ──────────────────────────────────────────────────────────────────────────
 // Mobile: liquid-glass pill bottom nav
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ──────────────────────────────────────────────────────────────────────────
 
 type MobilePrimarySlot = MobileSlot & { key: string }
 
@@ -661,9 +728,9 @@ function MobilePillNav({
   )
 }
 
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-// Mobile "More" sheet â€” grouped by category
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ──────────────────────────────────────────────────────────────────────────
+// Mobile "More" sheet — grouped by category
+// ──────────────────────────────────────────────────────────────────────────
 
 function MobileMoreSheet({
   categories,
@@ -733,9 +800,9 @@ function MobileMoreSheet({
   )
 }
 
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ──────────────────────────────────────────────────────────────────────────
 // View router (unchanged logic)
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ──────────────────────────────────────────────────────────────────────────
 
 function ViewRouter({
   user,
@@ -794,7 +861,7 @@ function ViewRouter({
     return <InventoryView user={user} />
   }
 
-  // Phase 4 â€” Sales
+  // Phase 4 — Sales
   if (active === 'counter-sale') return <CounterSaleView user={user} />
   if (active === 'online-sale') return <OnlineSaleView user={user} />
   if (active === 'ofc-sale') return <OfcSaleView user={user} />
@@ -803,11 +870,11 @@ function ViewRouter({
   if (active === 'purchases') return <PurchasesView user={user} />
   if (active === 'vendors') return <VendorsView user={user} />
 
-  // Phase 7 â€” Delivery & Riders
+  // Phase 7 — Delivery & Riders
   if (active === 'delivery') return <DeliveryView user={user} />
   if (active === 'riders') return <DeliveryView user={user} />
 
-  // Phase 8 â€” Reports
+  // Phase 8 — Reports
   if (active === 'reports') return <ReportsView user={user} />
   if (active === 'my-reports') return <SalesmanReportsView user={user} />
 
