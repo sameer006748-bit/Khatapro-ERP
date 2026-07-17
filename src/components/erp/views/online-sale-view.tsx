@@ -8,7 +8,7 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { toast } from 'sonner'
 import { Plus, Trash2, Globe, CheckCircle2, AlertCircle, Printer, FileText, Send } from 'lucide-react'
-import { formatMoney, parseMoney } from '@/lib/format'
+import { formatWholeRupees, parseMoney } from '@/lib/format'
 import { motion } from 'framer-motion'
 import { PrintInvoiceButton } from '@/components/invoice/print-invoice-button'
 import type { MeUser } from '@/components/erp/erp-app'
@@ -45,7 +45,6 @@ export function OnlineSaleView({ user }: { user: MeUser }) {
     }
   }, [businessAccounts, paymentAccountId])
 
-  // ── Reconciled totals ──
   const subtotal = items.reduce((acc, it) => acc + (parseMoney(it.unitPrice) ?? 0n) * BigInt(parseInt(it.qty) || 0), 0n)
   const discountPaisas = useMemo(() => {
     const v = parseMoney(form.discountRupees)
@@ -59,12 +58,11 @@ export function OnlineSaleView({ user }: { user: MeUser }) {
   const companyDeliveryIncomePaisas = parseMoney(form.companyDeliveryIncome) ?? 0n
   const customerGrandTotal = netProductTotal + deliveryFeePaisas
 
-  // Advance and change
   const advanceReceived = parseMoney(form.advanceReceived) ?? 0n
   const changeAmount = advanceReceived > customerGrandTotal ? advanceReceived - customerGrandTotal : 0n
   const netAdvance = advanceReceived - changeAmount
   const outstanding = customerGrandTotal > netAdvance ? customerGrandTotal - netAdvance : 0n
-  const codExpected = outstanding // COD = remaining outstanding
+  const codExpected = outstanding
 
   const postMut = useMutation({
     mutationFn: async () => {
@@ -123,10 +121,10 @@ export function OnlineSaleView({ user }: { user: MeUser }) {
           <h2 className="text-xl font-semibold text-foreground">Online Sale Posted!</h2>
           <p className="text-3xl font-bold text-primary mt-1" data-num>{result.invoiceNo}</p>
           {result.customerGrandTotal && (
-            <p className="text-sm text-muted-foreground mt-2">Grand Total: <span className="font-medium text-foreground" data-num>{formatMoney(BigInt(result.customerGrandTotal))}</span></p>
+            <p className="text-sm text-muted-foreground mt-2">Grand Total: <span className="font-medium text-foreground" data-num>{formatWholeRupees(BigInt(result.customerGrandTotal))}</span></p>
           )}
           {result.remainingCod && (
-            <p className="text-sm text-muted-foreground">COD Expected: <span className="font-medium text-amber-600" data-num>{formatMoney(BigInt(result.remainingCod))}</span></p>
+            <p className="text-sm text-muted-foreground">COD Expected: <span className="font-medium text-amber-600" data-num>{formatWholeRupees(BigInt(result.remainingCod))}</span></p>
           )}
           <div className="mt-6 flex flex-col gap-2">
             <Button className="press-md shadow-sm" onClick={() => window.open(`/?invoice=${result.invoiceId}`, '_self')}><FileText className="size-4" /> View Invoice</Button>
@@ -151,7 +149,6 @@ export function OnlineSaleView({ user }: { user: MeUser }) {
     <div className="space-y-4">
       <h1 className="text-xl font-semibold tracking-tight text-foreground">Online Sale</h1>
 
-      {/* ── Customer ── */}
       <div className="card-3d p-4 space-y-3">
         <h2 className="text-sm font-semibold text-foreground">Customer</h2>
         <div className="grid sm:grid-cols-2 gap-2">
@@ -178,7 +175,6 @@ export function OnlineSaleView({ user }: { user: MeUser }) {
         </div>
       </div>
 
-      {/* ── Items ── */}
       <div className="card-3d p-4">
         <div className="flex items-center justify-between mb-2">
           <h2 className="text-sm font-semibold text-foreground">Items</h2>
@@ -203,7 +199,6 @@ export function OnlineSaleView({ user }: { user: MeUser }) {
         </div>
       </div>
 
-      {/* ── Delivery ── */}
       <div className="card-3d p-4 space-y-3">
         <h2 className="text-sm font-semibold text-foreground">Delivery</h2>
         <div className="grid sm:grid-cols-3 gap-2">
@@ -225,7 +220,6 @@ export function OnlineSaleView({ user }: { user: MeUser }) {
         )}
       </div>
 
-      {/* ── Advance ── */}
       <div className="card-3d p-4 space-y-3">
         <h2 className="text-sm font-semibold text-foreground">Advance Payment</h2>
         <div className="grid sm:grid-cols-2 gap-2">
@@ -243,52 +237,51 @@ export function OnlineSaleView({ user }: { user: MeUser }) {
         </div>
       </div>
 
-      {/* ── Reconciled Totals ── */}
       <div className="card-3d p-4 space-y-1">
         <h2 className="text-sm font-semibold text-foreground mb-2">Reconciled Totals</h2>
         <div className="flex items-center justify-between text-sm">
-          <span className="text-muted-foreground">Product Subtotal</span><span className="font-medium" data-num>{formatMoney(subtotal, false)}</span>
+          <span className="text-muted-foreground">Product Subtotal</span><span className="font-medium" data-num>{formatWholeRupees(subtotal, false)}</span>
         </div>
         {discountPaisas > 0n && (
           <div className="flex items-center justify-between text-sm">
-            <span className="text-muted-foreground">Discount</span><span className="font-medium text-amber-600" data-num>−{formatMoney(discountPaisas, false)}</span>
+            <span className="text-muted-foreground">Discount</span><span className="font-medium text-amber-600" data-num>−{formatWholeRupees(discountPaisas, false)}</span>
           </div>
         )}
         <div className="flex items-center justify-between text-sm">
-          <span className="text-muted-foreground">Net Product Total</span><span className="font-medium" data-num>{formatMoney(netProductTotal, false)}</span>
+          <span className="text-muted-foreground">Net Product Total</span><span className="font-medium" data-num>{formatWholeRupees(netProductTotal, false)}</span>
         </div>
         {deliveryFeePaisas > 0n && (
           <>
             <div className="flex items-center justify-between text-sm">
-              <span className="text-muted-foreground">Customer Delivery Charge</span><span className="font-medium" data-num>{formatMoney(deliveryFeePaisas, false)}</span>
+              <span className="text-muted-foreground">Customer Delivery Charge</span><span className="font-medium" data-num>{formatWholeRupees(deliveryFeePaisas, false)}</span>
             </div>
             <div className="flex items-center justify-between text-xs pl-4">
-              <span className="text-muted-foreground">Rider Earning</span><span data-num>{formatMoney(riderEarningPaisas, false)}</span>
+              <span className="text-muted-foreground">Rider Earning</span><span data-num>{formatWholeRupees(riderEarningPaisas, false)}</span>
             </div>
             <div className="flex items-center justify-between text-xs pl-4">
-              <span className="text-muted-foreground">Company Delivery Income</span><span data-num>{formatMoney(companyDeliveryIncomePaisas, false)}</span>
+              <span className="text-muted-foreground">Company Delivery Income</span><span data-num>{formatWholeRupees(companyDeliveryIncomePaisas, false)}</span>
             </div>
           </>
         )}
         <div className="flex items-center justify-between text-sm pt-1 border-t border-border">
-          <span className="font-semibold text-foreground">Customer Grand Total</span><span className="font-bold text-primary" data-num>{formatMoney(customerGrandTotal)}</span>
+          <span className="font-semibold text-foreground">Customer Grand Total</span><span className="font-bold text-primary" data-num>{formatWholeRupees(customerGrandTotal)}</span>
         </div>
         <div className="flex items-center justify-between text-sm">
-          <span className="text-muted-foreground">Advance Received</span><span className="font-medium" data-num>{formatMoney(advanceReceived, false)}</span>
+          <span className="text-muted-foreground">Advance Received</span><span className="font-medium" data-num>{formatWholeRupees(advanceReceived, false)}</span>
         </div>
         {changeAmount > 0n && (
           <div className="flex items-center justify-between text-sm">
-            <span className="text-muted-foreground">Change</span><span className="font-medium text-amber-600" data-num>−{formatMoney(changeAmount, false)}</span>
+            <span className="text-muted-foreground">Change</span><span className="font-medium text-amber-600" data-num>−{formatWholeRupees(changeAmount, false)}</span>
           </div>
         )}
         <div className="flex items-center justify-between text-sm">
-          <span className="text-muted-foreground">Net Advance</span><span className="font-medium text-primary" data-num>{formatMoney(netAdvance, false)}</span>
+          <span className="text-muted-foreground">Net Advance</span><span className="font-medium text-primary" data-num>{formatWholeRupees(netAdvance, false)}</span>
         </div>
         <div className="flex items-center justify-between text-sm">
-          <span className="text-muted-foreground">Outstanding</span><span className="font-medium text-destructive" data-num>{formatMoney(outstanding, false)}</span>
+          <span className="text-muted-foreground">Outstanding</span><span className="font-medium text-destructive" data-num>{formatWholeRupees(outstanding, false)}</span>
         </div>
         <div className="flex items-center justify-between text-sm pt-1 border-t border-border">
-          <span className="font-semibold text-foreground">COD Expected</span><span className="font-bold text-amber-600" data-num>{formatMoney(codExpected)}</span>
+          <span className="font-semibold text-foreground">COD Expected</span><span className="font-bold text-amber-600" data-num>{formatWholeRupees(codExpected)}</span>
         </div>
       </div>
 

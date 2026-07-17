@@ -15,15 +15,9 @@ import {
 } from 'lucide-react'
 import { useRiderDashboard } from '@/hooks/use-rider-dashboard'
 import { GlassPanel, KpiCard, QuickActionButton, SectionHeader, EmptyState } from '@/components/erp/dashboard-components'
+import { formatWholeRupees } from '@/lib/format'
 import { useRouter } from 'next/navigation'
 
-function formatPKR(value: string | null | undefined): string {
-  if (!value) return 'Not available'
-  const n = Number(value)
-  if (n >= 1000000) return `PKR ${(n / 1000000).toFixed(1)}M`
-  if (n >= 1000) return `PKR ${(n / 1000).toFixed(1)}K`
-  return `PKR ${n.toFixed(0)}`
-}
 
 const STATUS_COLORS: Record<string, string> = {
   pending: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400',
@@ -109,12 +103,12 @@ export function RiderDashboard({ user }: { user: any }) {
       icon: CheckCircle2, accent: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400',
     },
     {
-      label: 'COD Pending', value: formatPKR(summary.codPending),
+      label: 'COD Pending', value: formatWholeRupees(Number(summary.codPending), true).replace('Rs ', 'PKR '),
       sub: 'Cash to collect',
       icon: Wallet, accent: 'bg-amber-500/10 text-amber-600 dark:text-amber-400',
     },
     {
-      label: 'Earnings Payable', value: formatPKR(summary.earningsPayable),
+      label: 'Earnings Payable', value: formatWholeRupees(Number(summary.earningsPayable), true).replace('Rs ', 'PKR '),
       sub: 'Delivery earnings owed',
       icon: Package, accent: 'bg-violet-500/10 text-violet-600 dark:text-violet-400',
     },
@@ -199,7 +193,7 @@ export function RiderDashboard({ user }: { user: any }) {
                     </div>
                   </div>
                   <div className="text-right shrink-0 ml-3">
-                    <div className="text-sm font-semibold text-foreground">{formatPKR(order.totalCodAmount)}</div>
+                    <div className="text-sm font-semibold text-foreground">{formatWholeRupees(Number(order.totalCodAmount), true).replace('Rs ', 'PKR ')}</div>
                     <div className="text-[11px] text-muted-foreground">COD</div>
                   </div>
                 </div>

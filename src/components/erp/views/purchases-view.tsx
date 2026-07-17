@@ -8,7 +8,7 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { toast } from 'sonner'
 import { Plus, Search, Package, Wallet, TrendingDown, X, CheckCircle2, AlertCircle, MoreVertical, History, Printer, FileText, ArrowLeft, RefreshCw, ArrowRightLeft } from 'lucide-react'
-import { formatMoney, parseMoney } from '@/lib/format'
+import { formatWholeRupees, parseMoney } from '@/lib/format'
 import { bizDate } from '@/lib/dates'
 import { motion, AnimatePresence } from 'framer-motion'
 import type { MeUser } from '@/components/erp/erp-app'
@@ -69,10 +69,10 @@ export function PurchasesView({ user }: { user: MeUser }) {
 
       {/* KPIs */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
-        <KPI icon={Package} label="Total Purchases" value={formatMoney(kpis.total)} />
-        <KPI icon={Wallet} label="Amount Paid" value={formatMoney(kpis.paid)} />
-        <KPI icon={TrendingDown} label="Payables" value={formatMoney(kpis.payable)} warn={kpis.payable > 0n} />
-        <KPI icon={Package} label="This Month" value={formatMoney(kpis.thisMonth)} />
+        <KPI icon={Package} label="Total Purchases" value={formatWholeRupees(kpis.total)} />
+        <KPI icon={Wallet} label="Amount Paid" value={formatWholeRupees(kpis.paid)} />
+        <KPI icon={TrendingDown} label="Payables" value={formatWholeRupees(kpis.payable)} warn={kpis.payable > 0n} />
+        <KPI icon={Package} label="This Month" value={formatWholeRupees(kpis.thisMonth)} />
       </div>
 
       {/* Toolbar */}
@@ -90,14 +90,14 @@ export function PurchasesView({ user }: { user: MeUser }) {
               <th className="text-left px-3 py-2 font-medium">PUR No</th><th className="text-left px-3 py-2 font-medium">Date</th><th className="text-left px-3 py-2 font-medium">Vendor</th><th className="text-left px-3 py-2 font-medium">Bill No</th><th className="text-right px-3 py-2 font-medium">Total</th><th className="text-right px-3 py-2 font-medium">Paid</th><th className="text-right px-3 py-2 font-medium">Outstanding</th><th className="text-left px-3 py-2 font-medium">Status</th><th className="text-center px-3 py-2 font-medium w-16">·</th>
             </tr></thead><tbody>
               {filtered.map(p => <tr key={p.id} className="border-b border-border/40 last:border-0 hover:bg-muted/20 cursor-pointer" onClick={() => { setDetailId(p.id); setModal('detail') }}>
-                <td className="px-3 py-2 font-medium text-foreground" data-num>{p.purchaseNo}</td><td className="px-3 py-2 text-xs text-muted-foreground" data-num>{bizDate(p.purchaseDate)}</td><td className="px-3 py-2 text-foreground">{p.vendorName ?? '—'}</td><td className="px-3 py-2 text-xs text-muted-foreground">{p.supplierBillNo ?? '—'}</td><td className="px-3 py-2 text-right font-medium" data-num>{formatMoney(BigInt(p.total), false)}</td><td className="px-3 py-2 text-right text-muted-foreground" data-num>{formatMoney(BigInt(p.paidAmount), false)}</td><td className="px-3 py-2 text-right" data-num>{BigInt(p.outstandingAmount) > 0n ? formatMoney(BigInt(p.outstandingAmount), false) : '—'}</td><td className="px-3 py-2"><span className={`text-[9px] uppercase px-1.5 py-0.5 rounded border font-medium ${STATUS_BADGE[p.status] ?? 'bg-muted text-muted-foreground'}`}>{p.status.replace(/_/g, ' ')}</span></td><td className="px-3 py-2 text-center"><button onClick={e => { e.stopPropagation(); setDetailId(p.id); setModal('detail') }} className="text-muted-foreground hover:text-foreground"><MoreVertical className="size-4" /></button></td>
+                <td className="px-3 py-2 font-medium text-foreground" data-num>{p.purchaseNo}</td><td className="px-3 py-2 text-xs text-muted-foreground" data-num>{bizDate(p.purchaseDate)}</td><td className="px-3 py-2 text-foreground">{p.vendorName ?? '—'}</td><td className="px-3 py-2 text-xs text-muted-foreground">{p.supplierBillNo ?? '—'}</td><td className="px-3 py-2 text-right font-medium" data-num>{formatWholeRupees(BigInt(p.total), false)}</td><td className="px-3 py-2 text-right text-muted-foreground" data-num>{formatWholeRupees(BigInt(p.paidAmount), false)}</td><td className="px-3 py-2 text-right" data-num>{BigInt(p.outstandingAmount) > 0n ? formatWholeRupees(BigInt(p.outstandingAmount), false) : '—'}</td><td className="px-3 py-2"><span className={`text-[9px] uppercase px-1.5 py-0.5 rounded border font-medium ${STATUS_BADGE[p.status] ?? 'bg-muted text-muted-foreground'}`}>{p.status.replace(/_/g, ' ')}</span></td><td className="px-3 py-2 text-center"><button onClick={e => { e.stopPropagation(); setDetailId(p.id); setModal('detail') }} className="text-muted-foreground hover:text-foreground"><MoreVertical className="size-4" /></button></td>
               </tr>)}
             </tbody></table>
           </div>
           {/* Mobile cards */}
           <div className="md:hidden space-y-2">{filtered.map(p => <div key={p.id} className="border border-border rounded-lg bg-card p-3" onClick={() => { setDetailId(p.id); setModal('detail') }}>
             <div className="flex items-start justify-between gap-2 mb-1"><div><div className="font-medium text-foreground text-sm" data-num>{p.purchaseNo}</div><div className="text-[10px] text-muted-foreground">{p.vendorName ?? '—'} · {bizDate(p.purchaseDate)}</div></div><span className={`text-[9px] uppercase px-1.5 py-0.5 rounded border font-medium ${STATUS_BADGE[p.status] ?? 'bg-muted'}`}>{p.status.replace(/_/g, ' ')}</span></div>
-            <div className="flex items-end justify-between"><div className="text-[10px] text-muted-foreground">Total: <span data-num>{formatMoney(BigInt(p.total))}</span></div>{BigInt(p.outstandingAmount) > 0n && <div className="text-[10px] text-amber-600">Owe: <span data-num>{formatMoney(BigInt(p.outstandingAmount))}</span></div>}</div>
+            <div className="flex items-end justify-between"><div className="text-[10px] text-muted-foreground">Total: <span data-num>{formatWholeRupees(BigInt(p.total))}</span></div>{BigInt(p.outstandingAmount) > 0n && <div className="text-[10px] text-amber-600">Owe: <span data-num>{formatWholeRupees(BigInt(p.outstandingAmount))}</span></div>}</div>
           </div>)}</div>
         </>
       )}
@@ -144,7 +144,8 @@ function AddPurchaseModal({ user, onClose }: { user: MeUser; onClose: () => void
 
   const mut = useMutation({
     mutationFn: async () => {
-      const r = await fetch('/api/purchases', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ vendorId, purchaseDate, supplierBillNo: supplierBillNo || undefined, items: cart.map(it => ({ productId: it.productId || null, productName: it.productName, quantity: parseInt(it.qty) || 1, unitCostPaisas: (parseMoney(it.unitCost) ?? 0n).toString() })), payments: payments.map(p => ({ accountId: p.accountId, amountPaisas: (parseMoney(p.amountPaisas) ?? 0n).toString(), paymentType: p.paymentType })) }) })
+      const body = { vendorId, purchaseDate, supplierBillNo: supplierBillNo || undefined, items: cart.map(it => ({ productId: it.productId || null, productName: it.productName, quantity: parseInt(it.qty) || 1, unitCostPaisas: (parseMoney(it.unitCost) ?? 0n).toString() })), payments: payments.map(p => ({ accountId: p.accountId, amountPaisas: (parseMoney(p.amountPaisas) ?? 0n).toString(), paymentType: p.paymentType })) }
+      const r = await fetch('/api/purchases', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
       const j = await r.json(); if (!r.ok) throw new Error(j?.error ?? 'Failed'); return j
     },
     onSuccess: (j) => { toast.success(`Purchase posted: ${j.purchaseNo}`); setResult({ ok: true, purchaseNo: j.purchaseNo, purchaseId: j.purchaseId }); void qc.invalidateQueries({ queryKey: ['purchases'] }); void qc.invalidateQueries({ queryKey: ['products'] }) },
@@ -173,13 +174,13 @@ function AddPurchaseModal({ user, onClose }: { user: MeUser; onClose: () => void
           <span className="flex-1 text-sm truncate">{it.productName}</span>
           <Input type="number" value={it.qty} onChange={e => setCart(ls => ls.map(c => c.key === it.key ? { ...c, qty: e.target.value } : c))} className="h-7 w-14 bg-background text-sm" data-num />
           <Input type="text" value={it.unitCost} onChange={e => setCart(ls => ls.map(c => c.key === it.key ? { ...c, unitCost: e.target.value } : c))} placeholder="Rs" className="h-7 w-20 bg-background text-sm" data-num />
-          <span className="text-xs font-medium w-20 text-right" data-num>{formatMoney((parseMoney(it.unitCost) ?? 0n) * BigInt(it.qty || '0'), false)}</span>
+          <span className="text-xs font-medium w-20 text-right" data-num>{formatWholeRupees((parseMoney(it.unitCost) ?? 0n) * BigInt(it.qty || '0'), false)}</span>
           <button onClick={() => setCart(ls => ls.filter(c => c.key !== it.key))} className="text-muted-foreground"><X className="size-3.5" /></button>
         </div>)}</div>
       </div>
       {/* Right: summary + payment */}
       <div className="space-y-3">
-        <div className="border border-border rounded-lg p-3 bg-muted/30"><div className="text-xs text-muted-foreground mb-1">Total</div><div className="text-lg font-bold text-foreground" data-num>{formatMoney(totalPaisas)}</div></div>
+        <div className="border border-border rounded-lg p-3 bg-muted/30"><div className="text-xs text-muted-foreground mb-1">Total</div><div className="text-lg font-bold text-foreground" data-num>{formatWholeRupees(totalPaisas)}</div></div>
         {/* Payment */}
         <div className="space-y-2">
           <Label className="text-xs text-muted-foreground">Payment</Label>
@@ -226,20 +227,20 @@ function PurchaseDetailModal({ purchaseId, user, canPay, canReturn, onClose, onP
         {p.vendorAddress && <div>{p.vendorAddress}{p.vendorCity ? `, ${p.vendorCity}` : ''}</div>}
       </div>}
       {/* Items */}
-      <div className="border border-border rounded-lg overflow-hidden"><table className="w-full text-sm"><thead className="bg-muted/50"><tr className="text-[10px] uppercase text-muted-foreground"><th className="text-left px-2 py-1.5">Item</th><th className="text-right px-2 py-1.5">Qty</th><th className="text-right px-2 py-1.5">Cost</th><th className="text-right px-2 py-1.5">Total</th></tr></thead><tbody>{p.items?.map(it => <tr key={it.id} className="border-t border-border/40"><td className="px-2 py-1.5">{it.productName}{it.returnedQuantity > 0 && <span className="text-[9px] text-red-600 ml-1">(-{it.returnedQuantity} ret)</span>}</td><td className="text-right px-2 py-1.5" data-num>{it.quantity}</td><td className="text-right px-2 py-1.5" data-num>{formatMoney(BigInt(it.unitCost), false)}</td><td className="text-right px-2 py-1.5 font-medium" data-num>{formatMoney(BigInt(it.lineTotal), false)}</td></tr>)}</tbody></table></div>
+      <div className="border border-border rounded-lg overflow-hidden"><table className="w-full text-sm"><thead className="bg-muted/50"><tr className="text-[10px] uppercase text-muted-foreground"><th className="text-left px-2 py-1.5">Item</th><th className="text-right px-2 py-1.5">Qty</th><th className="text-right px-2 py-1.5">Cost</th><th className="text-right px-2 py-1.5">Total</th></tr></thead><tbody>{p.items?.map(it => <tr key={it.id} className="border-t border-border/40"><td className="px-2 py-1.5">{it.productName}{it.returnedQuantity > 0 && <span className="text-[9px] text-red-600 ml-1">(-{it.returnedQuantity} ret)</span>}</td><td className="text-right px-2 py-1.5" data-num>{it.quantity}</td><td className="text-right px-2 py-1.5" data-num>{formatWholeRupees(BigInt(it.unitCost), false)}</td><td className="text-right px-2 py-1.5 font-medium" data-num>{formatWholeRupees(BigInt(it.lineTotal), false)}</td></tr>)}</tbody></table></div>
       {/* Totals */}
       <div className="flex justify-end"><div className="text-xs space-y-0.5 min-w-[160px]">
-        <div className="flex justify-between"><span className="text-muted-foreground">Subtotal</span><span data-num>{formatMoney(BigInt(p.subtotal), false)}</span></div>
-        {BigInt(p.discount) > 0n && <div className="flex justify-between"><span className="text-muted-foreground">Discount</span><span data-num>−{formatMoney(BigInt(p.discount), false)}</span></div>}
-        {BigInt(p.additionalCharges) > 0n && <div className="flex justify-between"><span className="text-muted-foreground">Add. Charges</span><span data-num>+{formatMoney(BigInt(p.additionalCharges), false)}</span></div>}
-        <div className="flex justify-between"><span className="text-muted-foreground">Total</span><span className="font-bold" data-num>{formatMoney(BigInt(p.total))}</span></div>
-        <div className="flex justify-between"><span className="text-muted-foreground">Paid</span><span className="text-primary" data-num>{formatMoney(BigInt(p.paidAmount))}</span></div>
-        {outstanding > 0n && <div className="flex justify-between"><span className="text-muted-foreground">Outstanding</span><span className="text-amber-600 font-medium" data-num>{formatMoney(outstanding)}</span></div>}
+        <div className="flex justify-between"><span className="text-muted-foreground">Subtotal</span><span data-num>{formatWholeRupees(BigInt(p.subtotal), false)}</span></div>
+        {BigInt(p.discount) > 0n && <div className="flex justify-between"><span className="text-muted-foreground">Discount</span><span data-num>−{formatWholeRupees(BigInt(p.discount), false)}</span></div>}
+        {BigInt(p.additionalCharges) > 0n && <div className="flex justify-between"><span className="text-muted-foreground">Add. Charges</span><span data-num>+{formatWholeRupees(BigInt(p.additionalCharges), false)}</span></div>}
+        <div className="flex justify-between"><span className="text-muted-foreground">Total</span><span className="font-bold" data-num>{formatWholeRupees(BigInt(p.total))}</span></div>
+        <div className="flex justify-between"><span className="text-muted-foreground">Paid</span><span className="text-primary" data-num>{formatWholeRupees(BigInt(p.paidAmount))}</span></div>
+        {outstanding > 0n && <div className="flex justify-between"><span className="text-muted-foreground">Outstanding</span><span className="text-amber-600 font-medium" data-num>{formatWholeRupees(outstanding)}</span></div>}
       </div></div>
       {/* Payments */}
-      {p.payments && p.payments.length > 0 && <div className="border border-border rounded-lg p-2"><div className="text-[10px] uppercase text-muted-foreground mb-1">Payments</div><div className="space-y-0.5">{p.payments.map(pp => <div key={pp.id} className="flex justify-between text-xs"><span className="text-muted-foreground">{pp.paymentType.replace(/_/g, ' ')} · {bizDate(pp.paymentDate)}</span><span data-num>{formatMoney(BigInt(pp.amount), false)}</span></div>)}</div></div>}
+      {p.payments && p.payments.length > 0 && <div className="border border-border rounded-lg p-2"><div className="text-[10px] uppercase text-muted-foreground mb-1">Payments</div><div className="space-y-0.5">{p.payments.map(pp => <div key={pp.id} className="flex justify-between text-xs"><span className="text-muted-foreground">{pp.paymentType.replace(/_/g, ' ')} · {bizDate(pp.paymentDate)}</span><span data-num>{formatWholeRupees(BigInt(pp.amount), false)}</span></div>)}</div></div>}
       {/* Replacements */}
-      {replacements.length > 0 && <div className="border border-border rounded-lg p-2"><div className="text-[10px] uppercase text-muted-foreground mb-1 flex items-center gap-1"><ArrowRightLeft className="size-3" /> Replacements</div><div className="space-y-0.5">{replacements.map(r => <div key={r.id} className="flex justify-between text-xs"><span data-num>{r.replacementNo}</span><span className={BigInt(r.valueDiff) > 0n ? 'text-amber-600' : BigInt(r.valueDiff) < 0n ? 'text-emerald-600' : 'text-muted-foreground'} data-num>{BigInt(r.valueDiff) === 0n ? 'Equal' : formatMoney(BigInt(r.valueDiff), false)}</span></div>)}</div></div>}
+      {replacements.length > 0 && <div className="border border-border rounded-lg p-2"><div className="text-[10px] uppercase text-muted-foreground mb-1 flex items-center gap-1"><ArrowRightLeft className="size-3" /> Replacements</div><div className="space-y-0.5">{replacements.map(r => <div key={r.id} className="flex justify-between text-xs"><span data-num>{r.replacementNo}</span><span className={BigInt(r.valueDiff) > 0n ? 'text-amber-600' : BigInt(r.valueDiff) < 0n ? 'text-emerald-600' : 'text-muted-foreground'} data-num>{BigInt(r.valueDiff) === 0n ? 'Equal' : formatWholeRupees(BigInt(r.valueDiff), false)}</span></div>)}</div></div>}
       {/* Actions */}
       <div className="flex gap-2 pt-2 border-t border-border flex-wrap">
         <Button variant="outline" size="sm" onClick={printPurchase}><Printer className="size-3.5" /> Print</Button>
@@ -293,8 +294,8 @@ function PurchaseDetailModal({ purchaseId, user, canPay, canReturn, onClose, onP
               <tr key={it.id} style={{ borderBottom: '1px solid #ddd' }}>
                 <td style={{ padding: '3px 4px' }}>{it.productName}{it.returnedQuantity > 0 ? ` (-${it.returnedQuantity} ret)` : ''}</td>
                 <td style={{ textAlign: 'center', padding: '3px' }}>{it.quantity}</td>
-                <td style={{ textAlign: 'right', padding: '3px 4px', fontFamily: 'monospace' }}>{formatMoney(BigInt(it.unitCost), false)}</td>
-                <td style={{ textAlign: 'right', padding: '3px 4px', fontFamily: 'monospace', fontWeight: 'bold' }}>{formatMoney(BigInt(it.lineTotal), false)}</td>
+                <td style={{ textAlign: 'right', padding: '3px 4px', fontFamily: 'monospace' }}>{formatWholeRupees(BigInt(it.unitCost), false)}</td>
+                <td style={{ textAlign: 'right', padding: '3px 4px', fontFamily: 'monospace', fontWeight: 'bold' }}>{formatWholeRupees(BigInt(it.lineTotal), false)}</td>
               </tr>
             ))}
           </tbody>
@@ -303,22 +304,22 @@ function PurchaseDetailModal({ purchaseId, user, canPay, canReturn, onClose, onP
         <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '6px' }}>
           <div style={{ minWidth: '150px', fontSize: '10px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', padding: '1px 0' }}>
-              <span>Subtotal</span><span style={{ fontFamily: 'monospace' }}>{formatMoney(BigInt(p.subtotal), false)}</span>
+              <span>Subtotal</span><span style={{ fontFamily: 'monospace' }}>{formatWholeRupees(BigInt(p.subtotal), false)}</span>
             </div>
             {BigInt(p.discount) > 0n && <div style={{ display: 'flex', justifyContent: 'space-between', padding: '1px 0' }}>
-              <span>Discount</span><span style={{ fontFamily: 'monospace' }}>−{formatMoney(BigInt(p.discount), false)}</span>
+              <span>Discount</span><span style={{ fontFamily: 'monospace' }}>−{formatWholeRupees(BigInt(p.discount), false)}</span>
             </div>}
             {BigInt(p.additionalCharges) > 0n && <div style={{ display: 'flex', justifyContent: 'space-between', padding: '1px 0' }}>
-              <span>Add. Charges</span><span style={{ fontFamily: 'monospace' }}>+{formatMoney(BigInt(p.additionalCharges), false)}</span>
+              <span>Add. Charges</span><span style={{ fontFamily: 'monospace' }}>+{formatWholeRupees(BigInt(p.additionalCharges), false)}</span>
             </div>}
             <div style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0', borderTop: '1px solid #000', fontWeight: 'bold' }}>
-              <span>Grand Total</span><span style={{ fontFamily: 'monospace' }}>{formatMoney(BigInt(p.total))}</span>
+              <span>Grand Total</span><span style={{ fontFamily: 'monospace' }}>{formatWholeRupees(BigInt(p.total))}</span>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', padding: '1px 0' }}>
-              <span>Paid</span><span style={{ fontFamily: 'monospace' }}>{formatMoney(BigInt(p.paidAmount))}</span>
+              <span>Paid</span><span style={{ fontFamily: 'monospace' }}>{formatWholeRupees(BigInt(p.paidAmount))}</span>
             </div>
             {outstanding > 0n && <div style={{ display: 'flex', justifyContent: 'space-between', padding: '1px 0', color: '#c00' }}>
-              <span>Outstanding</span><span style={{ fontFamily: 'monospace' }}>{formatMoney(outstanding)}</span>
+              <span>Outstanding</span><span style={{ fontFamily: 'monospace' }}>{formatWholeRupees(outstanding)}</span>
             </div>}
           </div>
         </div>
@@ -329,7 +330,7 @@ function PurchaseDetailModal({ purchaseId, user, canPay, canReturn, onClose, onP
             {p.payments.map(pp => (
               <div key={pp.id} style={{ display: 'flex', justifyContent: 'space-between' }}>
                 <span>{pp.paymentType.replace(/_/g, ' ')} · {bizDate(pp.paymentDate)}</span>
-                <span style={{ fontFamily: 'monospace' }}>{formatMoney(BigInt(pp.amount), false)}</span>
+                <span style={{ fontFamily: 'monospace' }}>{formatWholeRupees(BigInt(pp.amount), false)}</span>
               </div>
             ))}
           </div>
@@ -348,7 +349,7 @@ function PurchaseDetailModal({ purchaseId, user, canPay, canReturn, onClose, onP
 function PayVendorModal({ purchase, user, onClose }: { purchase: Purchase; user: MeUser; onClose: () => void }) {
   const qc = useQueryClient()
   const [accountId, setAccountId] = useState('')
-  const [amount, setAmount] = useState(formatMoney(BigInt(purchase.outstandingAmount), false))
+  const [amount, setAmount] = useState(formatWholeRupees(BigInt(purchase.outstandingAmount), false))
   const [notes, setNotes] = useState('')
   const coaQ = useQuery({ queryKey: ['coa'], queryFn: () => fetch('/api/setup/coa').then(r => r.json()) })
   const accounts: Account[] = useMemo(() => coaQ.data?.categories?.flatMap((c: any) => c.accounts).filter((a: any) => a.isBusinessAccount && a.isActive).map((a: any) => ({ id: a.id, code: a.code, name: a.name })) ?? [], [coaQ.data])
@@ -364,7 +365,7 @@ function PayVendorModal({ purchase, user, onClose }: { purchase: Purchase; user:
   return <Shell title="Pay Vendor" onClose={onClose}>
     <div className="space-y-3">
       <div className="text-sm"><span className="text-muted-foreground">Purchase:</span> <span className="font-medium" data-num>{purchase.purchaseNo}</span></div>
-      <div className="text-sm"><span className="text-muted-foreground">Outstanding:</span> <span className="font-bold text-amber-600" data-num>{formatMoney(BigInt(purchase.outstandingAmount))}</span></div>
+      <div className="text-sm"><span className="text-muted-foreground">Outstanding:</span> <span className="font-bold text-amber-600" data-num>{formatWholeRupees(BigInt(purchase.outstandingAmount))}</span></div>
       <div><Label className="text-xs text-muted-foreground">Pay From</Label><Select value={accountId} onValueChange={setAccountId}><SelectTrigger className="h-9 bg-background"><SelectValue placeholder="Select account…" /></SelectTrigger><SelectContent>{accounts.map(a => <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>)}</SelectContent></Select></div>
       <div><Label className="text-xs text-muted-foreground">Amount (Rs)</Label><Input type="text" value={amount} onChange={e => setAmount(e.target.value)} className="h-9 bg-background" data-num /></div>
       <div><Label className="text-xs text-muted-foreground">Note</Label><Input value={notes} onChange={e => setNotes(e.target.value)} placeholder="Optional" className="h-9 bg-background" /></div>
@@ -375,7 +376,7 @@ function PayVendorModal({ purchase, user, onClose }: { purchase: Purchase; user:
 
 function ApplyAdvanceModal({ purchase, user, onClose }: { purchase: PurchaseDetail; user: MeUser; onClose: () => void }) {
   const qc = useQueryClient()
-  const [amount, setAmount] = useState(formatMoney(BigInt(purchase.outstandingAmount), false))
+  const [amount, setAmount] = useState(formatWholeRupees(BigInt(purchase.outstandingAmount), false))
   const [notes, setNotes] = useState('')
   const mut = useMutation({
     mutationFn: async () => {
@@ -395,7 +396,7 @@ function ApplyAdvanceModal({ purchase, user, onClose }: { purchase: PurchaseDeta
         This applies an existing vendor advance against this purchase's outstanding balance. No new cash movement — just reclassifies the advance.
       </div>
       <div className="text-sm"><span className="text-muted-foreground">Purchase:</span> <span className="font-medium" data-num>{purchase.purchaseNo}</span></div>
-      <div className="text-sm"><span className="text-muted-foreground">Outstanding:</span> <span className="font-bold text-amber-600" data-num>{formatMoney(outstanding)}</span></div>
+      <div className="text-sm"><span className="text-muted-foreground">Outstanding:</span> <span className="font-bold text-amber-600" data-num>{formatWholeRupees(outstanding)}</span></div>
       <div><Label className="text-xs text-muted-foreground">Amount to Apply (Rs)</Label><Input type="text" value={amount} onChange={e => setAmount(e.target.value)} className="h-9 bg-background" data-num /></div>
       {exceeds && <div className="text-xs text-destructive flex items-center gap-1"><AlertCircle className="size-3" /> Amount exceeds outstanding</div>}
       <div><Label className="text-xs text-muted-foreground">Note</Label><Input value={notes} onChange={e => setNotes(e.target.value)} placeholder="Optional" className="h-9 bg-background" /></div>
@@ -431,7 +432,6 @@ function ReturnModal({ purchase, user, onClose }: { purchase: PurchaseDetail; us
 
 function ReplacementModal({ purchase, user, onClose }: { purchase: PurchaseDetail; user: MeUser; onClose: () => void }) {
   const qc = useQueryClient()
-  // Each replacement row: original item selected, outgoing qty, replacement product (defaults to same), incoming qty, incoming unit cost
   const [rows, setRows] = useState<Array<{
     originalItemId: string
     outgoingQty: string
@@ -453,7 +453,7 @@ function ReplacementModal({ purchase, user, onClose }: { purchase: PurchaseDetai
       incomingProductId: it.productId ?? '',
       incomingProductName: it.productName,
       incomingQty: '1',
-      incomingUnitCost: formatMoney(BigInt(it.unitCost), false),
+      incomingUnitCost: formatWholeRupees(BigInt(it.unitCost), false),
     }])
   }
 
@@ -503,7 +503,7 @@ function ReplacementModal({ purchase, user, onClose }: { purchase: PurchaseDetai
       {availableItems.length > 0 && (
         <div>
           <Label className="text-xs text-muted-foreground">Select original purchase item to replace:</Label>
-          <div className="space-y-1 mt-1">{availableItems.map(it => <button key={it.id} onClick={() => addRow(it.id)} className="w-full flex items-center justify-between p-2 border border-border/50 rounded hover:bg-muted/40 press-sm text-left"><span className="text-sm">{it.productName}</span><span className="text-xs text-muted-foreground">Qty: {it.quantity} · {formatMoney(BigInt(it.unitCost), false)}</span><Plus className="size-3 text-primary" /></button>)}</div>
+          <div className="space-y-1 mt-1">{availableItems.map(it => <button key={it.id} onClick={() => addRow(it.id)} className="w-full flex items-center justify-between p-2 border border-border/50 rounded hover:bg-muted/40 press-sm text-left"><span className="text-sm">{it.productName}</span><span className="text-xs text-muted-foreground">Qty: {it.quantity} · {formatWholeRupees(BigInt(it.unitCost), false)}</span><Plus className="size-3 text-primary" /></button>)}</div>
         </div>
       )}
 
@@ -520,7 +520,7 @@ function ReplacementModal({ purchase, user, onClose }: { purchase: PurchaseDetai
             <div>
               <Label className="text-[10px] text-muted-foreground">Outgoing (defective) Qty</Label>
               <Input type="number" value={r.outgoingQty} onChange={e => setRows(ls => ls.map((x, j) => j === i ? { ...x, outgoingQty: e.target.value } : x))} className="h-8 bg-background text-sm" data-num />
-              <div className="text-[9px] text-muted-foreground mt-0.5">Cost: {formatMoney(BigInt(orig.unitCost), false)}</div>
+              <div className="text-[9px] text-muted-foreground mt-0.5">Cost: {formatWholeRupees(BigInt(orig.unitCost), false)}</div>
             </div>
             <div>
               <Label className="text-[10px] text-muted-foreground">Incoming (replacement) Qty</Label>
@@ -543,9 +543,9 @@ function ReplacementModal({ purchase, user, onClose }: { purchase: PurchaseDetai
 
       {/* Preview */}
       {rows.length > 0 && <div className="border border-border rounded-lg p-3 bg-muted/30 space-y-1 text-xs">
-        <div className="flex justify-between"><span className="text-muted-foreground">Outgoing Value:</span><span data-num>{formatMoney(outgoingValue, false)}</span></div>
-        <div className="flex justify-between"><span className="text-muted-foreground">Incoming Value:</span><span data-num>{formatMoney(incomingValue, false)}</span></div>
-        <div className="flex justify-between font-medium border-t border-border pt-1"><span className="text-muted-foreground">Value Difference:</span><span className={valueDiff > 0n ? 'text-amber-600' : valueDiff < 0n ? 'text-emerald-600' : 'text-muted-foreground'} data-num>{valueDiff === 0n ? 'Equal (no voucher)' : formatMoney(valueDiff, false)}</span></div>
+        <div className="flex justify-between"><span className="text-muted-foreground">Outgoing Value:</span><span data-num>{formatWholeRupees(outgoingValue, false)}</span></div>
+        <div className="flex justify-between"><span className="text-muted-foreground">Incoming Value:</span><span data-num>{formatWholeRupees(incomingValue, false)}</span></div>
+        <div className="flex justify-between font-medium border-t border-border pt-1"><span className="text-muted-foreground">Value Difference:</span><span className={valueDiff > 0n ? 'text-amber-600' : valueDiff < 0n ? 'text-emerald-600' : 'text-muted-foreground'} data-num>{valueDiff === 0n ? 'Equal (no voucher)' : formatWholeRupees(valueDiff, false)}</span></div>
       </div>}
 
       <div><Label className="text-xs text-muted-foreground">Reference / Note</Label><Input value={notes} onChange={e => setNotes(e.target.value)} placeholder="Optional" className="h-9 bg-background" /></div>

@@ -8,7 +8,7 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { toast } from 'sonner'
 import { Plus, Trash2, Truck, CheckCircle2, AlertCircle, Printer, FileText } from 'lucide-react'
-import { formatMoney, parseMoney } from '@/lib/format'
+import { formatWholeRupees, parseMoney } from '@/lib/format'
 import { motion } from 'framer-motion'
 import { PrintInvoiceButton } from '@/components/invoice/print-invoice-button'
 import type { MeUser } from '@/components/erp/erp-app'
@@ -205,39 +205,39 @@ export function OfcSaleView({ user }: { user: MeUser }) {
       <div className="card-3d p-4 space-y-1">
         <h2 className="text-sm font-semibold text-foreground mb-2">Totals</h2>
         <div className="flex items-center justify-between text-sm">
-          <span className="text-muted-foreground">Subtotal</span><span className="font-medium" data-num>{formatMoney(subtotal, false)}</span>
+          <span className="text-muted-foreground">Subtotal</span><span className="font-medium" data-num>{formatWholeRupees(subtotal, false)}</span>
         </div>
         {discountPaisas > 0n && (
           <div className="flex items-center justify-between text-sm">
-            <span className="text-muted-foreground">Discount</span><span className="font-medium text-amber-600" data-num>−{formatMoney(discountPaisas, false)}</span>
+            <span className="text-muted-foreground">Discount</span><span className="font-medium text-amber-600" data-num>−{formatWholeRupees(discountPaisas, false)}</span>
           </div>
         )}
         <div className="flex items-center justify-between text-sm pt-1 border-t border-border">
-          <span className="font-semibold text-foreground">Net Total (Full Advance Required)</span><span className="font-bold text-primary" data-num>{formatMoney(finalTotal)}</span>
+          <span className="font-semibold text-foreground">Net Total (Full Advance Required)</span><span className="font-bold text-primary" data-num>{formatWholeRupees(finalTotal)}</span>
         </div>
         <div className="flex items-center justify-between text-sm">
-          <span className="text-muted-foreground">Advance Received</span><span className="font-medium" data-num>{formatMoney(advanceReceived, false)}</span>
+          <span className="text-muted-foreground">Advance Received</span><span className="font-medium" data-num>{formatWholeRupees(advanceReceived, false)}</span>
         </div>
         {changeAmount > 0n && (
           <div className="flex items-center justify-between text-sm">
-            <span className="text-muted-foreground">Change</span><span className="font-medium text-amber-600" data-num>−{formatMoney(changeAmount, false)}</span>
+            <span className="text-muted-foreground">Change</span><span className="font-medium text-amber-600" data-num>−{formatWholeRupees(changeAmount, false)}</span>
           </div>
         )}
         <div className="flex items-center justify-between text-sm">
-          <span className="text-muted-foreground">Net Collected</span><span className="font-medium text-primary" data-num>{formatMoney(netCollected, false)}</span>
+          <span className="text-muted-foreground">Net Collected</span><span className="font-medium text-primary" data-num>{formatWholeRupees(netCollected, false)}</span>
         </div>
         {ofcUnderpayment && (
           <div className="flex items-center justify-between text-sm">
-            <span className="text-muted-foreground">Underpayment</span><span className="font-medium text-destructive" data-num>{formatMoney(outstanding, false)}</span>
+            <span className="text-muted-foreground">Underpayment</span><span className="font-medium text-destructive" data-num>{formatWholeRupees(outstanding, false)}</span>
           </div>
         )}
       </div>
 
-      {ofcUnderpayment && <div className="card-3d p-3 border-destructive/40 flex items-center gap-2"><AlertCircle className="size-4 text-destructive" /><span className="text-xs text-destructive">OFC requires full advance. Received: {formatMoney(netCollected, false)} / Needed: {formatMoney(finalTotal)}</span></div>}
+      {ofcUnderpayment && <div className="card-3d p-3 border-destructive/40 flex items-center gap-2"><AlertCircle className="size-4 text-destructive" /><span className="text-xs text-destructive">OFC requires full advance. Received: {formatWholeRupees(netCollected, false)} / Needed: {formatWholeRupees(finalTotal)}</span></div>}
       {result && !result.ok && <div className="card-3d p-3 border-destructive/40 flex items-center gap-2"><AlertCircle className="size-4 text-destructive" /><span className="text-xs text-destructive">{result.error}</span></div>}
 
       <Button className="w-full press-md shadow-sm" disabled={postMut.isPending || !canPost || !ofcValid} onClick={() => postMut.mutate()}>
-        {!ofcValid && finalTotal > 0n ? 'Full advance required' : postMut.isPending ? 'Posting…' : <><Truck className="size-4" /> Post OFC Sale — {formatMoney(finalTotal)}</>}
+        {!ofcValid && finalTotal > 0n ? 'Full advance required' : postMut.isPending ? 'Posting…' : <><Truck className="size-4" /> Post OFC Sale — {formatWholeRupees(finalTotal)}</>}
       </Button>
     </div>
   )

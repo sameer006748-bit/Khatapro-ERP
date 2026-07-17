@@ -13,14 +13,9 @@ import {
 } from 'lucide-react'
 import { useOwnerDashboard } from '@/hooks/use-owner-dashboard'
 import { GlassPanel, KpiCard, QuickActionButton, SectionHeader, EmptyState } from '@/components/erp/dashboard-components'
+import { formatWholeRupees } from '@/lib/format'
 import { useRouter } from 'next/navigation'
 
-function formatPKR(value: number | null | undefined): string {
-  if (value === null || value === undefined) return 'Not available'
-  if (value >= 1000000) return `PKR ${(value / 1000000).toFixed(1)}M`
-  if (value >= 1000) return `PKR ${(value / 1000).toFixed(1)}K`
-  return `PKR ${value.toFixed(0)}`
-}
 
 function formatDateTime(iso: string): string {
   try { return format(new Date(iso), 'HH:mm') } catch { return iso }
@@ -78,19 +73,19 @@ export function SalesmanDashboard({ user }: { user: any }) {
 
   const kpis = [
     {
-      label: 'Today Sales', value: formatPKR(data.kpis.todaySales),
+      label: 'Today Sales', value: formatWholeRupees(data.kpis.todaySales, true).replace('Rs ', 'PKR '),
       sub: `${data.salesByType.counter.count} counter \u00B7 ${data.salesByType.online.count} online \u00B7 ${data.salesByType.ofc.count} OFC`,
       icon: ShoppingCart, accent: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400',
     },
     {
       label: 'Today Collections',
-      value: data.availability.todayCollections ? formatPKR(data.kpis.todayCollections) : 'Not available',
+      value: data.availability.todayCollections ? formatWholeRupees(data.kpis.todayCollections, true).replace('Rs ', 'PKR ') : 'Not available',
       sub: data.availability.todayCollections ? 'Cash received today' : 'Receipt data unavailable',
       icon: Wallet, accent: 'bg-green-500/10 text-green-600 dark:text-green-400',
     },
     {
       label: 'Today Net Cash Flow',
-      value: data.availability.todayNetCashFlow ? formatPKR(data.kpis.todayNetCashFlow) : 'Not available',
+      value: data.availability.todayNetCashFlow ? formatWholeRupees(data.kpis.todayNetCashFlow, true).replace('Rs ', 'PKR ') : 'Not available',
       sub: data.availability.todayNetCashFlow ? 'Net cash movement' : 'Waiting for collections',
       icon: data.availability.todayNetCashFlow ? TrendingUp : TrendingDown,
       accent: data.availability.todayNetCashFlow ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400' : 'bg-orange-500/10 text-orange-600 dark:text-orange-400',
@@ -163,7 +158,7 @@ export function SalesmanDashboard({ user }: { user: any }) {
                     </div>
                   </div>
                   <div className="text-right shrink-0 ml-2">
-                    <div className="text-sm font-semibold text-foreground">{formatPKR(Number(inv.total))}</div>
+                    <div className="text-sm font-semibold text-foreground">{formatWholeRupees(Number(inv.total), true).replace('Rs ', 'PKR ')}</div>
                     <div className="text-[11px] text-muted-foreground">{inv.invoiceType}</div>
                   </div>
                 </div>

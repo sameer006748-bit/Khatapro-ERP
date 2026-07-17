@@ -34,6 +34,18 @@ export function formatMoney(paisas: bigint | number | null | undefined, withSymb
   return negative ? `-Rs ${body}` : `Rs ${body}`
 }
 
+/** Format paisa-denominated values as whole rupees with comma separators. */
+export function formatWholeRupees(paisas: bigint | number | null | undefined, withSymbol = true): string {
+  if (paisas == null) return withSymbol ? 'Rs 0' : '0'
+  const b = typeof paisas === 'number' ? BigInt(Math.round(paisas)) : paisas
+  const negative = b < 0n
+  const abs = negative ? -b : b
+  const whole = abs / 100n
+  const wholeStr = whole.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',')
+  if (!withSymbol) return negative ? `-${wholeStr}` : wholeStr
+  return negative ? `-Rs ${wholeStr}` : `Rs ${wholeStr}`
+}
+
 /** Format an integer quantity with thousands separators. */
 export function formatQty(q: bigint | number | null | undefined): string {
   if (q == null) return '0'

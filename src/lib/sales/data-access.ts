@@ -230,7 +230,6 @@ export async function postSalesReturn(businessId: string, invoiceId: string, ret
     return { returnId, voucherId: (ret as any)?.return_voucher_id ?? '' }
   }
 
-  // Atomic $transaction: reversal voucher + stock restore + return record + invoice update
   const result = await db.$transaction(async (tx) => {
     const invoice = await tx.invoice.findFirst({ where: { id: invoiceId, businessId }, include: { items: true, paymentAllocations: { where: { isChange: false } } } })
     if (!invoice) throw new Error('Invoice not found')

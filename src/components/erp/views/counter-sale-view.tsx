@@ -18,7 +18,7 @@ import {
   Printer, FileText, Wallet, Banknote, Smartphone, Split,
   TrendingDown, User, Minus, Search, Send, Percent,
 } from 'lucide-react'
-import { formatMoney, parseMoney } from '@/lib/format'
+import { formatWholeRupees, parseMoney } from '@/lib/format'
 import { motion, AnimatePresence } from 'framer-motion'
 import type { MeUser } from '@/components/erp/erp-app'
 
@@ -262,7 +262,7 @@ export function CounterSaleView({ user }: { user: MeUser }) {
         <h1 className="text-xl font-semibold tracking-tight text-foreground">Counter Sale</h1>
         <div className="flex items-center gap-2">
           <Select value={salesmanId} onValueChange={setSalesmanId}>
-            <SelectTrigger className="h-8 w-auto bg-background press-sm text-xs"><SelectValue placeholder="Salesman\u2026" /></SelectTrigger>
+            <SelectTrigger className="h-8 w-auto bg-background press-sm text-xs"><SelectValue placeholder="Salesman…" /></SelectTrigger>
             <SelectContent>{salesmenQ.data?.rows.map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}</SelectContent>
           </Select>
           <Button variant="ghost" size="sm" className="h-8 text-xs press-sm" onClick={() => setShowCustomer(v => !v)}><User className="size-3" /> {showCustomer ? 'Hide' : 'Customer'}</Button>
@@ -278,14 +278,14 @@ export function CounterSaleView({ user }: { user: MeUser }) {
           <div className="card-3d p-3">
             <div className="relative">
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
-              <Input value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder="Search products\u2026" className="h-9 bg-background pl-8 press-sm" />
+              <Input value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder="Search products…" className="h-9 bg-background pl-8 press-sm" />
             </div>
             <div className="mt-2 space-y-1 max-h-[300px] overflow-y-auto">
               {filteredProducts.map(p => (
                 <button key={p.id} onClick={() => addToCart(p.id)} className="w-full flex items-center justify-between p-2 rounded-md hover:bg-accent/40 press-sm text-left">
                   <div className="min-w-0">
                     <div className="text-sm font-medium text-foreground truncate">{p.name}</div>
-                    <div className="text-[10px] text-muted-foreground" data-num>Rs {p.salePrice} \u00B7 stock: {p.currentStock}</div>
+                    <div className="text-[10px] text-muted-foreground" data-num>Rs {p.salePrice} · stock: {p.currentStock}</div>
                   </div>
                   <Plus className="size-4 text-primary shrink-0" />
                 </button>
@@ -311,7 +311,7 @@ export function CounterSaleView({ user }: { user: MeUser }) {
           <div className="card-3d p-3">
             <div className="flex items-center justify-between mb-2">
               <span className="text-sm font-semibold text-foreground">Cart ({cart.length})</span>
-              {cart.length > 0 && <span className="text-lg font-bold text-primary" data-num>{formatMoney(subtotal)}</span>}
+              {cart.length > 0 && <span className="text-lg font-bold text-primary" data-num>{formatWholeRupees(subtotal)}</span>}
             </div>
             {cart.length === 0 ? (
               <div className="text-center py-6 text-sm text-muted-foreground">Click a product to add to cart</div>
@@ -332,7 +332,7 @@ export function CounterSaleView({ user }: { user: MeUser }) {
                         <button onClick={() => updateCartQty(it.key, 1)} className="grid place-items-center size-6 rounded border border-border text-muted-foreground press-sm"><Plus className="size-3" /></button>
                       </div>
                       <Input type="text" value={it.unitPrice} onChange={e => updateCartPrice(it.key, e.target.value)} className="h-7 w-16 bg-background press-sm text-right text-xs" data-num />
-                      <span className="w-16 text-right text-sm font-medium text-foreground" data-num>{formatMoney(lineTotal, false)}</span>
+                      <span className="w-16 text-right text-sm font-medium text-foreground" data-num>{formatWholeRupees(lineTotal, false)}</span>
                       <button onClick={() => removeFromCart(it.key)} className="text-muted-foreground hover:text-destructive press-sm shrink-0"><Trash2 className="size-3.5" /></button>
                     </div>
                   )
@@ -346,9 +346,9 @@ export function CounterSaleView({ user }: { user: MeUser }) {
               <div className="flex items-center gap-1.5 mb-2">
                 <span className="text-sm font-semibold text-foreground">Payment</span>
                 {!showAdvanced && (
-                  <button onClick={() => setShowAdvanced(true)} className="ml-auto text-[10px] text-muted-foreground hover:text-foreground">Split \u2192</button>
+                  <button onClick={() => setShowAdvanced(true)} className="ml-auto text-[10px] text-muted-foreground hover:text-foreground">Split →</button>
                 )}
-                {showAdvanced && <button onClick={() => setShowAdvanced(false)} className="ml-auto text-[10px] text-muted-foreground hover:text-foreground">\u2190 Simple</button>}
+                {showAdvanced && <button onClick={() => setShowAdvanced(false)} className="ml-auto text-[10px] text-muted-foreground hover:text-foreground">← Simple</button>}
               </div>
 
               {!showAdvanced && (
@@ -370,7 +370,7 @@ export function CounterSaleView({ user }: { user: MeUser }) {
                   {paymentMode === 'partial' && (
                     <div className="mt-2 space-y-1.5">
                       <Input type="text" value={partialAmount} onChange={e => setPartialAmount(e.target.value)} placeholder="Amount received (Rs)" className="h-9 bg-background press-sm text-sm" data-num />
-                      <div className="flex justify-between text-xs"><span className="text-muted-foreground">Outstanding</span><span className="font-medium text-amber-600" data-num>{formatMoney(partialOutstanding, false)}</span></div>
+                      <div className="flex justify-between text-xs"><span className="text-muted-foreground">Outstanding</span><span className="font-medium text-amber-600" data-num>{formatWholeRupees(partialOutstanding, false)}</span></div>
                     </div>
                   )}
 
@@ -380,19 +380,19 @@ export function CounterSaleView({ user }: { user: MeUser }) {
                       {changeNeeded && (
                         <>
                           <Select value={changeAccountId} onValueChange={setChangeAccountId}>
-                            <SelectTrigger className="h-8 bg-background press-sm text-sm"><SelectValue placeholder="Change return account\u2026" /></SelectTrigger>
+                            <SelectTrigger className="h-8 bg-background press-sm text-sm"><SelectValue placeholder="Change return account…" /></SelectTrigger>
                             <SelectContent>
                               {businessAccounts.map(a => <SelectItem key={a.id} value={a.id}>{a.name} ({a.code})</SelectItem>)}
                             </SelectContent>
                           </Select>
-                          <div className="flex justify-between text-xs"><span className="text-muted-foreground">Change</span><span className="font-medium text-amber-600" data-num>{formatMoney(changeAmount, false)}</span></div>
+                      <div className="flex justify-between text-xs"><span className="text-muted-foreground">Change</span><span className="font-medium text-amber-600" data-num>{formatWholeRupees(changeAmount, false)}</span></div>
                         </>
                       )}
                     </div>
                   )}
 
                   {paymentMode === 'full' && (
-                    <div className="mt-2 flex justify-between text-xs"><span className="text-muted-foreground">Amount</span><span className="font-medium text-foreground" data-num>{formatMoney(subtotal, false)}</span></div>
+                    <div className="mt-2 flex justify-between text-xs"><span className="text-muted-foreground">Amount</span><span className="font-medium text-foreground" data-num>{formatWholeRupees(subtotal, false)}</span></div>
                   )}
                 </>
               )}
@@ -402,7 +402,7 @@ export function CounterSaleView({ user }: { user: MeUser }) {
                   {advPayments.map(p => (
                     <div key={p.key} className="grid grid-cols-2 gap-1 items-end">
                       <Select value={p.accountId} onValueChange={v => setAdvPayments(ls => ls.map(x => x.key === p.key ? { ...x, accountId: v } : x))}>
-                        <SelectTrigger className="h-8 bg-background press-sm text-sm"><SelectValue placeholder="Account\u2026" /></SelectTrigger>
+                        <SelectTrigger className="h-8 bg-background press-sm text-sm"><SelectValue placeholder="Account…" /></SelectTrigger>
                         <SelectContent>{businessAccounts.map(a => <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>)}</SelectContent>
                       </Select>
                       <div className="flex gap-1">
@@ -425,17 +425,17 @@ export function CounterSaleView({ user }: { user: MeUser }) {
             <div className="sticky bottom-20 md:bottom-3 z-20">
               <div className="card-3d border-primary/30 p-3 bg-card/95 backdrop-blur-md">
                 <div className="flex items-center gap-3 mb-2 text-sm">
-                  <div><span className="text-[9px] uppercase text-muted-foreground">Subtotal</span><div className="font-semibold text-foreground" data-num>{formatMoney(subtotal, false)}</div></div>
-                  <div><span className="text-[9px] uppercase text-muted-foreground">Total</span><div className="font-bold text-foreground" data-num>{formatMoney(finalTotal, false)}</div></div>
-                  <div><span className="text-[9px] uppercase text-muted-foreground">Paid</span><div className="font-semibold text-primary" data-num>{formatMoney(totalPaid, false)}</div></div>
-                  {totalChange > 0n && <div><span className="text-[9px] uppercase text-muted-foreground">Change</span><div className="font-semibold text-amber-600" data-num>{formatMoney(totalChange, false)}</div></div>}
-                  {outstanding > 0n && <div><span className="text-[9px] uppercase text-muted-foreground">Outstanding</span><div className="font-semibold text-destructive" data-num>{formatMoney(outstanding, false)}</div></div>}
-                  {salesman && totalPaid > 0n && <div className="ml-auto hidden sm:block text-[10px] text-muted-foreground">Commission \u2248 <span className="font-medium text-foreground" data-num>{formatMoney(estimatedCommission, false)}</span></div>}
+                  <div><span className="text-[9px] uppercase text-muted-foreground">Subtotal</span><div className="font-semibold text-foreground" data-num>{formatWholeRupees(subtotal, false)}</div></div>
+                  <div><span className="text-[9px] uppercase text-muted-foreground">Total</span><div className="font-bold text-foreground" data-num>{formatWholeRupees(finalTotal, false)}</div></div>
+                  <div><span className="text-[9px] uppercase text-muted-foreground">Paid</span><div className="font-semibold text-primary" data-num>{formatWholeRupees(totalPaid, false)}</div></div>
+                  {totalChange > 0n && <div><span className="text-[9px] uppercase text-muted-foreground">Change</span><div className="font-semibold text-amber-600" data-num>{formatWholeRupees(totalChange, false)}</div></div>}
+                  {outstanding > 0n && <div><span className="text-[9px] uppercase text-muted-foreground">Outstanding</span><div className="font-semibold text-destructive" data-num>{formatWholeRupees(outstanding, false)}</div></div>}
+                  {salesman && totalPaid > 0n && <div className="ml-auto hidden sm:block text-[10px] text-muted-foreground">Commission ≈ <span className="font-medium text-foreground" data-num>{formatWholeRupees(estimatedCommission, false)}</span></div>}
                 </div>
                 {stockWarnings.length > 0 && <div className="mb-1.5 flex items-center gap-1 text-[10px] text-amber-600"><TrendingDown className="size-2.5" /> {stockWarnings.length} item(s) will go negative</div>}
                 {result && !result.ok && <div className="mb-1.5 p-1.5 bg-destructive/10 rounded text-[10px] text-destructive flex items-center gap-1"><AlertCircle className="size-3" /> {result.error}</div>}
                 <Button className="w-full press-md shadow-sm" disabled={!canPost || postMut.isPending} onClick={() => postMut.mutate()}>
-                  {postMut.isPending ? 'Posting\u2026' : <><CheckCircle2 className="size-4" /> Post Sale \u2014 {formatMoney(finalTotal)}</>}
+                  {postMut.isPending ? 'Posting…' : <><CheckCircle2 className="size-4" /> Post Sale — {formatWholeRupees(finalTotal)}</>}
                 </Button>
               </div>
             </div>
