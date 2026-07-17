@@ -7,10 +7,11 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { toast } from 'sonner'
-import { Plus, Search, Package, Wallet, TrendingDown, X, CheckCircle2, AlertCircle, MoreVertical, History, Printer, FileText, ArrowLeft, RefreshCw, ArrowRightLeft } from 'lucide-react'
+import { Plus, Search, Package, Wallet, TrendingDown, X, CheckCircle2, AlertCircle, MoreVertical, History, Printer, FileText, ArrowLeft, RefreshCw, ArrowRightLeft, ArrowUpFromLine, BookOpen } from 'lucide-react'
 import { formatWholeRupees, parseMoney } from '@/lib/format'
 import { bizDate } from '@/lib/dates'
 import { motion, AnimatePresence } from 'framer-motion'
+import { useRouter } from 'next/navigation'
 import type { MeUser } from '@/components/erp/erp-app'
 
 type Purchase = { id: string; purchaseNo: string; vendorId: string; vendorName: string | null; vendorPhone?: string | null; vendorAddress?: string | null; vendorCity?: string | null; supplierBillNo: string | null; purchaseDate: string; total: string; paidAmount: string; outstandingAmount: string; status: string }
@@ -25,6 +26,7 @@ type Payment = { accountId: string; amountPaisas: string; paymentType: string }
 const STATUS_BADGE: Record<string, string> = { posted: 'bg-sky-50 text-sky-700 border-sky-200', partially_paid: 'bg-amber-50 text-amber-700 border-amber-200', paid: 'bg-emerald-50 text-emerald-700 border-emerald-200', returned: 'bg-red-50 text-red-700 border-red-200', partially_returned: 'bg-amber-50 text-amber-700 border-amber-200' }
 
 export function PurchasesView({ user }: { user: MeUser }) {
+  const router = useRouter()
   const qc = useQueryClient()
   const canCreate = user.permissions.includes('can_create_purchases')
   const canPay = user.permissions.includes('can_pay_vendors')
@@ -64,15 +66,25 @@ export function PurchasesView({ user }: { user: MeUser }) {
     <div className="space-y-4">
       <div className="flex items-end justify-between gap-3 flex-wrap">
         <div><h1 className="text-xl font-semibold tracking-tight text-foreground">Purchases</h1><p className="text-xs text-muted-foreground mt-0.5">Purchase bills, vendor payments and stock receipts</p></div>
-        {canCreate && <Button size="sm" className="h-8 press-sm shadow-sm" onClick={() => setModal('add')}><Plus className="size-3.5" /> Add Purchase</Button>}
+        {canCreate && <Button size="sm" className="h-8 press-sm shadow-sm" onClick={() => setModal('add')}><Plus className="size-3.5" /> New Purchase</Button>}
       </div>
 
-      {/* KPIs */}
+      {/* Summary KPIs */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
         <KPI icon={Package} label="Total Purchases" value={formatWholeRupees(kpis.total)} />
         <KPI icon={Wallet} label="Amount Paid" value={formatWholeRupees(kpis.paid)} />
         <KPI icon={TrendingDown} label="Payables" value={formatWholeRupees(kpis.payable)} warn={kpis.payable > 0n} />
         <KPI icon={Package} label="This Month" value={formatWholeRupees(kpis.thisMonth)} />
+      </div>
+
+      {/* Quick actions */}
+      <div className="flex flex-wrap gap-2">
+        <Button variant="outline" size="sm" className="h-9 press-sm" onClick={() => router.push('/?page=vendors')}>
+          <ArrowUpFromLine className="size-3.5 mr-1.5" /> Pay Vendor
+        </Button>
+        <Button variant="outline" size="sm" className="h-9 press-sm" onClick={() => router.push('/?page=vendors')}>
+          <BookOpen className="size-3.5 mr-1.5" /> Vendor Ledger
+        </Button>
       </div>
 
       {/* Toolbar */}
