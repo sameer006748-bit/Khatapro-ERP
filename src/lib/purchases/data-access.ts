@@ -47,10 +47,8 @@ export async function listVendors(businessId: string): Promise<VendorRow[]> {
 export async function createVendor(businessId: string, name: string, phone?: string, email?: string, address?: string, city?: string): Promise<VendorRow> {
   if (await isPhase5Live()) {
     const admin = getAdminSupabase()
-    // Find Vendors Payable account (2010) — we link vendor sub-accounts under Liability
     const { data: payableAcct } = await admin.from('accounts').select('id, category_id').eq('business_id', businessId).eq('code', '2010').single()
     if (!payableAcct) throw new Error('Vendors Payable account (2010) not found')
-    // Create a sub-account for this vendor under the same category
     const { data: acct, error: acctErr } = await admin.from('accounts').insert({
       business_id: businessId, code: 'VEND-' + Date.now().toString(36).toUpperCase(), name: `Vendor: ${name}`,
       category_id: payableAcct.category_id, is_active: true, is_party_account: true, party_type: 'vendor', balance_cache: 0
@@ -62,7 +60,6 @@ export async function createVendor(businessId: string, name: string, phone?: str
     if (vErr) throw new Error(`Create vendor: ${vErr.message}`)
     return { id: v.id, name: v.name, phone: v.phone, email: v.email, address: v.address, city: v.city, isActive: v.is_active, accountId: v.account_id }
   }
-  // Prisma fallback
   const payableAcct = await getAccountByCode(businessId, '2010')
   if (!payableAcct) throw new Error('Vendors Payable account (2010) not found')
   const assetCat = await db.accountCategory.findFirst({ where: { businessId, code: 'LIABILITY' } })
@@ -102,7 +99,6 @@ async function postPurchaseViaSupabase(input: typeof postPurchase extends (x: in
 }
 
 async function postPurchaseViaPrisma(input: typeof postPurchase extends (x: infer T) => any ? T: never): Promise<{ purchaseId: string; purchaseNo: string }> {
-  // Simplified Prisma fallback — generates purchase number, posts voucher via smart dispatcher
   const subtotal = input.items.reduce((s, i) => s + i.unitCostPaisas * BigInt(i.quantity), 0n)
   const discount = input.discountPaisas ?? 0n
   const additional = input.additionalChargesPaisas ?? 0n
@@ -115,40 +111,148 @@ async function postPurchaseViaPrisma(input: typeof postPurchase extends (x: infe
   let nextNum = 1; if (last) { const m = last.purchaseNo.match(/^PUR-(\d+)$/); if (m) nextNum = parseInt(m[1], 10) + 1 }
   const purchaseNo = `PUR-${String(nextNum).padStart(4, '0')}`
 
-  // Resolve accounts
+  // Resolve accounts (read-only lookups)
   const purchasesAcct = await getAccountByCode(input.businessId, '5010')
   if (!purchasesAcct) throw new Error('Purchases account (5010) not found')
   const payableAcct = await getAccountByCode(input.businessId, '2010')
   if (!payableAcct) throw new Error('Vendors Payable account (2010) not found')
 
   // Build voucher lines
-  const lines: Array<{ accountId: string; debit: bigint; credit: bigint; memo?: string }> = [
+  const voucherLines: Array<{ accountId: string; debit: bigint; credit: bigint; memo?: string }> = [
     { accountId: purchasesAcct.id, debit: total, credit: 0n, memo: `Purchase ${purchaseNo}` }
   ]
   for (const p of input.payments) {
-    if (p.paymentType !== 'credit') { lines.push({ accountId: p.accountId, debit: 0n, credit: p.amountPaisas, memo: `Payment ${purchaseNo}` }) }
+    if (p.paymentType !== 'credit') { voucherLines.push({ accountId: p.accountId, debit: 0n, credit: p.amountPaisas, memo: `Payment ${purchaseNo}` }) }
   }
-  if (outstanding > 0n) { lines.push({ accountId: payableAcct.id, debit: 0n, credit: outstanding, memo: `Payable ${purchaseNo}` }) }
+  if (outstanding > 0n) { voucherLines.push({ accountId: payableAcct.id, debit: 0n, credit: outstanding, memo: `Payable ${purchaseNo}` }) }
 
-  // Post voucher
-  const { postVoucherSmart } = await import('@/lib/accounting/voucher-supabase')
-  const voucherId = await postVoucherSmart({ businessId: input.businessId, voucherType: 'PU', voucherDate: input.purchaseDate, memo: `Purchase ${purchaseNo}`, lines, postedBy: input.createdBy })
+  // Single $transaction: voucher + purchase + items + stock movements + payment records
+  // all commit or rollback together. Zero orphan risk.
+  const result = await db.$transaction(async (tx) => {
+    // 1. Create voucher header
+    const vch = await tx.voucher.create({
+      data: {
+        businessId: input.businessId,
+        voucherType: 'PU',
+        voucherDate: input.purchaseDate,
+        memo: `Purchase ${purchaseNo}`,
+        postedBy: input.createdBy ?? null,
+        totalDebit: total,
+        totalCredit: total,
+      },
+    })
 
-  // Create purchase
-  const purchase = await db.purchase.create({ data: { businessId: input.businessId, purchaseNo, vendorId: input.vendorId, supplierBillNo: input.supplierBillNo ?? null, purchaseDate: input.purchaseDate, subtotal, discount, additionalCharges: additional, total, paidAmount: paid, outstandingAmount: outstanding, status: outstanding <= 0n ? 'paid' : paid > 0n ? 'partially_paid' : 'posted', notes: input.notes ?? null, voucherId, createdBy: input.createdBy ?? null } })
+    // 2. Create voucher lines
+    await tx.voucherLine.createMany({
+      data: voucherLines.map((l, i) => ({
+        businessId: input.businessId,
+        voucherId: vch.id,
+        accountId: l.accountId,
+        debit: l.debit,
+        credit: l.credit,
+        memo: l.memo ?? null,
+        lineOrder: i,
+      })),
+    })
 
-  // Items + stock-in
-  const { createStockMovement } = await import('@/lib/products/data-access')
-  for (const item of input.items) {
-    let smId: string | undefined
-    if (item.productId) { const sm = await createStockMovement(input.businessId, { productId: item.productId, movementType: 'adjustment_in', quantity: item.quantity, reason: `Purchase ${purchaseNo}`, createdBy: input.createdBy }); smId = sm.id }
-    await db.purchaseItem.create({ data: { businessId: input.businessId, purchaseId: purchase.id, productId: item.productId ?? null, productName: item.productName, quantity: item.quantity, unitCost: item.unitCostPaisas, lineTotal: item.unitCostPaisas * BigInt(item.quantity), stockMovementId: smId ?? null } })
-  }
-  // Payment records
-  for (const p of input.payments) {
-    if (p.paymentType !== 'credit') { await db.purchasePayment.create({ data: { businessId: input.businessId, purchaseId: purchase.id, vendorId: input.vendorId, accountId: p.accountId, amount: p.amountPaisas, paymentType: p.paymentType ?? 'purchase_payment', voucherId, createdBy: input.createdBy ?? null } }) }
-  }
-  return { purchaseId: purchase.id, purchaseNo }
+    // 3. Update account balances
+    const deltas = new Map<string, bigint>()
+    for (const l of voucherLines) {
+      const d = l.debit - l.credit
+      deltas.set(l.accountId, (deltas.get(l.accountId) ?? 0n) + d)
+    }
+    for (const [accountId, delta] of deltas) {
+      const acc = await tx.account.findUnique({ where: { id: accountId }, select: { balanceCache: true } })
+      if (acc) {
+        await tx.account.update({
+          where: { id: accountId },
+          data: { balanceCache: acc.balanceCache + delta },
+        })
+      }
+    }
+
+    // 4. Validate products
+    for (const item of input.items) {
+      if (item.productId) {
+        const prod = await tx.product.findFirst({
+          where: { id: item.productId, businessId: input.businessId },
+          select: { id: true },
+        })
+        if (!prod) throw new Error(`Product not found: ${item.productName}`)
+      }
+    }
+
+    // 5. Create purchase header
+    const purchase = await tx.purchase.create({
+      data: {
+        businessId: input.businessId, purchaseNo, vendorId: input.vendorId,
+        supplierBillNo: input.supplierBillNo ?? null, purchaseDate: input.purchaseDate,
+        subtotal, discount, additionalCharges: additional, total,
+        paidAmount: paid, outstandingAmount: outstanding,
+        status: outstanding <= 0n ? 'paid' : paid > 0n ? 'partially_paid' : 'posted',
+        notes: input.notes ?? null, voucherId: vch.id, createdBy: input.createdBy ?? null,
+      },
+    })
+
+    // 6. Purchase items + stock movements
+    for (const item of input.items) {
+      let smId: string | undefined
+      if (item.productId) {
+        const product = await tx.product.findFirst({
+          where: { id: item.productId, businessId: input.businessId },
+          select: { currentStock: true },
+        })
+        if (!product) throw new Error(`Product not found: ${item.productName}`)
+        const newStock = product.currentStock + item.quantity
+
+        const sm = await tx.stockMovement.create({
+          data: {
+            businessId: input.businessId,
+            productId: item.productId,
+            movementType: 'adjustment_in',
+            quantity: item.quantity,
+            balanceAfter: newStock,
+            reason: `Purchase ${purchaseNo}`,
+            createdBy: input.createdBy ?? null,
+          },
+        })
+        smId = sm.id
+
+        await tx.product.update({
+          where: { id: item.productId },
+          data: { currentStock: { increment: item.quantity } },
+        })
+      }
+
+      await tx.purchaseItem.create({
+        data: {
+          businessId: input.businessId, purchaseId: purchase.id,
+          productId: item.productId ?? null, productName: item.productName,
+          quantity: item.quantity, unitCost: item.unitCostPaisas,
+          lineTotal: item.unitCostPaisas * BigInt(item.quantity),
+          stockMovementId: smId ?? null,
+        },
+      })
+    }
+
+    // 7. Payment records
+    for (const p of input.payments) {
+      if (p.paymentType !== 'credit') {
+        await tx.purchasePayment.create({
+          data: {
+            businessId: input.businessId, purchaseId: purchase.id,
+            vendorId: input.vendorId, accountId: p.accountId,
+            amount: p.amountPaisas, paymentType: p.paymentType ?? 'purchase_payment',
+            voucherId: vch.id, createdBy: input.createdBy ?? null,
+          },
+        })
+      }
+    }
+
+    return { purchaseId: purchase.id, purchaseNo }
+  })
+
+  return result
 }
 
 // ─── List Purchases ───
@@ -196,7 +300,6 @@ export async function postVendorPayment(input: { businessId: string; vendorId: s
     if (error) throw new Error(`Supabase: ${error.message}`)
     return data as string
   }
-  // Prisma fallback — simplified
   const payableAcct = await getAccountByCode(input.businessId, '2010')
   if (!payableAcct) throw new Error('Vendors Payable account (2010) not found')
   const { postVoucherSmart } = await import('@/lib/accounting/voucher-supabase')
@@ -219,7 +322,6 @@ export async function postVendorAdvance(input: { businessId: string; vendorId: s
     if (error) throw new Error(`Supabase: ${error.message}`)
     return data as string
   }
-  // Prisma fallback
   const payableAcct = await getAccountByCode(input.businessId, '2010')
   if (!payableAcct) throw new Error('Vendors Payable account (2010) not found')
   const { postVoucherSmart } = await import('@/lib/accounting/voucher-supabase')
@@ -248,7 +350,6 @@ export async function postPurchaseReturn(input: {
     const { data: ret } = await admin.from('purchase_returns').select('return_no').eq('id', returnId).single()
     return { returnId, returnNo: (ret as any)?.return_no ?? '' }
   }
-  // Prisma fallback — simplified
   const purchasesAcct = await getAccountByCode(input.businessId, '5010')
   if (!purchasesAcct) throw new Error('Purchases account (5010) not found')
   const payableAcct = await getAccountByCode(input.businessId, '2010')
@@ -275,7 +376,7 @@ export async function postPurchaseReturn(input: {
   return { returnId: ret.id, returnNo }
 }
 
-// ─── Vendor Ledger (proper — uses vendor_ledger() RPC from migration 00005a) ───
+// ─── Vendor Ledger ───
 export type VendorLedgerRow = {
   date: string; type: string; reference: string; description: string
   debit: string; credit: string; runningBalance: string
@@ -299,10 +400,6 @@ async function vendorLedgerViaSupabase(
   filters?: { fromDate?: string | null; toDate?: string | null; typeFilter?: string | null; search?: string | null },
 ): Promise<VendorLedgerRow[]> {
   const admin = getAdminSupabase()
-
-  // Call the vendor_ledger() RPC from migration 00005a.
-  // It returns table with: line_date, line_type, reference, description,
-  //   debit, credit, running_balance, voucher_id, reference_id, reference_type
   const { data, error } = await admin.rpc('vendor_ledger', {
     p_business_id: businessId,
     p_vendor_id: vendorId,
@@ -325,7 +422,6 @@ async function vendorLedgerViaSupabase(
     referenceType: r.reference_type ?? null,
   }))
 
-  // Apply client-side type filter (RPC only supports date range)
   if (filters?.typeFilter && filters.typeFilter !== 'all') {
     const typeMap: Record<string, string[]> = {
       purchase: ['Purchase'],
@@ -340,7 +436,6 @@ async function vendorLedgerViaSupabase(
     rows = rows.filter(r => allowed.includes(r.type))
   }
 
-  // Apply client-side reference search
   if (filters?.search) {
     const q = filters.search.toLowerCase()
     rows = rows.filter(r => r.reference.toLowerCase().includes(q) || r.description.toLowerCase().includes(q) || r.type.toLowerCase().includes(q))
@@ -349,7 +444,7 @@ async function vendorLedgerViaSupabase(
   return rows
 }
 
-// ─── Update Vendor (edit) ───
+// ─── Update Vendor ───
 export async function updateVendor(
   businessId: string,
   vendorId: string,
@@ -374,7 +469,7 @@ export async function updateVendor(
   return { id: v.id, name: v.name, phone: v.phone, email: v.email, address: v.address, city: v.city, isActive: v.isActive, accountId: v.accountId }
 }
 
-// ─── Advance Application (uses post_advance_application() RPC from migration 00005a) ───
+// ─── Advance Application ───
 export async function postAdvanceApplication(input: {
   businessId: string; vendorId: string; purchaseId: string
   amountPaisas: bigint; applicationDate?: Date; notes?: string | null; createdBy?: string | null
@@ -394,7 +489,6 @@ export async function postAdvanceApplication(input: {
     if (error) throw new Error(`post_advance_application RPC: ${error.message}`)
     return data as string
   }
-  // Prisma fallback
   const payableAcct = await getAccountByCode(input.businessId, '2010')
   if (!payableAcct) throw new Error('Vendors Payable account (2010) not found')
   const { postVoucherSmart } = await import('@/lib/accounting/voucher-supabase')
@@ -410,7 +504,7 @@ export async function postAdvanceApplication(input: {
   return pp.id
 }
 
-// ─── Purchase Replacement (uses post_purchase_replacement() RPC from migration 00005a) ───
+// ─── Purchase Replacement ───
 export type ReplacementItemInput = {
   originalPurchaseItemId: string
   outgoingProductId?: string | null; outgoingProductName: string
@@ -448,12 +542,10 @@ export async function postPurchaseReplacement(input: {
     })
     if (error) throw new Error(`post_purchase_replacement RPC: ${error.message}`)
     const replacementId = data as string
-    // Fetch the replacement_no from the new record
     const { data: rep } = await admin.from('purchase_replacements')
       .select('replacement_no').eq('id', replacementId).single()
     return { replacementId, replacementNo: (rep as any)?.replacement_no ?? '' }
   }
-  // Prisma fallback — simplified, uses audit_logs (no dedicated table in Prisma schema)
   const purchasesAcct = await getAccountByCode(input.businessId, '5010')
   if (!purchasesAcct) throw new Error('Purchases account (5010) not found')
   const payableAcct = await getAccountByCode(input.businessId, '2010')
@@ -500,7 +592,6 @@ export async function postPurchaseReplacement(input: {
   return { replacementId: replacementNo, replacementNo }
 }
 
-// ─── List Replacements for a purchase (reads from purchase_replacements + purchase_replacement_items) ───
 export type ReplacementRecord = {
   id: string; replacementNo: string; date: string
   outgoingValue: string; incomingValue: string; valueDiff: string
@@ -514,7 +605,6 @@ export type ReplacementRecord = {
 export async function listReplacementsForPurchase(businessId: string, purchaseId: string): Promise<ReplacementRecord[]> {
   if (await isPhase5Live()) {
     const admin = getAdminSupabase()
-    // Fetch replacement headers for this purchase, with nested items
     const { data: reps, error } = await admin.from('purchase_replacements')
       .select('id, replacement_no, replacement_date, outgoing_value, incoming_value, value_diff, voucher_id, notes, purchase_replacement_items(outgoing_product_name, outgoing_quantity, outgoing_unit_cost, incoming_product_name, incoming_quantity, incoming_unit_cost)')
       .eq('business_id', businessId).eq('purchase_id', purchaseId)
