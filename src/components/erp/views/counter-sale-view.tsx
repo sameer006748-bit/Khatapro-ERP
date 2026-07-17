@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -31,7 +31,7 @@ type CartItem = {
   productId: string
   productName: string
   qty: number
-  unitPrice: string  // rupees
+  unitPrice: string
   isTemporary: boolean
 }
 
@@ -49,7 +49,6 @@ export function CounterSaleView({ user }: { user: MeUser }) {
   const [tempItemPrice, setTempItemPrice] = useState('')
   const [showCustomer, setShowCustomer] = useState(false)
 
-  // Payment
   const [paymentMode, setPaymentMode] = useState<PaymentMode>('full')
   const [paymentAccountId, setPaymentAccountId] = useState('')
   const [partialAmount, setPartialAmount] = useState('')
@@ -61,9 +60,11 @@ export function CounterSaleView({ user }: { user: MeUser }) {
     { key: '1', accountId: '', amount: '', isChange: false },
   ])
   const [result, setResult] = useState<{ ok: boolean; invoiceNo?: string; invoiceId?: string; error?: string } | null>(null)
-  const [idempotencyKey, setIdempotencyKey] = useState(() => crypto.randomUUID())
+  const [sessionKey] = useState(() => crypto.randomUUID())
 
-  // Fetch from CoA (Supabase UUIDs) — NOT business-accounts (Prisma)
+  // Duplicate-submit guard (ref-based, independent of React render batching)
+  const postingRef = useRef(false)
+
   const coaQ = useQuery({
     queryKey: ['coa'],
     queryFn: () => fetch('/api/setup/coa').then(r => r.json()),
@@ -77,7 +78,6 @@ export function CounterSaleView({ user }: { user: MeUser }) {
     queryFn: () => fetch('/api/salesmen').then(r => r.json()),
   })
 
-  // Extract business accounts from CoA (these are Supabase UUIDs)
   const businessAccounts: Account[] = useMemo(() => {
     if (!coaQ.data?.categories) return []
     return coaQ.data.categories
@@ -86,14 +86,12 @@ export function CounterSaleView({ user }: { user: MeUser }) {
       .map((a: any) => ({ id: a.id, code: a.code, name: a.name, isBusinessAccount: a.isBusinessAccount }))
   }, [coaQ.data])
 
-  // Auto-select salesman
   useEffect(() => {
     if (salesmenQ.data && salesmenQ.data.rows.length === 1 && !salesmanId) {
       setSalesmanId(salesmenQ.data.rows[0].id)
     }
   }, [salesmenQ.data, salesmanId])
 
-  // Auto-select Cash account for payment
   useEffect(() => {
     if (businessAccounts.length > 0 && !paymentAccountId) {
       const cash = businessAccounts.find(a => a.name === 'Cash' || a.code === '1010')
@@ -101,14 +99,12 @@ export function CounterSaleView({ user }: { user: MeUser }) {
     }
   }, [businessAccounts, paymentAccountId])
 
-  // Filter products by search
   const filteredProducts = useMemo(() => {
     if (!productsQ.data?.rows) return []
     if (!searchQuery) return productsQ.data.rows.slice(0, 8)
     return productsQ.data.rows.filter(p => p.name.toLowerCase().includes(searchQuery.toLowerCase())).slice(0, 8)
   }, [productsQ.data, searchQuery])
 
-  // Subtotal
   const subtotal = useMemo(() => {
     return cart.reduce((acc, it) => {
       const up = parseMoney(it.unitPrice) ?? 0n
@@ -116,7 +112,6 @@ export function CounterSaleView({ user }: { user: MeUser }) {
     }, 0n)
   }, [cart])
 
-  // Discount
   const discountPaisas = useMemo(() => {
     const v = parseMoney(discountRupees)
     if (v === null) return 0n
@@ -128,16 +123,13 @@ export function CounterSaleView({ user }: { user: MeUser }) {
 
   const salesman = salesmenQ.data?.rows.find(s => s.id === salesmanId)
 
-  // Change calc
   const cashReceived = parseMoney(cashReceivedAmount) ?? 0n
   const changeAmount = cashReceived > finalTotal ? cashReceived - finalTotal : 0n
   const changeNeeded = changeAmount > 0n
 
-  // Partial calc
   const partialPaid = parseMoney(partialAmount) ?? 0n
   const partialOutstanding = finalTotal - partialPaid
 
-  // Build payments
   function buildPayments() {
     if (showAdvanced) {
       return advPayments.filter(p => p.accountId && p.amount).map(p => ({
@@ -166,18 +158,16 @@ export function CounterSaleView({ user }: { user: MeUser }) {
     return p && p.currentStock < it.qty
   })
 
-  // UUID validation
   const isUuid = (s: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s)
   const allAccountsValid = payments.every(p => isUuid(p.accountId))
   const canPost = salesmanId && cart.length > 0 && payments.length > 0 && payments.every(p => p.amount > 0n) && allAccountsValid && !discountError && (discountRupees === '' || discountPaisas >= 0n)
 
   const postMut = useMutation({
     mutationFn: async () => {
-      // Defensive: validate all account IDs are UUIDs before posting
+      if (postingRef.current) throw new Error('Submission already in progress')
+      postingRef.current = true
       for (const p of payments) {
-        if (!isUuid(p.accountId)) {
-          throw new Error(`Invalid account ID (not a UUID): ${p.accountId}. Please refresh the page.`)
-        }
+        if (!isUuid(p.accountId)) throw new Error(`Invalid account ID (not a UUID): ${p.accountId}. Please refresh the page.`)
       }
       const r = await fetch('/api/sales/counter', {
         method: 'POST', headers: { 'content-type': 'application/json' },
@@ -198,7 +188,6 @@ export function CounterSaleView({ user }: { user: MeUser }) {
           salesmanId,
           customerName: customerName || undefined,
           discountPaisas: discountPaisas.toString(),
-          idempotencyKey,
         }),
       })
       const j = await r.json()
@@ -206,6 +195,7 @@ export function CounterSaleView({ user }: { user: MeUser }) {
       return j
     },
     onSuccess: (j) => {
+      postingRef.current = false
       toast.success(`Sale posted: ${j.invoiceNo}`)
       setResult({ ok: true, invoiceNo: j.invoiceNo, invoiceId: j.invoiceId })
       void qc.invalidateQueries({ queryKey: ['invoices'] })
@@ -213,12 +203,12 @@ export function CounterSaleView({ user }: { user: MeUser }) {
       void qc.invalidateQueries({ queryKey: ['products'] })
     },
     onError: (e: Error) => {
+      postingRef.current = false
       setResult({ ok: false, error: e.message })
       toast.error(`Sale failed: ${e.message}`)
     },
   })
 
-  // ─── SUCCESS ───
   if (result?.ok) {
     return (
       <div className="space-y-6">
@@ -229,7 +219,7 @@ export function CounterSaleView({ user }: { user: MeUser }) {
           <div className="mt-6 flex flex-col gap-2">
             <Button className="press-md shadow-sm" onClick={() => window.open(`/?invoice=${result.invoiceId}`, '_self')}><FileText className="size-4" /> View Invoice</Button>
             <PrintInvoiceButton invoiceId={result.invoiceId} label="Print Invoice" size="default" className="w-full justify-center" icon={Printer} />
- <Button variant="ghost" className="press-sm" onClick={() => { setResult(null); setCart([]); setCustomerName(''); setShowCustomer(false); setIdempotencyKey(crypto.randomUUID()); }}><ShoppingCart className="size-4" /> New Sale</Button>
+            <Button variant="ghost" className="press-sm" onClick={() => { setResult(null); setCart([]); setCustomerName(''); setShowCustomer(false) }}><ShoppingCart className="size-4" /> New Sale</Button>
           </div>
         </motion.div>
       </div>
@@ -239,7 +229,6 @@ export function CounterSaleView({ user }: { user: MeUser }) {
   function addToCart(productId: string) {
     const p = productsQ.data?.rows.find(x => x.id === productId)
     if (!p) return
-    // If product already in cart, increment qty
     const existing = cart.find(c => c.productId === productId)
     if (existing) {
       setCart(ls => ls.map(c => c.key === existing.key ? { ...c, qty: c.qty + 1 } : c))
@@ -273,7 +262,7 @@ export function CounterSaleView({ user }: { user: MeUser }) {
         <h1 className="text-xl font-semibold tracking-tight text-foreground">Counter Sale</h1>
         <div className="flex items-center gap-2">
           <Select value={salesmanId} onValueChange={setSalesmanId}>
-            <SelectTrigger className="h-8 w-auto bg-background press-sm text-xs"><SelectValue placeholder="Salesman…" /></SelectTrigger>
+            <SelectTrigger className="h-8 w-auto bg-background press-sm text-xs"><SelectValue placeholder="Salesman\u2026" /></SelectTrigger>
             <SelectContent>{salesmenQ.data?.rows.map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}</SelectContent>
           </Select>
           <Button variant="ghost" size="sm" className="h-8 text-xs press-sm" onClick={() => setShowCustomer(v => !v)}><User className="size-3" /> {showCustomer ? 'Hide' : 'Customer'}</Button>
@@ -284,29 +273,25 @@ export function CounterSaleView({ user }: { user: MeUser }) {
         <Input value={customerName} onChange={e => setCustomerName(e.target.value)} className="h-9 bg-background press-sm" placeholder="Customer name (optional)" />
       )}
 
-      {/* ─── TWO-COLUMN LAYOUT ON DESKTOP ─── */}
       <div className="grid lg:grid-cols-5 gap-3">
-        {/* LEFT: Product search + quick list */}
         <div className="lg:col-span-2 space-y-3">
           <div className="card-3d p-3">
             <div className="relative">
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
-              <Input value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder="Search products…" className="h-9 bg-background pl-8 press-sm" />
+              <Input value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder="Search products\u2026" className="h-9 bg-background pl-8 press-sm" />
             </div>
-            {/* Quick product list */}
             <div className="mt-2 space-y-1 max-h-[300px] overflow-y-auto">
               {filteredProducts.map(p => (
                 <button key={p.id} onClick={() => addToCart(p.id)} className="w-full flex items-center justify-between p-2 rounded-md hover:bg-accent/40 press-sm text-left">
                   <div className="min-w-0">
                     <div className="text-sm font-medium text-foreground truncate">{p.name}</div>
-                    <div className="text-[10px] text-muted-foreground" data-num>Rs {p.salePrice} · stock: {p.currentStock}</div>
+                    <div className="text-[10px] text-muted-foreground" data-num>Rs {p.salePrice} \u00B7 stock: {p.currentStock}</div>
                   </div>
                   <Plus className="size-4 text-primary shrink-0" />
                 </button>
               ))}
               {filteredProducts.length === 0 && <div className="text-xs text-muted-foreground text-center py-4">No products found</div>}
             </div>
-            {/* Temp item toggle */}
             <button onClick={() => setShowTempItem(v => !v)} className="mt-2 text-[10px] text-muted-foreground hover:text-foreground press-sm w-full text-center">
               {showTempItem ? 'Cancel temp item' : '+ Add temporary item'}
             </button>
@@ -322,9 +307,7 @@ export function CounterSaleView({ user }: { user: MeUser }) {
           </div>
         </div>
 
-        {/* RIGHT: Cart + payment + post */}
         <div className="lg:col-span-3 space-y-3">
-          {/* Cart */}
           <div className="card-3d p-3">
             <div className="flex items-center justify-between mb-2">
               <span className="text-sm font-semibold text-foreground">Cart ({cart.length})</span>
@@ -343,17 +326,13 @@ export function CounterSaleView({ user }: { user: MeUser }) {
                         <div className="text-sm font-medium text-foreground truncate">{it.productName}{it.isTemporary && <span className="text-[9px] uppercase bg-amber-100 text-amber-700 px-1 rounded ml-1">Temp</span>}</div>
                         {p && p.currentStock < it.qty && <div className="text-[9px] text-amber-600 flex items-center gap-0.5"><TrendingDown className="size-2" /> Stock: {p.currentStock}</div>}
                       </div>
-                      {/* Qty */}
                       <div className="flex items-center gap-0.5 shrink-0">
                         <button onClick={() => updateCartQty(it.key, -1)} className="grid place-items-center size-6 rounded border border-border text-muted-foreground press-sm"><Minus className="size-3" /></button>
                         <span className="w-6 text-center text-sm font-medium" data-num>{it.qty}</span>
                         <button onClick={() => updateCartQty(it.key, 1)} className="grid place-items-center size-6 rounded border border-border text-muted-foreground press-sm"><Plus className="size-3" /></button>
                       </div>
-                      {/* Price */}
                       <Input type="text" value={it.unitPrice} onChange={e => updateCartPrice(it.key, e.target.value)} className="h-7 w-16 bg-background press-sm text-right text-xs" data-num />
-                      {/* Line total */}
                       <span className="w-16 text-right text-sm font-medium text-foreground" data-num>{formatMoney(lineTotal, false)}</span>
-                      {/* Remove */}
                       <button onClick={() => removeFromCart(it.key)} className="text-muted-foreground hover:text-destructive press-sm shrink-0"><Trash2 className="size-3.5" /></button>
                     </div>
                   )
@@ -362,20 +341,18 @@ export function CounterSaleView({ user }: { user: MeUser }) {
             )}
           </div>
 
-          {/* Payment (only if cart has items) */}
           {cart.length > 0 && (
             <div className="card-3d p-3">
               <div className="flex items-center gap-1.5 mb-2">
                 <span className="text-sm font-semibold text-foreground">Payment</span>
                 {!showAdvanced && (
-                  <button onClick={() => setShowAdvanced(true)} className="ml-auto text-[10px] text-muted-foreground hover:text-foreground">Split →</button>
+                  <button onClick={() => setShowAdvanced(true)} className="ml-auto text-[10px] text-muted-foreground hover:text-foreground">Split \u2192</button>
                 )}
-                {showAdvanced && <button onClick={() => setShowAdvanced(false)} className="ml-auto text-[10px] text-muted-foreground hover:text-foreground">← Simple</button>}
+                {showAdvanced && <button onClick={() => setShowAdvanced(false)} className="ml-auto text-[10px] text-muted-foreground hover:text-foreground">\u2190 Simple</button>}
               </div>
 
               {!showAdvanced && (
                 <>
-                  {/* Payment mode buttons */}
                   <div className="grid grid-cols-4 gap-1 mb-2">
                     <PayBtn icon={Banknote} label="Cash" active={paymentMode === 'full'} onClick={() => { setPaymentMode('full'); const c = businessAccounts.find(a => a.name === 'Cash' || a.code === '1010'); if (c) setPaymentAccountId(c.id) }} />
                     <PayBtn icon={Smartphone} label="JazzCash" active={paymentMode === 'full'} onClick={() => { setPaymentMode('full'); const jc = businessAccounts.find(a => a.name === 'JazzCash' || a.code === '1050'); if (jc) setPaymentAccountId(jc.id) }} />
@@ -383,7 +360,6 @@ export function CounterSaleView({ user }: { user: MeUser }) {
                     <PayBtn icon={Wallet} label="Change" active={paymentMode === 'change'} onClick={() => setPaymentMode('change')} />
                   </div>
 
-                  {/* Account selector */}
                   <Select value={paymentAccountId} onValueChange={setPaymentAccountId}>
                     <SelectTrigger className="h-8 bg-background press-sm text-sm"><SelectValue /></SelectTrigger>
                     <SelectContent>
@@ -391,7 +367,6 @@ export function CounterSaleView({ user }: { user: MeUser }) {
                     </SelectContent>
                   </Select>
 
-                  {/* Partial */}
                   {paymentMode === 'partial' && (
                     <div className="mt-2 space-y-1.5">
                       <Input type="text" value={partialAmount} onChange={e => setPartialAmount(e.target.value)} placeholder="Amount received (Rs)" className="h-9 bg-background press-sm text-sm" data-num />
@@ -399,14 +374,13 @@ export function CounterSaleView({ user }: { user: MeUser }) {
                     </div>
                   )}
 
-                  {/* Cash + Change */}
                   {paymentMode === 'change' && (
                     <div className="mt-2 space-y-1.5">
                       <Input type="text" value={cashReceivedAmount} onChange={e => setCashReceivedAmount(e.target.value)} placeholder="Cash received (Rs)" className="h-9 bg-background press-sm text-sm" data-num />
                       {changeNeeded && (
                         <>
                           <Select value={changeAccountId} onValueChange={setChangeAccountId}>
-                            <SelectTrigger className="h-8 bg-background press-sm text-sm"><SelectValue placeholder="Change return account…" /></SelectTrigger>
+                            <SelectTrigger className="h-8 bg-background press-sm text-sm"><SelectValue placeholder="Change return account\u2026" /></SelectTrigger>
                             <SelectContent>
                               {businessAccounts.map(a => <SelectItem key={a.id} value={a.id}>{a.name} ({a.code})</SelectItem>)}
                             </SelectContent>
@@ -417,20 +391,18 @@ export function CounterSaleView({ user }: { user: MeUser }) {
                     </div>
                   )}
 
-                  {/* Full payment summary */}
                   {paymentMode === 'full' && (
                     <div className="mt-2 flex justify-between text-xs"><span className="text-muted-foreground">Amount</span><span className="font-medium text-foreground" data-num>{formatMoney(subtotal, false)}</span></div>
                   )}
                 </>
               )}
 
-              {/* Advanced split */}
               {showAdvanced && (
                 <div className="space-y-1.5">
                   {advPayments.map(p => (
                     <div key={p.key} className="grid grid-cols-2 gap-1 items-end">
                       <Select value={p.accountId} onValueChange={v => setAdvPayments(ls => ls.map(x => x.key === p.key ? { ...x, accountId: v } : x))}>
-                        <SelectTrigger className="h-8 bg-background press-sm text-sm"><SelectValue placeholder="Account…" /></SelectTrigger>
+                        <SelectTrigger className="h-8 bg-background press-sm text-sm"><SelectValue placeholder="Account\u2026" /></SelectTrigger>
                         <SelectContent>{businessAccounts.map(a => <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>)}</SelectContent>
                       </Select>
                       <div className="flex gap-1">
@@ -449,7 +421,6 @@ export function CounterSaleView({ user }: { user: MeUser }) {
             </div>
           )}
 
-          {/* ─── STICKY POST BAR ─── */}
           {cart.length > 0 && (
             <div className="sticky bottom-20 md:bottom-3 z-20">
               <div className="card-3d border-primary/30 p-3 bg-card/95 backdrop-blur-md">
@@ -459,12 +430,12 @@ export function CounterSaleView({ user }: { user: MeUser }) {
                   <div><span className="text-[9px] uppercase text-muted-foreground">Paid</span><div className="font-semibold text-primary" data-num>{formatMoney(totalPaid, false)}</div></div>
                   {totalChange > 0n && <div><span className="text-[9px] uppercase text-muted-foreground">Change</span><div className="font-semibold text-amber-600" data-num>{formatMoney(totalChange, false)}</div></div>}
                   {outstanding > 0n && <div><span className="text-[9px] uppercase text-muted-foreground">Outstanding</span><div className="font-semibold text-destructive" data-num>{formatMoney(outstanding, false)}</div></div>}
-                  {salesman && totalPaid > 0n && <div className="ml-auto hidden sm:block text-[10px] text-muted-foreground">Commission ≈ <span className="font-medium text-foreground" data-num>{formatMoney(estimatedCommission, false)}</span></div>}
+                  {salesman && totalPaid > 0n && <div className="ml-auto hidden sm:block text-[10px] text-muted-foreground">Commission \u2248 <span className="font-medium text-foreground" data-num>{formatMoney(estimatedCommission, false)}</span></div>}
                 </div>
                 {stockWarnings.length > 0 && <div className="mb-1.5 flex items-center gap-1 text-[10px] text-amber-600"><TrendingDown className="size-2.5" /> {stockWarnings.length} item(s) will go negative</div>}
                 {result && !result.ok && <div className="mb-1.5 p-1.5 bg-destructive/10 rounded text-[10px] text-destructive flex items-center gap-1"><AlertCircle className="size-3" /> {result.error}</div>}
                 <Button className="w-full press-md shadow-sm" disabled={!canPost || postMut.isPending} onClick={() => postMut.mutate()}>
-                  {postMut.isPending ? 'Posting…' : <><CheckCircle2 className="size-4" /> Post Sale — {formatMoney(finalTotal)}</>}
+                  {postMut.isPending ? 'Posting\u2026' : <><CheckCircle2 className="size-4" /> Post Sale \u2014 {formatMoney(finalTotal)}</>}
                 </Button>
               </div>
             </div>

@@ -15,6 +15,7 @@ import { postSale, listInvoices, resolveSalesmanIdForUser, resolveEffectiveSales
 import { parseMoney } from '@/lib/format'
 import { parseDiscountPaisas } from '@/lib/sales/discount'
 import { assertPhase9SaleFeatures } from '@/lib/supabase/rpc-compatibility'
+import { isSupabaseConfigured } from '@/lib/supabase/config'
 
 const ItemSchema = z.object({
   productId: z.string().nullable().optional(),
@@ -44,6 +45,16 @@ const PostSaleSchema = z.object({
   idempotencyKey: z.string().min(1).max(200).optional(),
 })
 
+async function tryPostSale(input: Parameters<typeof postSale>[0]) {
+  return postSale(input).catch(async (e) => {
+    const msg = (e as Error).message || ''
+    if (msg.includes('Unique constraint') || msg.includes('unique constraint')) {
+      return postSale(input)
+    }
+    throw e
+  })
+}
+
 export async function POST(req: Request) {
   const session = await getServerSession(authOptions)
   if (!session?.user) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
@@ -57,9 +68,6 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'INVALID_INPUT', details: parsed.error.flatten() }, { status: 400 })
   }
 
-  // Parse money strings to BigInt.
-  // Items: unitPrice is in RUPEES (e.g. "1800") → parseMoney converts to paisas (180000).
-  // Payments: amount is already in PAISAS (e.g. "180000") → BigInt directly, no parseMoney.
   let items: Array<{ productId?: string | null; productName: string; qty: number; unitPrice: bigint; isTemporary?: boolean }>
   let payments: Array<{ accountId: string; amount: bigint; isChange?: boolean }>
   try {
@@ -77,14 +85,15 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: (e as Error).message }, { status: 400 })
   }
 
-  // Defensive: validate all payment account IDs are UUIDs (not Prisma cuids)
-  const isUuid = (s: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s)
-  for (const p of payments) {
-    if (!isUuid(p.accountId)) {
-      return NextResponse.json(
-        { error: `Invalid account ID (not a UUID): ${p.accountId}. Payment accounts must be Supabase UUIDs. Refresh the page.` },
-        { status: 400 },
-      )
+  if (isSupabaseConfigured()) {
+    const isUuid = (s: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s)
+    for (const p of payments) {
+      if (!isUuid(p.accountId)) {
+        return NextResponse.json(
+          { error: `Invalid account ID (not a UUID): ${p.accountId}. Payment accounts must be Supabase UUIDs. Refresh the page.` },
+          { status: 400 },
+        )
+      }
     }
   }
 
@@ -106,13 +115,12 @@ export async function POST(req: Request) {
   assertPhase9SaleFeatures({ discountPaisas, idempotencyKey })
 
   try {
-    // Resolve the effective salesman_id (salesmen get their own, owners can assign)
     const smResult = await resolveEffectiveSalesmanId(su, parsed.data.salesmanId ?? null)
     if (!smResult.ok) {
       return NextResponse.json({ error: smResult.error }, { status: smResult.status })
     }
 
-    const result = await postSale({
+    const result = await tryPostSale({
       businessId: su.businessId,
       invoiceType: 'COUNTER',
       invoiceDate: new Date(parsed.data.invoiceDate),
@@ -129,7 +137,11 @@ export async function POST(req: Request) {
     })
     return NextResponse.json({ ok: true, invoiceId: result.invoiceId, invoiceNo: result.invoiceNo })
   } catch (e) {
-    return NextResponse.json({ error: (e as Error).message }, { status: 500 })
+    const msg = (e as Error).message || ''
+    if (msg.includes('Unique constraint') || msg.includes('unique constraint')) {
+      return NextResponse.json({ error: 'Transaction conflict. Please retry in a moment.' }, { status: 409 })
+    }
+    return NextResponse.json({ error: 'POST_FAILED' }, { status: 500 })
   }
 }
 
@@ -139,7 +151,6 @@ export async function GET(req: Request) {
   const su = await loadSessionUser((session.user as any).id)
   if (!su) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
 
-  // Allow both can_view_sales (full) and can_view_own_sales (salesman)
   const canViewAll = hasPermission(su, 'can_view_sales')
   const canViewOwn = hasPermission(su, 'can_view_own_sales')
   if (!canViewAll && !canViewOwn) {
@@ -149,7 +160,6 @@ export async function GET(req: Request) {
   const url = new URL(req.url)
   const type = url.searchParams.get('type') || undefined
 
-  // If user can only view own sales, resolve their salesman_id and filter
   let salesmanId: string | undefined
   if (!canViewAll && canViewOwn) {
     const smId = await resolveSalesmanIdForUser(su.businessId, su.supabaseUserUuid, su.userId)
