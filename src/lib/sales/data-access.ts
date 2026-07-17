@@ -141,13 +141,11 @@ async function postSaleViaPrisma(input: PostSaleInput): Promise<{ invoiceId: str
   if (outstanding > 0n && arAccount) voucherLines.push({ accountId: arAccount.id, debit: outstanding, credit: 0n, memo: 'Outstanding' })
 
   const result = await db.$transaction(async (tx) => {
-    // 1. Invoice number inside transaction for sequential safety
     const last = await tx.invoice.findFirst({ where: { businessId: input.businessId }, orderBy: { invoiceNo: 'desc' } })
     let nextNum = 1
-    if (last) { const m = last.invoiceNo.match(/^INV-(d+)$/); if (m) nextNum = parseInt(m[1], 10) + 1 }
+    if (last) { const m = last.invoiceNo.match(/^INV-(\d+)$/); if (m) nextNum = parseInt(m[1], 10) + 1 }
     const invoiceNo = `INV-${String(nextNum).padStart(4, '0')}`
 
-    // 2. Voucher header + lines
     const vch = await tx.voucher.create({
       data: { businessId: input.businessId, voucherType: 'SI', voucherDate: input.invoiceDate, memo: input.memo ?? `Sale ${invoiceNo}`, postedBy: input.createdBy ?? null, totalDebit: total, totalCredit: total },
     })
@@ -159,12 +157,10 @@ async function postSaleViaPrisma(input: PostSaleInput): Promise<{ invoiceId: str
       if (acc) await tx.account.update({ where: { id: accountId }, data: { balanceCache: acc.balanceCache + delta } })
     }
 
-    // 3. Invoice
     const invoice = await tx.invoice.create({
       data: { businessId: input.businessId, invoiceNo, invoiceType: input.invoiceType, invoiceDate: input.invoiceDate, customerId: input.customerId ?? null, salesmanId: input.salesmanId ?? null, customerName: input.customerName ?? null, customerPhone: input.customerPhone ?? null, customerAddress: input.customerAddress ?? null, customerCity: input.customerCity ?? null, subtotal, discount, total, paidAmount, voucherId: vch.id, memo: input.memo ?? null, createdBy: input.createdBy ?? null },
     })
 
-    // 4. Items + stock decrement
     for (const item of input.items) {
       let smId: string | undefined
       if (item.productId) {
@@ -178,7 +174,6 @@ async function postSaleViaPrisma(input: PostSaleInput): Promise<{ invoiceId: str
       await tx.invoiceItem.create({ data: { businessId: input.businessId, invoiceId: invoice.id, productId: item.productId ?? null, productName: item.productName, qty: item.qty, unitPrice: item.unitPrice, lineTotal: item.unitPrice * BigInt(item.qty), isTemporary: item.isTemporary ?? false, stockMovementId: smId ?? null } })
     }
 
-    // 5. Payment allocations + commission
     let salesman: { id: string; commissionPct: number } | null = null
     if (input.salesmanId) salesman = await tx.salesman.findUnique({ where: { id: input.salesmanId }, select: { id: true, commissionPct: true } })
     for (const p of input.payments) {
@@ -234,18 +229,31 @@ export async function postSalesReturn(businessId: string, invoiceId: string, ret
     const { data: ret } = await admin.from('sales_returns').select('return_voucher_id').eq('id', returnId).single()
     return { returnId, voucherId: (ret as any)?.return_voucher_id ?? '' }
   }
-  const invoice = await db.invoice.findFirst({ where: { id: invoiceId, businessId }, include: { items: true, paymentAllocations: { where: { isChange: false } } } })
-  if (!invoice) throw new Error('Invoice not found')
-  if (invoice.isReturned) throw new Error('Invoice already returned')
-  const salesAccount = await getAccountByCode(businessId, '4010')
-  if (!salesAccount) throw new Error('Sales account (4010) not found')
-  const voucherLines: Array<{ accountId: string; debit: bigint; credit: bigint; memo?: string }> = [{ accountId: salesAccount.id, debit: invoice.total, credit: 0n, memo: 'Sales return reversal' }]
-  for (const pa of invoice.paymentAllocations) voucherLines.push({ accountId: pa.accountId, debit: 0n, credit: pa.amount, memo: 'Return refund' })
-  const { postVoucherSmart } = await import('@/lib/accounting/voucher-supabase')
-  const voucherId = await postVoucherSmart({ businessId, voucherType: 'SR', voucherDate: returnDate, memo: `Return: ${invoice.invoiceNo}`, lines: voucherLines, referenceId: invoiceId, referenceType: 'sales_return', postedBy: createdBy })
-  const { createStockMovement } = await import('@/lib/products/data-access')
-  for (const item of invoice.items) { if (item.productId) await createStockMovement(businessId, { productId: item.productId, movementType: 'adjustment_in', quantity: item.qty, reason: `Return: ${invoice.invoiceNo}`, createdBy }) }
-  const salesReturn = await db.salesReturn.create({ data: { businessId, originalInvoiceId: invoiceId, returnVoucherId: voucherId, returnDate, total: invoice.total, reason: reason ?? null, createdBy: createdBy ?? null } })
-  await db.invoice.update({ where: { id: invoiceId }, data: { isReturned: true, returnVoucherId: voucherId } })
-  return { returnId: salesReturn.id, voucherId }
+
+  // Atomic $transaction: reversal voucher + stock restore + return record + invoice update
+  const result = await db.$transaction(async (tx) => {
+    const invoice = await tx.invoice.findFirst({ where: { id: invoiceId, businessId }, include: { items: true, paymentAllocations: { where: { isChange: false } } } })
+    if (!invoice) throw new Error('Invoice not found')
+    if (invoice.isReturned) throw new Error('Invoice already returned')
+    const salesAccount = await getAccountByCode(businessId, '4010')
+    if (!salesAccount) throw new Error('Sales account (4010) not found')
+    const vLines: Array<{ accountId: string; debit: bigint; credit: bigint }> = [{ accountId: salesAccount.id, debit: invoice.total, credit: 0n }]
+    for (const pa of invoice.paymentAllocations) vLines.push({ accountId: pa.accountId, debit: 0n, credit: pa.amount })
+    const vch = await tx.voucher.create({ data: { businessId, voucherType: 'SR', voucherDate: returnDate, memo: `Return: ${invoice.invoiceNo}`, postedBy: createdBy ?? null, referenceId: invoiceId, referenceType: 'sales_return', totalDebit: invoice.total, totalCredit: invoice.total } })
+    await tx.voucherLine.createMany({ data: vLines.map((l, i) => ({ businessId, voucherId: vch.id, accountId: l.accountId, debit: l.debit, credit: l.credit, lineOrder: i })) })
+    const deltas = new Map<string, bigint>(); for (const l of vLines) deltas.set(l.accountId, (deltas.get(l.accountId) ?? 0n) + l.debit - l.credit)
+    for (const [a, d] of deltas) { const acc = await tx.account.findUnique({ where: { id: a }, select: { balanceCache: true } }); if (acc) await tx.account.update({ where: { id: a }, data: { balanceCache: acc.balanceCache + d } }) }
+    for (const item of invoice.items) {
+      if (item.productId) {
+        const prod = await tx.product.findFirst({ where: { id: item.productId, businessId }, select: { currentStock: true } })
+        const ns = (prod?.currentStock ?? 0) + item.qty
+        await tx.stockMovement.create({ data: { businessId, productId: item.productId, movementType: 'adjustment_in', quantity: item.qty, balanceAfter: ns, reason: `Return: ${invoice.invoiceNo}`, createdBy: createdBy ?? null } })
+        await tx.product.update({ where: { id: item.productId }, data: { currentStock: { increment: item.qty } } })
+      }
+    }
+    const sr = await tx.salesReturn.create({ data: { businessId, originalInvoiceId: invoiceId, returnVoucherId: vch.id, returnDate, total: invoice.total, reason: reason ?? null, createdBy: createdBy ?? null } })
+    await tx.invoice.update({ where: { id: invoiceId }, data: { isReturned: true, returnVoucherId: vch.id } })
+    return { returnId: sr.id, voucherId: vch.id }
+  })
+  return result
 }
