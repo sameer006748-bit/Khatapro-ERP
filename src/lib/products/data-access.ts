@@ -460,40 +460,50 @@ export async function createStockMovement(
     return { id: data as string, balanceAfter: (sm as any).balance_after }
   }
 
-  // Prisma fallback
-  const product = await db.product.findFirst({
-    where: { id: input.productId, businessId },
-    select: { currentStock: true },
-  })
-  if (!product) throw new Error('Product not found')
-
+  // Prisma fallback — atomic $transaction: lookup + movement + stock update
+  // all commit or rollback together. Uses atomic increment/decrement to
+  // avoid read-compute-write races when two parallel POSTs arrive.
   const delta =
     input.movementType === 'adjustment_out'
       ? -input.quantity
       : input.movementType === 'correction'
-      ? input.quantity // correction can be +/-
-      : input.quantity
+        ? input.quantity // correction can be +/-
+        : input.quantity
 
-  const balanceAfter = product.currentStock + delta
+  const result = await db.$transaction(async (tx) => {
+    // Validate product exists and belongs to the business.
+    const product = await tx.product.findFirst({
+      where: { id: input.productId, businessId },
+      select: { currentStock: true },
+    })
+    if (!product) throw new Error('Product not found')
 
-  const sm = await db.stockMovement.create({
-    data: {
-      businessId,
-      productId: input.productId,
-      movementType: input.movementType,
-      quantity: input.quantity,
-      balanceAfter,
-      reason: input.reason ?? null,
-      createdBy: input.createdBy ?? null,
-    },
+    // Compute balanceAfter from the current value inside the transaction.
+    const newStock = product.currentStock + delta
+
+    // Create the stock movement record.
+    const sm = await tx.stockMovement.create({
+      data: {
+        businessId,
+        productId: input.productId,
+        movementType: input.movementType,
+        quantity: input.quantity,
+        balanceAfter: newStock,
+        reason: input.reason ?? null,
+        createdBy: input.createdBy ?? null,
+      },
+    })
+
+    // Atomically update the product's currentStock using Prisma increment.
+    await tx.product.update({
+      where: { id: input.productId },
+      data: { currentStock: { increment: delta } },
+    })
+
+    return { id: sm.id, balanceAfter: newStock }
   })
 
-  await db.product.update({
-    where: { id: input.productId },
-    data: { currentStock: balanceAfter },
-  })
-
-  return { id: sm.id, balanceAfter }
+  return result
 }
 
 export async function listStockMovements(

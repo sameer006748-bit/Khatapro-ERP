@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -54,6 +54,7 @@ export function StockAdjustmentView({ user }: { user: MeUser }) {
   const [adjustmentType, setAdjustmentType] = useState<'in' | 'out'>('out')
   const [quantity, setQuantity] = useState('')
   const [reason, setReason] = useState('')
+  const postingRef = useRef(false)
   const [result, setResult] = useState<{ ok: boolean; balanceAfter?: number; error?: string } | null>(null)
 
   const productsQ = useQuery<{ rows: Product[] }>({
@@ -70,6 +71,8 @@ export function StockAdjustmentView({ user }: { user: MeUser }) {
 
   const adjustMut = useMutation({
     mutationFn: async () => {
+      if (postingRef.current) throw new Error('Submission already in progress')
+      postingRef.current = true
       const r = await fetch('/api/stock-movements', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -84,7 +87,9 @@ export function StockAdjustmentView({ user }: { user: MeUser }) {
       if (!r.ok) throw new Error(j?.error ?? 'ADJUST_FAILED')
       return j
     },
+    retry: 0,
     onSuccess: (j) => {
+      postingRef.current = false
       toast.success('Stock adjusted.')
       setResult({ ok: true, balanceAfter: j.balanceAfter })
       void qc.invalidateQueries({ queryKey: ['products'] })
@@ -95,6 +100,7 @@ export function StockAdjustmentView({ user }: { user: MeUser }) {
       setReason('')
     },
     onError: (e: Error) => {
+      postingRef.current = false
       setResult({ ok: false, error: e.message })
       toast.error(`Failed: ${e.message}`)
     },
@@ -112,8 +118,7 @@ export function StockAdjustmentView({ user }: { user: MeUser }) {
       <div>
         <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight text-foreground">Stock Adjustment</h1>
         <p className="text-sm text-muted-foreground mt-1.5 max-w-2xl">
-          Manually adjust stock in or out. Negative stock is allowed — adjustments are never blocked.
-          Each adjustment creates a stock_movements record for full audit trail.
+          Manually adjust stock in or out. Negative stock is allowed. Each adjustment creates a stock_movements record for full audit trail.
         </p>
       </div>
 
@@ -125,7 +130,7 @@ export function StockAdjustmentView({ user }: { user: MeUser }) {
               <Label className="text-xs font-medium text-muted-foreground">Product</Label>
               <Select value={productId} onValueChange={setProductId}>
                 <SelectTrigger className="h-10 bg-background press-sm">
-                  <SelectValue placeholder="Select product…" />
+                  <SelectValue placeholder="Select product..." />
                 </SelectTrigger>
                 <SelectContent>
                   {productsQ.data?.rows.map((p) => (
@@ -190,7 +195,6 @@ export function StockAdjustmentView({ user }: { user: MeUser }) {
               />
             </div>
 
-            {/* Projection */}
             {selectedProduct && qty > 0 && (
               <div className={`card-3d p-4 ${projectedBalance !== null && projectedBalance < 0 ? 'border-destructive/40 bg-destructive/5' : 'bg-muted/30'}`}>
                 <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">Projection</div>
@@ -221,7 +225,7 @@ export function StockAdjustmentView({ user }: { user: MeUser }) {
                 disabled={adjustMut.isPending || !productId || !quantity || parseInt(quantity, 10) <= 0}
                 className="press-md shadow-sm"
               >
-                {adjustMut.isPending ? 'Adjusting…' : (
+                {adjustMut.isPending ? 'Adjusting...' : (
                   <>
                     <ArrowRight className="size-4" /> Post adjustment
                   </>
@@ -232,7 +236,6 @@ export function StockAdjustmentView({ user }: { user: MeUser }) {
         </div>
       )}
 
-      {/* Result */}
       {result && (
         <div className={`card-3d p-5 ${result.ok ? 'border-primary/40' : 'border-destructive/40'}`}>
           <div className="flex items-start gap-3">
@@ -255,7 +258,6 @@ export function StockAdjustmentView({ user }: { user: MeUser }) {
         </div>
       )}
 
-      {/* Recent movements */}
       <div className="card-3d overflow-hidden">
         <div className="px-5 py-3.5 border-b border-border flex items-center gap-2">
           <History className="size-4 text-muted-foreground" />
@@ -263,10 +265,9 @@ export function StockAdjustmentView({ user }: { user: MeUser }) {
           <span className="text-xs text-muted-foreground ml-auto" data-num>{movementsQ.data?.rows.length ?? 0}</span>
         </div>
         {movementsQ.isLoading ? (
-          <div className="p-6 text-sm text-muted-foreground">Loading…</div>
+          <div className="p-6 text-sm text-muted-foreground">Loading...</div>
         ) : movementsQ.data?.rows.length ? (
           <>
-            {/* Desktop table */}
             <div className="hidden md:block overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
@@ -293,14 +294,13 @@ export function StockAdjustmentView({ user }: { user: MeUser }) {
                         {m.movementType === 'adjustment_out' ? '-' : '+'}{m.quantity}
                       </td>
                       <td className="p-3.5 text-right font-medium text-foreground" data-num>{m.balanceAfter}</td>
-                      <td className="p-3.5 text-xs text-muted-foreground">{m.reason ?? '—'}</td>
+                      <td className="p-3.5 text-xs text-muted-foreground">{m.reason ?? '--'}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
 
-            {/* Mobile cards */}
             <div className="md:hidden divide-y divide-border/60">
               {movementsQ.data.rows.slice(0, 20).map((m) => (
                 <div key={m.id} className="p-4">
@@ -333,6 +333,3 @@ export function StockAdjustmentView({ user }: { user: MeUser }) {
     </div>
   )
 }
-
-void formatMoney
-void formatTableDate
