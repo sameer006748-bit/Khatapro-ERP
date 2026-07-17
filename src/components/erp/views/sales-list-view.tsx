@@ -1,9 +1,9 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { formatMoney, formatTableDate } from '@/lib/format'
-import { FileText, Search, Printer, X } from 'lucide-react'
+import { formatMoney, formatWholeRupees, formatTableDate } from '@/lib/format'
+import { FileText, Search, Printer, X, ShoppingCart, Plus, ArrowDownToLine, RotateCcw } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { useRouter } from 'next/navigation'
@@ -53,6 +53,20 @@ export function SalesListView() {
       (r.salesmanName ?? '').toLowerCase().includes(f)
   })
 
+  // Compute summary from loaded data
+  const summary = useMemo(() => {
+    const totalInvoices = rows.length
+    let totalSales = 0n
+    let totalOutstanding = 0n
+    for (const r of rows) {
+      const t = BigInt(r.total)
+      const p = BigInt(r.paidAmount)
+      totalSales += t
+      if (!r.isCancelled && !r.isReturned) totalOutstanding += t - p
+    }
+    return { totalInvoices, totalSales, totalOutstanding }
+  }, [rows])
+
   function toggleSelect(id: string) {
     setSelected(prev => {
       if (prev.includes(id)) return prev.filter(x => x !== id)
@@ -68,11 +82,48 @@ export function SalesListView() {
 
   return (
     <div className="space-y-6">
+      {/* Header */}
       <div>
         <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight text-foreground">Sales</h1>
-        <p className="text-sm text-muted-foreground mt-1.5 max-w-2xl">All invoices from the shared sequence (Counter, Online, OFC). Click any invoice to view detail + print.</p>
+        <p className="text-sm text-muted-foreground mt-1.5 max-w-2xl">Create, view and manage all sales invoices.</p>
       </div>
 
+      {/* Summary bar */}
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+        <div className="border border-border rounded-lg bg-card p-3">
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Total Invoices</div>
+          <div className="text-lg font-bold text-foreground" data-num>{summary.totalInvoices}</div>
+        </div>
+        <div className="border border-border rounded-lg bg-card p-3">
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Total Sales</div>
+          <div className="text-lg font-bold text-foreground" data-num>{formatWholeRupees(summary.totalSales)}</div>
+        </div>
+        <div className="border border-border rounded-lg bg-card p-3">
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Outstanding</div>
+          <div className={`text-lg font-bold ${summary.totalOutstanding > 0n ? 'text-amber-600' : 'text-foreground'}`} data-num>{formatWholeRupees(summary.totalOutstanding)}</div>
+        </div>
+      </div>
+
+      {/* Primary action + Quick actions */}
+      <div className="flex flex-wrap gap-2">
+        <Button size="sm" className="h-10 press-sm shadow-sm" onClick={() => router.push('/?page=counter-sale')}>
+          <Plus className="size-4 mr-1.5" /> New Sale
+        </Button>
+        <Button variant="outline" size="sm" className="h-10 press-sm" onClick={() => router.push('/?page=counter-sale')}>
+          <ShoppingCart className="size-4 mr-1.5" /> Counter Sale
+        </Button>
+        <Button variant="outline" size="sm" className="h-10 press-sm" onClick={() => router.push('/?page=online-sale')}>
+          <ShoppingCart className="size-4 mr-1.5" /> Online Sale
+        </Button>
+        <Button variant="outline" size="sm" className="h-10 press-sm" onClick={() => router.push('/?page=ofc-sale')}>
+          <ShoppingCart className="size-4 mr-1.5" /> OFC Sale
+        </Button>
+        <Button variant="outline" size="sm" className="h-10 press-sm" onClick={() => router.push('/?page=accounts')}>
+          <ArrowDownToLine className="size-4 mr-1.5" /> Receive Payment
+        </Button>
+      </div>
+
+      {/* Filters */}
       <div className="flex gap-2 flex-wrap">
         <div className="relative flex-1 min-w-[200px]">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
