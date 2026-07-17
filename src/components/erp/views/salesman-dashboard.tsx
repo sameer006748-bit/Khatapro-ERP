@@ -69,6 +69,8 @@ export function SalesmanDashboard({ user }: { user: any }) {
     { label: 'New Bill', icon: ShoppingCart, action: () => router.push('/?page=counter-sale') },
     { label: 'My Sales', icon: FileText, action: () => router.push('/?page=sales-list') },
     { label: 'Reports', icon: TrendingUp, action: () => router.push('/?page=my-reports') },
+    { label: 'Receive Payment', icon: Wallet, action: () => router.push('/?page=accounts') },
+    { label: 'Commission', icon: TrendingUp, action: () => router.push('/?page=my-reports') },
   ]
 
   const kpis = [
@@ -126,7 +128,7 @@ export function SalesmanDashboard({ user }: { user: any }) {
       <motion.div variants={item}>
         <GlassPanel padding="p-5 sm:p-6">
           <SectionHeader title="Quick Actions" subtitle="Create new sales and reports" />
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3">
             {quickActions.map(action => (
               <QuickActionButton key={action.label} label={action.label} icon={action.icon} onClick={action.action} />
             ))}
