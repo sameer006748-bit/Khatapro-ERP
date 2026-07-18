@@ -14,6 +14,9 @@ export interface OwnerDashboardData {
     totalSales: number
     lowStockCount: number
     negativeStockCount: number
+    todayPurchases: number | null
+    cashBalance: number | null
+    bankBalance: number | null
   }
   availability: {
     todaySales: boolean

@@ -1,5 +1,6 @@
 ﻿'use client'
 
+import { useState } from 'react'
 import { motion } from 'framer-motion'
 import { format } from 'date-fns'
 import {
@@ -14,32 +15,47 @@ import {
   Receipt,
   FileText,
   Users,
-  Activity,
+  ChevronDown,
+  ChevronRight,
+  RefreshCw,
   Sparkles,
   ArrowRight,
-  RefreshCw,
-  Brain,
+  Banknote,
+  Building2,
 } from 'lucide-react'
 import { useOwnerDashboard } from '@/hooks/use-owner-dashboard'
-import { useAiSettings } from '@/hooks/use-ai-settings'
-import { GlassPanel, KpiCard, QuickActionButton, SectionHeader, EmptyState } from '@/components/erp/dashboard-components'
+import { GlassPanel, SectionHeader, EmptyState } from '@/components/erp/dashboard-components'
 import { formatWholeRupees } from '@/lib/format'
 import { useRouter } from 'next/navigation'
-
 
 function formatDateTime(iso: string): string {
   try { return format(new Date(iso), 'HH:mm') } catch { return iso }
 }
 
+function Chip({ icon: Icon, label, onClick }: { icon: React.ComponentType<{ className?: string }>; label: string; onClick: () => void }) {
+  return (
+    <button onClick={onClick} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border bg-card text-xs font-medium hover:bg-muted/30 press-sm transition-colors">
+      <Icon className="size-3.5 text-primary" /> {label}
+    </button>
+  )
+}
+
+function PendingCard({ icon: Icon, label, value, sub, accent }: { icon: React.ComponentType<{ className?: string }>; label: string; value: string; sub: string; accent: string }) {
+  return (
+    <div className="rounded-xl border border-border bg-muted/20 p-4">
+      <div className="flex items-center gap-2 mb-1"><Icon className={`size-4 ${accent}`} /><span className="text-sm font-medium text-foreground">{label}</span></div>
+      <div className="text-lg font-bold text-foreground" data-num>{value}</div>
+      <div className="text-[11px] text-muted-foreground mt-0.5">{sub}</div>
+    </div>
+  )
+}
+
 export function OwnerDashboard({ user }: { user: any }) {
   const router = useRouter()
   const { data, isLoading, error, refetch } = useOwnerDashboard()
-  const { data: aiSettings } = useAiSettings()
+  const [showAdvanced, setShowAdvanced] = useState(false)
 
-  const container = {
-    hidden: { opacity: 0 },
-    show: { opacity: 1, transition: { staggerChildren: 0.05 } },
-  }
+  const container = { hidden: { opacity: 0 }, show: { opacity: 1, transition: { staggerChildren: 0.05 } } }
   const item = { hidden: { opacity: 0, y: 10 }, show: { opacity: 1, y: 0 } }
 
   if (isLoading) {
@@ -76,68 +92,36 @@ export function OwnerDashboard({ user }: { user: any }) {
     )
   }
 
-  const quickActions = [
-    { label: 'Counter Sale', icon: ShoppingCart, action: () => router.push('/?page=counter-sale') },
-    { label: 'Online Sale', icon: ShoppingCart, action: () => router.push('/?page=online-sale') },
-    { label: 'OFC Sale', icon: ShoppingCart, action: () => router.push('/?page=ofc-sale') },
-    { label: 'New Purchase', icon: Receipt, action: () => router.push('/?page=purchases') },
-    { label: 'Receipt Voucher', icon: ArrowDownToLine, action: () => router.push('/?page=receipt-voucher') },
-    { label: 'Payment Voucher', icon: ArrowUpFromLine, action: () => router.push('/?page=payment-voucher') },
+  const karachiTime = new Date().toLocaleString('en-GB', { timeZone: 'Asia/Karachi', hour: '2-digit', minute: '2-digit' })
+
+  // ── Metrics ──
+  const todaySales = data.kpis.todaySales ?? 0
+  const todayCollections = data.kpis.todayCollections
+  const todayExpenses = data.kpis.todayExpenses ?? 0
+  const todayPurchases = data.kpis.todayPurchases
+  const totalReceivables = data.kpis.totalReceivables ?? 0
+  const totalPayables = data.kpis.totalPayables ?? 0
+  const cashBalance = data.kpis.cashBalance
+  const bankBalance = data.kpis.bankBalance
+  const approxProfit = todaySales - todayExpenses
+
+  const primaryCards: Array<{ label: string; value: string; sub: string; icon: React.ComponentType<{ className?: string }>; accent: string; show: boolean }> = [
+    { label: 'Aaj ki Sales', value: formatWholeRupees(todaySales), sub: `${data.salesByType.counter.count} counter \u00B7 ${data.salesByType.online.count} online \u00B7 ${data.salesByType.ofc.count} OFC`, icon: ShoppingCart, accent: 'bg-emerald-500/10 text-emerald-600', show: true },
+    { label: 'Paisa Receive Hua', value: todayCollections != null ? formatWholeRupees(todayCollections) : '—', sub: todayCollections != null ? 'Cash received today' : 'Not available', icon: ArrowDownToLine, accent: 'bg-green-500/10 text-green-600', show: true },
+    { label: 'Kharcha Hua', value: formatWholeRupees(todayExpenses), sub: 'Aaj ka kharcha', icon: ArrowUpFromLine, accent: 'bg-red-500/10 text-red-600', show: true },
+    { label: 'Purchase Hui', value: todayPurchases != null ? formatWholeRupees(todayPurchases) : '—', sub: todayPurchases != null ? 'Aaj ki purchases' : 'Not available', icon: Receipt, accent: 'bg-amber-500/10 text-amber-600', show: todayPurchases != null },
+    { label: 'Cash Available', value: cashBalance != null ? formatWholeRupees(cashBalance) : '—', sub: 'Cash in hand', icon: Banknote, accent: 'bg-teal-500/10 text-teal-600', show: cashBalance != null },
+    { label: 'Bank Available', value: bankBalance != null ? formatWholeRupees(bankBalance) : '—', sub: 'Bank balance', icon: Building2, accent: 'bg-sky-500/10 text-sky-600', show: bankBalance != null },
+    { label: 'Customers se Lena Hai', value: formatWholeRupees(totalReceivables), sub: 'Outstanding receivables', icon: Users, accent: 'bg-violet-500/10 text-violet-600', show: true },
+    { label: 'Vendors ko Dena Hai', value: formatWholeRupees(totalPayables), sub: 'Outstanding payables', icon: Wallet, accent: 'bg-amber-500/10 text-amber-600', show: true },
+    { label: 'Approx. Profit', value: formatWholeRupees(approxProfit), sub: 'Sales − Expenses (approximate)', icon: TrendingUp, accent: approxProfit >= 0 ? 'bg-blue-500/10 text-blue-600' : 'bg-orange-500/10 text-orange-600', show: true },
   ]
 
-  const kpis = [
-    {
-      label: 'Today Sales', value: formatWholeRupees(data.kpis.todaySales, true).replace('Rs ', 'PKR '),
-      sub: `${data.salesByType.counter.count} counter \u00B7 ${data.salesByType.online.count} online \u00B7 ${data.salesByType.ofc.count} OFC`,
-      icon: ShoppingCart, accent: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400',
-    },
-    {
-      label: 'Today Collections',
-      value: data.availability.todayCollections ? formatWholeRupees(data.kpis.todayCollections, true).replace('Rs ', 'PKR ') : 'Not available',
-      sub: data.availability.todayCollections ? 'Cash received today' : 'Receipt data unavailable',
-      icon: ArrowDownToLine, accent: 'bg-green-500/10 text-green-600 dark:text-green-400',
-    },
-    {
-      label: 'Today Expenses', value: formatWholeRupees(data.kpis.todayExpenses, true).replace('Rs ', 'PKR '),
-      sub: 'Operating expenses',
-      icon: ArrowUpFromLine, accent: 'bg-red-500/10 text-red-600 dark:text-red-400',
-    },
-    {
-      label: 'Net Cash Flow',
-      value: data.availability.todayNetCashFlow ? formatWholeRupees(data.kpis.todayNetCashFlow, true).replace('Rs ', 'PKR ') : 'Not available',
-      sub: data.availability.todayNetCashFlow ? (data.kpis.todayNetCashFlow! >= 0 ? 'Positive flow' : 'Negative flow') : 'Waiting for collections',
-      icon: data.availability.todayNetCashFlow ? (data.kpis.todayNetCashFlow! >= 0 ? TrendingUp : TrendingDown) : TrendingDown,
-      accent: data.availability.todayNetCashFlow ? (data.kpis.todayNetCashFlow! >= 0 ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400' : 'bg-orange-500/10 text-orange-600 dark:text-orange-400') : 'bg-orange-500/10 text-orange-600 dark:text-orange-400',
-    },
-    {
-      label: 'Receivables', value: formatWholeRupees(data.kpis.totalReceivables, true).replace('Rs ', 'PKR '),
-      sub: 'Outstanding from customers', icon: Users, accent: 'bg-violet-500/10 text-violet-600 dark:text-violet-400',
-    },
-    {
-      label: 'Payables', value: formatWholeRupees(data.kpis.totalPayables, true).replace('Rs ', 'PKR '),
-      sub: 'Owed to vendors', icon: Wallet, accent: 'bg-amber-500/10 text-amber-600 dark:text-amber-400',
-    },
-    {
-      label: 'Total Sales', value: formatWholeRupees(data.kpis.totalSales, true).replace('Rs ', 'PKR '),
-      sub: 'Lifetime revenue', icon: TrendingUp, accent: 'bg-cyan-500/10 text-cyan-600 dark:text-cyan-400',
-    },
-    {
-      label: 'Stock Alerts',
-      value: `${data.kpis.lowStockCount + data.kpis.negativeStockCount}`,
-      sub: `${data.kpis.negativeStockCount} negative`,
-      icon: AlertTriangle,
-      accent: (data.kpis.lowStockCount + data.kpis.negativeStockCount) > 0
-        ? 'bg-red-500/10 text-red-600 dark:text-red-400'
-        : 'bg-green-500/10 text-green-600 dark:text-green-400',
-    },
-  ]
-
-  const karachiTime = new Date().toLocaleString('en-GB', {
-    timeZone: 'Asia/Karachi', hour: '2-digit', minute: '2-digit',
-  })
+  const visibleCards = primaryCards.filter(c => c.show)
 
   return (
     <motion.div variants={container} initial="hidden" animate="show" className="space-y-6">
+      {/* Header */}
       <motion.div variants={item}>
         <GlassPanel padding="p-6 sm:p-8">
           <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
@@ -150,10 +134,10 @@ export function OwnerDashboard({ user }: { user: any }) {
                 <span className="text-[11px] text-muted-foreground/60" data-num>{karachiTime} PKT</span>
               </div>
               <h1 className="text-3xl sm:text-4xl font-semibold tracking-tight text-foreground mb-2">
-                Welcome, {user.displayName.split(' ')[0]}.
+                Business Summary
               </h1>
               <p className="text-sm text-muted-foreground max-w-2xl">
-                Your business is running smoothly. Review today's performance, manage stock, and process new transactions.
+                Aaj ki sales, collections, kharcha aur pending payments ka overview.
               </p>
             </div>
             <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white/50 border border-white/10">
@@ -164,146 +148,195 @@ export function OwnerDashboard({ user }: { user: any }) {
         </GlassPanel>
       </motion.div>
 
-      <motion.div variants={item}>
-        <GlassPanel padding="p-5 sm:p-6">
-          <SectionHeader title="Quick Actions" subtitle="Create new transactions instantly" />
-          <div className="grid grid-cols-3 sm:grid-cols-6 gap-3">
-            {quickActions.map(action => (
-              <QuickActionButton key={action.label} label={action.label} icon={action.icon} onClick={action.action} />
-            ))}
-          </div>
-        </GlassPanel>
-      </motion.div>
-
+      {/* Primary summary cards */}
       <motion.div variants={item}>
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          {kpis.map((kpi, idx) => (
-            <KpiCard key={kpi.label} label={kpi.label} value={kpi.value} sub={kpi.sub} icon={kpi.icon} accent={kpi.accent} delay={idx * 0.05} />
+          {visibleCards.map(card => (
+            <div key={card.label} className="rounded-2xl border border-white/10 bg-white/60 dark:bg-white/5 p-5">
+              <div className="flex items-center gap-2 mb-3">
+                <div className={`size-8 rounded-lg flex items-center justify-center ${card.accent}`}><card.icon className="size-4" /></div>
+                <span className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium">{card.label}</span>
+              </div>
+              <div className="text-xl sm:text-2xl font-bold text-foreground mb-1" data-num>{card.value}</div>
+              <div className="text-[11px] text-muted-foreground">{card.sub}</div>
+            </div>
           ))}
         </div>
       </motion.div>
 
-      <div className="grid lg:grid-cols-2 gap-6">
-        <motion.div variants={item}>
-          <GlassPanel padding="p-5 sm:p-6">
-            <SectionHeader title="Recent Invoices" subtitle="Latest sales transactions"
-              action={<button onClick={() => router.push('/?page=sales-list')} className="text-xs text-primary hover:underline flex items-center gap-1">View all <ArrowRight className="size-3" /></button>} />
-            {data.recentInvoices.length === 0 ? <EmptyState message="No invoices yet" /> : (
-              <div className="space-y-2">
-                {data.recentInvoices.map(inv => (
-                  <div key={inv.id} className="flex items-center justify-between p-3 rounded-xl bg-white/50 border border-white/10 hover:bg-white/70 transition-colors">
-                    <div className="flex items-center gap-3 min-w-0">
-                      <div className="size-9 rounded-lg bg-primary/10 flex items-center justify-center shrink-0"><FileText className="size-4 text-primary" /></div>
-                      <div className="min-w-0">
-                        <div className="text-sm font-medium text-foreground truncate">{inv.invoiceNo}</div>
-                        <div className="text-xs text-muted-foreground truncate">{inv.customerName || 'Walk-in'} \u00B7 {formatDateTime(inv.invoiceDate)}</div>
-                      </div>
-                    </div>
-                    <div className="text-right shrink-0 ml-2">
-                      <div className="text-sm font-semibold text-foreground">{formatWholeRupees(Number(inv.total), true).replace('Rs ', 'PKR ')}</div>
-                      <div className="text-[11px] text-muted-foreground">{inv.invoiceType}</div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </GlassPanel>
-        </motion.div>
-
-        <motion.div variants={item}>
-          <GlassPanel padding="p-5 sm:p-6">
-            <SectionHeader title="Recent Purchases" subtitle="Latest procurement entries"
-              action={<button onClick={() => router.push('/?page=purchases')} className="text-xs text-primary hover:underline flex items-center gap-1">View all <ArrowRight className="size-3" /></button>} />
-            {data.recentPurchases.length === 0 ? <EmptyState message="No purchases yet" /> : (
-              <div className="space-y-2">
-                {data.recentPurchases.map(pur => (
-                  <div key={pur.id} className="flex items-center justify-between p-3 rounded-xl bg-white/50 border border-white/10 hover:bg-white/70 transition-colors">
-                    <div className="flex items-center gap-3 min-w-0">
-                      <div className="size-9 rounded-lg bg-amber-500/10 flex items-center justify-center shrink-0"><Receipt className="size-4 text-amber-600 dark:text-amber-400" /></div>
-                      <div className="min-w-0">
-                        <div className="text-sm font-medium text-foreground truncate">{pur.purchaseNo}</div>
-                        <div className="text-xs text-muted-foreground truncate">{pur.vendorName || 'Unknown'} \u00B7 {formatDateTime(pur.purchaseDate)}</div>
-                      </div>
-                    </div>
-                    <div className="text-right shrink-0 ml-2">
-                      <div className="text-sm font-semibold text-foreground">{formatWholeRupees(Number(pur.total), true).replace('Rs ', 'PKR ')}</div>
-                      <div className="text-[11px] text-muted-foreground">{pur.status}</div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </GlassPanel>
-        </motion.div>
-      </div>
-
-      <div className="grid lg:grid-cols-2 gap-6">
-        <motion.div variants={item}>
-          <GlassPanel padding="p-5 sm:p-6">
-            <SectionHeader title="Stock Alerts" subtitle={`${data.kpis.lowStockCount + data.kpis.negativeStockCount} items need attention`}
-              action={<button onClick={() => router.push('/?page=inventory')} className="text-xs text-primary hover:underline flex items-center gap-1">Manage stock <ArrowRight className="size-3" /></button>} />
-            {(data.kpis.lowStockCount + data.kpis.negativeStockCount) === 0 ? <EmptyState message="All stock levels healthy" /> : (
-              <div className="space-y-2">
-                {data.negativeStockProducts.slice(0, 3).map(p => (
-                  <div key={p.id} className="flex items-center justify-between p-3 rounded-xl bg-red-500/5 border border-red-500/10">
-                    <div className="flex items-center gap-3 min-w-0">
-                      <div className="size-9 rounded-lg bg-red-500/10 flex items-center justify-center shrink-0"><AlertTriangle className="size-4 text-red-600 dark:text-red-400" /></div>
-                      <div className="min-w-0"><div className="text-sm font-medium text-foreground truncate">{p.name}</div><div className="text-xs text-red-600 dark:text-red-400 font-medium">Negative stock: {p.currentStock}</div></div>
-                    </div>
-                  </div>
-                ))}
-                {data.lowStockProducts.slice(0, 3).map(p => (
-                  <div key={p.id} className="flex items-center justify-between p-3 rounded-xl bg-amber-500/5 border border-amber-500/10">
-                    <div className="flex items-center gap-3 min-w-0">
-                      <div className="size-9 rounded-lg bg-amber-500/10 flex items-center justify-center shrink-0"><Package className="size-4 text-amber-600 dark:text-amber-400" /></div>
-                      <div className="min-w-0"><div className="text-sm font-medium text-foreground truncate">{p.name}</div><div className="text-xs text-amber-600 dark:text-amber-400 font-medium">Low stock: {p.currentStock} left</div></div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </GlassPanel>
-        </motion.div>
-
-        <motion.div variants={item}>
-          <GlassPanel padding="p-5 sm:p-6">
-            <SectionHeader title="Recent Activity" subtitle="Latest audit trail entries"
-              action={<button onClick={() => router.push('/?page=audit')} className="text-xs text-primary hover:underline flex items-center gap-1">View all <ArrowRight className="size-3" /></button>} />
-            {data.auditLogs.length === 0 ? <EmptyState message="No activity yet" /> : (
-              <div className="space-y-2">
-                {data.auditLogs.map(log => (
-                  <div key={log.id} className="flex items-start gap-3 p-3 rounded-xl bg-white/50 border border-white/10">
-                    <div className="size-9 rounded-lg bg-primary/10 flex items-center justify-center shrink-0"><Activity className="size-4 text-primary" /></div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center justify-between mb-0.5">
-                        <span className="text-sm font-medium text-foreground capitalize">{log.action.replace(/_/g, ' ')}</span>
-                        <span className="text-[11px] text-muted-foreground">{formatDateTime(log.timestamp)}</span>
-                      </div>
-                      <div className="text-xs text-muted-foreground truncate">{log.entity} {log.entityId ? `\u00B7 ${log.entityId.slice(0, 8)}` : ''}</div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </GlassPanel>
-        </motion.div>
-      </div>
-
+      {/* Paisa Kahan Se Aya */}
       <motion.div variants={item}>
         <GlassPanel padding="p-5 sm:p-6">
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-2">
-              <div className="size-8 rounded-lg bg-primary/10 flex items-center justify-center"><Brain className="size-4 text-primary" /></div>
+          <SectionHeader title="Paisa Kahan Se Aya" subtitle="Today's income sources" />
+          <div className="flex flex-wrap gap-2 mb-4">
+            <Chip icon={ShoppingCart} label="View Sales" onClick={() => router.push('/?page=sales-list')} />
+            <Chip icon={ArrowDownToLine} label="Receive Payment" onClick={() => router.push('/?page=accounts')} />
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="rounded-xl border border-border bg-muted/20 p-4">
+              <div className="flex items-center gap-2 mb-1"><ShoppingCart className="size-4 text-emerald-600" /><span className="text-sm font-medium text-foreground">Sales</span></div>
+              <div className="text-lg font-bold text-foreground" data-num>{formatWholeRupees(todaySales)}</div>
+              <div className="text-[11px] text-muted-foreground mt-0.5">{data.salesByType.counter.count} counter \u00B7 {data.salesByType.online.count} online \u00B7 {data.salesByType.ofc.count} OFC</div>
+            </div>
+            <div className="rounded-xl border border-border bg-muted/20 p-4">
+              <div className="flex items-center gap-2 mb-1"><ArrowDownToLine className="size-4 text-green-600" /><span className="text-sm font-medium text-foreground">Customer Payments</span></div>
+              <div className="text-lg font-bold text-foreground" data-num>{todayCollections != null ? formatWholeRupees(todayCollections) : '—'}</div>
+              <div className="text-[11px] text-muted-foreground mt-0.5">{todayCollections != null ? 'Aaj ki receipts' : 'Data not available'}</div>
+            </div>
+          </div>
+        </GlassPanel>
+      </motion.div>
+
+      {/* Paisa Kahan Gaya */}
+      <motion.div variants={item}>
+        <GlassPanel padding="p-5 sm:p-6">
+          <SectionHeader title="Paisa Kahan Gaya" subtitle="Today's outflows" />
+          <div className="flex flex-wrap gap-2 mb-4">
+            <Chip icon={Receipt} label="View Purchases" onClick={() => router.push('/?page=purchases')} />
+            <Chip icon={ArrowUpFromLine} label="Add Expense" onClick={() => router.push('/?page=expense-batch')} />
+            <Chip icon={Wallet} label="Pay Vendor" onClick={() => router.push('/?page=vendors')} />
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="rounded-xl border border-border bg-muted/20 p-4">
+              <div className="flex items-center gap-2 mb-1"><Receipt className="size-4 text-amber-600" /><span className="text-sm font-medium text-foreground">Purchases</span></div>
+              <div className="text-lg font-bold text-foreground" data-num>{todayPurchases != null ? formatWholeRupees(todayPurchases) : '—'}</div>
+              <div className="text-[11px] text-muted-foreground mt-0.5">{todayPurchases != null ? 'Aaj ki purchases' : 'Not available'}</div>
+            </div>
+            <div className="rounded-xl border border-border bg-muted/20 p-4">
+              <div className="flex items-center gap-2 mb-1"><ArrowUpFromLine className="size-4 text-red-600" /><span className="text-sm font-medium text-foreground">Expenses</span></div>
+              <div className="text-lg font-bold text-foreground" data-num>{formatWholeRupees(todayExpenses)}</div>
+              <div className="text-[11px] text-muted-foreground mt-0.5">Aaj ka kharcha</div>
+            </div>
+            <div className="rounded-xl border border-border bg-muted/20 p-4">
+              <div className="flex items-center gap-2 mb-1"><Wallet className="size-4 text-amber-600" /><span className="text-sm font-medium text-foreground">Vendors ko Dena Hai</span></div>
+              <div className="text-lg font-bold text-foreground" data-num>{formatWholeRupees(totalPayables)}</div>
+              <div className="text-[11px] text-muted-foreground mt-0.5">Total payables</div>
+            </div>
+          </div>
+        </GlassPanel>
+      </motion.div>
+
+      {/* Abhi Kya Pending Hai */}
+      <motion.div variants={item}>
+        <GlassPanel padding="p-5 sm:p-6">
+          <SectionHeader title="Abhi Kya Pending Hai" subtitle="Receivables, payables and stock alerts" />
+          <div className="flex flex-wrap gap-2 mb-4">
+            <Chip icon={ArrowDownToLine} label="Receive Payment" onClick={() => router.push('/?page=accounts')} />
+            <Chip icon={Wallet} label="Pay Vendor" onClick={() => router.push('/?page=vendors')} />
+            <Chip icon={Package} label="View Inventory" onClick={() => router.push('/?page=inventory')} />
+            <Chip icon={ShoppingCart} label="View Orders" onClick={() => router.push('/?page=sales-list')} />
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+            <PendingCard icon={Users} label="Customers se Lena Hai" value={formatWholeRupees(totalReceivables)} sub="Outstanding receivables" accent="text-violet-600" />
+            <PendingCard icon={Wallet} label="Vendors ko Dena Hai" value={formatWholeRupees(totalPayables)} sub="Outstanding payables" accent="text-amber-600" />
+            <PendingCard icon={AlertTriangle} label="Low / Negative Stock" value={`${data.kpis.lowStockCount + data.kpis.negativeStockCount} items`} sub={`${data.kpis.negativeStockCount} negative`} accent={(data.kpis.lowStockCount + data.kpis.negativeStockCount) > 0 ? 'text-red-600' : 'text-green-600'} />
+            <PendingCard icon={ShoppingCart} label="Pending Online Orders" value={`${data.salesByType.online.count} today`} sub="Online orders aaj ke" accent="text-sky-600" />
+          </div>
+        </GlassPanel>
+      </motion.div>
+
+      {/* Advanced Activity (collapsed) */}
+      <motion.div variants={item}>
+        <GlassPanel padding="p-5 sm:p-6">
+          <button onClick={() => setShowAdvanced(!showAdvanced)} className="w-full flex items-center justify-between">
+            <div>
+              <h3 className="text-sm font-semibold text-foreground text-left">Advanced Activity</h3>
+              <p className="text-[11px] text-muted-foreground text-left">Recent invoices, purchases, stock alerts and audit trail</p>
+            </div>
+            {showAdvanced ? <ChevronDown className="size-4 text-muted-foreground" /> : <ChevronRight className="size-4 text-muted-foreground" />}
+          </button>
+
+          {showAdvanced && (
+            <div className="mt-4 space-y-6">
+              {/* Recent Invoices + Purchases */}
+              <div className="grid lg:grid-cols-2 gap-4">
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-medium text-foreground">Recent Invoices</span>
+                    <button onClick={() => router.push('/?page=sales-list')} className="text-[11px] text-primary hover:underline flex items-center gap-1">View all <ArrowRight className="size-3" /></button>
+                  </div>
+                  {data.recentInvoices.length === 0 ? <EmptyState message="No invoices yet" /> : (
+                    <div className="space-y-1.5">
+                      {data.recentInvoices.map(inv => (
+                        <div key={inv.id} className="flex items-center justify-between p-2.5 rounded-lg bg-white/50 border border-white/10 text-sm">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <FileText className="size-3.5 text-primary shrink-0" />
+                            <span className="font-medium truncate">{inv.invoiceNo}</span>
+                            <span className="text-[11px] text-muted-foreground">{inv.customerName || 'Walk-in'}</span>
+                          </div>
+                          <span className="font-semibold shrink-0 ml-2">{formatWholeRupees(Number(inv.total))}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-medium text-foreground">Recent Purchases</span>
+                    <button onClick={() => router.push('/?page=purchases')} className="text-[11px] text-primary hover:underline flex items-center gap-1">View all <ArrowRight className="size-3" /></button>
+                  </div>
+                  {data.recentPurchases.length === 0 ? <EmptyState message="No purchases yet" /> : (
+                    <div className="space-y-1.5">
+                      {data.recentPurchases.map(pur => (
+                        <div key={pur.id} className="flex items-center justify-between p-2.5 rounded-lg bg-white/50 border border-white/10 text-sm">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <Receipt className="size-3.5 text-amber-600 shrink-0" />
+                            <span className="font-medium truncate">{pur.purchaseNo}</span>
+                            <span className="text-[11px] text-muted-foreground">{pur.vendorName || '—'}</span>
+                          </div>
+                          <span className="font-semibold shrink-0 ml-2">{formatWholeRupees(Number(pur.total))}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Stock Alerts in Advanced */}
+              {(data.kpis.lowStockCount + data.kpis.negativeStockCount) > 0 && (
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-medium text-foreground">Stock Alerts</span>
+                    <button onClick={() => router.push('/?page=inventory')} className="text-[11px] text-primary hover:underline flex items-center gap-1">Manage <ArrowRight className="size-3" /></button>
+                  </div>
+                  <div className="space-y-1.5">
+                    {data.negativeStockProducts.slice(0, 3).map(p => (
+                      <div key={p.id} className="flex items-center gap-2 p-2.5 rounded-lg bg-red-500/5 border border-red-500/10 text-sm">
+                        <AlertTriangle className="size-3.5 text-red-600 shrink-0" />
+                        <span className="font-medium truncate">{p.name}</span>
+                        <span className="text-[11px] text-red-600 font-medium">Negative: {p.currentStock}</span>
+                      </div>
+                    ))}
+                    {data.lowStockProducts.slice(0, 3).map(p => (
+                      <div key={p.id} className="flex items-center gap-2 p-2.5 rounded-lg bg-amber-500/5 border border-amber-500/10 text-sm">
+                        <Package className="size-3.5 text-amber-600 shrink-0" />
+                        <span className="font-medium truncate">{p.name}</span>
+                        <span className="text-[11px] text-amber-600 font-medium">Low: {p.currentStock}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Audit Logs in Advanced */}
               <div>
-                <h3 className="text-sm font-semibold text-foreground">AI Business Brief</h3>
-                <p className="text-[11px] text-muted-foreground">{aiSettings?.connected ? 'Gemini connected' : 'Not configured'}</p>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-medium text-foreground">Audit Trail</span>
+                  <span className="text-[11px] text-muted-foreground">{data.auditLogs.length} entries</span>
+                </div>
+                {data.auditLogs.length === 0 ? <EmptyState message="No activity yet" /> : (
+                  <div className="space-y-1 max-h-48 overflow-y-auto">
+                    {data.auditLogs.slice(0, 10).map(log => (
+                      <div key={log.id} className="flex items-center justify-between p-2 rounded-lg bg-white/40 border border-white/5 text-xs">
+                        <span className="text-muted-foreground capitalize">{log.action.replace(/_/g, ' ')}</span>
+                        <span className="text-muted-foreground">{formatDateTime(log.timestamp)}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
-            <button onClick={() => router.push('/?page=ai-settings')} className="text-xs text-primary hover:underline flex items-center gap-1">Configure <ArrowRight className="size-3" /></button>
-          </div>
-          <div className="rounded-xl border border-white/10 bg-white/50 p-4">
-            <p className="text-xs text-muted-foreground text-center">AI insights will appear here once configured.</p>
-          </div>
+          )}
         </GlassPanel>
       </motion.div>
     </motion.div>
