@@ -6,7 +6,7 @@ import { NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { db } from '@/lib/db'
 import { authOptions } from '@/lib/auth/authOptions'
-import { loadSessionUser, requirePermission } from '@/lib/auth/permissions'
+import { loadSessionUser, hasPermission } from '@/lib/auth/permissions'
 import { getVoucherDetail } from '@/lib/vouchers/data-access'
 
 export async function GET(
@@ -17,17 +17,19 @@ export async function GET(
   if (!session?.user) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
   const loaded = await loadSessionUser((session.user as any).id)
   if (!loaded) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
-  const su = await requirePermission(loaded, 'can_view_vouchers')
+  if (!hasPermission(loaded, 'can_view_day_book') && !hasPermission(loaded, 'can_view_vouchers')) {
+    return NextResponse.json({ error: 'FORBIDDEN' }, { status: 403 })
+  }
 
   const { id } = await params
 
   // Try Supabase first.
-  const supaDetail = await getVoucherDetail(su.businessId, id)
+  const supaDetail = await getVoucherDetail(loaded.businessId, id)
   if (supaDetail) return NextResponse.json({ voucher: supaDetail })
 
   // Prisma fallback.
   const v = await db.voucher.findFirst({
-    where: { id, businessId: su.businessId },
+    where: { id, businessId: loaded.businessId },
     include: { lines: { include: { account: { include: { category: true } } }, orderBy: { lineOrder: 'asc' } } },
   })
   if (!v) return NextResponse.json({ error: 'NOT_FOUND' }, { status: 404 })
