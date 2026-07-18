@@ -23,6 +23,7 @@ const BUSINESS_ACCOUNT_ICONS: Record<string, string> = {
 export function AccountsView({ user }: { user: MeUser }) {
   const qc = useQueryClient()
   const [entryModal, setEntryModal] = useState<null | 'receive' | 'pay' | 'expense' | 'transfer' | 'petty-topup' | 'petty-expense' | 'adjustment'>(null)
+  const [advancedOpen, setAdvancedOpen] = useState(false)
 
   const coaQ = useQuery({ queryKey: ['coa'], queryFn: () => fetch('/api/setup/coa').then(r => r.json()) })
   const accounts: Account[] = useMemo(() => (coaQ.data?.categories ?? []).flatMap((c: any) => c.accounts.filter((a: any) => a.isActive).map((a: any) => ({ id: a.id, code: a.code, name: a.name, isBusinessAccount: a.isBusinessAccount, isPartyAccount: a.isPartyAccount, partyType: a.partyType, categoryCode: c.code, categoryType: c.type }))), [coaQ.data])
@@ -48,6 +49,21 @@ export function AccountsView({ user }: { user: MeUser }) {
   const moneyOutToday = todayVouchers.filter((v: any) => v.voucherType === 'PM').reduce((s: bigint, v: any) => s + BigInt(v.totalDebit), 0n)
   const expensesToday = todayVouchers.filter((v: any) => v.voucherType === 'EX').reduce((s: bigint, v: any) => s + BigInt(v.totalDebit), 0n)
 
+  // Business-friendly classification of already-loaded vouchers.
+  // Only voucher types with a reliable meaning are classified; everything
+  // else stays in Advanced Account Activity.
+  const postedVouchers = recentVouchers.filter((v: any) => !v.isCancelled)
+  const inflowVouchers = postedVouchers.filter((v: any) => v.voucherType === 'RC')
+  const outflowVouchers = postedVouchers.filter((v: any) => v.voucherType === 'PM' || v.voucherType === 'EX')
+  const inflowTotal = inflowVouchers.reduce((s: bigint, v: any) => s + BigInt(v.totalDebit), 0n)
+  const outflowTotal = outflowVouchers.reduce((s: bigint, v: any) => s + BigInt(v.totalCredit), 0n)
+
+  // Pending: standard receivable/payable control accounts from trial balance
+  const receivablesBal = getBalance('1200')
+  const payablesBal = getBalance('2010') + getBalance('2020')
+  const totalAvailable = businessAccounts.reduce((s, a) => s + getBalance(a.code), 0n)
+  const balancesReady = !tbQ.isLoading && tbRows.length > 0
+
   const canPostReceipt = user.permissions.includes('can_create_receipt_voucher')
   const canPostPayment = user.permissions.includes('can_create_payment_voucher')
   const canPostExpense = user.permissions.includes('can_create_expense_batch')
@@ -65,29 +81,39 @@ export function AccountsView({ user }: { user: MeUser }) {
       {/* Header */}
       <div className="flex items-end justify-between gap-3 flex-wrap">
         <div>
-          <h1 className="text-xl font-semibold tracking-tight text-foreground">Accounts</h1>
-          <p className="text-xs text-muted-foreground mt-0.5">Balances, payments, receipts and daily transactions</p>
+          <h1 className="text-xl font-semibold tracking-tight text-foreground">Money Summary</h1>
+          <p className="text-xs text-muted-foreground mt-0.5">Aap ke paas abhi kitna paisa hai, kahan se aya, kahan gaya aur kya pending hai</p>
         </div>
         <Button size="sm" className="h-8 press-sm shadow-sm" onClick={() => setEntryModal('receive')}><Plus className="size-3.5" /> New Entry</Button>
       </div>
 
-      {/* Balance cards */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-2">
-        {businessAccounts.map(a => {
-          const bal = getBalance(a.code)
-          const icon = BUSINESS_ACCOUNT_ICONS[a.code] ?? '💼'
-          const isNegative = bal < 0n
-          return (
-            <div key={a.id} className={`border rounded-lg bg-card p-3 cursor-pointer hover:bg-muted/20 press-sm ${isNegative ? 'border-amber-300' : 'border-border'}`} onClick={() => openLedger(a.id)}>
-              <div className="flex items-center justify-between mb-1">
-                <span className="text-lg">{icon}</span>
-                {isNegative && <span className="text-[8px] uppercase bg-amber-100 text-amber-700 px-1 py-0.5 rounded font-medium">Overdrawn</span>}
+      {/* Current Money */}
+      <div>
+        <h2 className="text-sm font-semibold text-foreground mb-2">Current Money</h2>
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-2">
+          {businessAccounts.map(a => {
+            const bal = getBalance(a.code)
+            const icon = BUSINESS_ACCOUNT_ICONS[a.code] ?? '💼'
+            const isNegative = bal < 0n
+            return (
+              <div key={a.id} className={`border rounded-lg bg-card p-3 cursor-pointer hover:bg-muted/20 press-sm ${isNegative ? 'border-amber-300' : 'border-border'}`} onClick={() => openLedger(a.id)}>
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-lg">{icon}</span>
+                  {isNegative && <span className="text-[8px] uppercase bg-amber-100 text-amber-700 px-1 py-0.5 rounded font-medium">Overdrawn</span>}
+                </div>
+                <div className="text-[10px] uppercase tracking-wider text-muted-foreground truncate">{a.name}</div>
+                <div className={`text-base font-bold ${isNegative ? 'text-amber-700' : 'text-foreground'}`} data-num>{formatMoney(bal)}</div>
               </div>
-              <div className="text-[10px] uppercase tracking-wider text-muted-foreground truncate">{a.name}</div>
-              <div className={`text-base font-bold ${isNegative ? 'text-amber-700' : 'text-foreground'}`} data-num>{formatMoney(bal)}</div>
+            )
+          })}
+          {balancesReady && businessAccounts.length > 0 && (
+            <div className="border border-primary/40 rounded-lg bg-card p-3">
+              <div className="flex items-center justify-between mb-1"><span className="text-lg">💰</span></div>
+              <div className="text-[10px] uppercase tracking-wider text-muted-foreground truncate">Total Available</div>
+              <div className={`text-base font-bold ${totalAvailable < 0n ? 'text-amber-700' : 'text-primary'}`} data-num>{formatMoney(totalAvailable)}</div>
             </div>
-          )
-        })}
+          )}
+        </div>
       </div>
 
       {/* Daily summary */}
@@ -98,27 +124,75 @@ export function AccountsView({ user }: { user: MeUser }) {
         <SummaryCard icon={Wallet} label="Net Movement" value={formatMoney(moneyInToday - moneyOutToday - expensesToday)} color={moneyInToday - moneyOutToday - expensesToday >= 0n ? 'text-emerald-600' : 'text-amber-600'} />
       </div>
 
-      {/* Capital quick actions */}
-      <div className="flex flex-wrap gap-2">
-        {canPostReceipt && <QuickAction icon={ArrowDownToLine} label="Owner Investment" onClick={() => setEntryModal('receive')} />}
-        {canPostPayment && <QuickAction icon={ArrowUpFromLine} label="Owner Drawings" onClick={() => setEntryModal('pay')} />}
-        {canPostJournal && <QuickAction icon={BookOpen} label="Journal Voucher" onClick={() => setEntryModal('adjustment')} />}
+      {/* Paisa Kahan Se Aya / Kahan Gaya (recent, from loaded day book) */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+        <div className="border border-border rounded-lg bg-card overflow-hidden">
+          <div className="px-4 py-2.5 border-b border-border flex items-center justify-between">
+            <h2 className="text-sm font-semibold text-foreground">Paisa Kahan Se Aya</h2>
+            <span className="text-xs font-medium text-emerald-600" data-num>{formatMoney(inflowTotal)}</span>
+          </div>
+          <div className="divide-y divide-border/40">
+            {inflowVouchers.length === 0 && <p className="p-3 text-xs text-muted-foreground">Koi recent received entry nahi</p>}
+            {inflowVouchers.slice(0, 6).map((v: any) => (
+              <div key={v.voucherId} className="px-4 py-2 flex items-center justify-between gap-2">
+                <div className="min-w-0"><div className="text-sm text-foreground truncate">{v.memo || 'Money received'}</div><div className="text-[10px] text-muted-foreground" data-num>{bizDate(v.voucherDate)}</div></div>
+                <span className="text-sm font-medium text-emerald-600 shrink-0" data-num>+{formatMoney(BigInt(v.totalDebit), false)}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="border border-border rounded-lg bg-card overflow-hidden">
+          <div className="px-4 py-2.5 border-b border-border flex items-center justify-between">
+            <h2 className="text-sm font-semibold text-foreground">Paisa Kahan Gaya</h2>
+            <span className="text-xs font-medium text-amber-600" data-num>{formatMoney(outflowTotal)}</span>
+          </div>
+          <div className="divide-y divide-border/40">
+            {outflowVouchers.length === 0 && <p className="p-3 text-xs text-muted-foreground">Koi recent payment/expense entry nahi</p>}
+            {outflowVouchers.slice(0, 6).map((v: any) => (
+              <div key={v.voucherId} className="px-4 py-2 flex items-center justify-between gap-2">
+                <div className="min-w-0"><div className="text-sm text-foreground truncate">{v.memo || (v.voucherType === 'EX' ? 'Expense' : 'Payment')}</div><div className="text-[10px] text-muted-foreground" data-num>{bizDate(v.voucherDate)}</div></div>
+                <span className="text-sm font-medium text-amber-600 shrink-0" data-num>−{formatMoney(BigInt(v.totalCredit), false)}</span>
+              </div>
+            ))}
+          </div>
+        </div>
       </div>
 
-      {/* Current Assets quick actions */}
+      {/* Abhi Kya Pending Hai */}
+      {balancesReady && (
+        <div className="border border-border rounded-lg bg-card overflow-hidden">
+          <div className="px-4 py-2.5 border-b border-border"><h2 className="text-sm font-semibold text-foreground">Abhi Kya Pending Hai</h2></div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 divide-y sm:divide-y-0 sm:divide-x divide-border/40">
+            <div className="p-3 flex items-center justify-between gap-2">
+              <div><div className="text-sm text-foreground">Customers se lena hai</div><div className="text-[10px] text-muted-foreground">Receivables</div></div>
+              <span className="text-sm font-semibold text-emerald-600" data-num>{formatMoney(receivablesBal)}</span>
+            </div>
+            <div className="p-3 flex items-center justify-between gap-2">
+              <div><div className="text-sm text-foreground">Vendors ko dena hai</div><div className="text-[10px] text-muted-foreground">Payables</div></div>
+              <span className="text-sm font-semibold text-amber-600" data-num>{formatMoney(payablesBal)}</span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Primary actions */}
       <div className="flex flex-wrap gap-2">
+        {canPostReceipt && <QuickAction icon={ArrowDownToLine} label="Receive Payment" onClick={() => setEntryModal('receive')} />}
+        {canPostPayment && <QuickAction icon={ArrowUpFromLine} label="Pay Vendor" onClick={() => setEntryModal('pay')} />}
+        {canPostExpense && <QuickAction icon={ReceiptIcon} label="Add Expense" onClick={() => setEntryModal('expense')} />}
         {canPostContra && <QuickAction icon={ArrowLeftRight} label="Transfer Funds" onClick={() => setEntryModal('transfer')} />}
         {canManagePetty && <QuickAction icon={Coffee} label="Petty Cash" onClick={() => setEntryModal('petty-topup')} />}
-        {canPostReceipt && <QuickAction icon={ArrowDownToLine} label="Receivables" onClick={() => setEntryModal('receive')} />}
-        {canPostExpense && <QuickAction icon={ReceiptIcon} label="Expenses" onClick={() => setEntryModal('expense')} />}
+        {canPostJournal && <QuickAction icon={BookOpen} label="Adjustment" onClick={() => setEntryModal('adjustment')} />}
       </div>
 
-      {/* Recent activity */}
+      {/* Advanced Account Activity (technical, collapsed by default) */}
       <div className="border border-border rounded-lg overflow-hidden bg-card">
-        <div className="px-4 py-2.5 border-b border-border flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-foreground">Recent Activity</h2>
-          <span className="text-xs text-muted-foreground">{recentVouchers.length} entries</span>
-        </div>
+        <button className="w-full px-4 py-2.5 flex items-center justify-between hover:bg-muted/20 press-sm" onClick={() => setAdvancedOpen(o => !o)}>
+          <h2 className="text-sm font-semibold text-foreground">Advanced Account Activity</h2>
+          <span className="flex items-center gap-2 text-xs text-muted-foreground">{recentVouchers.length} entries <ChevronRight className={`size-3.5 transition-transform ${advancedOpen ? 'rotate-90' : ''}`} /></span>
+        </button>
+        {advancedOpen && (<>
+        <div className="border-t border-border" />
         {/* Desktop table */}
         <div className="hidden md:block">
           <table className="w-full text-sm">
@@ -184,6 +258,7 @@ export function AccountsView({ user }: { user: MeUser }) {
             )
           })}
         </div>
+        </>)}
       </div>
 
       {/* Modals */}
