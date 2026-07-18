@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { toast } from 'sonner'
-import { Plus, Search, Package, Wallet, TrendingDown, X, CheckCircle2, AlertCircle, MoreVertical, History, Printer, FileText, ArrowLeft, RefreshCw, ArrowRightLeft, ArrowUpFromLine, BookOpen, ChevronRight } from 'lucide-react'
+import { Plus, Search, Package, Wallet, TrendingDown, X, CheckCircle2, AlertCircle, MoreVertical, Printer, FileText, RefreshCw, ArrowRightLeft, BookOpen, ChevronRight } from 'lucide-react'
 import { formatWholeRupees, parseMoney } from '@/lib/format'
 import { bizDate } from '@/lib/dates'
 import { motion, AnimatePresence } from 'framer-motion'
@@ -40,7 +40,7 @@ export function PurchasesView({ user }: { user: MeUser }) {
   const [replacementPurchase, setReplacementPurchase] = useState<PurchaseDetail | null>(null)
   const [applyAdvancePurchase, setApplyAdvancePurchase] = useState<PurchaseDetail | null>(null)
 
-  const purchasesQ = useQuery<{ rows: Purchase[] }>({ queryKey: ['purchases'], queryFn: () => fetch('/api/purchases').then(r => r.json()) })
+  const purchasesQ = useQuery<{ rows: Purchase[] }>({ queryKey: ['purchases'], queryFn: () => fetch('/api/purchases').then(r => r.json()), staleTime: 30_000 })
 
   const purchases = purchasesQ.data?.rows ?? []
   const filtered = useMemo(() => {
@@ -77,13 +77,10 @@ export function PurchasesView({ user }: { user: MeUser }) {
         <KPI icon={Package} label="This Month" value={formatWholeRupees(kpis.thisMonth)} />
       </div>
 
-      {/* Quick actions */}
+      {/* Quick actions — vendor payments and ledgers both live on the Vendors page */}
       <div className="flex flex-wrap gap-2">
         <Button variant="outline" size="sm" className="h-9 press-sm" onClick={() => router.push('/?page=vendors')}>
-          <ArrowUpFromLine className="size-3.5 mr-1.5" /> Pay Vendor
-        </Button>
-        <Button variant="outline" size="sm" className="h-9 press-sm" onClick={() => router.push('/?page=vendors')}>
-          <BookOpen className="size-3.5 mr-1.5" /> Vendor Ledger
+          <BookOpen className="size-3.5 mr-1.5" /> Vendors
         </Button>
       </div>
 
@@ -116,7 +113,7 @@ export function PurchasesView({ user }: { user: MeUser }) {
 
       {/* Modals */}
       <AnimatePresence>
-        {modal === 'add' && <AddPurchaseModal user={user} onClose={() => setModal(null)} />}
+        {modal === 'add' && <AddPurchaseModal user={user} onClose={() => setModal(null)} onViewPurchase={(id) => { setDetailId(id); setModal('detail') }} />}
         {modal === 'detail' && detailId && <PurchaseDetailModal purchaseId={detailId} user={user} canPay={canPay} canReturn={canReturn} onClose={() => { setModal(null); setDetailId(null) }} onPay={(p) => { setModal('pay'); setPayPurchase(p) }} onReturn={(p) => { setModal('return'); setReturnPurchase(p) }} onReplacement={(p) => { setModal('replacement'); setReplacementPurchase(p) }} onApplyAdvance={(p) => { setModal('apply-advance'); setApplyAdvancePurchase(p) }} />}
         {modal === 'pay' && payPurchase && <PayVendorModal purchase={payPurchase} user={user} onClose={() => { setModal('detail') }} />}
         {modal === 'return' && returnPurchase && <ReturnModal purchase={returnPurchase} user={user} onClose={() => { setModal('detail') }} />}
@@ -135,7 +132,7 @@ function Shell({ title, onClose, children, wide }: { title: string; onClose: () 
   return <div className="fixed inset-0 z-50 bg-foreground/30 backdrop-blur-sm flex items-end sm:items-center justify-center p-4" onClick={onClose}><motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 10 }} className={`border border-border rounded-xl bg-card shadow-xl p-5 w-full ${wide ? 'max-w-2xl' : 'max-w-md'} max-h-[85vh] overflow-y-auto`} onClick={e => e.stopPropagation()}><div className="flex items-center justify-between mb-4"><h3 className="text-sm font-semibold text-foreground">{title}</h3><button onClick={onClose} className="text-muted-foreground hover:text-foreground"><X className="size-4" /></button></div>{children}</motion.div></div>
 }
 
-function AddPurchaseModal({ user, onClose }: { user: MeUser; onClose: () => void }) {
+function AddPurchaseModal({ user, onClose, onViewPurchase }: { user: MeUser; onClose: () => void; onViewPurchase: (id: string) => void }) {
   const qc = useQueryClient()
   const [vendorId, setVendorId] = useState('')
   const [supplierBillNo, setSupplierBillNo] = useState('')
@@ -145,9 +142,9 @@ function AddPurchaseModal({ user, onClose }: { user: MeUser; onClose: () => void
   const [search, setSearch] = useState('')
   const [result, setResult] = useState<{ ok: boolean; purchaseNo?: string; purchaseId?: string; error?: string } | null>(null)
 
-  const vendorsQ = useQuery<{ rows: Vendor[] }>({ queryKey: ['vendors'], queryFn: () => fetch('/api/vendors').then(r => r.json()) })
-  const productsQ = useQuery<{ rows: Product[] }>({ queryKey: ['products'], queryFn: () => fetch('/api/products').then(r => r.json()) })
-  const coaQ = useQuery({ queryKey: ['coa'], queryFn: () => fetch('/api/setup/coa').then(r => r.json()) })
+  const vendorsQ = useQuery<{ rows: Vendor[] }>({ queryKey: ['vendors'], queryFn: () => fetch('/api/vendors').then(r => r.json()), staleTime: 30_000 })
+  const productsQ = useQuery<{ rows: Product[] }>({ queryKey: ['products'], queryFn: () => fetch('/api/products').then(r => r.json()), staleTime: 30_000 })
+  const coaQ = useQuery({ queryKey: ['coa'], queryFn: () => fetch('/api/setup/coa').then(r => r.json()), staleTime: 300_000 })
   const accounts: Account[] = useMemo(() => coaQ.data?.categories?.flatMap((c: any) => c.accounts).filter((a: any) => a.isBusinessAccount && a.isActive).map((a: any) => ({ id: a.id, code: a.code, name: a.name })) ?? [], [coaQ.data])
 
   const subtotal = useMemo(() => cart.reduce((s, it) => { const c = parseMoney(it.unitCost); const q = BigInt(it.qty || '0'); return s + (c ?? 0n) * q }, 0n), [cart])
@@ -164,7 +161,11 @@ function AddPurchaseModal({ user, onClose }: { user: MeUser; onClose: () => void
     onError: (e: Error) => { setResult({ ok: false, error: e.message }); toast.error(`Failed: ${e.message}`) },
   })
 
-  if (result?.ok) return <Shell title="Purchase Posted" onClose={onClose}><div className="text-center py-4"><CheckCircle2 className="size-12 text-primary mx-auto mb-3" /><p className="text-2xl font-bold text-primary" data-num>{result.purchaseNo}</p><p className="text-xs text-muted-foreground mt-2">Purchase posted successfully. Close and click the purchase in the list to view details, print, or pay.</p><div className="mt-4 flex flex-col gap-2"><Button variant="ghost" size="sm" onClick={() => { setResult(null); setCart([]); setPayments([{ accountId: '', amountPaisas: '', paymentType: 'purchase_payment' }]); setVendorId(''); setSupplierBillNo('') }}>New Purchase</Button></div></div></Shell>
+  if (result?.ok) return <Shell title="Purchase Posted" onClose={onClose}><div className="text-center py-4"><CheckCircle2 className="size-12 text-primary mx-auto mb-3" /><p className="text-2xl font-bold text-primary" data-num>{result.purchaseNo}</p><div className="mt-4 flex flex-col gap-2">
+    <Button className="w-full" onClick={() => { if (result.purchaseId) onViewPurchase(result.purchaseId) }}><FileText className="size-3.5" /> View Purchase</Button>
+    <p className="text-[10px] text-muted-foreground">Print and Record Payment are available inside the purchase view.</p>
+    <Button variant="ghost" size="sm" onClick={() => { setResult(null); setCart([]); setPayments([{ accountId: '', amountPaisas: '', paymentType: 'purchase_payment' }]); setVendorId(''); setSupplierBillNo('') }}><Plus className="size-3.5" /> New Purchase</Button>
+  </div></div></Shell>
 
   function addProduct(pid: string) { const p = productsQ.data?.rows.find(x => x.id === pid); if (p) { setCart(ls => [...ls, { key: String(Date.now()), productId: pid, productName: p.name, qty: '1', unitCost: String(p.purchasePrice) }]); setSearch('') } }
   const canPost = vendorId && cart.length > 0 && cart.every(it => it.qty && it.unitCost) && payments.every(p => p.paymentType === 'credit' || (p.accountId && p.amountPaisas))
@@ -409,7 +410,7 @@ function PayVendorModal({ purchase, user, onClose }: { purchase: Purchase; user:
   const [accountId, setAccountId] = useState('')
   const [amount, setAmount] = useState(formatWholeRupees(BigInt(purchase.outstandingAmount), false))
   const [notes, setNotes] = useState('')
-  const coaQ = useQuery({ queryKey: ['coa'], queryFn: () => fetch('/api/setup/coa').then(r => r.json()) })
+  const coaQ = useQuery({ queryKey: ['coa'], queryFn: () => fetch('/api/setup/coa').then(r => r.json()), staleTime: 300_000 })
   const accounts: Account[] = useMemo(() => coaQ.data?.categories?.flatMap((c: any) => c.accounts).filter((a: any) => a.isBusinessAccount && a.isActive).map((a: any) => ({ id: a.id, code: a.code, name: a.name })) ?? [], [coaQ.data])
   const mut = useMutation({
     mutationFn: async () => {
@@ -500,7 +501,7 @@ function ReplacementModal({ purchase, user, onClose }: { purchase: PurchaseDetai
   }>>([])
   const [notes, setNotes] = useState('')
 
-  const productsQ = useQuery<{ rows: Product[] }>({ queryKey: ['products'], queryFn: () => fetch('/api/products').then(r => r.json()) })
+  const productsQ = useQuery<{ rows: Product[] }>({ queryKey: ['products'], queryFn: () => fetch('/api/products').then(r => r.json()), staleTime: 30_000 })
 
   function addRow(originalItemId: string) {
     const it = purchase.items?.find(i => i.id === originalItemId)

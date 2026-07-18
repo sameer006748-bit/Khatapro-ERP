@@ -29,8 +29,8 @@ export function OfcSaleView({ user }: { user: MeUser }) {
   const [result, setResult] = useState<{ ok: boolean; invoiceNo?: string; invoiceId?: string; error?: string } | null>(null)
   const [idempotencyKey, setIdempotencyKey] = useState(() => crypto.randomUUID())
 
-  const coaQ = useQuery({ queryKey: ['coa'], queryFn: () => fetch('/api/setup/coa').then(r => r.json()) })
-  const productsQ = useQuery<{ rows: Product[] }>({ queryKey: ['products'], queryFn: () => fetch('/api/products').then(r => r.json()) })
+  const coaQ = useQuery({ queryKey: ['coa'], queryFn: () => fetch('/api/setup/coa').then(r => r.json()), staleTime: 300_000 })
+  const productsQ = useQuery<{ rows: Product[] }>({ queryKey: ['products'], queryFn: () => fetch('/api/products').then(r => r.json()), staleTime: 30_000 })
 
   const businessAccounts: Account[] = useMemo(() => {
     if (!coaQ.data?.categories) return []
@@ -132,7 +132,7 @@ export function OfcSaleView({ user }: { user: MeUser }) {
     )
   }
 
-  const canPost = form.customerName && form.customerPhone && form.customerAddress &&
+  const canPost = form.customerName && form.customerPhone && form.customerAddress && form.customerCity &&
     items.some(it => it.productId || it.productName) &&
     !discountError && (form.discountRupees === '' || discountPaisas >= 0n)
 
@@ -150,11 +150,11 @@ export function OfcSaleView({ user }: { user: MeUser }) {
           <Input value={form.customerCity} onChange={e => setForm(s => ({ ...s, customerCity: e.target.value }))} placeholder="City *" className="h-9 bg-background press-sm" />
         </div>
         <div>
-          <Label className="text-[10px] text-muted-foreground">Courier Note</Label>
+          <Label className="text-[10px] text-muted-foreground">Courier Note (optional)</Label>
           <Input value={form.courierNote} onChange={e => setForm(s => ({ ...s, courierNote: e.target.value }))} placeholder="Courier name, tracking # etc." className="h-9 bg-background press-sm text-sm" />
         </div>
         <div>
-          <Label className="text-[10px] text-muted-foreground">Discount (Rs)</Label>
+          <Label className="text-[10px] text-muted-foreground">Discount (Rs, optional)</Label>
           <Input type="text" value={form.discountRupees} onChange={e => setForm(s => ({ ...s, discountRupees: e.target.value }))} placeholder="0" className="h-8 bg-background press-sm text-sm max-w-[200px]" data-num />
           {discountError && <div className="text-[10px] text-destructive mt-0.5">{discountError}</div>}
         </div>

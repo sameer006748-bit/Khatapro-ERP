@@ -230,7 +230,7 @@ export function OwnerDashboard({ user }: { user: any }) {
             <PendingCard icon={Users} label="Receivables" value={formatWholeRupees(totalReceivables)} sub="Outstanding receivables" accent="text-violet-600" />
             <PendingCard icon={Wallet} label="Payables" value={formatWholeRupees(totalPayables)} sub="Outstanding payables" accent="text-amber-600" />
             <PendingCard icon={AlertTriangle} label="Low / Negative Stock" value={`${data.kpis.lowStockCount + data.kpis.negativeStockCount} items`} sub={`${data.kpis.negativeStockCount} negative`} accent={(data.kpis.lowStockCount + data.kpis.negativeStockCount) > 0 ? 'text-red-600' : 'text-green-600'} />
-            <PendingCard icon={ShoppingCart} label="Pending Online Orders" value={`${data.salesByType.online.count} today`} sub="Online orders aaj ke" accent="text-sky-600" />
+            <PendingCard icon={ShoppingCart} label="Pending Online Orders" value={`${data.salesByType.online.count} today`} sub="Online orders placed today" accent="text-sky-600" />
           </div>
         </GlassPanel>
       </motion.div>

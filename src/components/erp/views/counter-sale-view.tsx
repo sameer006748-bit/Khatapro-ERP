@@ -68,14 +68,17 @@ export function CounterSaleView({ user }: { user: MeUser }) {
   const coaQ = useQuery({
     queryKey: ['coa'],
     queryFn: () => fetch('/api/setup/coa').then(r => r.json()),
+    staleTime: 300_000,
   })
   const productsQ = useQuery<{ rows: Product[] }>({
     queryKey: ['products'],
     queryFn: () => fetch('/api/products').then(r => r.json()),
+    staleTime: 30_000,
   })
   const salesmenQ = useQuery<{ rows: Salesman[] }>({
     queryKey: ['salesmen'],
     queryFn: () => fetch('/api/salesmen').then(r => r.json()),
+    staleTime: 300_000,
   })
 
   const businessAccounts: Account[] = useMemo(() => {

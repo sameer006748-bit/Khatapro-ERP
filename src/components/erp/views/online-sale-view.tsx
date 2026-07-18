@@ -30,8 +30,8 @@ export function OnlineSaleView({ user }: { user: MeUser }) {
   const [result, setResult] = useState<{ ok: boolean; invoiceNo?: string; invoiceId?: string; error?: string; remainingCod?: string; customerGrandTotal?: string } | null>(null)
   const [idempotencyKey, setIdempotencyKey] = useState(() => crypto.randomUUID())
 
-  const coaQ = useQuery({ queryKey: ['coa'], queryFn: () => fetch('/api/setup/coa').then(r => r.json()) })
-  const productsQ = useQuery<{ rows: Product[] }>({ queryKey: ['products'], queryFn: () => fetch('/api/products').then(r => r.json()) })
+  const coaQ = useQuery({ queryKey: ['coa'], queryFn: () => fetch('/api/setup/coa').then(r => r.json()), staleTime: 300_000 })
+  const productsQ = useQuery<{ rows: Product[] }>({ queryKey: ['products'], queryFn: () => fetch('/api/products').then(r => r.json()), staleTime: 30_000 })
 
   const businessAccounts: Account[] = useMemo(() => {
     if (!coaQ.data?.categories) return []
@@ -169,7 +169,7 @@ export function OnlineSaleView({ user }: { user: MeUser }) {
           </div>
         </div>
         <div>
-          <Label className="text-[10px] text-muted-foreground">Discount (Rs)</Label>
+          <Label className="text-[10px] text-muted-foreground">Discount (Rs, optional)</Label>
           <Input type="text" value={form.discountRupees} onChange={e => setForm(s => ({ ...s, discountRupees: e.target.value }))} placeholder="0" className="h-8 bg-background press-sm text-sm max-w-[200px]" data-num />
           {discountError && <div className="text-[10px] text-destructive mt-0.5">{discountError}</div>}
         </div>

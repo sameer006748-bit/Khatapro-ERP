@@ -25,21 +25,22 @@ export function AccountsView({ user }: { user: MeUser }) {
   const [entryModal, setEntryModal] = useState<null | 'receive' | 'pay' | 'expense' | 'transfer' | 'petty-topup' | 'petty-expense' | 'adjustment'>(null)
   const [advancedOpen, setAdvancedOpen] = useState(false)
 
-  const coaQ = useQuery({ queryKey: ['coa'], queryFn: () => fetch('/api/setup/coa').then(r => r.json()) })
+  const coaQ = useQuery({ queryKey: ['coa'], queryFn: () => fetch('/api/setup/coa').then(r => r.json()), staleTime: 300_000 })
   const accounts: Account[] = useMemo(() => (coaQ.data?.categories ?? []).flatMap((c: any) => c.accounts.filter((a: any) => a.isActive).map((a: any) => ({ id: a.id, code: a.code, name: a.name, isBusinessAccount: a.isBusinessAccount, isPartyAccount: a.isPartyAccount, partyType: a.partyType, categoryCode: c.code, categoryType: c.type }))), [coaQ.data])
   const businessAccounts = accounts.filter(a => a.categoryType === 'Asset' && a.isBusinessAccount)
   const expenseAccounts = accounts.filter(a => a.categoryType === 'Expense')
 
-  // Trial balance for balances
-  const tbQ = useQuery({ queryKey: ['trial-balance'], queryFn: () => fetch('/api/trial-balance').then(r => r.json()) })
+  // Trial balance for balances (mutations invalidate ['trial-balance'], so a
+  // short staleTime only skips refetches on plain navigation revisits)
+  const tbQ = useQuery({ queryKey: ['trial-balance'], queryFn: () => fetch('/api/trial-balance').then(r => r.json()), staleTime: 30_000 })
   const tbRows: any[] = tbQ.data?.rows ?? []
   const getBalance = (code: string): bigint => {
     const row = tbRows.find((r: any) => r.accountCode === code)
     return row ? BigInt(row.balance) : 0n
   }
 
-  // Day book for recent activity
-  const dayBookQ = useQuery({ queryKey: ['day-book'], queryFn: () => fetch('/api/day-book').then(r => r.json()) })
+  // Day book for recent activity (invalidated by every posting mutation)
+  const dayBookQ = useQuery({ queryKey: ['day-book'], queryFn: () => fetch('/api/day-book').then(r => r.json()), staleTime: 30_000 })
   const recentVouchers: any[] = (dayBookQ.data?.rows ?? []).slice(0, 15)
 
   // Today's summary (Asia/Karachi date)
@@ -82,7 +83,7 @@ export function AccountsView({ user }: { user: MeUser }) {
       <div className="flex items-end justify-between gap-3 flex-wrap">
         <div>
           <h1 className="text-xl font-semibold tracking-tight text-foreground">Money Summary</h1>
-          <p className="text-xs text-muted-foreground mt-0.5">Aap ke paas abhi kitna paisa hai, kahan se aya, kahan gaya aur kya pending hai</p>
+          <p className="text-xs text-muted-foreground mt-0.5">Current balances, today's money movement and pending amounts</p>
         </div>
         <Button size="sm" className="h-8 press-sm shadow-sm" onClick={() => setEntryModal('receive')}><Plus className="size-3.5" /> New Entry</Button>
       </div>
@@ -135,12 +136,12 @@ export function AccountsView({ user }: { user: MeUser }) {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
         <div className="border border-border rounded-lg bg-card overflow-hidden">
           <div className="px-4 py-2.5 border-b border-border flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-foreground">Paisa Kahan Se Aya</h2>
+            <h2 className="text-sm font-semibold text-foreground">Money Received (Recent)</h2>
             <span className="text-xs font-medium text-emerald-600" data-num>{formatMoney(inflowTotal)}</span>
           </div>
           <div className="divide-y divide-border/40">
             {dayBookQ.isLoading && <p className="p-3 text-xs text-muted-foreground" role="status">Loading…</p>}
-            {!dayBookQ.isLoading && inflowVouchers.length === 0 && <p className="p-3 text-xs text-muted-foreground">Koi recent received entry nahi</p>}
+            {!dayBookQ.isLoading && inflowVouchers.length === 0 && <p className="p-3 text-xs text-muted-foreground">No money received yet — use Receive Payment below to record one.</p>}
             {inflowVouchers.slice(0, 6).map((v: any) => (
               <div key={v.voucherId} className="px-4 py-2 flex items-center justify-between gap-2">
                 <div className="min-w-0"><div className="text-sm text-foreground truncate">{v.memo || 'Money received'}</div><div className="text-[10px] text-muted-foreground" data-num>{bizDate(v.voucherDate)}</div></div>
@@ -151,12 +152,12 @@ export function AccountsView({ user }: { user: MeUser }) {
         </div>
         <div className="border border-border rounded-lg bg-card overflow-hidden">
           <div className="px-4 py-2.5 border-b border-border flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-foreground">Paisa Kahan Gaya</h2>
+            <h2 className="text-sm font-semibold text-foreground">Money Paid (Recent)</h2>
             <span className="text-xs font-medium text-amber-600" data-num>{formatMoney(outflowTotal)}</span>
           </div>
           <div className="divide-y divide-border/40">
             {dayBookQ.isLoading && <p className="p-3 text-xs text-muted-foreground" role="status">Loading…</p>}
-            {!dayBookQ.isLoading && outflowVouchers.length === 0 && <p className="p-3 text-xs text-muted-foreground">Koi recent payment/expense entry nahi</p>}
+            {!dayBookQ.isLoading && outflowVouchers.length === 0 && <p className="p-3 text-xs text-muted-foreground">No payments or expenses yet — use Pay Vendor or Add Expense below.</p>}
             {outflowVouchers.slice(0, 6).map((v: any) => (
               <div key={v.voucherId} className="px-4 py-2 flex items-center justify-between gap-2">
                 <div className="min-w-0"><div className="text-sm text-foreground truncate">{v.memo || (v.voucherType === 'EX' ? 'Expense' : 'Payment')}</div><div className="text-[10px] text-muted-foreground" data-num>{bizDate(v.voucherDate)}</div></div>
@@ -170,14 +171,14 @@ export function AccountsView({ user }: { user: MeUser }) {
       {/* Abhi Kya Pending Hai */}
       {balancesReady && (
         <div className="border border-border rounded-lg bg-card overflow-hidden">
-          <div className="px-4 py-2.5 border-b border-border"><h2 className="text-sm font-semibold text-foreground">Abhi Kya Pending Hai</h2></div>
+          <div className="px-4 py-2.5 border-b border-border"><h2 className="text-sm font-semibold text-foreground">Pending Amounts</h2></div>
           <div className="grid grid-cols-1 sm:grid-cols-2 divide-y sm:divide-y-0 sm:divide-x divide-border/40">
             <div className="p-3 flex items-center justify-between gap-2">
-              <div><div className="text-sm text-foreground">Customers se lena hai</div><div className="text-[10px] text-muted-foreground">Receivables</div></div>
+              <div><div className="text-sm text-foreground">To collect from customers</div><div className="text-[10px] text-muted-foreground">Receivables</div></div>
               <span className="text-sm font-semibold text-emerald-600" data-num>{formatMoney(receivablesBal)}</span>
             </div>
             <div className="p-3 flex items-center justify-between gap-2">
-              <div><div className="text-sm text-foreground">Vendors ko dena hai</div><div className="text-[10px] text-muted-foreground">Payables</div></div>
+              <div><div className="text-sm text-foreground">To pay vendors</div><div className="text-[10px] text-muted-foreground">Payables</div></div>
               <span className="text-sm font-semibold text-amber-600" data-num>{formatMoney(payablesBal)}</span>
             </div>
           </div>
