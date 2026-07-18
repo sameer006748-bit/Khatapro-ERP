@@ -46,6 +46,8 @@ export function LedgerDrilldownView({ accountId }: { accountId: string }) {
     queryKey: ['ledger', accountId],
     queryFn: () => fetch(`/api/ledger/${accountId}`).then((r) => r.json()),
     enabled: !!accountId,
+    staleTime: 30_000,
+    gcTime: 5 * 60_000,
   })
 
   // When the user navigates back, strip ?ledger= from the URL.

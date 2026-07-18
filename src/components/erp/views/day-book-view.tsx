@@ -49,6 +49,8 @@ export function DayBookView({ user, onSelectVoucher }: { user: MeUser; onSelectV
   const q = useQuery<{ rows: DayBookRow[] }>({
     queryKey: ['day-book', fromDate, toDate, voucherType],
     queryFn: () => fetch(`/api/day-book?${params.toString()}`).then(r => r.json()),
+    staleTime: 30_000,
+    gcTime: 5 * 60_000,
   })
 
   const rows = q.data?.rows ?? []

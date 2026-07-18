@@ -31,10 +31,10 @@ export async function GET(req: Request) {
     const url = new URL(req.url)
     const today = url.searchParams.get('today') || bizDateString(new Date())
     const bid = loaded.businessId
-    const admin = getAdminSupabase()
 
     // ── Concurrent: today sales aggregate, 5 recent invoices, 5 recent purchases,
-    //     stock aggregates + alert details, today expenses, 3 account lookups ──
+    //     stock aggregates + alert details, today expenses, 3 account lookups,
+    //     today collections and recent audit logs (all independent) ──
     const [
       todaySalesAgg,
       recentInvoices,
@@ -44,6 +44,8 @@ export async function GET(req: Request) {
       salesAccount,
       arAccount,
       apAccount,
+      collections,
+      auditLogsResult,
     ] = await Promise.all([
       getTodaySalesAggregate(bid, today),
       getRecentInvoices(bid, RECENT_LIMIT),
@@ -53,6 +55,8 @@ export async function GET(req: Request) {
       getAccountByCode(bid, '4010'),
       getAccountByCode(bid, '1200'),
       getAccountByCode(bid, '2010'),
+      getTodayCollections(bid, today),
+      getRecentAuditLogs(bid),
     ])
 
     // ── Today KPIs from aggregate ──
@@ -74,52 +78,8 @@ export async function GET(req: Request) {
     const todayExpensesNumber = Number(todayExpensesPaisas)
 
     // ── Collections (receipts) ──
-    let todayCollectionsNumber: number | null = null
-    let collectionsAvailable = false
-    try {
-      const { data: receiptsRaw, error: receiptsError } = await admin
-        .from('receipts')
-        .select('id, amount, voucher_id')
-        .eq('business_id', bid)
-        .eq('receipt_date', today)
-        .eq('status', 'posted')
-        .is('reversal_voucher_id', null)
-
-      if (!receiptsError && Array.isArray(receiptsRaw)) {
-        const receiptRows = receiptsRaw as any[]
-        if (receiptRows.length === 0) {
-          todayCollectionsNumber = 0
-          collectionsAvailable = true
-        } else {
-          const voucherIds = Array.from(
-            new Set(
-              receiptRows
-                .map(r => r.voucher_id)
-                .filter((v): v is string => typeof v === 'string' && v.length > 0),
-            ),
-          )
-          let allowedVoucherIds = new Set<string>(voucherIds)
-          if (voucherIds.length > 0) {
-            const { data: vouchersRaw } = await admin
-              .from('vouchers')
-              .select('id, is_cancelled')
-              .eq('business_id', bid)
-              .in('id', voucherIds)
-            const vouchers = (vouchersRaw ?? []) as any[]
-            for (const v of vouchers) {
-              if (v && v.is_cancelled) allowedVoucherIds.delete(v.id)
-            }
-          }
-          const sum = receiptRows
-            .filter(r => !r.voucher_id || allowedVoucherIds.has(r.voucher_id))
-            .reduce((s, r) => s + BigInt(r.amount ?? 0), 0n)
-          todayCollectionsNumber = Number(sum)
-          collectionsAvailable = true
-        }
-      }
-    } catch {
-      collectionsAvailable = false
-    }
+    const todayCollectionsNumber: number | null = collections.value
+    const collectionsAvailable = collections.available
 
     // ── Net cash flow ──
     let todayNetCashFlowNumber: number | null = null
@@ -134,27 +94,8 @@ export async function GET(req: Request) {
     const payablesBalance = apAccount ? Number(-apAccount.balanceCache) : 0
     const totalSalesBalance = salesAccount ? Number(-salesAccount.balanceCache) : 0
 
-    // ── Audit logs (20 most recent) ──
-    const { data: auditLogsRaw } = await admin
-      .from('audit_logs')
-      .select('id, timestamp, action, entity, entity_id, details')
-      .eq('business_id', bid)
-      .order('timestamp', { ascending: false })
-      .limit(20)
-    const auditLogs = (auditLogsRaw ?? []).map((r: any) => {
-      const details =
-        typeof r.details === 'string'
-          ? r.details
-          : JSON.stringify(r.details ?? null)
-      return {
-        id: r.id,
-        timestamp: r.timestamp,
-        action: r.action,
-        entity: r.entity,
-        entityId: r.entity_id,
-        details: details.length > 200 ? details.slice(0, 200) + '...' : details,
-      }
-    })
+    // ── Audit logs (20 most recent) — fetched concurrently above ──
+    const auditLogs = auditLogsResult
 
     // ── Response (shape unchanged) ──
     return NextResponse.json({
@@ -504,4 +445,76 @@ async function getTodayExpenses(businessId: string, today: string) {
   }
   if (error) throw new Error(`getTodayExpenses: ${error.message}`)
   return []
+}
+
+// ── Today collections (receipts, excluding cancelled vouchers) ──
+
+async function getTodayCollections(
+  businessId: string,
+  today: string,
+): Promise<{ value: number | null; available: boolean }> {
+  try {
+    const admin = getAdminSupabase()
+    const { data: receiptsRaw, error: receiptsError } = await admin
+      .from('receipts')
+      .select('id, amount, voucher_id')
+      .eq('business_id', businessId)
+      .eq('receipt_date', today)
+      .eq('status', 'posted')
+      .is('reversal_voucher_id', null)
+
+    if (!receiptsError && Array.isArray(receiptsRaw)) {
+      const receiptRows = receiptsRaw as any[]
+      if (receiptRows.length === 0) return { value: 0, available: true }
+
+      const voucherIds = Array.from(
+        new Set(
+          receiptRows
+            .map(r => r.voucher_id)
+            .filter((v): v is string => typeof v === 'string' && v.length > 0),
+        ),
+      )
+      const allowedVoucherIds = new Set<string>(voucherIds)
+      if (voucherIds.length > 0) {
+        const { data: vouchersRaw } = await admin
+          .from('vouchers')
+          .select('id, is_cancelled')
+          .eq('business_id', businessId)
+          .in('id', voucherIds)
+        const vouchers = (vouchersRaw ?? []) as any[]
+        for (const v of vouchers) {
+          if (v && v.is_cancelled) allowedVoucherIds.delete(v.id)
+        }
+      }
+      const sum = receiptRows
+        .filter(r => !r.voucher_id || allowedVoucherIds.has(r.voucher_id))
+        .reduce((s, r) => s + BigInt(r.amount ?? 0), 0n)
+      return { value: Number(sum), available: true }
+    }
+  } catch { /* fall through */ }
+  return { value: null, available: false }
+}
+
+// ── Recent audit logs (20 most recent) ──
+
+async function getRecentAuditLogs(businessId: string) {
+  const admin = getAdminSupabase()
+  const { data: auditLogsRaw } = await admin
+    .from('audit_logs')
+    .select('id, timestamp, action, entity, entity_id, details')
+    .eq('business_id', businessId)
+    .order('timestamp', { ascending: false })
+    .limit(20)
+  return (auditLogsRaw ?? []).map((r: any) => {
+    const details =
+      typeof r.details === 'string' ? r.details : JSON.stringify(r.details ?? null)
+    return {
+      id: r.id,
+      timestamp: r.timestamp,
+      action: r.action,
+      entity: r.entity,
+      entityId: r.entity_id,
+      details: details.length > 200 ? details.slice(0, 200) + '...' : details,
+    }
+  })
 }

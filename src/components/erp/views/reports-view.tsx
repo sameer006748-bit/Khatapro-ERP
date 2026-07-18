@@ -160,6 +160,8 @@ function ReportContent({ type, fromDate, toDate, user }: { type: ReportType; fro
     queryFn: () => fetch(`/api/reports?type=${type}&fromDate=${fromDate}&toDate=${toDate}`).then(r => r.json()),
     enabled: !!type,
     retry: 1, retryDelay: 500,
+    staleTime: 60_000,
+    gcTime: 5 * 60_000,
   })
 
   if (q.isLoading) return <div className="card-3d p-8 text-center text-sm text-muted-foreground animate-pulse">Loading report…</div>
