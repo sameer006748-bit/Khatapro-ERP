@@ -106,15 +106,15 @@ export function OwnerDashboard({ user }: { user: any }) {
   const approxProfit = todaySales - todayExpenses
 
   const primaryCards: Array<{ label: string; value: string; sub: string; icon: React.ComponentType<{ className?: string }>; accent: string; show: boolean }> = [
-    { label: 'Aaj ki Sales', value: formatWholeRupees(todaySales), sub: `${data.salesByType.counter.count} counter \u00B7 ${data.salesByType.online.count} online \u00B7 ${data.salesByType.ofc.count} OFC`, icon: ShoppingCart, accent: 'bg-emerald-500/10 text-emerald-600', show: true },
-    { label: 'Paisa Receive Hua', value: todayCollections != null ? formatWholeRupees(todayCollections) : '—', sub: todayCollections != null ? 'Cash received today' : 'Not available', icon: ArrowDownToLine, accent: 'bg-green-500/10 text-green-600', show: true },
-    { label: 'Kharcha Hua', value: formatWholeRupees(todayExpenses), sub: 'Aaj ka kharcha', icon: ArrowUpFromLine, accent: 'bg-red-500/10 text-red-600', show: true },
-    { label: 'Purchase Hui', value: todayPurchases != null ? formatWholeRupees(todayPurchases) : '—', sub: todayPurchases != null ? 'Aaj ki purchases' : 'Not available', icon: Receipt, accent: 'bg-amber-500/10 text-amber-600', show: todayPurchases != null },
+    { label: "Today's Sales", value: formatWholeRupees(todaySales), sub: `${data.salesByType.counter.count} counter \u00B7 ${data.salesByType.online.count} online \u00B7 ${data.salesByType.ofc.count} OFC`, icon: ShoppingCart, accent: 'bg-emerald-500/10 text-emerald-600', show: true },
+    { label: 'Amount Received', value: todayCollections != null ? formatWholeRupees(todayCollections) : '—', sub: todayCollections != null ? 'Cash received today' : 'Not available', icon: ArrowDownToLine, accent: 'bg-green-500/10 text-green-600', show: true },
+    { label: 'Expenses', value: formatWholeRupees(todayExpenses), sub: "Today's expenses", icon: ArrowUpFromLine, accent: 'bg-red-500/10 text-red-600', show: true },
+    { label: 'Purchases', value: todayPurchases != null ? formatWholeRupees(todayPurchases) : '—', sub: todayPurchases != null ? "Today's purchases" : 'Not available', icon: Receipt, accent: 'bg-amber-500/10 text-amber-600', show: todayPurchases != null },
     { label: 'Cash Available', value: cashBalance != null ? formatWholeRupees(cashBalance) : '—', sub: 'Cash in hand', icon: Banknote, accent: 'bg-teal-500/10 text-teal-600', show: cashBalance != null },
     { label: 'Bank Available', value: bankBalance != null ? formatWholeRupees(bankBalance) : '—', sub: 'Bank balance', icon: Building2, accent: 'bg-sky-500/10 text-sky-600', show: bankBalance != null },
-    { label: 'Customers se Lena Hai', value: formatWholeRupees(totalReceivables), sub: 'Outstanding receivables', icon: Users, accent: 'bg-violet-500/10 text-violet-600', show: true },
-    { label: 'Vendors ko Dena Hai', value: formatWholeRupees(totalPayables), sub: 'Outstanding payables', icon: Wallet, accent: 'bg-amber-500/10 text-amber-600', show: true },
-    { label: 'Approx. Profit', value: formatWholeRupees(approxProfit), sub: 'Sales − Expenses (approximate)', icon: TrendingUp, accent: approxProfit >= 0 ? 'bg-blue-500/10 text-blue-600' : 'bg-orange-500/10 text-orange-600', show: true },
+    { label: 'Receivables', value: formatWholeRupees(totalReceivables), sub: 'Outstanding receivables', icon: Users, accent: 'bg-violet-500/10 text-violet-600', show: true },
+    { label: 'Payables', value: formatWholeRupees(totalPayables), sub: 'Outstanding payables', icon: Wallet, accent: 'bg-amber-500/10 text-amber-600', show: true },
+    { label: 'Estimated Profit', value: formatWholeRupees(approxProfit), sub: 'Sales − Expenses (estimated)', icon: TrendingUp, accent: approxProfit >= 0 ? 'bg-blue-500/10 text-blue-600' : 'bg-orange-500/10 text-orange-600', show: true },
   ]
 
   const visibleCards = primaryCards.filter(c => c.show)
@@ -137,7 +137,7 @@ export function OwnerDashboard({ user }: { user: any }) {
                 Business Summary
               </h1>
               <p className="text-sm text-muted-foreground max-w-2xl">
-                Aaj ki sales, collections, kharcha aur pending payments ka overview.
+                Today's sales, collections, expenses and outstanding payments overview.
               </p>
             </div>
             <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white/50 border border-white/10">
@@ -164,10 +164,10 @@ export function OwnerDashboard({ user }: { user: any }) {
         </div>
       </motion.div>
 
-      {/* Paisa Kahan Se Aya */}
+      {/* Sources of Funds */}
       <motion.div variants={item}>
         <GlassPanel padding="p-5 sm:p-6">
-          <SectionHeader title="Paisa Kahan Se Aya" subtitle="Today's income sources" />
+          <SectionHeader title="Sources of Funds" subtitle="Today's income sources" />
           <div className="flex flex-wrap gap-2 mb-4">
             <Chip icon={ShoppingCart} label="View Sales" onClick={() => router.push('/?page=sales-list')} />
             <Chip icon={ArrowDownToLine} label="Receive Payment" onClick={() => router.push('/?page=accounts')} />
@@ -181,16 +181,16 @@ export function OwnerDashboard({ user }: { user: any }) {
             <div className="rounded-xl border border-border bg-muted/20 p-4">
               <div className="flex items-center gap-2 mb-1"><ArrowDownToLine className="size-4 text-green-600" /><span className="text-sm font-medium text-foreground">Customer Payments</span></div>
               <div className="text-lg font-bold text-foreground" data-num>{todayCollections != null ? formatWholeRupees(todayCollections) : '—'}</div>
-              <div className="text-[11px] text-muted-foreground mt-0.5">{todayCollections != null ? 'Aaj ki receipts' : 'Data not available'}</div>
+              <div className="text-[11px] text-muted-foreground mt-0.5">{todayCollections != null ? "Today's receipts" : 'Data not available'}</div>
             </div>
           </div>
         </GlassPanel>
       </motion.div>
 
-      {/* Paisa Kahan Gaya */}
+      {/* Uses of Funds */}
       <motion.div variants={item}>
         <GlassPanel padding="p-5 sm:p-6">
-          <SectionHeader title="Paisa Kahan Gaya" subtitle="Today's outflows" />
+          <SectionHeader title="Uses of Funds" subtitle="Today's outflows" />
           <div className="flex flex-wrap gap-2 mb-4">
             <Chip icon={Receipt} label="View Purchases" onClick={() => router.push('/?page=purchases')} />
             <Chip icon={ArrowUpFromLine} label="Add Expense" onClick={() => router.push('/?page=expense-batch')} />
@@ -200,15 +200,15 @@ export function OwnerDashboard({ user }: { user: any }) {
             <div className="rounded-xl border border-border bg-muted/20 p-4">
               <div className="flex items-center gap-2 mb-1"><Receipt className="size-4 text-amber-600" /><span className="text-sm font-medium text-foreground">Purchases</span></div>
               <div className="text-lg font-bold text-foreground" data-num>{todayPurchases != null ? formatWholeRupees(todayPurchases) : '—'}</div>
-              <div className="text-[11px] text-muted-foreground mt-0.5">{todayPurchases != null ? 'Aaj ki purchases' : 'Not available'}</div>
+              <div className="text-[11px] text-muted-foreground mt-0.5">{todayPurchases != null ? "Today's purchases" : 'Not available'}</div>
             </div>
             <div className="rounded-xl border border-border bg-muted/20 p-4">
               <div className="flex items-center gap-2 mb-1"><ArrowUpFromLine className="size-4 text-red-600" /><span className="text-sm font-medium text-foreground">Expenses</span></div>
               <div className="text-lg font-bold text-foreground" data-num>{formatWholeRupees(todayExpenses)}</div>
-              <div className="text-[11px] text-muted-foreground mt-0.5">Aaj ka kharcha</div>
+              <div className="text-[11px] text-muted-foreground mt-0.5">Today's expenses</div>
             </div>
             <div className="rounded-xl border border-border bg-muted/20 p-4">
-              <div className="flex items-center gap-2 mb-1"><Wallet className="size-4 text-amber-600" /><span className="text-sm font-medium text-foreground">Vendors ko Dena Hai</span></div>
+              <div className="flex items-center gap-2 mb-1"><Wallet className="size-4 text-amber-600" /><span className="text-sm font-medium text-foreground">Payables</span></div>
               <div className="text-lg font-bold text-foreground" data-num>{formatWholeRupees(totalPayables)}</div>
               <div className="text-[11px] text-muted-foreground mt-0.5">Total payables</div>
             </div>
@@ -216,10 +216,10 @@ export function OwnerDashboard({ user }: { user: any }) {
         </GlassPanel>
       </motion.div>
 
-      {/* Abhi Kya Pending Hai */}
+      {/* Outstanding Obligations */}
       <motion.div variants={item}>
         <GlassPanel padding="p-5 sm:p-6">
-          <SectionHeader title="Abhi Kya Pending Hai" subtitle="Receivables, payables and stock alerts" />
+          <SectionHeader title="Outstanding Obligations" subtitle="Receivables, payables and stock alerts" />
           <div className="flex flex-wrap gap-2 mb-4">
             <Chip icon={ArrowDownToLine} label="Receive Payment" onClick={() => router.push('/?page=accounts')} />
             <Chip icon={Wallet} label="Pay Vendor" onClick={() => router.push('/?page=vendors')} />
@@ -227,8 +227,8 @@ export function OwnerDashboard({ user }: { user: any }) {
             <Chip icon={ShoppingCart} label="View Orders" onClick={() => router.push('/?page=sales-list')} />
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-            <PendingCard icon={Users} label="Customers se Lena Hai" value={formatWholeRupees(totalReceivables)} sub="Outstanding receivables" accent="text-violet-600" />
-            <PendingCard icon={Wallet} label="Vendors ko Dena Hai" value={formatWholeRupees(totalPayables)} sub="Outstanding payables" accent="text-amber-600" />
+            <PendingCard icon={Users} label="Receivables" value={formatWholeRupees(totalReceivables)} sub="Outstanding receivables" accent="text-violet-600" />
+            <PendingCard icon={Wallet} label="Payables" value={formatWholeRupees(totalPayables)} sub="Outstanding payables" accent="text-amber-600" />
             <PendingCard icon={AlertTriangle} label="Low / Negative Stock" value={`${data.kpis.lowStockCount + data.kpis.negativeStockCount} items`} sub={`${data.kpis.negativeStockCount} negative`} accent={(data.kpis.lowStockCount + data.kpis.negativeStockCount) > 0 ? 'text-red-600' : 'text-green-600'} />
             <PendingCard icon={ShoppingCart} label="Pending Online Orders" value={`${data.salesByType.online.count} today`} sub="Online orders aaj ke" accent="text-sky-600" />
           </div>
