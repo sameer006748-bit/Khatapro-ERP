@@ -71,7 +71,24 @@ export function LedgerDrilldownView({ accountId }: { accountId: string }) {
   }
 
   if (q.isLoading) {
-    return <div className="card-3d p-8 text-sm text-muted-foreground">Loading ledger…</div>
+    return (
+      <div className="space-y-6" role="status" aria-label="Loading ledger">
+        <div className="animate-pulse space-y-2">
+          <div className="h-4 w-24 rounded bg-muted" />
+          <div className="h-7 w-56 rounded bg-muted" />
+          <div className="h-3 w-40 rounded bg-muted" />
+        </div>
+        <div className="card-3d divide-y divide-border/40">
+          {[1, 2, 3, 4, 5, 6].map(i => (
+            <div key={i} className="flex items-center gap-3 px-4 py-3 animate-pulse">
+              <div className="h-3 w-16 rounded bg-muted" />
+              <div className="h-3 flex-1 rounded bg-muted" />
+              <div className="h-3 w-20 rounded bg-muted" />
+            </div>
+          ))}
+        </div>
+      </div>
+    )
   }
 
   if (q.isError || !q.data) {

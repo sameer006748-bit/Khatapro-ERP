@@ -107,7 +107,18 @@ export function DayBookView({ user, onSelectVoucher }: { user: MeUser; onSelectV
         <div className="border border-border rounded-lg bg-card px-3 py-1.5"><span className="text-muted-foreground">Total Credit: </span><span className="font-medium" data-num>{formatMoney(totalCredit, false)}</span></div>
       </div>
 
-      {q.isLoading ? <div className="text-center py-8 text-sm text-muted-foreground">Loading…</div>
+      {q.isLoading ? (
+        <div className="border border-border rounded-lg bg-card divide-y divide-border/40" role="status" aria-label="Loading vouchers">
+          {[1, 2, 3, 4, 5, 6].map(i => (
+            <div key={i} className="flex items-center gap-3 px-3 py-3 animate-pulse">
+              <div className="h-3 w-16 rounded bg-muted" />
+              <div className="h-3 flex-1 rounded bg-muted" />
+              <div className="h-3 w-20 rounded bg-muted" />
+            </div>
+          ))}
+        </div>
+      )
+      : q.isError ? <div className="text-center py-8"><p className="text-sm text-destructive">Failed to load vouchers.</p><button className="mt-2 text-sm text-primary hover:underline" onClick={() => q.refetch()}>Retry</button></div>
       : filtered.length === 0 ? <div className="text-center py-8"><BookOpen className="size-8 text-muted-foreground mx-auto mb-2 opacity-50" /><p className="text-sm text-muted-foreground">No vouchers for this filter.</p></div>
       : (
         <>

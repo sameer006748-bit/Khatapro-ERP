@@ -91,6 +91,13 @@ export function AccountsView({ user }: { user: MeUser }) {
       <div>
         <h2 className="text-sm font-semibold text-foreground mb-2">Current Money</h2>
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-2">
+          {(coaQ.isLoading || tbQ.isLoading) && businessAccounts.length === 0 && [1, 2, 3, 4, 5].map(i => (
+            <div key={i} className="border border-border rounded-lg bg-card p-3 animate-pulse" role="status" aria-label="Loading balances">
+              <div className="h-5 w-5 rounded bg-muted mb-2" />
+              <div className="h-2.5 w-16 rounded bg-muted mb-2" />
+              <div className="h-4 w-20 rounded bg-muted" />
+            </div>
+          ))}
           {businessAccounts.map(a => {
             const bal = getBalance(a.code)
             const icon = BUSINESS_ACCOUNT_ICONS[a.code] ?? '💼'
@@ -132,7 +139,8 @@ export function AccountsView({ user }: { user: MeUser }) {
             <span className="text-xs font-medium text-emerald-600" data-num>{formatMoney(inflowTotal)}</span>
           </div>
           <div className="divide-y divide-border/40">
-            {inflowVouchers.length === 0 && <p className="p-3 text-xs text-muted-foreground">Koi recent received entry nahi</p>}
+            {dayBookQ.isLoading && <p className="p-3 text-xs text-muted-foreground" role="status">Loading…</p>}
+            {!dayBookQ.isLoading && inflowVouchers.length === 0 && <p className="p-3 text-xs text-muted-foreground">Koi recent received entry nahi</p>}
             {inflowVouchers.slice(0, 6).map((v: any) => (
               <div key={v.voucherId} className="px-4 py-2 flex items-center justify-between gap-2">
                 <div className="min-w-0"><div className="text-sm text-foreground truncate">{v.memo || 'Money received'}</div><div className="text-[10px] text-muted-foreground" data-num>{bizDate(v.voucherDate)}</div></div>
@@ -147,7 +155,8 @@ export function AccountsView({ user }: { user: MeUser }) {
             <span className="text-xs font-medium text-amber-600" data-num>{formatMoney(outflowTotal)}</span>
           </div>
           <div className="divide-y divide-border/40">
-            {outflowVouchers.length === 0 && <p className="p-3 text-xs text-muted-foreground">Koi recent payment/expense entry nahi</p>}
+            {dayBookQ.isLoading && <p className="p-3 text-xs text-muted-foreground" role="status">Loading…</p>}
+            {!dayBookQ.isLoading && outflowVouchers.length === 0 && <p className="p-3 text-xs text-muted-foreground">Koi recent payment/expense entry nahi</p>}
             {outflowVouchers.slice(0, 6).map((v: any) => (
               <div key={v.voucherId} className="px-4 py-2 flex items-center justify-between gap-2">
                 <div className="min-w-0"><div className="text-sm text-foreground truncate">{v.memo || (v.voucherType === 'EX' ? 'Expense' : 'Payment')}</div><div className="text-[10px] text-muted-foreground" data-num>{bizDate(v.voucherDate)}</div></div>
