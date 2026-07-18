@@ -25,7 +25,6 @@ import {
   Plus,
   Tag,
   PackagePlus,
-  TrendingDown,
   Clock,
   ChevronDown,
   Briefcase,
@@ -84,8 +83,8 @@ import { AiSettingsView } from '@/components/erp/views/ai-settings-view'
 import { SupabaseStatusBadge } from '@/components/erp/supabase-status-badge'
 
 // ──────────────────────────────────────────────────────────────────────────
-// Navigation model: 3 clear sections — Daily Work, Finance & Assets,
-// Accounting & Reports. Each with grouped sub-items.
+// Navigation model: 6 compact top-level groups — Home, Daily Work, Money,
+// Inventory, Advanced Accounting, Settings.
 // Each sub-item has a permission/ownerOnly gate. A category is visible
 // only if at least one of its sub-items is visible to the user.
 // ──────────────────────────────────────────────────────────────────────────
@@ -106,98 +105,54 @@ type NavCategory = {
   /** Optional direct key for categories that are also a page (e.g. Home). */
   directKey?: string
   items: SubItem[]
-  /** Visual section group for desktop sidebar */
-  section?: 'daily' | 'finance' | 'accounting'
 }
 
 const NAV_CATEGORIES: NavCategory[] = [
-  // ── SECTION 1: Daily Work ──
   {
     id: 'dashboard',
     label: 'Home',
     icon: HomeIcon,
-    section: 'daily',
     items: [
       { key: 'home', label: 'Dashboard', short: 'Home', icon: LayoutDashboard },
     ],
   },
   {
-    id: 'sales',
-    label: 'Sales',
-    icon: ShoppingCart,
-    section: 'daily',
+    id: 'daily-work',
+    label: 'Daily Work',
+    icon: Briefcase,
     items: [
       { key: 'counter-sale', label: 'Counter Sale', short: 'Counter', icon: ShoppingCart, perm: 'can_create_sales' },
       { key: 'online-sale', label: 'Online Sale', short: 'Online', icon: ShoppingCart, perm: 'can_create_sales' },
       { key: 'ofc-sale', label: 'OFC Sale', short: 'OFC', icon: ShoppingCart, perm: 'can_create_sales' },
       { key: 'sales-list', label: 'Sales List', short: 'List', icon: ClipboardList, perm: 'can_view_sales' },
       { key: 'delivery', label: 'Delivery / Riders', short: 'Delivery', icon: Bike, perm: 'can_view_delivery_orders' },
-    ],
-  },
-  {
-    id: 'purchases',
-    label: 'Purchases',
-    icon: Receipt,
-    section: 'daily',
-    items: [
       { key: 'purchases', label: 'Purchase Bills', short: 'Purchases', icon: Receipt, perm: 'can_view_purchases' },
       { key: 'vendors', label: 'Vendors', short: 'Vendors', icon: Users, perm: 'can_view_purchases' },
+      { key: 'expense-batch', label: 'Add Expense', short: 'Expenses', icon: Receipt, perm: 'can_create_expense_batch' },
+      { key: 'my-reports', label: 'Salesman Reports', short: 'Reports', icon: BarChart3, perm: 'can_view_own_sales' },
     ],
   },
   {
-    id: 'expenses',
-    label: 'Expenses',
-    icon: TrendingDown,
-    section: 'daily',
+    id: 'money',
+    label: 'Money',
+    icon: Wallet,
     items: [
-      { key: 'expense-batch', label: 'Add Expense', short: 'Expenses', icon: Receipt, perm: 'can_create_expense_batch' },
+      { key: 'accounts', label: 'Accounts & Balances', short: 'Accounts', icon: DollarSign, perm: 'can_view_account_balances' },
       { key: 'petty-cash', label: 'Petty Cash', short: 'Petty', icon: Wallet, perm: 'can_manage_petty_cash' },
     ],
   },
   {
-    id: 'salesman',
-    label: 'Salesman',
-    icon: Users,
-    section: 'daily',
+    id: 'inventory',
+    label: 'Inventory',
+    icon: Package,
     items: [
-      { key: 'my-reports', label: 'Salesman Reports', short: 'Reports', icon: BarChart3, perm: 'can_view_own_sales' },
+      { key: 'inventory', label: 'Products & Stock', short: 'Stock', icon: Package, perm: 'can_view_products' },
     ],
   },
-  // ── SECTION 2: Finance & Assets ──
-  {
-    id: 'receivables-payables',
-    label: 'A/c Receivables & Payables',
-    icon: ArrowLeftRight,
-    section: 'finance',
-    items: [
-      { key: 'accounts', label: 'Receivables & Payables', short: 'A/c', icon: ArrowLeftRight, perm: 'can_view_account_balances' },
-    ],
-  },
-  {
-    id: 'capital',
-    label: 'Capital',
-    icon: Briefcase,
-    section: 'finance',
-    items: [
-      { key: 'accounts', label: 'Capital Accounts', short: 'Capital', icon: Briefcase, perm: 'can_view_account_balances' },
-    ],
-  },
-  {
-    id: 'assets',
-    label: 'Current Assets',
-    icon: Wallet,
-    section: 'finance',
-    items: [
-      { key: 'accounts', label: 'Cash, Bank & Wallet', short: 'Cash', icon: DollarSign, perm: 'can_view_account_balances' },
-      { key: 'inventory', label: 'Inventory / Stock', short: 'Stock', icon: Package, perm: 'can_view_products' },
-    ],
-  },
-  // ── SECTION 3: Accounting & Reports ──
   {
     id: 'accounting',
-    label: 'Accounting',
-    icon: Briefcase,
-    section: 'accounting',
+    label: 'Advanced Accounting',
+    icon: BookOpen,
     items: [
       { key: 'day-book', label: 'Day Book', short: 'Day Book', icon: BookOpen, perm: 'can_view_day_book' },
       { key: 'journal-voucher', label: 'Journal Voucher', short: 'JV', icon: ClipboardList, perm: 'can_create_journal_voucher' },
@@ -207,14 +162,6 @@ const NAV_CATEGORIES: NavCategory[] = [
       { key: 'trial-balance', label: 'Trial Balance', short: 'TB', icon: Scale, perm: 'can_view_trial_balance' },
       { key: 'opening-balance', label: 'Opening Balance', short: 'Opening', icon: Plus, perm: 'can_post_opening_voucher' },
       { key: 'coa', label: 'Chart of Accounts', short: 'CoA', icon: BookOpen, perm: 'can_view_setup' },
-    ],
-  },
-  {
-    id: 'reports',
-    label: 'Reports',
-    icon: BarChart3,
-    section: 'accounting',
-    items: [
       { key: 'reports', label: 'Financial Reports', short: 'Reports', icon: FileText, perm: 'can_view_trial_balance' },
     ],
   },
@@ -222,7 +169,6 @@ const NAV_CATEGORIES: NavCategory[] = [
     id: 'settings',
     label: 'Settings',
     icon: Settings,
-    section: 'accounting',
     items: [
       { key: 'setup', label: 'Setup Overview', short: 'Setup', icon: Settings, perm: 'can_view_setup' },
       { key: 'business-accounts', label: 'Business Accounts', short: 'Accounts', icon: Wallet, perm: 'can_view_setup' },
@@ -262,17 +208,6 @@ function categoryForKey(key: string): string | null {
     if (cat.items.some((i) => i.key === key)) return cat.id
   }
   return null
-}
-
-/** Get the section label for a category id */
-function sectionLabelFor(id: string): string | null {
-  const cat = NAV_CATEGORIES.find(c => c.id === id)
-  if (!cat || !cat.section) return null
-  switch (cat.section) {
-    case 'daily': return 'Daily Work'
-    case 'finance': return 'Finance & Assets'
-    case 'accounting': return 'Accounting & Reports'
-  }
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -334,10 +269,12 @@ export function DashboardShell({ user, onSignOut }: { user: MeUser; onSignOut: (
 
   const cats = useMemo(() => visibleCategories(user), [user])
 
-  // Expand state: default-expand all categories on first load.
+  // Expand state: all groups collapsed by default; only the active page's
+  // group starts open (Home is a direct entry, never a collapsible group).
   const [expanded, setExpanded] = useState<Set<string>>(() => {
     const init = new Set<string>()
-    for (const cat of cats) init.add(cat.id)
+    const activeCat = categoryForKey(active)
+    if (activeCat && activeCat !== 'dashboard') init.add(activeCat)
     return init
   })
 
@@ -494,7 +431,7 @@ export function DashboardShell({ user, onSignOut }: { user: MeUser; onSignOut: (
   )
 }
 
-/** Render sidebar categories grouped by section */
+/** Render the six top-level sidebar groups */
 function renderSidebarCategories(
   cats: Array<NavCategory & { visibleItems: SubItem[] }>,
   activeKey: string,
@@ -502,42 +439,19 @@ function renderSidebarCategories(
   onToggle: (id: string) => void,
   onSelect: (k: string) => void,
 ) {
-  const sections: { label: string; cats: typeof cats }[] = []
-  // Group by section in order
-  const sectionOrder = ['daily', 'finance', 'accounting'] as const
-  const sectionLabels: Record<string, string> = {
-    daily: 'Daily Work',
-    finance: 'Finance & Assets',
-    accounting: 'Accounting & Reports',
-  }
-
-  for (const sec of sectionOrder) {
-    const group = cats.filter(c => c.section === sec)
-    if (group.length > 0) {
-      sections.push({ label: sectionLabels[sec], cats: group })
-    }
-  }
-
   return (
-    <>
-      {sections.map((section) => (
-        <div key={section.label} className="mb-4">
-          <div className="text-[10px] uppercase tracking-widest text-muted-foreground/60 font-semibold px-3 py-1.5">
-            {section.label}
-          </div>
-          {section.cats.map((cat) => (
-            <SidebarCategory
-              key={cat.id}
-              category={cat}
-              activeKey={activeKey}
-              isExpanded={expanded.has(cat.id)}
-              onToggle={() => onToggle(cat.id)}
-              onSelect={onSelect}
-            />
-          ))}
-        </div>
+    <div className="space-y-0.5">
+      {cats.map((cat) => (
+        <SidebarCategory
+          key={cat.id}
+          category={cat}
+          activeKey={activeKey}
+          isExpanded={expanded.has(cat.id)}
+          onToggle={() => onToggle(cat.id)}
+          onSelect={onSelect}
+        />
       ))}
-    </>
+    </div>
   )
 }
 
