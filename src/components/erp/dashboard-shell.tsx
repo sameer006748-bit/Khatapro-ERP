@@ -752,7 +752,13 @@ function ViewRouter({
     if (user.roleName === 'Accountant') return <AccountantDashboard user={user} />
     if (user.roleName === 'Salesman') return <SalesmanDashboard user={user} />
     if (user.roleName === 'Rider') return <RiderDashboard user={user} />
-    return <OwnerDashboard user={user} />
+    // No Owner fallback: unknown roles must never see Owner-only business data.
+    return (
+      <div className="card-3d p-8 text-center max-w-md mx-auto">
+        <p className="text-sm font-medium text-foreground">Welcome, {user.displayName}.</p>
+        <p className="text-xs text-muted-foreground mt-1">Your dashboard isn’t configured for this role. Use the menu to open your available workspaces, or open My Profile.</p>
+      </div>
+    )
   }
   if (active === 'setup') return <SetupView user={user} />
   if (active === 'business-accounts') return <BusinessAccountsView user={user} />

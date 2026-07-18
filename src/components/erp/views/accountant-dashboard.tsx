@@ -157,9 +157,9 @@ export function AccountantDashboard({ user }: { user: any }) {
           <GlassPanel padding="p-5 sm:p-6">
             <SectionHeader title="Recent Invoices" subtitle="Latest sales transactions"
               action={<button onClick={() => router.push('/?page=sales-list')} className="text-xs text-primary hover:underline flex items-center gap-1">View all <ArrowRight className="size-3" /></button>} />
-            {data.recentInvoices.length === 0 ? <EmptyState message="No invoices yet" /> : (
+            {(data.recentInvoices ?? []).length === 0 ? <EmptyState message="No invoices yet" /> : (
               <div className="space-y-2">
-                {data.recentInvoices.map(inv => (
+                {(data.recentInvoices ?? []).map(inv => (
                   <div key={inv.id} className="flex items-center justify-between p-3 rounded-xl bg-white/50 border border-white/10 hover:bg-white/70 transition-colors">
                     <div className="flex items-center gap-3 min-w-0">
                       <div className="size-9 rounded-lg bg-primary/10 flex items-center justify-center shrink-0"><FileText className="size-4 text-primary" /></div>
@@ -183,9 +183,9 @@ export function AccountantDashboard({ user }: { user: any }) {
           <GlassPanel padding="p-5 sm:p-6">
             <SectionHeader title="Recent Purchases" subtitle="Latest procurement entries"
               action={<button onClick={() => router.push('/?page=purchases')} className="text-xs text-primary hover:underline flex items-center gap-1">View all <ArrowRight className="size-3" /></button>} />
-            {data.recentPurchases.length === 0 ? <EmptyState message="No purchases yet" /> : (
+            {(data.recentPurchases ?? []).length === 0 ? <EmptyState message="No purchases yet" /> : (
               <div className="space-y-2">
-                {data.recentPurchases.map(pur => (
+                {(data.recentPurchases ?? []).map(pur => (
                   <div key={pur.id} className="flex items-center justify-between p-3 rounded-xl bg-white/50 border border-white/10 hover:bg-white/70 transition-colors">
                     <div className="flex items-center gap-3 min-w-0">
                       <div className="size-9 rounded-lg bg-amber-500/10 flex items-center justify-center shrink-0"><Wallet className="size-4 text-amber-600 dark:text-amber-400" /></div>

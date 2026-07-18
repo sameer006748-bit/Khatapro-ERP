@@ -51,7 +51,7 @@ export function SalesmanDashboard({ user }: { user: any }) {
     )
   }
 
-  if (error || !data) {
+  if (error || !data || !data.summary) {
     return (
       <div className="space-y-6">
         <GlassPanel padding="p-8">
@@ -148,9 +148,9 @@ export function SalesmanDashboard({ user }: { user: any }) {
         <GlassPanel padding="p-5 sm:p-6">
           <SectionHeader title="Recent Invoices" subtitle="Latest sales transactions"
             action={<button onClick={() => router.push('/?page=sales-list')} className="text-xs text-primary hover:underline flex items-center gap-1">View all <ArrowRight className="size-3" /></button>} />
-          {data.rows.length === 0 ? <EmptyState message="No invoices yet" /> : (
+          {(data.rows ?? []).length === 0 ? <EmptyState message="No invoices yet" /> : (
             <div className="space-y-2">
-              {data.rows.map(inv => (
+              {(data.rows ?? []).map(inv => (
                 <div key={inv.id} className="flex items-center justify-between p-3 rounded-xl bg-white/50 border border-white/10 hover:bg-white/70 transition-colors">
                   <div className="flex items-center gap-3 min-w-0">
                     <div className="size-9 rounded-lg bg-primary/10 flex items-center justify-center shrink-0"><FileText className="size-4 text-primary" /></div>

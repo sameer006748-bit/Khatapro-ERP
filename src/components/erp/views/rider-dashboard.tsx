@@ -77,7 +77,7 @@ export function RiderDashboard({ user }: { user: any }) {
     )
   }
 
-  const { summary, recentOrders } = data
+  const { summary, recentOrders = [] } = data
 
   const quickActions = [
     { label: 'My Orders', icon: Package, action: () => router.push('/?page=delivery') },

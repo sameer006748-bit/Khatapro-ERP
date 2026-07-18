@@ -31,8 +31,8 @@ async function fetchBootstrap(): Promise<{ bootstrapOpen: boolean }> {
 }
 
 export function ErpApp() {
-  const me = useQuery({ queryKey: ['me'], queryFn: fetchMe, refetchOnMount: true })
-  const boot = useQuery({ queryKey: ['bootstrap'], queryFn: fetchBootstrap })
+  const me = useQuery({ queryKey: ['me'], queryFn: fetchMe, staleTime: 60_000 })
+  const boot = useQuery({ queryKey: ['bootstrap'], queryFn: fetchBootstrap, staleTime: 300_000 })
 
   const isLoading = me.isLoading || boot.isLoading
   const user = me.data?.user ?? null
