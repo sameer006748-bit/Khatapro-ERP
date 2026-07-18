@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { toast } from 'sonner'
-import { Plus, Search, Package, Wallet, TrendingDown, X, CheckCircle2, AlertCircle, MoreVertical, History, Printer, FileText, ArrowLeft, RefreshCw, ArrowRightLeft, ArrowUpFromLine, BookOpen } from 'lucide-react'
+import { Plus, Search, Package, Wallet, TrendingDown, X, CheckCircle2, AlertCircle, MoreVertical, History, Printer, FileText, ArrowLeft, RefreshCw, ArrowRightLeft, ArrowUpFromLine, BookOpen, ChevronRight } from 'lucide-react'
 import { formatWholeRupees, parseMoney } from '@/lib/format'
 import { bizDate } from '@/lib/dates'
 import { motion, AnimatePresence } from 'framer-motion'
@@ -253,6 +253,8 @@ function PurchaseDetailModal({ purchaseId, user, canPay, canReturn, onClose, onP
       {p.payments && p.payments.length > 0 && <div className="border border-border rounded-lg p-2"><div className="text-[10px] uppercase text-muted-foreground mb-1">Payments</div><div className="space-y-0.5">{p.payments.map(pp => <div key={pp.id} className="flex justify-between text-xs"><span className="text-muted-foreground">{pp.paymentType.replace(/_/g, ' ')} · {bizDate(pp.paymentDate)}</span><span data-num>{formatWholeRupees(BigInt(pp.amount), false)}</span></div>)}</div></div>}
       {/* Replacements */}
       {replacements.length > 0 && <div className="border border-border rounded-lg p-2"><div className="text-[10px] uppercase text-muted-foreground mb-1 flex items-center gap-1"><ArrowRightLeft className="size-3" /> Replacements</div><div className="space-y-0.5">{replacements.map(r => <div key={r.id} className="flex justify-between text-xs"><span data-num>{r.replacementNo}</span><span className={BigInt(r.valueDiff) > 0n ? 'text-amber-600' : BigInt(r.valueDiff) < 0n ? 'text-emerald-600' : 'text-muted-foreground'} data-num>{BigInt(r.valueDiff) === 0n ? 'Equal' : formatWholeRupees(BigInt(r.valueDiff), false)}</span></div>)}</div></div>}
+      {/* Accounting impact (Owner/Accountant only) */}
+      {p.voucherId && user.permissions.includes('can_view_day_book') && <AccountingImpact voucherId={p.voucherId} />}
       {/* Actions */}
       <div className="flex gap-2 pt-2 border-t border-border flex-wrap">
         <Button variant="outline" size="sm" onClick={printPurchase}><Printer className="size-3.5" /> Print</Button>
@@ -356,6 +358,50 @@ function PurchaseDetailModal({ purchaseId, user, canPay, canReturn, onClose, onP
       </div>
     </div>
   </Shell>
+}
+
+// Accounting Impact — shows actual posted voucher lines (Debit/Credit) for the
+// transaction. Collapsed by default; fetches existing voucher data only when
+// expanded. Rendered only for roles with can_view_day_book.
+type VoucherLine = { id: string; accountCode: string; accountName: string; debit: string; credit: string }
+
+function AccountingImpact({ voucherId }: { voucherId: string }) {
+  const [open, setOpen] = useState(false)
+  const q = useQuery<{ voucher: { totalDebit: string; totalCredit: string; lines: VoucherLine[] } }>({
+    queryKey: ['voucher', voucherId],
+    queryFn: () => fetch(`/api/vouchers/${voucherId}`).then(r => r.json()),
+    enabled: open && !!voucherId, retry: 1, retryDelay: 500,
+  })
+  const v = q.data?.voucher
+  return (
+    <div className="border border-border rounded-lg overflow-hidden">
+      <button type="button" onClick={() => setOpen(o => !o)} className="w-full flex items-center justify-between px-3 py-2 text-xs font-medium hover:bg-muted/20 press-sm">
+        <span className="flex items-center gap-1.5"><BookOpen className="size-3.5 text-primary" /> See Accounting Entry</span>
+        <ChevronRight className={`size-3.5 text-muted-foreground transition-transform ${open ? 'rotate-90' : ''}`} />
+      </button>
+      {open && (
+        <div className="border-t border-border p-2">
+          {q.isLoading ? <p className="text-xs text-muted-foreground py-2 text-center" role="status">Loading…</p>
+          : q.isError || !v || v.lines.length === 0 ? <p className="text-xs text-muted-foreground py-2 text-center">Accounting entry not available</p>
+          : <div className="space-y-1">
+              {v.lines.map(l => (
+                <div key={l.id} className="flex items-center justify-between gap-2 text-xs border-b border-border/40 last:border-0 pb-1 last:pb-0">
+                  <div className="min-w-0"><div className="text-foreground truncate">{l.accountName}</div><div className="text-[10px] text-muted-foreground" data-num>{l.accountCode}</div></div>
+                  <div className="flex gap-3 shrink-0 text-right">
+                    <div className="w-20"><div className="text-[9px] uppercase text-muted-foreground">Debit</div><div data-num>{BigInt(l.debit) > 0n ? formatWholeRupees(BigInt(l.debit), false) : '—'}</div></div>
+                    <div className="w-20"><div className="text-[9px] uppercase text-muted-foreground">Credit</div><div data-num>{BigInt(l.credit) > 0n ? formatWholeRupees(BigInt(l.credit), false) : '—'}</div></div>
+                  </div>
+                </div>
+              ))}
+              <div className="flex items-center justify-between gap-2 text-xs font-semibold pt-1 border-t border-border">
+                <span className="text-[10px] uppercase tracking-wider text-muted-foreground">Totals</span>
+                <div className="flex gap-3 shrink-0 text-right"><span className="w-20" data-num>{formatWholeRupees(BigInt(v.totalDebit), false)}</span><span className="w-20" data-num>{formatWholeRupees(BigInt(v.totalCredit), false)}</span></div>
+              </div>
+            </div>}
+        </div>
+      )}
+    </div>
+  )
 }
 
 function PayVendorModal({ purchase, user, onClose }: { purchase: Purchase; user: MeUser; onClose: () => void }) {
