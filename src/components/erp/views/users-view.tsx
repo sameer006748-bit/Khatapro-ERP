@@ -15,7 +15,7 @@ import {
 import { formatTableDate } from '@/lib/format'
 import type { MeUser } from '@/components/erp/erp-app'
 import { toast } from 'sonner'
-import { Users as UsersIcon, Plus, X, ShieldCheck, Lock } from 'lucide-react'
+import { Users as UsersIcon, Plus, X, ShieldCheck, Lock, KeyRound } from 'lucide-react'
 
 type UserRow = {
   id: string
@@ -46,6 +46,7 @@ export function UsersView({ user }: { user: MeUser }) {
   const qc = useQueryClient()
   const isOwner = user.roleName === 'Owner/Admin'
   const [open, setOpen] = useState(false)
+  const [resetUser, setResetUser] = useState<UserRow | null>(null)
 
   const q = useQuery<{ users: UserRow[]; roles: RoleRow[] }>({
     queryKey: ['users'],
@@ -75,6 +76,24 @@ export function UsersView({ user }: { user: MeUser }) {
     onError: (e: Error) => toast.error(`Failed: ${e.message}`),
   })
 
+  const resetMut = useMutation({
+    mutationFn: async (payload: { userId: string; newPassword: string }) => {
+      const r = await fetch('/api/setup/users/reset-password', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      const j = await r.json()
+      if (!r.ok) throw new Error(j?.error ?? 'RESET_FAILED')
+      return j
+    },
+    onSuccess: () => {
+      toast.success('Password reset successfully')
+      setResetUser(null)
+    },
+    onError: (e: Error) => toast.error(e.message),
+  })
+
   if (!isOwner) {
     return (
       <div className="card-3d p-8 text-center">
@@ -83,7 +102,7 @@ export function UsersView({ user }: { user: MeUser }) {
         </div>
         <p className="text-sm font-medium text-foreground">Restricted to Owner/Admin</p>
         <p className="text-xs text-muted-foreground mt-1">
-          You don&apos;t have permission to manage users and roles.
+          You don't have permission to manage users and roles.
         </p>
       </div>
     )
@@ -94,7 +113,7 @@ export function UsersView({ user }: { user: MeUser }) {
       <div className="flex items-end justify-between gap-4 flex-wrap">
         <div>
           <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight text-foreground">
-            Users &amp; Roles
+            Users & Roles
           </h1>
           <p className="text-sm text-muted-foreground mt-1.5 max-w-2xl">
             After first-owner bootstrap, public registration is closed — invite new users from
@@ -138,6 +157,7 @@ export function UsersView({ user }: { user: MeUser }) {
                       <th className="text-left p-3.5 font-medium">Phone</th>
                       <th className="text-left p-3.5 font-medium">Status</th>
                       <th className="text-left p-3.5 font-medium">Created</th>
+                      <th className="text-right p-3.5 font-medium">Actions</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -187,6 +207,11 @@ export function UsersView({ user }: { user: MeUser }) {
                         <td className="p-3.5 text-xs text-muted-foreground" data-num>
                           {formatTableDate(u.createdAt)}
                         </td>
+                        <td className="p-3.5 text-right">
+                          {u.isActive && (
+                            <Button variant="ghost" size="sm" className="h-7 text-xs press-sm" onClick={() => setResetUser(u)}><KeyRound className="size-3 mr-1" /> Reset Password</Button>
+                          )}
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -229,6 +254,11 @@ export function UsersView({ user }: { user: MeUser }) {
                         </span>
                       )}
                     </div>
+                    {u.isActive && (
+                      <div className="mt-2">
+                        <Button variant="ghost" size="sm" className="w-full h-8 text-xs press-sm" onClick={() => setResetUser(u)}><KeyRound className="size-3 mr-1" /> Reset Password</Button>
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
@@ -267,6 +297,43 @@ export function UsersView({ user }: { user: MeUser }) {
               </div>
             ))}
           </div>
+        </div>
+      </div>
+
+      {resetUser && (
+        <ResetPasswordModal
+          displayName={resetUser.displayName}
+          email={resetUser.email}
+          onClose={() => setResetUser(null)}
+          onReset={(pwd) => resetMut.mutate({ userId: resetUser.id, newPassword: pwd })}
+          isPending={resetMut.isPending}
+        />
+      )}
+    </div>
+  )
+}
+
+function ResetPasswordModal({ displayName, email, onClose, onReset, isPending }: { displayName: string; email: string; onClose: () => void; onReset: (pwd: string) => void; isPending: boolean }) {
+  const [newPassword, setNewPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [error, setError] = useState('')
+  const canSubmit = newPassword.length >= 8 && newPassword === confirmPassword
+  const handleSubmit = () => {
+    setError('')
+    if (newPassword.length < 8) { setError('Password must be at least 8 characters'); return }
+    if (newPassword !== confirmPassword) { setError('Passwords do not match'); return }
+    onReset(newPassword)
+  }
+  return (
+    <div className="fixed inset-0 z-50 bg-foreground/30 backdrop-blur-sm flex items-center justify-center p-4" onClick={onClose}>
+      <div className="border border-border rounded-xl bg-card shadow-xl p-5 w-full max-w-sm" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-4"><h3 className="text-sm font-semibold text-foreground">Reset Password</h3><button onClick={onClose} className="text-muted-foreground hover:text-foreground"><X className="size-4" /></button></div>
+        <div className="space-y-3">
+          <div className="text-xs text-muted-foreground">Resetting password for <strong>{displayName}</strong> ({email})</div>
+          <div><Label className="text-xs text-muted-foreground">New Password</Label><Input type="password" value={newPassword} onChange={e => setNewPassword(e.target.value)} placeholder="Min 8 characters" className="h-9 bg-background press-sm" /></div>
+          <div><Label className="text-xs text-muted-foreground">Confirm Password</Label><Input type="password" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} placeholder="Re-enter password" className="h-9 bg-background press-sm" /></div>
+          {error && <div className="text-xs text-destructive">{error}</div>}
+          <Button className="w-full press-sm" disabled={!canSubmit || isPending} onClick={handleSubmit}>{isPending ? 'Resetting…' : 'Reset Password'}</Button>
         </div>
       </div>
     </div>
