@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useMemo } from 'react'
+import { bizDateString } from '@/lib/dates'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -17,7 +18,7 @@ type Line = { key: string; accountId: string; debit: string; credit: string; mem
 
 export function JournalVoucherView({ user }: { user: MeUser }) {
   const qc = useQueryClient()
-  const [jvDate, setJvDate] = useState(new Date().toISOString().slice(0, 10))
+  const [jvDate, setJvDate] = useState(bizDateString(new Date()))
   const [memo, setMemo] = useState('')
   const [lines, setLines] = useState<Line[]>([
     { key: '1', accountId: '', debit: '', credit: '', memo: '' },

@@ -118,7 +118,7 @@ export function SalesListView() {
         <Button variant="outline" size="sm" className="h-10 press-sm" onClick={() => router.push('/?page=ofc-sale')}>
           <ShoppingCart className="size-4 mr-1.5" /> OFC Sale
         </Button>
-        <Button variant="outline" size="sm" className="h-10 press-sm" onClick={() => router.push('/?page=accounts')}>
+        <Button variant="outline" size="sm" className="h-10 press-sm" onClick={() => router.push('/?page=receipt-voucher')}>
           <ArrowDownToLine className="size-4 mr-1.5" /> Receive Payment
         </Button>
       </div>

@@ -9,7 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { toast } from 'sonner'
 import { Wallet, ArrowDownToLine, ArrowUpFromLine, BookOpen } from 'lucide-react'
 import { formatMoney, parseMoney } from '@/lib/format'
-import { bizDate } from '@/lib/dates'
+import { bizDate, bizDateString } from '@/lib/dates'
 import { motion, AnimatePresence } from 'framer-motion'
 import type { MeUser } from '@/components/erp/erp-app'
 
@@ -101,7 +101,7 @@ function TopupModal({ pettyCashAccountId, accounts, onClose }: { pettyCashAccoun
 
   const mut = useMutation({
     mutationFn: async () => {
-      const r = await fetch('/api/contra-entry', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ contraDate: new Date().toISOString().slice(0, 10), fromAccountId, toAccountId: pettyCashAccountId, amount, notes: notes || `Petty cash top-up from ${accounts.find(a => a.id === fromAccountId)?.name}` }) })
+      const r = await fetch('/api/contra-entry', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ contraDate: bizDateString(new Date()), fromAccountId, toAccountId: pettyCashAccountId, amount, notes: notes || `Petty cash top-up from ${accounts.find(a => a.id === fromAccountId)?.name}` }) })
       const j = await r.json(); if (!r.ok) throw new Error(j?.error ?? 'Failed'); return j
     },
     onSuccess: () => { toast.success('Petty cash topped up.'); void qc.invalidateQueries({ queryKey: ['trial-balance'] }); void qc.invalidateQueries({ queryKey: ['day-book'] }); onClose() },
@@ -126,7 +126,7 @@ function PettyExpenseModal({ pettyCashAccountId, expenseAccounts, onClose }: { p
   const mut = useMutation({
     mutationFn: async () => {
       // Use expense-batch with a single line
-      const r = await fetch('/api/expense-batch', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ expenseDate: new Date().toISOString().slice(0, 10), paymentAccountId: pettyCashAccountId, lines: [{ expenseAccountId, description: description || undefined, amount }], notes: 'Petty cash expense' }) })
+      const r = await fetch('/api/expense-batch', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ expenseDate: bizDateString(new Date()), paymentAccountId: pettyCashAccountId, lines: [{ expenseAccountId, description: description || undefined, amount }], notes: 'Petty cash expense' }) })
       const j = await r.json(); if (!r.ok) throw new Error(j?.error ?? 'Failed'); return j
     },
     onSuccess: () => { toast.success('Petty cash expense recorded.'); void qc.invalidateQueries({ queryKey: ['trial-balance'] }); void qc.invalidateQueries({ queryKey: ['day-book'] }); void qc.invalidateQueries({ queryKey: ['expenses'] }); onClose() },

@@ -11,7 +11,7 @@ import {
   ArrowRight,
   RefreshCw,
 } from 'lucide-react'
-import { useOwnerDashboard } from '@/hooks/use-owner-dashboard'
+import { useOwnSalesDashboard } from '@/hooks/use-owner-dashboard'
 import { GlassPanel, KpiCard, QuickActionButton, SectionHeader, EmptyState } from '@/components/erp/dashboard-components'
 import { formatWholeRupees } from '@/lib/format'
 import { useRouter } from 'next/navigation'
@@ -23,7 +23,7 @@ function formatDateTime(iso: string): string {
 
 export function SalesmanDashboard({ user }: { user: any }) {
   const router = useRouter()
-  const { data, isLoading, error, refetch } = useOwnerDashboard()
+  const { data, isLoading, error, refetch } = useOwnSalesDashboard()
 
   const container = {
     hidden: { opacity: 0 },
@@ -75,22 +75,22 @@ export function SalesmanDashboard({ user }: { user: any }) {
 
   const kpis = [
     {
-      label: 'Today Sales', value: formatWholeRupees(data.kpis.todaySales, true).replace('Rs ', 'PKR '),
-      sub: `${data.salesByType.counter.count} counter \u00B7 ${data.salesByType.online.count} online \u00B7 ${data.salesByType.ofc.count} OFC`,
+      label: 'Today Sales', value: formatWholeRupees(BigInt(data.summary.totalAmount), true).replace('Rs ', 'PKR '),
+      sub: `${data.summary.invoiceCount} invoice${data.summary.invoiceCount === 1 ? '' : 's'} today`,
       icon: ShoppingCart, accent: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400',
     },
     {
       label: 'Today Collections',
-      value: data.availability.todayCollections ? formatWholeRupees(data.kpis.todayCollections, true).replace('Rs ', 'PKR ') : 'Not available',
-      sub: data.availability.todayCollections ? 'Cash received today' : 'Receipt data unavailable',
+      value: formatWholeRupees(BigInt(data.summary.paidAmount), true).replace('Rs ', 'PKR '),
+      sub: 'Received against your sales',
       icon: Wallet, accent: 'bg-green-500/10 text-green-600 dark:text-green-400',
     },
     {
-      label: 'Today Net Cash Flow',
-      value: data.availability.todayNetCashFlow ? formatWholeRupees(data.kpis.todayNetCashFlow, true).replace('Rs ', 'PKR ') : 'Not available',
-      sub: data.availability.todayNetCashFlow ? 'Net cash movement' : 'Waiting for collections',
-      icon: data.availability.todayNetCashFlow ? TrendingUp : TrendingDown,
-      accent: data.availability.todayNetCashFlow ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400' : 'bg-orange-500/10 text-orange-600 dark:text-orange-400',
+      label: 'Today Outstanding',
+      value: formatWholeRupees(BigInt(data.summary.outstandingAmount), true).replace('Rs ', 'PKR '),
+      sub: 'Unpaid on your sales',
+      icon: data.summary.outstandingAmount === '0' ? TrendingUp : TrendingDown,
+      accent: data.summary.outstandingAmount === '0' ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400' : 'bg-orange-500/10 text-orange-600 dark:text-orange-400',
     },
   ]
 
@@ -148,20 +148,20 @@ export function SalesmanDashboard({ user }: { user: any }) {
         <GlassPanel padding="p-5 sm:p-6">
           <SectionHeader title="Recent Invoices" subtitle="Latest sales transactions"
             action={<button onClick={() => router.push('/?page=sales-list')} className="text-xs text-primary hover:underline flex items-center gap-1">View all <ArrowRight className="size-3" /></button>} />
-          {data.recentInvoices.length === 0 ? <EmptyState message="No invoices yet" /> : (
+          {data.rows.length === 0 ? <EmptyState message="No invoices yet" /> : (
             <div className="space-y-2">
-              {data.recentInvoices.map(inv => (
+              {data.rows.map(inv => (
                 <div key={inv.id} className="flex items-center justify-between p-3 rounded-xl bg-white/50 border border-white/10 hover:bg-white/70 transition-colors">
                   <div className="flex items-center gap-3 min-w-0">
                     <div className="size-9 rounded-lg bg-primary/10 flex items-center justify-center shrink-0"><FileText className="size-4 text-primary" /></div>
                     <div className="min-w-0">
-                      <div className="text-sm font-medium text-foreground truncate">{inv.invoiceNo}</div>
-                      <div className="text-xs text-muted-foreground truncate">{inv.customerName || 'Walk-in'} \u00B7 {formatDateTime(inv.invoiceDate)}</div>
+                      <div className="text-sm font-medium text-foreground truncate">{inv.invoice_no}</div>
+                      <div className="text-xs text-muted-foreground truncate">{inv.customer_name || 'Walk-in'} \u00B7 {formatDateTime(inv.invoice_date)}</div>
                     </div>
                   </div>
                   <div className="text-right shrink-0 ml-2">
                     <div className="text-sm font-semibold text-foreground">{formatWholeRupees(Number(inv.total), true).replace('Rs ', 'PKR ')}</div>
-                    <div className="text-[11px] text-muted-foreground">{inv.invoiceType}</div>
+                    <div className="text-[11px] text-muted-foreground">{inv.invoice_type}</div>
                   </div>
                 </div>
               ))}

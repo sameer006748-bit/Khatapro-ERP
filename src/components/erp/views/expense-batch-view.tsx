@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useMemo } from 'react'
+import { bizDateString } from '@/lib/dates'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -17,7 +18,7 @@ type ExpenseLine = { key: string; expenseAccountId: string; description: string;
 
 export function ExpenseBatchView({ user }: { user: MeUser }) {
   const qc = useQueryClient()
-  const [expenseDate, setExpenseDate] = useState(new Date().toISOString().slice(0, 10))
+  const [expenseDate, setExpenseDate] = useState(bizDateString(new Date()))
   const [paymentAccountId, setPaymentAccountId] = useState('')
   const [lines, setLines] = useState<ExpenseLine[]>([{ key: '1', expenseAccountId: '', description: '', amount: '' }])
   const [reference, setReference] = useState('')

@@ -9,7 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { toast } from 'sonner'
 import { Plus, Search, Package, Wallet, TrendingDown, X, CheckCircle2, AlertCircle, MoreVertical, Printer, FileText, RefreshCw, ArrowRightLeft, BookOpen, ChevronRight } from 'lucide-react'
 import { formatWholeRupees, parseMoney } from '@/lib/format'
-import { bizDate } from '@/lib/dates'
+import { bizDate, bizDateString } from '@/lib/dates'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useRouter } from 'next/navigation'
 import type { MeUser } from '@/components/erp/erp-app'
@@ -136,7 +136,7 @@ function AddPurchaseModal({ user, onClose, onViewPurchase }: { user: MeUser; onC
   const qc = useQueryClient()
   const [vendorId, setVendorId] = useState('')
   const [supplierBillNo, setSupplierBillNo] = useState('')
-  const [purchaseDate, setPurchaseDate] = useState(new Date().toISOString().slice(0, 10))
+  const [purchaseDate, setPurchaseDate] = useState(bizDateString(new Date()))
   const [cart, setCart] = useState<CartItem[]>([])
   const [payments, setPayments] = useState<Payment[]>([{ accountId: '', amountPaisas: '', paymentType: 'purchase_payment' }])
   const [search, setSearch] = useState('')

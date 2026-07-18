@@ -15,7 +15,7 @@ import {
   CheckCircle2, TrendingDown,
 } from 'lucide-react'
 import { formatMoney } from '@/lib/format'
-import { bizDate } from '@/lib/dates'
+import { bizDate, bizDateString } from '@/lib/dates'
 import { motion, AnimatePresence } from 'framer-motion'
 import type { MeUser } from '@/components/erp/erp-app'
 
@@ -331,7 +331,7 @@ function StockEntryModal({ products, onClose }: { products: Product[]; onClose: 
   const [productId, setProductId] = useState('')
   const [qty, setQty] = useState('')
   const [reason, setReason] = useState('')
-  const [date, setDate] = useState(new Date().toISOString().slice(0, 10))
+  const [date, setDate] = useState(bizDateString(new Date()))
   const mut = useMutation({
     mutationFn: async () => { const r = await fetch('/api/stock-movements', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ productId, movementType: 'adjustment_in', quantity: parseInt(qty), reason: reason || `Stock entry ${date}` }) }); const j = await r.json(); if (!r.ok) throw new Error(j?.error ?? 'Failed'); return j },
     onSuccess: () => { toast.success('Stock entry saved.'); void qc.invalidateQueries({ queryKey: ['products'] }); void qc.invalidateQueries({ queryKey: ['stock-movements'] }); onClose() },

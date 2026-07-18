@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useMemo } from 'react'
+import { bizDateString } from '@/lib/dates'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -23,7 +24,7 @@ export function OnlineSaleView({ user }: { user: MeUser }) {
     customerName: '', customerPhone: '', customerAddress: '', customerCity: '',
     source: 'WhatsApp', codAmount: '', deliveryFee: '', riderEarning: '',
     companyDeliveryIncome: '', advanceReceived: '', discountRupees: '',
-    invoiceDate: new Date().toISOString().slice(0, 10),
+    invoiceDate: bizDateString(new Date()),
   })
   const [items, setItems] = useState<Item[]>([{ key: '1', productId: '', productName: '', qty: '1', unitPrice: '' }])
   const [paymentAccountId, setPaymentAccountId] = useState('')
@@ -134,7 +135,7 @@ export function OnlineSaleView({ user }: { user: MeUser }) {
             <Button variant="ghost" className="press-sm" onClick={() => {
               setResult(null)
               setItems([{ key: String(Date.now()), productId: '', productName: '', qty: '1', unitPrice: '' }])
-              setForm({ customerName: '', customerPhone: '', customerAddress: '', customerCity: '', source: 'WhatsApp', codAmount: '', deliveryFee: '', riderEarning: '', companyDeliveryIncome: '', advanceReceived: '', discountRupees: '', invoiceDate: new Date().toISOString().slice(0, 10) })
+              setForm({ customerName: '', customerPhone: '', customerAddress: '', customerCity: '', source: 'WhatsApp', codAmount: '', deliveryFee: '', riderEarning: '', companyDeliveryIncome: '', advanceReceived: '', discountRupees: '', invoiceDate: bizDateString(new Date()) })
               setIdempotencyKey(crypto.randomUUID())
             }}><Globe className="size-4" /> New Order</Button>
           </div>

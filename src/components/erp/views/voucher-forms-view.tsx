@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useMemo } from 'react'
+import { bizDateString } from '@/lib/dates'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -35,7 +36,7 @@ function AccountingDetail({ drName, crName, amount }: { drName: string; crName: 
 
 export function PaymentVoucherView({ user }: { user: MeUser }) {
   const qc = useQueryClient()
-  const [paymentDate, setPaymentDate] = useState(new Date().toISOString().slice(0, 10))
+  const [paymentDate, setPaymentDate] = useState(bizDateString(new Date()))
   const [paidFromAccountId, setPaidFromAccountId] = useState('')
   const [debitAccountId, setDebitAccountId] = useState('')
   const [amount, setAmount] = useState('')
@@ -96,7 +97,7 @@ export function PaymentVoucherView({ user }: { user: MeUser }) {
 
 export function ReceiptVoucherView({ user }: { user: MeUser }) {
   const qc = useQueryClient()
-  const [receiptDate, setReceiptDate] = useState(new Date().toISOString().slice(0, 10))
+  const [receiptDate, setReceiptDate] = useState(bizDateString(new Date()))
   const [receivedIntoAccountId, setReceivedIntoAccountId] = useState('')
   const [creditAccountId, setCreditAccountId] = useState('')
   const [amount, setAmount] = useState('')
@@ -158,7 +159,7 @@ export function ReceiptVoucherView({ user }: { user: MeUser }) {
 
 export function ContraEntryView({ user }: { user: MeUser }) {
   const qc = useQueryClient()
-  const [contraDate, setContraDate] = useState(new Date().toISOString().slice(0, 10))
+  const [contraDate, setContraDate] = useState(bizDateString(new Date()))
   const [fromAccountId, setFromAccountId] = useState('')
   const [toAccountId, setToAccountId] = useState('')
   const [amount, setAmount] = useState('')

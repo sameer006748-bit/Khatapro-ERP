@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useMemo, useRef } from 'react'
+import { bizDateString } from '@/lib/dates'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -41,7 +42,7 @@ export function CounterSaleView({ user }: { user: MeUser }) {
   const qc = useQueryClient()
   const [salesmanId, setSalesmanId] = useState('')
   const [customerName, setCustomerName] = useState('')
-  const [invoiceDate] = useState(new Date().toISOString().slice(0, 10))
+  const [invoiceDate] = useState(bizDateString(new Date()))
   const [cart, setCart] = useState<CartItem[]>([])
   const [searchQuery, setSearchQuery] = useState('')
   const [showTempItem, setShowTempItem] = useState(false)

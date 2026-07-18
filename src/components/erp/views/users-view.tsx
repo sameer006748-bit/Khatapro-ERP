@@ -50,7 +50,12 @@ export function UsersView({ user }: { user: MeUser }) {
 
   const q = useQuery<{ users: UserRow[]; roles: RoleRow[] }>({
     queryKey: ['users'],
-    queryFn: () => fetch('/api/setup/users').then((r) => r.json()),
+    queryFn: async () => {
+      const r = await fetch('/api/setup/users')
+      const j = await r.json().catch(() => ({}))
+      if (!r.ok) throw new Error(j?.error ?? 'FETCH_FAILED')
+      return j
+    },
     enabled: isOwner,
   })
 
@@ -139,12 +144,14 @@ export function UsersView({ user }: { user: MeUser }) {
           <div className="px-5 py-3.5 border-b border-border flex items-center justify-between">
             <h2 className="text-sm font-semibold text-foreground">Users</h2>
             <span className="text-xs text-muted-foreground" data-num>
-              {q.data?.users.length ?? 0} total
+              {q.data?.users?.length ?? 0} total
             </span>
           </div>
 
           {q.isLoading ? (
             <div className="p-8 text-sm text-muted-foreground">Loading…</div>
+          ) : q.isError ? (
+            <div className="p-8 text-sm text-destructive">Failed to load users. Please try again.</div>
           ) : (
             <>
               {/* Desktop table */}
@@ -161,7 +168,7 @@ export function UsersView({ user }: { user: MeUser }) {
                     </tr>
                   </thead>
                   <tbody>
-                    {q.data?.users.map((u) => (
+                    {q.data?.users?.map((u) => (
                       <tr
                         key={u.id}
                         className="border-b border-border/60 last:border-0 hover:bg-accent/30 transition-colors"
@@ -220,7 +227,7 @@ export function UsersView({ user }: { user: MeUser }) {
 
               {/* Mobile cards */}
               <div className="sm:hidden divide-y divide-border/60">
-                {q.data?.users.map((u) => (
+                {q.data?.users?.map((u) => (
                   <div key={u.id} className="p-4">
                     <div className="flex items-center gap-3">
                       <div className="size-10 rounded-full bg-accent grid place-items-center text-sm font-semibold text-accent-foreground shrink-0">
@@ -272,7 +279,7 @@ export function UsersView({ user }: { user: MeUser }) {
             <h2 className="text-sm font-semibold text-foreground">Roles</h2>
           </div>
           <div className="divide-y divide-border/60">
-            {q.data?.roles.map((r) => (
+            {q.data?.roles?.map((r) => (
               <div key={r.id} className="p-4">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">

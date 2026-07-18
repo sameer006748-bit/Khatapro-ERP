@@ -9,7 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { toast } from 'sonner'
 import { Plus, Wallet, ArrowDownToLine, ArrowUpFromLine, Receipt as ReceiptIcon, ArrowLeftRight, Coffee, Settings2, TrendingUp, TrendingDown, BookOpen, ChevronRight, X, CheckCircle2, AlertCircle } from 'lucide-react'
 import { formatMoney, parseMoney } from '@/lib/format'
-import { bizDate } from '@/lib/dates'
+import { bizDate, bizDateString } from '@/lib/dates'
 import { motion, AnimatePresence } from 'framer-motion'
 import type { MeUser } from '@/components/erp/erp-app'
 
@@ -327,7 +327,7 @@ const PAY_PURPOSES = [
 
 function MoneyReceivedModal({ accounts, businessAccounts, onClose }: { accounts: Account[]; businessAccounts: Account[]; onClose: () => void }) {
   const qc = useQueryClient()
-  const [date, setDate] = useState(new Date().toISOString().slice(0, 10))
+  const [date, setDate] = useState(bizDateString(new Date()))
   const [amount, setAmount] = useState('')
   const [receivedIntoId, setReceivedIntoId] = useState('')
   const [purposeCode, setPurposeCode] = useState('1200')
@@ -372,7 +372,7 @@ function MoneyReceivedModal({ accounts, businessAccounts, onClose }: { accounts:
 
 function MoneyPaidModal({ accounts, businessAccounts, onClose }: { accounts: Account[]; businessAccounts: Account[]; onClose: () => void }) {
   const qc = useQueryClient()
-  const [date, setDate] = useState(new Date().toISOString().slice(0, 10))
+  const [date, setDate] = useState(bizDateString(new Date()))
   const [amount, setAmount] = useState('')
   const [paidFromId, setPaidFromId] = useState('')
   const [purposeCode, setPurposeCode] = useState('2010')
@@ -416,7 +416,7 @@ function MoneyPaidModal({ accounts, businessAccounts, onClose }: { accounts: Acc
 
 function ExpenseModal({ expenseAccounts, businessAccounts, presetPaidFrom, onClose }: { expenseAccounts: Account[]; businessAccounts: Account[]; presetPaidFrom: string | null; onClose: () => void }) {
   const qc = useQueryClient()
-  const [date, setDate] = useState(new Date().toISOString().slice(0, 10))
+  const [date, setDate] = useState(bizDateString(new Date()))
   const [paidFromId, setPaidFromId] = useState(presetPaidFrom ?? '')
   const [lines, setLines] = useState<Array<{ key: string; expenseAccountId: string; description: string; amount: string }>>([{ key: '1', expenseAccountId: '', description: '', amount: '' }])
   const [reference, setReference] = useState('')
@@ -473,7 +473,7 @@ function ExpenseModal({ expenseAccounts, businessAccounts, presetPaidFrom, onClo
 
 function TransferModal({ businessAccounts, presetTo, onClose }: { businessAccounts: Account[]; presetTo: string | null; onClose: () => void }) {
   const qc = useQueryClient()
-  const [date, setDate] = useState(new Date().toISOString().slice(0, 10))
+  const [date, setDate] = useState(bizDateString(new Date()))
   const [fromId, setFromId] = useState('')
   const [toId, setToId] = useState(presetTo ?? '')
   const [amount, setAmount] = useState('')
@@ -513,7 +513,7 @@ function TransferModal({ businessAccounts, presetTo, onClose }: { businessAccoun
 
 function AdjustmentModal({ accounts, onClose }: { accounts: Account[]; onClose: () => void }) {
   const qc = useQueryClient()
-  const [date, setDate] = useState(new Date().toISOString().slice(0, 10))
+  const [date, setDate] = useState(bizDateString(new Date()))
   const [accountId, setAccountId] = useState('')
   const [direction, setDirection] = useState<'increase' | 'decrease'>('increase')
   const [amount, setAmount] = useState('')
