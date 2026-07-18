@@ -15,6 +15,7 @@ export type MeUser = {
   businessId: string
   profileId: string
   permissions: string[]
+  phone?: string | null
 }
 
 async function fetchMe(): Promise<{ user: MeUser | null }> {

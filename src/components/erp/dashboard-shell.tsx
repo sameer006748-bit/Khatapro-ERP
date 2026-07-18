@@ -80,6 +80,8 @@ import { SalesmanReportsView } from '@/components/erp/views/salesman-reports-vie
 import { AccountsView } from '@/components/erp/views/accounts-view'
 import { AdvancedView } from '@/components/erp/views/advanced-view'
 import { AiSettingsView } from '@/components/erp/views/ai-settings-view'
+import { MyProfileView } from '@/components/erp/views/my-profile-view'
+
 import { SupabaseStatusBadge } from '@/components/erp/supabase-status-badge'
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -177,6 +179,7 @@ const NAV_CATEGORIES: NavCategory[] = [
       { key: 'audit', label: 'Audit Log', short: 'Audit', icon: ScrollText, perm: 'can_view_audit_log' },
       { key: 'ai-settings', label: 'AI Settings', short: 'AI', icon: Sparkles, ownerOnly: true },
       { key: 'biz-day-test', label: 'Biz-Day Test', short: 'Biz-Day', icon: Clock, ownerOnly: true },
+      { key: 'my-profile', label: 'My Profile', short: 'Profile', icon: Shield },
     ],
   },
 ]
@@ -794,6 +797,7 @@ function ViewRouter({
 
   // AI Settings (Phase 10)
   if (active === 'ai-settings' && user.roleName === 'Owner/Admin') return <AiSettingsView />
+  if (active === 'my-profile') return <MyProfileView user={user} />
 
   // Advanced
   if (active === 'accounts') return <AccountsView user={user} />

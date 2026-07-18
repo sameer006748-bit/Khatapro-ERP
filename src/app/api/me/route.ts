@@ -29,6 +29,7 @@ export async function GET() {
       businessId: loaded.businessId,
       profileId: loaded.profileId,
       permissions: Array.from(loaded.permissions),
+      phone: loaded.phone ?? null,
     },
   })
 }

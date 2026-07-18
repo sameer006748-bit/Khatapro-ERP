@@ -23,6 +23,7 @@ export type SessionUser = {
   roleName: string
   displayName: string
   email: string
+  phone: string | null
   permissions: Set<string>
 }
 
@@ -58,6 +59,7 @@ export async function loadSessionUser(userId: string): Promise<SessionUser | nul
       roleName: u.profile.role.name,
       displayName: u.profile.displayName,
       email: u.email,
+      phone: u.profile.phone ?? null,
       permissions,
     }
   }
@@ -130,9 +132,10 @@ export async function loadSessionUser(userId: string): Promise<SessionUser | nul
     businessId: profile.business_id,
     roleId: role.id,
     roleName: role.name,
-    displayName: profile.display_name,
-    email: authData.user.email ?? '',
-    permissions: permissionCodes,
+      displayName: profile.display_name,
+      email: authData.user.email ?? '',
+      phone: profile.phone ?? null,
+      permissions: permissionCodes,
   }
 }
 
