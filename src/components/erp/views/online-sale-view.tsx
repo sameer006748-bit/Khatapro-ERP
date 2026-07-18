@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -38,12 +38,14 @@ export function OnlineSaleView({ user }: { user: MeUser }) {
     return coaQ.data.categories.flatMap((c: any) => c.accounts).filter((a: any) => a.isBusinessAccount && a.isActive).map((a: any) => ({ id: a.id, code: a.code, name: a.name }))
   }, [coaQ.data])
 
-  useEffect(() => {
-    if (businessAccounts.length > 0 && !paymentAccountId) {
+  const effectivePaymentAccountId = useMemo(() => {
+    if (paymentAccountId) return paymentAccountId
+    if (businessAccounts.length > 0) {
       const cash = businessAccounts.find(a => a.name === 'Cash' || a.code === '1010')
-      setPaymentAccountId(cash?.id ?? businessAccounts[0].id)
+      return cash?.id ?? businessAccounts[0].id
     }
-  }, [businessAccounts, paymentAccountId])
+    return ''
+  }, [paymentAccountId, businessAccounts])
 
   const subtotal = items.reduce((acc, it) => acc + (parseMoney(it.unitPrice) ?? 0n) * BigInt(parseInt(it.qty) || 0), 0n)
   const discountPaisas = useMemo(() => {
@@ -67,10 +69,10 @@ export function OnlineSaleView({ user }: { user: MeUser }) {
   const postMut = useMutation({
     mutationFn: async () => {
       const payments: Array<{ accountId: string; amount: string; isChange?: boolean }> = [
-        { accountId: paymentAccountId, amount: advanceReceived.toString() },
+        { accountId: effectivePaymentAccountId, amount: advanceReceived.toString() },
       ]
       if (changeAmount > 0n) {
-        payments.push({ accountId: paymentAccountId, amount: changeAmount.toString(), isChange: true })
+        payments.push({ accountId: effectivePaymentAccountId, amount: changeAmount.toString(), isChange: true })
       }
 
       const r = await fetch('/api/sales/online', {

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useMemo, useRef } from 'react'
+import { useState, useMemo, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -89,18 +89,16 @@ export function CounterSaleView({ user }: { user: MeUser }) {
       .map((a: any) => ({ id: a.id, code: a.code, name: a.name, isBusinessAccount: a.isBusinessAccount }))
   }, [coaQ.data])
 
-  useEffect(() => {
-    if (salesmenQ.data && salesmenQ.data.rows.length === 1 && !salesmanId) {
-      setSalesmanId(salesmenQ.data.rows[0].id)
-    }
-  }, [salesmenQ.data, salesmanId])
+  const effectiveSalesmanId = useMemo(() => salesmanId || (salesmenQ.data && salesmenQ.data.rows.length === 1 ? salesmenQ.data.rows[0].id : ''), [salesmanId, salesmenQ.data])
 
-  useEffect(() => {
-    if (businessAccounts.length > 0 && !paymentAccountId) {
+  const effectivePaymentAccountId = useMemo(() => {
+    if (paymentAccountId) return paymentAccountId
+    if (businessAccounts.length > 0) {
       const cash = businessAccounts.find(a => a.name === 'Cash' || a.code === '1010')
-      setPaymentAccountId(cash?.id ?? businessAccounts[0].id)
+      return cash?.id ?? businessAccounts[0].id
     }
-  }, [businessAccounts, paymentAccountId])
+    return ''
+  }, [paymentAccountId, businessAccounts])
 
   const filteredProducts = useMemo(() => {
     if (!productsQ.data?.rows) return []
@@ -124,7 +122,7 @@ export function CounterSaleView({ user }: { user: MeUser }) {
   const discountError = discountPaisas < 0n ? 'Discount cannot be negative' : discountPaisas > subtotal ? 'Discount exceeds subtotal' : null
   const finalTotal = netTotal
 
-  const salesman = salesmenQ.data?.rows.find(s => s.id === salesmanId)
+  const salesman = salesmenQ.data?.rows.find(s => s.id === effectiveSalesmanId)
 
   const cashReceived = parseMoney(cashReceivedAmount) ?? 0n
   const changeAmount = cashReceived > finalTotal ? cashReceived - finalTotal : 0n
@@ -139,10 +137,10 @@ export function CounterSaleView({ user }: { user: MeUser }) {
         accountId: p.accountId, amount: parseMoney(p.amount) ?? 0n, isChange: p.isChange,
       }))
     }
-    if (paymentMode === 'full') return [{ accountId: paymentAccountId, amount: finalTotal }]
-    if (paymentMode === 'partial') return [{ accountId: paymentAccountId, amount: partialPaid }]
+    if (paymentMode === 'full') return [{ accountId: effectivePaymentAccountId, amount: finalTotal }]
+    if (paymentMode === 'partial') return [{ accountId: effectivePaymentAccountId, amount: partialPaid }]
     if (paymentMode === 'change') {
-      const ps: Array<{ accountId: string; amount: bigint; isChange?: boolean }> = [{ accountId: paymentAccountId, amount: cashReceived }]
+      const ps: Array<{ accountId: string; amount: bigint; isChange?: boolean }> = [{ accountId: effectivePaymentAccountId, amount: cashReceived }]
       if (changeNeeded && changeAccountId) ps.push({ accountId: changeAccountId, amount: changeAmount, isChange: true })
       return ps
     }
@@ -163,7 +161,7 @@ export function CounterSaleView({ user }: { user: MeUser }) {
 
   const isUuid = (s: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s)
   const allAccountsValid = payments.every(p => isUuid(p.accountId))
-  const canPost = salesmanId && cart.length > 0 && payments.length > 0 && payments.every(p => p.amount > 0n) && allAccountsValid && !discountError && (discountRupees === '' || discountPaisas >= 0n)
+  const canPost = effectiveSalesmanId && cart.length > 0 && payments.length > 0 && payments.every(p => p.amount > 0n) && allAccountsValid && !discountError && (discountRupees === '' || discountPaisas >= 0n)
 
   const postMut = useMutation({
     mutationFn: async () => {
@@ -188,7 +186,7 @@ export function CounterSaleView({ user }: { user: MeUser }) {
             amount: p.amount.toString(),
             isChange: p.isChange,
           })),
-          salesmanId,
+          salesmanId: effectiveSalesmanId,
           customerName: customerName || undefined,
           discountPaisas: discountPaisas.toString(),
         }),
