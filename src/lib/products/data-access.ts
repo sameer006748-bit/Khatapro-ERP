@@ -12,6 +12,7 @@ import 'server-only'
 import { db } from '@/lib/db'
 import { getAdminSupabase } from '@/lib/supabase/admin'
 import { probeTable } from '@/lib/supabase/phase-probe'
+import { resolveSupabaseUuid } from '@/lib/accounting/voucher-supabase'
 
 /**
  * Fail-closed Supabase phase probe.
@@ -430,14 +431,7 @@ export async function createStockMovement(
   if (await isPhase3Live()) {
     const admin = getAdminSupabase()
     // Resolve Supabase UUID for created_by.
-    let supabaseCreatedBy: string | null = null
-    if (input.createdBy) {
-      const u = await db.user.findUnique({
-        where: { id: input.createdBy },
-        select: { supabaseUserUuid: true },
-      })
-      supabaseCreatedBy = u?.supabaseUserUuid ?? null
-    }
+    const supabaseCreatedBy = await resolveSupabaseUuid(input.createdBy)
 
     const { data, error } = await admin.rpc('create_stock_movement', {
       p_business_id: businessId,

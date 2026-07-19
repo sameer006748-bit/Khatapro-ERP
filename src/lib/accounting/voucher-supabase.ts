@@ -16,20 +16,38 @@
 import 'server-only'
 import { getAdminSupabase } from '@/lib/supabase/admin'
 import { db } from '@/lib/db'
+import { isSupabaseConfigured } from '@/lib/supabase/config'
 import { writeAudit } from '@/lib/auth/permissions'
 import { bizDateString } from '@/lib/dates'
 import type { VoucherLineInput, PostVoucherInput } from '@/lib/accounting/voucher'
 import { VoucherError } from '@/lib/accounting/voucher'
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
 /**
- * Resolve a Prisma user ID (cuid) to the corresponding Supabase auth.users UUID.
- * Returns null if the user has no linked Supabase account (e.g. Supabase Auth
- * not yet configured, or align script not run).
+ * Resolve the user identifier used for posted_by / created_by columns.
+ *
+ * Production (Supabase configured): the authenticated `userId` IS already the
+ * Supabase auth.users UUID — see `loadSessionUser()`. We must NOT touch
+ * Prisma/SQLite here (it does not exist on Vercel). Validate the id is a real
+ * UUID and return it unchanged; fail closed with a safe internal error if it
+ * is malformed rather than silently accepting a bad id.
+ *
+ * Local development (Supabase NOT configured): preserve the historical
+ * behaviour of mapping a Prisma cuid → its linked Supabase UUID (or null).
  */
-export async function resolveSupabaseUuid(prismaUserId: string | null | undefined): Promise<string | null> {
-  if (!prismaUserId) return null
+export async function resolveSupabaseUuid(userId: string | null | undefined): Promise<string | null> {
+  if (!userId) return null
+
+  if (isSupabaseConfigured()) {
+    if (!UUID_RE.test(userId)) {
+      throw new VoucherError('Invalid authenticated user identifier', 'INVALID_USER')
+    }
+    return userId
+  }
+
   const u = await db.user.findUnique({
-    where: { id: prismaUserId },
+    where: { id: userId },
     select: { supabaseUserUuid: true },
   })
   return u?.supabaseUserUuid ?? null

@@ -17,17 +17,12 @@ import {
   type Phase9PostSalePayload,
 } from '@/lib/supabase/rpc-compatibility'
 import { probeTable } from '@/lib/supabase/phase-probe'
+import { resolveSupabaseUuid } from '@/lib/accounting/voucher-supabase'
 
 const _p4cache = { lastChecked: 0, lastResult: false }
 
 async function isPhase4Live(): Promise<boolean> {
   return probeTable(_p4cache, 'invoices')
-}
-
-async function resolveSupabaseUuid(prismaUserId: string | null | undefined): Promise<string | null> {
-  if (!prismaUserId) return null
-  const u = await db.user.findUnique({ where: { id: prismaUserId }, select: { supabaseUserUuid: true } })
-  return u?.supabaseUserUuid ?? null
 }
 
 export type SalesmanRow = { id: string; name: string; phone: string | null; commissionPct: number; isActive: boolean }

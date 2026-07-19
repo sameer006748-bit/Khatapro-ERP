@@ -69,9 +69,10 @@ export function OnlineSaleView({ user }: { user: MeUser }) {
 
   const postMut = useMutation({
     mutationFn: async () => {
-      const payments: Array<{ accountId: string; amount: string; isChange?: boolean }> = [
-        { accountId: effectivePaymentAccountId, amount: advanceReceived.toString() },
-      ]
+      const payments: Array<{ accountId: string; amount: string; isChange?: boolean }> = []
+      if (advanceReceived > 0n) {
+        payments.push({ accountId: effectivePaymentAccountId, amount: advanceReceived.toString() })
+      }
       if (changeAmount > 0n) {
         payments.push({ accountId: effectivePaymentAccountId, amount: changeAmount.toString(), isChange: true })
       }

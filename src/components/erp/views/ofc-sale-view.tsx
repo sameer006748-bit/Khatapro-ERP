@@ -94,9 +94,25 @@ export function OfcSaleView({ user }: { user: MeUser }) {
           idempotencyKey,
         }),
       })
-      const j = await r.json()
-      if (!r.ok) throw new Error(j?.error ?? 'POST_FAILED')
-      return j
+
+      // Defensive parsing: the server may return a non-JSON body (HTML error
+      // page, proxy timeout, empty response). Read text first and only parse
+      // when it is valid JSON so we never surface raw HTML or stack traces.
+      const requestId = r.headers.get('x-request-id')
+      const raw = await r.text()
+      let parsed: any = null
+      if (raw) {
+        try { parsed = JSON.parse(raw) } catch { parsed = null }
+      }
+
+      if (!r.ok) {
+        const serverMsg = parsed && typeof parsed.error === 'string' ? parsed.error : null
+        let msg = serverMsg ?? 'Could not post OFC sale. Please try again.'
+        if (requestId) msg += ` (Ref: ${requestId})`
+        throw new Error(msg)
+      }
+      if (!parsed) throw new Error('Unexpected server response. Please try again.')
+      return parsed
     },
     onSuccess: (j) => {
       toast.success(`OFC sale posted: ${j.invoiceNo}`)

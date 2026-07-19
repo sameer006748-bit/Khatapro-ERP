@@ -42,7 +42,7 @@ const OnlineSaleSchema = z.object({
   invoiceType: z.literal('ONLINE'),
   invoiceDate: z.string(),
   items: z.array(ItemSchema).min(1),
-  payments: z.array(PaymentSchema).min(1),
+  payments: z.array(PaymentSchema),
   salesmanId: z.string().nullable().optional(),
   customerName: z.string().min(1),
   customerPhone: z.string().min(1),

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -332,10 +332,19 @@ function StockEntryModal({ products, onClose }: { products: Product[]; onClose: 
   const [qty, setQty] = useState('')
   const [reason, setReason] = useState('')
   const [date, setDate] = useState(bizDateString(new Date()))
+  const postingRef = useRef(false)
   const mut = useMutation({
-    mutationFn: async () => { const r = await fetch('/api/stock-movements', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ productId, movementType: 'adjustment_in', quantity: parseInt(qty), reason: reason || `Stock entry ${date}` }) }); const j = await r.json(); if (!r.ok) throw new Error(j?.error ?? 'Failed'); return j },
-    onSuccess: () => { toast.success('Stock entry saved.'); void qc.invalidateQueries({ queryKey: ['products'] }); void qc.invalidateQueries({ queryKey: ['stock-movements'] }); onClose() },
-    onError: (e: Error) => toast.error(`Failed: ${e.message}`),
+    mutationFn: async () => {
+      if (postingRef.current) throw new Error('Submission already in progress')
+      postingRef.current = true
+      const r = await fetch('/api/stock-movements', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ productId, movementType: 'adjustment_in', quantity: parseInt(qty), reason: reason || `Stock entry ${date}` }) })
+      const j = await r.json().catch(() => null)
+      if (!r.ok) throw new Error(j?.error ?? 'Could not save stock entry. Please try again.')
+      return j
+    },
+    retry: 0,
+    onSuccess: () => { postingRef.current = false; toast.success('Stock entry saved.'); void qc.invalidateQueries({ queryKey: ['products'] }); void qc.invalidateQueries({ queryKey: ['stock-movements'] }); onClose() },
+    onError: (e: Error) => { postingRef.current = false; toast.error(`Failed: ${e.message}`) },
   })
   const sel = products.find(p => p.id === productId)
   const projected = sel ? sel.currentStock + (parseInt(qty) || 0) : null
