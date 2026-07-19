@@ -7,8 +7,9 @@ import { NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth/authOptions'
 import { loadSessionUser } from '@/lib/auth/permissions'
+import { withObservability } from '@/lib/observability'
 
-export async function GET() {
+export const GET = withObservability('/api/me', async () => {
   const session = await getServerSession(authOptions)
   if (!session?.user) {
     return NextResponse.json({ user: null }, { status: 200 })
@@ -32,4 +33,4 @@ export async function GET() {
       phone: loaded.phone ?? null,
     },
   })
-}
+})

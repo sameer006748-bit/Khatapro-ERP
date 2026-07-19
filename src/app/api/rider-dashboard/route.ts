@@ -3,8 +3,9 @@ import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth/authOptions'
 import { loadSessionUser, hasPermission } from '@/lib/auth/permissions'
 import { riderDashboardSummary, getRiderByUserId, listDeliveryOrders } from '@/lib/delivery/data-access'
+import { withObservability } from '@/lib/observability'
 
-export async function GET(request: Request) {
+export const GET = withObservability('/api/rider-dashboard', async (request: Request) => {
   try {
     const session = await getServerSession(authOptions)
     if (!session?.user) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
@@ -39,4 +40,4 @@ export async function GET(request: Request) {
   } catch {
     return NextResponse.json({ error: 'DASHBOARD_LOAD_FAILED' }, { status: 500 })
   }
-}
+})

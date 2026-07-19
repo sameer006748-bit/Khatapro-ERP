@@ -30,6 +30,7 @@ import {
   reportMyReturns,
   reportMyCommission,
 } from '@/lib/reports/data-access'
+import { withObservability } from '@/lib/observability'
 
 const VALID_TYPES = new Set([
   'my-sales-summary',
@@ -39,7 +40,7 @@ const VALID_TYPES = new Set([
   'my-commission',
 ])
 
-export async function GET(req: Request) {
+export const GET = withObservability('/api/reports/salesman', async (req: Request) => {
   const session = await getServerSession(authOptions)
   if (!session?.user) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
   const loaded = await loadSessionUser((session.user as any).id)
@@ -102,4 +103,4 @@ export async function GET(req: Request) {
   } catch (e) {
     return NextResponse.json({ error: (e as Error).message }, { status: 500 })
   }
-}
+})

@@ -8,8 +8,9 @@ import { z } from 'zod'
 import { authOptions } from '@/lib/auth/authOptions'
 import { loadSessionUser, requirePermission } from '@/lib/auth/permissions'
 import { listProducts, createProduct } from '@/lib/products/data-access'
+import { withObservability } from '@/lib/observability'
 
-export async function GET(req: Request) {
+export const GET = withObservability('/api/products', async (req: Request) => {
   const session = await getServerSession(authOptions)
   if (!session?.user) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
   const su = await loadSessionUser((session.user as any).id)
@@ -21,7 +22,7 @@ export async function GET(req: Request) {
 
   const rows = await listProducts(su.businessId, { temporaryOnly, search })
   return NextResponse.json({ rows })
-}
+})
 
 const CreateSchema = z.object({
   name: z.string().min(1).max(120),

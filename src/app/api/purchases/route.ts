@@ -4,6 +4,7 @@ import { z } from 'zod'
 import { authOptions } from '@/lib/auth/authOptions'
 import { loadSessionUser, requirePermission, hasPermission } from '@/lib/auth/permissions'
 import { postPurchase, listPurchases } from '@/lib/purchases/data-access'
+import { withObservability } from '@/lib/observability'
 
 const isUuid = (s: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s)
 
@@ -45,7 +46,7 @@ export async function POST(req: Request) {
   } catch (e) { return NextResponse.json({ error: (e as Error).message }, { status: 500 }) }
 }
 
-export async function GET() {
+export const GET = withObservability('/api/purchases', async () => {
   const session = await getServerSession(authOptions)
   if (!session?.user) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
   const su = await loadSessionUser((session.user as any).id)
@@ -53,4 +54,4 @@ export async function GET() {
   if (!hasPermission(su, 'can_view_purchases') && !hasPermission(su, 'can_create_purchases')) return NextResponse.json({ error: 'FORBIDDEN' }, { status: 403 })
   const rows = await listPurchases(su.businessId)
   return NextResponse.json({ rows })
-}
+})

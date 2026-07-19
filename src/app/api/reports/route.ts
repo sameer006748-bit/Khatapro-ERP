@@ -3,8 +3,9 @@ import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth/authOptions'
 import { loadSessionUser, hasPermission } from '@/lib/auth/permissions'
 import { reportProfitLoss, reportBalanceSheet, reportSalesSummary, reportInventoryValuation, reportCashFlow, reportExpenseSummary, reportCustomerOutstanding, reportVendorOutstanding, reportSalesDetail, reportPurchaseDetail, reportStockMovements, reportDeliverySummary, reportCodSettlements, reportProductProfitability, reportTrialBalance, reportExceptions } from '@/lib/reports/data-access'
+import { withObservability } from '@/lib/observability'
 
-export async function GET(req: Request) {
+export const GET = withObservability('/api/reports', async (req: Request) => {
   const session = await getServerSession(authOptions)
   if (!session?.user) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
   const loaded = await loadSessionUser((session.user as any).id)
@@ -100,4 +101,4 @@ export async function GET(req: Request) {
       default: return NextResponse.json({ error: 'UNKNOWN_REPORT_TYPE' }, { status: 400 })
     }
   } catch (e) { return NextResponse.json({ error: (e as Error).message }, { status: 500 }) }
-}
+})

@@ -6,11 +6,12 @@ import { getAdminSupabase } from '@/lib/supabase/admin'
 import { db } from '@/lib/db'
 import { getAccountByCode } from '@/lib/accounting/data-access'
 import { bizDateString } from '@/lib/dates'
+import { withObservability } from '@/lib/observability'
 
 const RECENT_LIMIT = 5
 const STOCK_ALERT_LIMIT = 6
 
-export async function GET(req: Request) {
+export const GET = withObservability('/api/dashboard/owner', async (req: Request) => {
   try {
     const session = await getServerSession(authOptions)
     if (!session?.user)
@@ -167,7 +168,7 @@ export async function GET(req: Request) {
       { status: 500 },
     )
   }
-}
+})
 
 // ── Today sales aggregate (DB-side GROUP BY) ──
 
