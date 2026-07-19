@@ -6,7 +6,7 @@ import {
   CURRENT_DATABASE_CAPABILITIES,
   CURRENT_DATABASE_PHASE,
   PHASE_8_POST_RECEIPT_VOUCHER_ARGUMENT_NAMES,
-  PHASE_9_POST_SALE_ARGUMENT_NAMES,
+  PHASE_8_POST_SALE_ARGUMENT_NAMES,
   buildPhase8PostReceiptVoucherPayload,
   buildPhase9PostSalePayload,
 } from '../src/lib/supabase/rpc-compatibility'
@@ -60,16 +60,18 @@ test('compatibility boundary is fixed to Phase 8 with Phase 9 features disabled'
   })
 })
 
-test('post_sale payload includes Phase 9 fields when discount is zero and no idempotency key', () => {
+test('Phase 8 post_sale payload has exactly the 13 Phase-8 argument names', () => {
+  assert.equal(CURRENT_DATABASE_PHASE, 8)
   const payload = buildPhase9PostSalePayload({ ...saleInput, discountPaisas: 0n })
-  const keys = Object.keys(payload)
-  assert.ok(keys.length >= PHASE_9_POST_SALE_ARGUMENT_NAMES.length)
-  for (const k of PHASE_9_POST_SALE_ARGUMENT_NAMES) {
-    assert.ok(keys.includes(k), `expected key "${k}" in payload`)
-  }
-  assert.equal('p_idempotency_key' in payload, true)
-  assert.equal(payload.p_discount_paisas, '0')
-  assert.strictEqual(payload.p_idempotency_key, null)
+  assert.deepEqual(Object.keys(payload), [...PHASE_8_POST_SALE_ARGUMENT_NAMES])
+  assert.equal('p_discount_paisas' in payload, false)
+  assert.equal('p_idempotency_key' in payload, false)
+})
+
+test('Phase 8 post_sale omits discount/idempotency without sending null or zero', () => {
+  const payload = buildPhase9PostSalePayload({ ...saleInput, discountPaisas: 0n, idempotencyKey: null })
+  assert.equal(Object.prototype.hasOwnProperty.call(payload, 'p_discount_paisas'), false)
+  assert.equal(Object.prototype.hasOwnProperty.call(payload, 'p_idempotency_key'), false)
 })
 
 test('post_sale accepts a zero/default discount', () => {

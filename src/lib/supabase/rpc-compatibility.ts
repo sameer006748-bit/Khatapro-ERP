@@ -13,7 +13,10 @@ export const CURRENT_DATABASE_CAPABILITIES = {
   receiptIdempotency: false,
 } as const
 
-export const PHASE_9_POST_SALE_ARGUMENT_NAMES = [
+// Exact named arguments of the Phase-8 public.post_sale(13 args). This is what
+// production accepts today; p_discount_paisas / p_idempotency_key do not exist on
+// the Phase-8 signature and must be omitted entirely (not sent as null/zero).
+export const PHASE_8_POST_SALE_ARGUMENT_NAMES = [
   'p_business_id',
   'p_invoice_type',
   'p_invoice_date',
@@ -27,6 +30,10 @@ export const PHASE_9_POST_SALE_ARGUMENT_NAMES = [
   'p_customer_city',
   'p_memo',
   'p_created_by',
+] as const
+
+export const PHASE_9_POST_SALE_ARGUMENT_NAMES = [
+  ...PHASE_8_POST_SALE_ARGUMENT_NAMES,
   'p_discount_paisas',
 ] as const
 
@@ -56,7 +63,8 @@ export type Phase8SalePayment = {
   is_change: boolean
 }
 
-export type Phase9PostSalePayload = {
+/** Exactly the 13 named arguments accepted by the Phase-8 public.post_sale. */
+export type Phase8PostSalePayload = {
   p_business_id: string
   p_invoice_type: 'COUNTER' | 'ONLINE' | 'OFC'
   p_invoice_date: string
@@ -70,11 +78,21 @@ export type Phase9PostSalePayload = {
   p_customer_city: string | null
   p_memo: string | null
   p_created_by: string | null
-  p_discount_paisas: string
+}
+
+/**
+ * Superset of the Phase-8 payload. The two Phase-9-only arguments are optional:
+ * when the deployed database is Phase 8 they are omitted entirely (a payload with
+ * exactly the Phase-8 keys is therefore still assignable here).
+ */
+export type Phase9PostSalePayload = Phase8PostSalePayload & {
+  p_discount_paisas?: string
   p_idempotency_key?: string | null
 }
 
-export type BuildPhase9PostSalePayloadInput = Phase9PostSalePayload & {
+export type BuildPhase9PostSalePayloadInput = Phase8PostSalePayload & {
+  p_discount_paisas?: string
+  p_idempotency_key?: string | null
   discountPaisas?: bigint
   idempotencyKey?: string | null
 }
@@ -142,10 +160,40 @@ export function assertPhase8ReceiptFeatures(input: {
   }
 }
 
+export function buildPhase8PostSalePayload(
+  input: BuildPhase9PostSalePayloadInput,
+): Phase8PostSalePayload {
+  // Fails closed on a non-zero discount or any idempotency key before we ever
+  // construct a payload. Zero discount / absent key are permitted and simply
+  // omitted — the Phase-8 signature has no argument to carry them.
+  assertPhase9SaleFeatures(input)
+  return {
+    p_business_id: input.p_business_id,
+    p_invoice_type: input.p_invoice_type,
+    p_invoice_date: input.p_invoice_date,
+    p_items: input.p_items,
+    p_payments: input.p_payments,
+    p_salesman_id: input.p_salesman_id,
+    p_customer_id: input.p_customer_id,
+    p_customer_name: input.p_customer_name,
+    p_customer_phone: input.p_customer_phone,
+    p_customer_address: input.p_customer_address,
+    p_customer_city: input.p_customer_city,
+    p_memo: input.p_memo,
+    p_created_by: input.p_created_by,
+  }
+}
+
 export function buildPhase9PostSalePayload(
   input: BuildPhase9PostSalePayloadInput,
 ): Phase9PostSalePayload {
   assertPhase9SaleFeatures(input)
+  // Phase-aware: on Phase 8 emit exactly the 13 Phase-8 arguments so the
+  // PostgREST function-signature lookup resolves. On Phase 9 add the two extra
+  // named arguments the Phase-9 signature accepts.
+  if (CURRENT_DATABASE_PHASE === 8) {
+    return buildPhase8PostSalePayload(input)
+  }
   return {
     p_business_id: input.p_business_id,
     p_invoice_type: input.p_invoice_type,
