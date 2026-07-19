@@ -9,6 +9,7 @@
  */
 
 import 'server-only'
+import { cache } from 'react'
 import { db } from '@/lib/db'
 import { isSupabaseConfigured } from '@/lib/supabase/config'
 import { createAuthClient } from '@/lib/supabase/auth'
@@ -27,8 +28,16 @@ export type SessionUser = {
   permissions: Set<string>
 }
 
-/** Load a SessionUser (with resolved permission set) by userId. */
-export async function loadSessionUser(userId: string): Promise<SessionUser | null> {
+/**
+ * Load a SessionUser (with resolved permission set) by userId.
+ *
+ * Wrapped in React's request-scoped `cache()` so the NextAuth `session`
+ * callback and the route handler that both call this within one request
+ * resolve it only once (previously two full auth+profile lookups per request).
+ */
+export const loadSessionUser = cache(_loadSessionUser)
+
+async function _loadSessionUser(userId: string): Promise<SessionUser | null> {
   if (!isSupabaseConfigured()) {
     // Local development fallback: Prisma + SQLite
     const u = await db.user.findUnique({
@@ -88,23 +97,19 @@ export async function loadSessionUser(userId: string): Promise<SessionUser | nul
     return null
   }
 
-  // Fetch role
-  const { data: role, error: roleError } = await supabase
-    .from('roles')
-    .select('id, name')
-    .eq('id', profile.role_id)
-    .single()
+  // Role and its permission-id mappings are independent given the role_id —
+  // fetch them concurrently instead of sequentially.
+  const [roleRes, rolePermsRes] = await Promise.all([
+    supabase.from('roles').select('id, name').eq('id', profile.role_id).single(),
+    supabase.from('role_permissions').select('permission_id').eq('role_id', profile.role_id),
+  ])
 
+  const { data: role, error: roleError } = roleRes
   if (roleError || !role) {
     return null
   }
 
-  // Fetch permissions via role_permissions
-  const { data: rolePerms, error: rpError } = await supabase
-    .from('role_permissions')
-    .select('permission_id')
-    .eq('role_id', role.id)
-
+  const { data: rolePerms, error: rpError } = rolePermsRes
   if (rpError) {
     return null
   }
