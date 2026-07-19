@@ -78,14 +78,29 @@ export async function GET() {
     .from('profiles')
     .select(`
       id, user_id, display_name, phone, is_active, created_at,
-      role:roles (id, name),
-      user:user_id (email)
+      role:roles (id, name)
     `)
     .eq('business_id', su.businessId)
     .order('created_at', { ascending: true })
 
   if (usersError) {
     return NextResponse.json({ error: 'FETCH_FAILED' }, { status: 500 })
+  }
+
+  // Emails live in Supabase auth (auth.users), which PostgREST cannot embed
+  // from profiles. Resolve them via the admin auth API; degrade gracefully to
+  // the user id if the lookup is unavailable rather than failing the listing.
+  const emailById = new Map<string, string>()
+  try {
+    const admin = getAdminClient()
+    if (admin) {
+      const { data: authList } = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 })
+      for (const au of authList?.users ?? []) {
+        if (au.id && au.email) emailById.set(au.id, au.email)
+      }
+    }
+  } catch {
+    /* email is non-essential for the listing */
   }
 
   const { data: roles, error: rolesError }: any = await supabase
@@ -105,7 +120,7 @@ export async function GET() {
   return NextResponse.json({
     users: (users || []).map((u: any) => ({
       id: u.user_id,
-      email: u.user?.email ?? u.user_id,
+      email: emailById.get(u.user_id) ?? u.display_name ?? u.user_id,
       displayName: u.display_name,
       phone: u.phone,
       isActive: u.is_active,

@@ -12,38 +12,21 @@
 import 'server-only'
 import { db } from '@/lib/db'
 import { getAdminSupabase } from '@/lib/supabase/admin'
+import { probeTable } from '@/lib/supabase/phase-probe'
 
 /**
  * True when Supabase env vars are set AND Phase 1 migration is applied
  * (so the accounts table exists). Cached after first check.
  */
-let _phase1Checked = false
-let _phase1Applied = false
+const _phase1Cache = { lastChecked: 0, lastResult: false }
 
 async function isSupabaseLive(): Promise<boolean> {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL
-  const pub = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
-  const svc = process.env.SUPABASE_SERVICE_ROLE_KEY
-  if (!url || !pub || !svc) return false
-  if (url.includes('<') || pub.includes('<') || svc.includes('<')) return false
-
-  if (_phase1Checked) return _phase1Applied
-  _phase1Checked = true
-  try {
-    const admin = getAdminSupabase()
-    // Use a real select (not head) so PostgREST returns an error when the
-    // table doesn't exist. head:true with count can return null count without
-    // an error when the table is missing from the schema cache.
-    const { data, error } = await admin
-      .from('permissions')
-      .select('id')
-      .limit(1)
-    // Table exists if no error AND we got an array (even if empty).
-    _phase1Applied = !error && Array.isArray(data)
-  } catch {
-    _phase1Applied = false
-  }
-  return _phase1Applied
+  // Delegate to the shared fail-closed probe. When Supabase is configured but
+  // the probe fails (transient outage / cold start), probeTable THROWS rather
+  // than returning false — this prevents falling through to Prisma/SQLite,
+  // which is unavailable on serverless and crashes accounting reads. It also
+  // re-probes on a 30s TTL instead of permanently caching a transient failure.
+  return probeTable(_phase1Cache, 'permissions')
 }
 
 export type AccountRow = {
