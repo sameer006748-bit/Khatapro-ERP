@@ -3,6 +3,7 @@ import { getServerSession } from 'next-auth'
 import { z } from 'zod'
 import { authOptions } from '@/lib/auth/authOptions'
 import { loadSessionUser, requirePermission, hasPermission } from '@/lib/auth/permissions'
+import { isSupabaseConfigured } from '@/lib/supabase/config'
 import { listRiders, createRider } from '@/lib/delivery/data-access'
 
 export async function GET() {
@@ -34,20 +35,37 @@ export async function POST(req: Request) {
 
   // Validate linked user if provided
   if (parsed.data.userId) {
-    const { db } = await import('@/lib/db')
-    // Check user exists, belongs to same business, and has Rider role
-    const user = await db.user.findUnique({
-      where: { id: parsed.data.userId },
-      include: { profile: { include: { role: true } } },
-    })
-    if (!user || !user.profile) return NextResponse.json({ error: 'Linked user not found' }, { status: 400 })
-    if (user.profile.businessId !== su.businessId) return NextResponse.json({ error: 'User does not belong to this business' }, { status: 400 })
-    if (user.profile.role.name !== 'Rider') return NextResponse.json({ error: 'Linked user must have Rider role' }, { status: 400 })
-    // Check not already linked to another rider
     const { getAdminSupabase } = await import('@/lib/supabase/admin')
     const admin = getAdminSupabase()
-    const { data: existing } = await admin.from('riders').select('id, name').eq('business_id', su.businessId).eq('user_id', parsed.data.userId).maybeSingle()
-    if (existing) return NextResponse.json({ error: `User already linked to rider: ${existing.name}` }, { status: 400 })
+
+    if (isSupabaseConfigured()) {
+      // Production: validate against Supabase, keyed on the Supabase auth UUID
+      // (profiles.user_id) so the stored riders.user_id matches the rider
+      // dashboard lookup. Prisma/SQLite is unavailable on serverless.
+      const { data: profile } = await admin
+        .from('profiles')
+        .select('user_id, business_id, role:roles ( name )')
+        .eq('business_id', su.businessId)
+        .eq('user_id', parsed.data.userId)
+        .maybeSingle()
+      if (!profile) return NextResponse.json({ error: 'Linked user not found' }, { status: 400 })
+      const roleName = (profile as any).role?.name
+      if (roleName !== 'Rider') return NextResponse.json({ error: 'Linked user must have Rider role' }, { status: 400 })
+      const { data: existing } = await admin.from('riders').select('id, name').eq('business_id', su.businessId).eq('user_id', parsed.data.userId).maybeSingle()
+      if (existing) return NextResponse.json({ error: `User already linked to rider: ${existing.name}` }, { status: 400 })
+    } else {
+      // Local development fallback: Prisma + SQLite
+      const { db } = await import('@/lib/db')
+      const user = await db.user.findUnique({
+        where: { id: parsed.data.userId },
+        include: { profile: { include: { role: true } } },
+      })
+      if (!user || !user.profile) return NextResponse.json({ error: 'Linked user not found' }, { status: 400 })
+      if (user.profile.businessId !== su.businessId) return NextResponse.json({ error: 'User does not belong to this business' }, { status: 400 })
+      if (user.profile.role.name !== 'Rider') return NextResponse.json({ error: 'Linked user must have Rider role' }, { status: 400 })
+      const { data: existing } = await admin.from('riders').select('id, name').eq('business_id', su.businessId).eq('user_id', parsed.data.userId).maybeSingle()
+      if (existing) return NextResponse.json({ error: `User already linked to rider: ${existing.name}` }, { status: 400 })
+    }
   }
 
   try {

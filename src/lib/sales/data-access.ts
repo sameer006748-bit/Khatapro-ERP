@@ -57,11 +57,15 @@ export async function listSalesmen(businessId: string): Promise<SalesmanRow[]> {
 
 export async function resolveSalesmanIdForUser(businessId: string, supabaseUserUuid: string | null, prismaUserId: string): Promise<string | null> {
   if (await isPhase4Live()) {
+    // Phase 4 is live → the salesmen table lives in Supabase. Resolve there and
+    // stop: falling through to Prisma/SQLite would crash on serverless (no DB
+    // file). A missing row simply means "no linked salesman" → return null.
     if (supabaseUserUuid) {
       const admin = getAdminSupabase()
       const { data, error } = await admin.from('salesmen').select('id').eq('business_id', businessId).eq('user_id', supabaseUserUuid).maybeSingle()
       if (!error && data) return data.id
     }
+    return null
   }
   const sm = await db.salesman.findFirst({ where: { businessId, userId: prismaUserId }, select: { id: true } })
   return sm?.id ?? null

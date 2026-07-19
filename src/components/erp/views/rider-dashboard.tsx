@@ -34,6 +34,7 @@ function statusLabel(s: string): string {
 export function RiderDashboard({ user }: { user: any }) {
   const router = useRouter()
   const { data, isLoading, error, refetch } = useRiderDashboard()
+  const notLinked = error instanceof Error && error.message === 'NotLinked'
 
   const container = {
     hidden: { opacity: 0 },
@@ -57,6 +58,23 @@ export function RiderDashboard({ user }: { user: any }) {
             </div>
           ))}
         </div>
+      </div>
+    )
+  }
+
+  if (notLinked) {
+    return (
+      <div className="space-y-6">
+        <GlassPanel padding="p-8">
+          <h1 className="text-2xl font-semibold mb-2">Welcome, {user.displayName.split(' ')[0]}.</h1>
+          <p className="text-muted-foreground">
+            Your account isn’t linked to a rider profile yet. Ask an Owner/Admin to link
+            your account under Delivery / Riders, then reload.
+          </p>
+          <button onClick={() => refetch()} className="mt-4 flex items-center gap-2 text-sm text-primary hover:underline">
+            <RefreshCw className="size-4" /> Reload
+          </button>
+        </GlassPanel>
       </div>
     )
   }

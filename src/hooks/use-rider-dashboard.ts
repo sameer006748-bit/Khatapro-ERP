@@ -22,7 +22,11 @@ export interface RiderDashboardData {
 
 async function fetchRiderDashboard(): Promise<RiderDashboardData> {
   const r = await fetch('/api/rider-dashboard', { cache: 'no-store' })
-  if (r.status === 401 || r.status === 403) throw new Error('Unauthorized')
+  // 403 here means the authenticated Rider has no linked rider record — a
+  // configuration state, not a transient error. Surface it distinctly so the
+  // UI can show an actionable "not linked" message instead of a generic error.
+  if (r.status === 403) throw new Error('NotLinked')
+  if (r.status === 401) throw new Error('Unauthorized')
   if (!r.ok) throw new Error('DASHBOARD_LOAD_FAILED')
   return r.json()
 }
@@ -34,7 +38,7 @@ export function useRiderDashboard() {
     staleTime: 30_000,
     refetchInterval: 60_000,
     retry: (failureCount, error) => {
-      if (error instanceof Error && error.message === 'Unauthorized') return false
+      if (error instanceof Error && (error.message === 'Unauthorized' || error.message === 'NotLinked')) return false
       return failureCount < 2
     },
   })

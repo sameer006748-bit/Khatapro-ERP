@@ -12,6 +12,10 @@ export function Providers({ children }: { children: React.ReactNode }) {
         defaultOptions: {
           queries: {
             refetchOnWindowFocus: false,
+            // Default staleTime so navigating between pages doesn't refetch
+            // every query on each mount (previously 0 → refetch storm on every
+            // navigation). Individual hooks can still override.
+            staleTime: 30_000,
             retry: 1,
           },
         },

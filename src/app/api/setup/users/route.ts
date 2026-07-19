@@ -67,8 +67,13 @@ export async function GET() {
     })
   }
 
-  // Supabase mode
-  const supabase = createAuthClient()
+  // Supabase mode. Owner-gated read → use the admin (service-role) client so
+  // RLS on profiles/roles doesn't block the listing. The anon client returns
+  // zero rows under RLS, which previously surfaced as a 500 FETCH_FAILED.
+  const supabase = getAdminClient()
+  if (!supabase) {
+    return NextResponse.json({ error: 'SUPABASE_ADMIN_UNAVAILABLE' }, { status: 500 })
+  }
   const { data: users, error: usersError }: any = await supabase
     .from('profiles')
     .select(`
