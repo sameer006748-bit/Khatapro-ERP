@@ -12,6 +12,7 @@ import { Plus, Trash2, Truck, CheckCircle2, AlertCircle, Printer, FileText } fro
 import { formatWholeRupees, parseMoney } from '@/lib/format'
 import { motion } from 'framer-motion'
 import { PrintInvoiceButton } from '@/components/invoice/print-invoice-button'
+import { CURRENT_DATABASE_CAPABILITIES } from '@/lib/supabase/rpc-compatibility'
 import type { MeUser } from '@/components/erp/erp-app'
 
 type Product = { id: string; name: string; salePrice: number }
@@ -91,7 +92,10 @@ export function OfcSaleView({ user }: { user: MeUser }) {
           memo: form.courierNote ? `Courier: ${form.courierNote}` : undefined,
           courierNote: form.courierNote || undefined,
           discountPaisas: discountPaisas.toString(),
-          idempotencyKey,
+          // Phase-9-only: the deployed Phase-8 post_sale has no idempotency
+          // argument and fails closed if one is sent. Omit on Phase 8; the
+          // Phase-9 branch keeps sending it for future use.
+          ...(CURRENT_DATABASE_CAPABILITIES.salesIdempotency ? { idempotencyKey } : {}),
         }),
       })
 

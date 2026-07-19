@@ -12,6 +12,7 @@ import { Plus, Trash2, Globe, CheckCircle2, AlertCircle, Printer, FileText, Send
 import { formatWholeRupees, parseMoney } from '@/lib/format'
 import { motion } from 'framer-motion'
 import { PrintInvoiceButton } from '@/components/invoice/print-invoice-button'
+import { CURRENT_DATABASE_CAPABILITIES } from '@/lib/supabase/rpc-compatibility'
 import type { MeUser } from '@/components/erp/erp-app'
 
 type Product = { id: string; name: string; salePrice: number }
@@ -95,12 +96,36 @@ export function OnlineSaleView({ user }: { user: MeUser }) {
           companyDeliveryIncome: form.companyDeliveryIncome || undefined,
           source: form.source || undefined,
           discountPaisas: discountPaisas.toString(),
-          idempotencyKey,
+          // Phase-9-only: the deployed Phase-8 post_sale has no idempotency
+          // argument and fails closed if one is sent. Omit on Phase 8; the
+          // Phase-9 branch keeps sending it for future use.
+          ...(CURRENT_DATABASE_CAPABILITIES.salesIdempotency ? { idempotencyKey } : {}),
         }),
       })
-      const j = await r.json()
-      if (!r.ok) throw new Error(j?.error ?? 'POST_FAILED')
-      return j
+
+      // Defensive parsing: the server may return a non-JSON body (empty
+      // response, proxy timeout, HTML error page). Read text first and only
+      // parse valid JSON so we never surface raw HTML, stack traces, or a
+      // "Unexpected end of JSON input" from an empty error body.
+      const requestId = r.headers.get('x-request-id')
+      const raw = await r.text()
+      let parsed: any = null
+      if (raw) {
+        try { parsed = JSON.parse(raw) } catch { parsed = null }
+      }
+      if (!r.ok) {
+        const serverMsg = parsed && typeof parsed.message === 'string' ? parsed.message
+          : parsed && typeof parsed.error === 'string' ? parsed.error : null
+        let msg = serverMsg ?? 'Could not post online sale. Please try again.'
+        if (requestId) msg += ` (Ref: ${requestId})`
+        throw new Error(msg)
+      }
+      if (!parsed) throw new Error('Unexpected server response. Please try again.')
+      // Surface a delivery-order seam failure without disguising it as success.
+      if (parsed.deliveryError) {
+        toast.warning(parsed.deliveryErrorMessage ?? 'Invoice posted, but the delivery order failed.')
+      }
+      return parsed
     },
     onSuccess: (j) => {
       toast.success(`Online sale posted: ${j.invoiceNo}`)
