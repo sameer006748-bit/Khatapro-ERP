@@ -23,6 +23,7 @@ import { postSale, resolveEffectiveSalesmanId } from '@/lib/sales/data-access'
 import { createDeliveryOrder } from '@/lib/delivery/data-access'
 import { parseMoney } from '@/lib/format'
 import { assertPhase9SaleFeatures } from '@/lib/supabase/rpc-compatibility'
+import { resolveRequestId, safeMutationError } from '@/lib/observability'
 
 const ItemSchema = z.object({
   productId: z.string().nullable().optional(),
@@ -104,6 +105,7 @@ export async function POST(req: Request) {
   }
   assertPhase9SaleFeatures({ discountPaisas, idempotencyKey })
 
+  const requestId = resolveRequestId(req)
   try {
     const smResult = await resolveEffectiveSalesmanId(su, parsed.data.salesmanId ?? null)
     if (!smResult.ok) {
@@ -170,16 +172,35 @@ export async function POST(req: Request) {
           createdBy: su.userId,
         })
       } catch (delivErr) {
+        // Invoice posted atomically; only the separate delivery-order seam
+        // failed. Report that clearly WITHOUT disguising it as full success and
+        // without leaking the raw backend message. The sanitized diagnostic is
+        // logged server-side against the same request ID.
+        const rawDeliv = delivErr instanceof Error ? delivErr.message : String(delivErr ?? '')
+        console.error(JSON.stringify({
+          event: 'api_request',
+          requestId,
+          route: '/api/sales/online',
+          method: 'POST',
+          status: 207,
+          severity: 'error',
+          environment: process.env.NODE_ENV || 'development',
+          errorCategory: 'internal',
+          errorCode: 'DELIVERY_ORDER_FAILED',
+          error: rawDeliv.length > 200 ? rawDeliv.slice(0, 200) + '...' : rawDeliv,
+        }))
         return NextResponse.json({
           ok: true,
           invoiceId: result.invoiceId,
           invoiceNo: result.invoiceNo,
           deliveryOrderId: null,
-          deliveryError: (delivErr as Error).message,
+          deliveryError: 'DELIVERY_ORDER_FAILED',
+          deliveryErrorMessage: 'Invoice posted, but the delivery order could not be created. Create it from the delivery orders screen.',
+          requestId,
           customerGrandTotal: customerGrandTotal.toString(),
           netAdvance: netCustomerAdvance.toString(),
           remainingCod: remainingCod.toString(),
-        })
+        }, { status: 207, headers: { 'X-Request-Id': requestId } })
       }
     }
 

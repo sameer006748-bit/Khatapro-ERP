@@ -4,7 +4,7 @@ import { z } from 'zod'
 import { authOptions } from '@/lib/auth/authOptions'
 import { loadSessionUser, requirePermission, hasPermission } from '@/lib/auth/permissions'
 import { postPurchase, listPurchases } from '@/lib/purchases/data-access'
-import { withObservability } from '@/lib/observability'
+import { withObservability, resolveRequestId, safeMutationError } from '@/lib/observability'
 
 const isUuid = (s: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s)
 
@@ -32,6 +32,7 @@ export async function POST(req: Request) {
   if (!parsed.success) return NextResponse.json({ error: 'INVALID_INPUT', details: parsed.error.flatten() }, { status: 400 })
   // Validate payment account UUIDs
   for (const p of parsed.data.payments) { if (p.paymentType !== 'credit' && (!p.accountId || !isUuid(p.accountId))) return NextResponse.json({ error: `Invalid account ID (not UUID): ${p.accountId ?? ''}` }, { status: 400 }) }
+  const requestId = resolveRequestId(req)
   try {
     const result = await postPurchase({
       businessId: su.businessId, vendorId: parsed.data.vendorId, purchaseDate: new Date(parsed.data.purchaseDate),
@@ -43,7 +44,15 @@ export async function POST(req: Request) {
       notes: parsed.data.notes ?? null, createdBy: su.userId,
     })
     return NextResponse.json({ ok: true, purchaseId: result.purchaseId, purchaseNo: result.purchaseNo })
-  } catch (e) { return NextResponse.json({ error: (e as Error).message }, { status: 500 }) }
+  } catch (e) {
+    return safeMutationError({
+      route: '/api/purchases',
+      requestId,
+      errorCode: 'PURCHASE_POST_FAILED',
+      userMessage: 'Purchase could not be posted.',
+      error: e,
+    })
+  }
 }
 
 export const GET = withObservability('/api/purchases', async () => {

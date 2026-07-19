@@ -1,4 +1,5 @@
 import 'server-only'
+import { NextResponse } from 'next/server'
 
 /**
  * Minimal server-only API observability: request timing, a request/trace ID,
@@ -109,6 +110,48 @@ function log(
     environment: environment(),
     ...(category ? { errorCategory: category } : {}),
   })
+}
+
+/**
+ * Build a safe JSON error response for a failed mutation. Logs a sanitized,
+ * non-sensitive diagnostic line (never payloads, PII, amounts, IDs, SQL, or
+ * stack traces) and returns a body carrying only a safe user-facing message, a
+ * stable error code, and the request ID. Sets the X-Request-Id header.
+ *
+ * Mirrors the verified Counter Sale error path so every core mutation fails the
+ * same safe way.
+ */
+export function safeMutationError(opts: {
+  route: string
+  requestId: string
+  errorCode: string
+  userMessage: string
+  error: unknown
+  status?: number
+  durationMs?: number
+}): NextResponse {
+  const raw = opts.error instanceof Error ? opts.error.message : String(opts.error ?? '')
+  // Truncate and keep only the diagnostic tail server-side; never returned to
+  // the client.
+  const sanitized = raw.length > 200 ? raw.slice(0, 200) + '...' : raw
+
+  emit({
+    requestId: opts.requestId,
+    route: opts.route,
+    method: 'POST',
+    status: opts.status ?? 500,
+    ...(opts.durationMs !== undefined ? { durationMs: Math.round(opts.durationMs) } : {}),
+    severity: 'error',
+    environment: environment(),
+    errorCategory: 'internal',
+    errorCode: opts.errorCode,
+    error: sanitized,
+  })
+
+  return NextResponse.json(
+    { error: opts.errorCode, message: opts.userMessage, requestId: opts.requestId },
+    { status: opts.status ?? 500, headers: { 'X-Request-Id': opts.requestId } },
+  )
 }
 
 type RouteHandler = (...args: any[]) => Promise<Response> | Response

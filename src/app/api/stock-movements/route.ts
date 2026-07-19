@@ -11,6 +11,7 @@ import { z } from 'zod'
 import { authOptions } from '@/lib/auth/authOptions'
 import { loadSessionUser, requirePermission } from '@/lib/auth/permissions'
 import { createStockMovement, listStockMovements } from '@/lib/products/data-access'
+import { resolveRequestId, safeMutationError } from '@/lib/observability'
 
 const MovementTypes = ['opening', 'adjustment_in', 'adjustment_out', 'temporary_item', 'correction'] as const
 
@@ -34,6 +35,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'INVALID_INPUT', details: parsed.error.flatten() }, { status: 400 })
   }
 
+  const requestId = resolveRequestId(req)
   try {
     const result = await createStockMovement(su.businessId, {
       productId: parsed.data.productId,
@@ -44,7 +46,13 @@ export async function POST(req: Request) {
     })
     return NextResponse.json({ ok: true, id: result.id, balanceAfter: result.balanceAfter })
   } catch (e) {
-    return NextResponse.json({ error: (e as Error).message }, { status: 500 })
+    return safeMutationError({
+      route: '/api/stock-movements',
+      requestId,
+      errorCode: 'STOCK_MOVEMENT_FAILED',
+      userMessage: 'Stock movement could not be recorded.',
+      error: e,
+    })
   }
 }
 

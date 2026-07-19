@@ -5,6 +5,7 @@ import { authOptions } from '@/lib/auth/authOptions'
 import { loadSessionUser, requirePermission } from '@/lib/auth/permissions'
 import { postExpenseBatch } from '@/lib/vouchers/data-access'
 import { parseMoney } from '@/lib/format'
+import { resolveRequestId, safeMutationError } from '@/lib/observability'
 
 const isUuid = (s: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s)
 const LineSchema = z.object({
@@ -35,6 +36,7 @@ export async function POST(req: Request) {
     const amt = parseMoney(l.amount)
     if (amt === null || amt <= 0n) return NextResponse.json({ error: `Invalid amount on line: ${l.amount}` }, { status: 400 })
   }
+  const requestId = resolveRequestId(req)
   try {
     const result = await postExpenseBatch({
       businessId: su.businessId,
@@ -50,5 +52,13 @@ export async function POST(req: Request) {
       createdBy: su.userId,
     })
     return NextResponse.json({ ok: true, ...result })
-  } catch (e) { return NextResponse.json({ error: (e as Error).message }, { status: 500 }) }
+  } catch (e) {
+    return safeMutationError({
+      route: '/api/expense-batch',
+      requestId,
+      errorCode: 'EXPENSE_BATCH_FAILED',
+      userMessage: 'Expense batch could not be posted.',
+      error: e,
+    })
+  }
 }

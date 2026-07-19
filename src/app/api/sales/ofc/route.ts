@@ -16,6 +16,7 @@ import { loadSessionUser, requirePermission } from '@/lib/auth/permissions'
 import { postSale, resolveEffectiveSalesmanId } from '@/lib/sales/data-access'
 import { parseMoney } from '@/lib/format'
 import { assertPhase9SaleFeatures } from '@/lib/supabase/rpc-compatibility'
+import { resolveRequestId, safeMutationError } from '@/lib/observability'
 
 const ItemSchema = z.object({
   productId: z.string().nullable().optional(),
@@ -95,6 +96,7 @@ export async function POST(req: Request) {
   }
   assertPhase9SaleFeatures({ discountPaisas, idempotencyKey })
   const finalTotal = subtotal - discountPaisas
+  const requestId = resolveRequestId(req)
 
   const totalReceived = payments.filter(p => !p.isChange).reduce((s, p) => s + p.amount, 0n)
   const changeReturned = payments.filter(p => p.isChange).reduce((s, p) => s + p.amount, 0n)
@@ -132,6 +134,12 @@ export async function POST(req: Request) {
     })
     return NextResponse.json({ ok: true, invoiceId: result.invoiceId, invoiceNo: result.invoiceNo })
   } catch (e) {
-    return NextResponse.json({ error: (e as Error).message }, { status: 500 })
+    return safeMutationError({
+      route: '/api/sales/ofc',
+      requestId,
+      errorCode: 'OFC_SALE_POST_FAILED',
+      userMessage: 'OFC Sale could not be posted.',
+      error: e,
+    })
   }
 }
