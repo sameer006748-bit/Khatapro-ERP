@@ -42,11 +42,11 @@ function shouldLogNormal(): boolean {
   return isDev()
 }
 
-function newRequestId(): string {
+export function newRequestId(): string {
   return globalThis.crypto.randomUUID()
 }
 
-function resolveRequestId(req?: Request): string {
+export function resolveRequestId(req?: Request): string {
   const incoming = req?.headers?.get(REQUEST_ID_HEADER)
   if (incoming && SAFE_REQUEST_ID.test(incoming) && incoming.length <= MAX_REQUEST_ID_LEN) {
     return incoming

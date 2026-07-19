@@ -16,6 +16,7 @@ import { parseMoney } from '@/lib/format'
 import { parseDiscountPaisas } from '@/lib/sales/discount'
 import { assertPhase9SaleFeatures } from '@/lib/supabase/rpc-compatibility'
 import { isSupabaseConfigured } from '@/lib/supabase/config'
+import { resolveRequestId, newRequestId } from '@/lib/observability'
 
 const ItemSchema = z.object({
   productId: z.string().nullable().optional(),
@@ -114,6 +115,9 @@ export async function POST(req: Request) {
   }
   assertPhase9SaleFeatures({ discountPaisas, idempotencyKey })
 
+  const requestId = resolveRequestId(req)
+  const startMs = performance.now()
+
   try {
     const smResult = await resolveEffectiveSalesmanId(su, parsed.data.salesmanId ?? null)
     if (!smResult.ok) {
@@ -137,11 +141,55 @@ export async function POST(req: Request) {
     })
     return NextResponse.json({ ok: true, invoiceId: result.invoiceId, invoiceNo: result.invoiceNo })
   } catch (e) {
+    const durationMs = Math.round(performance.now() - startMs)
     const msg = (e as Error).message || ''
+
     if (msg.includes('Unique constraint') || msg.includes('unique constraint')) {
       return NextResponse.json({ error: 'Transaction conflict. Please retry in a moment.' }, { status: 409 })
     }
-    return NextResponse.json({ error: 'POST_FAILED' }, { status: 500 })
+
+    // Classify the error safely.
+    let errorCategory: string
+    let operation: string
+    if (msg.startsWith('Supabase post_sale:')) {
+      errorCategory = 'SUPABASE_RPC_ERROR'
+      operation = 'post_sale'
+    } else if (msg.startsWith('Supabase')) {
+      errorCategory = 'SUPABASE_RPC_ERROR'
+      operation = 'supabase_query'
+    } else if (msg.includes('authorization') || msg.includes('permission')) {
+      errorCategory = 'AUTHORIZATION_ERROR'
+      operation = 'authorization_check'
+    } else if (msg.includes('constraint') || msg.includes('unique')) {
+      errorCategory = 'DATABASE_CONSTRAINT_ERROR'
+      operation = 'database_write'
+    } else {
+      errorCategory = 'UNKNOWN_POST_ERROR'
+      operation = 'post_sale'
+    }
+
+    // Sanitize: never log payload, PII, amounts, IDs, or stack traces.
+    const sanitized = msg.length > 200 ? msg.substring(0, 200) + '...' : msg
+
+    console.error(JSON.stringify({
+      event: 'api_request',
+      requestId,
+      route: '/api/sales/counter',
+      method: 'POST',
+      status: 500,
+      durationMs,
+      severity: 'error',
+      environment: process.env.NODE_ENV || 'development',
+      errorCategory,
+      operation,
+      error: sanitized,
+    }))
+
+    const res = NextResponse.json(
+      { error: 'SALE_POST_FAILED', message: 'Counter Sale could not be posted.', requestId },
+      { status: 500, headers: { 'X-Request-Id': requestId } },
+    )
+    return res
   }
 }
 
