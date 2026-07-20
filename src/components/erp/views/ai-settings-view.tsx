@@ -19,11 +19,28 @@ type ConnectionStatus =
   | 'failed'
   | 'configuration_error'
 
+type GeminiFailureCategory =
+  | 'invalid_api_key'
+  | 'permission_denied'
+  | 'model_not_found'
+  | 'quota_exceeded'
+  | 'rate_limited'
+  | 'timeout'
+  | 'malformed_request'
+  | 'provider_unavailable'
+
 type AiSettingsData = {
   configured: boolean
   provider: string
   status: ConnectionStatus
   lastTestedAt: string | null
+  errorCategory: GeminiFailureCategory | null
+}
+
+type AiConnectionTestResult = {
+  status: ConnectionStatus
+  lastTestedAt: string
+  errorCategory: GeminiFailureCategory | null
 }
 
 const STATUS_CONFIG: Record<ConnectionStatus, { label: string; color: 'default' | 'secondary' | 'destructive' | 'outline'; icon: React.ComponentType<{ className?: string }> }> = {
@@ -33,6 +50,17 @@ const STATUS_CONFIG: Record<ConnectionStatus, { label: string; color: 'default' 
   invalid: { label: 'Invalid key', color: 'destructive', icon: XCircle },
   failed: { label: 'Connection error', color: 'destructive', icon: XCircle },
   configuration_error: { label: 'Connection error', color: 'destructive', icon: AlertTriangle },
+}
+
+const FAILURE_MESSAGES: Record<GeminiFailureCategory, string> = {
+  invalid_api_key: 'Invalid API key',
+  permission_denied: 'Gemini access denied',
+  quota_exceeded: 'Free quota exhausted',
+  rate_limited: 'Gemini rate limit reached',
+  model_not_found: 'Model unavailable',
+  timeout: 'Connection timed out',
+  malformed_request: 'Gemini request rejected',
+  provider_unavailable: 'Gemini service unavailable',
 }
 
 async function fetchSettings(): Promise<AiSettingsData> {
@@ -53,7 +81,7 @@ async function saveSettings(apiKey: string): Promise<AiSettingsData> {
   return j
 }
 
-async function testConnection(): Promise<{ status: ConnectionStatus; lastTestedAt: string }> {
+async function testConnection(): Promise<AiConnectionTestResult> {
   const r = await fetch('/api/ai-settings/test', {
     method: 'POST',
     cache: 'no-store',
@@ -101,7 +129,9 @@ export function AiSettingsView() {
       if (data.status === 'connected') {
         toast.success('Connection successful')
       } else {
-        toast.error(`Connection: ${data.status}`)
+        toast.error(data.errorCategory
+          ? FAILURE_MESSAGES[data.errorCategory]
+          : 'Connection error')
       }
       void qc.invalidateQueries({ queryKey: ['ai-settings'] })
     },
@@ -126,6 +156,9 @@ export function AiSettingsView() {
   const settings = settingsQ.data
   const status = settings?.status ?? 'not_configured'
   const statusCfg = STATUS_CONFIG[status]
+  const statusLabel = settings?.errorCategory
+    ? FAILURE_MESSAGES[settings.errorCategory]
+    : statusCfg.label
   const StatusIcon = statusCfg.icon
   const isBusy = saveMut.isPending || testMut.isPending || removeMut.isPending
 
@@ -151,7 +184,7 @@ export function AiSettingsView() {
           </div>
           <Badge variant={statusCfg.color} className="gap-1.5">
             <StatusIcon className="size-3" />
-            {statusCfg.label}
+            {statusLabel}
           </Badge>
         </CardHeader>
         <CardContent className="space-y-4">

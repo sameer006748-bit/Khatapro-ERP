@@ -90,8 +90,13 @@ async function post(req: NextRequest) {
     )
   } catch (error) {
     if (error instanceof GeminiClientError) {
-      if (error.code === 'invalid_key') return response('AI_INVALID_KEY', 'The Gemini key is invalid. An Owner/Admin should test or replace it.', 502, requestId)
-      if (error.code === 'timeout') return response('AI_TIMEOUT', 'Gemini took too long. Please retry once.', 504, requestId)
+      if (error.category === 'invalid_api_key') return response('AI_INVALID_KEY', 'The Gemini key is invalid. An Owner/Admin should test or replace it.', 502, requestId)
+      if (error.category === 'permission_denied') return response('AI_ACCESS_DENIED', 'Gemini access is denied for the configured key.', 502, requestId)
+      if (error.category === 'quota_exceeded') return response('AI_QUOTA_EXHAUSTED', 'The Gemini quota is exhausted.', 429, requestId)
+      if (error.category === 'rate_limited') return response('AI_RATE_LIMITED', 'Gemini is rate limited. Please wait and retry.', 429, requestId)
+      if (error.category === 'model_not_found') return response('AI_MODEL_UNAVAILABLE', 'The configured Gemini model is unavailable.', 502, requestId)
+      if (error.category === 'timeout') return response('AI_TIMEOUT', 'Gemini took too long. Please retry once.', 504, requestId)
+      if (error.category === 'malformed_request') return response('AI_REQUEST_INVALID', 'Gemini rejected the request format.', 502, requestId)
       return response('AI_CONNECTION_ERROR', 'Gemini is temporarily unavailable. Please retry once.', 502, requestId)
     }
     return safeApiError({

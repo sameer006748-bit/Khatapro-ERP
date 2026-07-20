@@ -10,13 +10,17 @@ import { db } from '@/lib/db'
 import { isSupabaseConfigured } from '@/lib/supabase/config'
 import { getAdminClient } from '@/lib/supabase/server-admin'
 import { encrypt, decrypt } from '@/lib/security/ai-secret-encryption'
-import { probeGeminiKey } from '@/lib/ai/gemini-client'
+import {
+  probeGeminiKey,
+  type GeminiFailureCategory,
+} from '@/lib/ai/gemini-client'
 
 export type AiSettingsRecord = {
   configured: boolean
   provider: string
   status: AiConnectionStatus
   lastTestedAt: string | null
+  errorCategory: GeminiFailureCategory | null
 }
 
 export type AiConnectionStatus =
@@ -31,6 +35,12 @@ export type AiSettingsUpdate = {
   apiKey: string
 }
 
+export type AiConnectionTestResult = {
+  status: AiConnectionStatus
+  lastTestedAt: string
+  errorCategory: GeminiFailureCategory | null
+}
+
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 /**
@@ -43,6 +53,28 @@ function normalizeSupabaseUserUuid(userId: string | null): string | null {
   return UUID_PATTERN.test(normalized) ? normalized : null
 }
 
+const GEMINI_FAILURE_CATEGORY_SET = new Set<GeminiFailureCategory>([
+  'invalid_api_key',
+  'permission_denied',
+  'model_not_found',
+  'quota_exceeded',
+  'rate_limited',
+  'timeout',
+  'malformed_request',
+  'provider_unavailable',
+])
+
+function normalizeFailureCategory(value: string | null): GeminiFailureCategory | null {
+  return value && GEMINI_FAILURE_CATEGORY_SET.has(value as GeminiFailureCategory)
+    ? value as GeminiFailureCategory
+    : null
+}
+
+function normalizeDecryptedApiKey(value: string | null): string | null {
+  const trimmed = value?.trim() ?? ''
+  return trimmed.length > 0 ? trimmed : null
+}
+
 // ---------------------------------------------------------------------------
 // Supabase helpers
 // ---------------------------------------------------------------------------
@@ -53,8 +85,11 @@ function mapSupabaseRow(row: {
   encrypted_api_key: string
   connection_status: string
   last_tested_at: string | null
+  last_error_code: string | null
 }): AiSettingsRecord {
-  const decrypted = decrypt(row.encrypted_api_key, row.business_id, row.provider)
+  const decrypted = normalizeDecryptedApiKey(
+    decrypt(row.encrypted_api_key, row.business_id, row.provider),
+  )
   const effectiveStatus = decrypted === null
     ? 'configuration_error'
     : (row.connection_status as AiConnectionStatus)
@@ -64,6 +99,9 @@ function mapSupabaseRow(row: {
     provider: row.provider,
     status: effectiveStatus,
     lastTestedAt: row.last_tested_at ?? null,
+    errorCategory: decrypted === null
+      ? null
+      : normalizeFailureCategory(row.last_error_code),
   }
 }
 
@@ -78,12 +116,13 @@ async function fetchSupabaseSettings(
       provider,
       status: 'configuration_error',
       lastTestedAt: null,
+      errorCategory: null,
     }
   }
 
   const { data, error } = await admin
     .from('ai_provider_settings')
-    .select('business_id,provider,encrypted_api_key,connection_status,last_tested_at')
+    .select('business_id,provider,encrypted_api_key,connection_status,last_tested_at,last_error_code')
     .eq('business_id', businessId)
     .eq('provider', provider)
     .maybeSingle()
@@ -95,6 +134,7 @@ async function fetchSupabaseSettings(
       provider,
       status: 'configuration_error',
       lastTestedAt: null,
+      errorCategory: null,
     }
   }
 
@@ -104,6 +144,7 @@ async function fetchSupabaseSettings(
       provider,
       status: 'not_configured',
       lastTestedAt: null,
+      errorCategory: null,
     }
   }
 
@@ -226,10 +267,13 @@ export async function getAiSettings(
       provider,
       status: 'not_configured',
       lastTestedAt: null,
+      errorCategory: null,
     }
   }
 
-  const decrypted = decrypt(row.encryptedApiKey, businessId, provider)
+  const decrypted = normalizeDecryptedApiKey(
+    decrypt(row.encryptedApiKey, businessId, provider),
+  )
   const effectiveStatus = decrypted === null
     ? 'configuration_error'
     : row.connectionStatus as AiConnectionStatus
@@ -239,6 +283,9 @@ export async function getAiSettings(
     provider: row.provider,
     status: effectiveStatus,
     lastTestedAt: row.lastTestedAt?.toISOString() ?? null,
+    errorCategory: decrypted === null
+      ? null
+      : normalizeFailureCategory(row.lastErrorCode),
   }
 }
 
@@ -282,6 +329,7 @@ export async function saveAiSettings(
       provider,
       status: 'not_tested',
       lastTestedAt: null,
+      errorCategory: null,
     }
   }
 
@@ -313,6 +361,7 @@ export async function saveAiSettings(
     provider,
     status: 'not_tested',
     lastTestedAt: null,
+    errorCategory: null,
   }
 }
 
@@ -334,14 +383,18 @@ export async function getAiApiKey(
       .eq('provider', provider)
       .maybeSingle()
     if (error || !data?.encrypted_api_key) return null
-    return decrypt(data.encrypted_api_key, businessId, provider)
+    return normalizeDecryptedApiKey(
+      decrypt(data.encrypted_api_key, businessId, provider),
+    )
   }
 
   const row = await db.aiProviderSetting.findUnique({
     where: { businessId_provider: { businessId, provider } },
     select: { encryptedApiKey: true },
   })
-  return row ? decrypt(row.encryptedApiKey, businessId, provider) : null
+  return row
+    ? normalizeDecryptedApiKey(decrypt(row.encryptedApiKey, businessId, provider))
+    : null
 }
 
 /**
@@ -353,13 +406,14 @@ export async function testAiConnection(
   provider: string,
   userId: string,
   supabaseUserUuid: string | null = null,
-): Promise<{ status: AiConnectionStatus; lastTestedAt: string }> {
+  requestId: string = 'unavailable',
+): Promise<AiConnectionTestResult> {
   const nowIso = new Date().toISOString()
 
   if (isSupabaseConfigured()) {
     const admin = getAdminClient()
     if (!admin) {
-      return { status: 'configuration_error', lastTestedAt: nowIso }
+      return { status: 'configuration_error', lastTestedAt: nowIso, errorCategory: null }
     }
 
     const { data, error } = await admin
@@ -370,10 +424,12 @@ export async function testAiConnection(
       .maybeSingle()
 
     if (error || !data) {
-      return { status: 'not_configured', lastTestedAt: nowIso }
+      return { status: 'not_configured', lastTestedAt: nowIso, errorCategory: null }
     }
 
-    const decrypted = decrypt(data.encrypted_api_key, businessId, provider)
+    const decrypted = normalizeDecryptedApiKey(
+      decrypt(data.encrypted_api_key, businessId, provider),
+    )
     if (decrypted === null) {
       const supabaseUuid = normalizeSupabaseUserUuid(supabaseUserUuid)
       await updateSupabaseConnectionStatus(
@@ -384,7 +440,7 @@ export async function testAiConnection(
         'decryption_failed',
         supabaseUuid,
       )
-      return { status: 'configuration_error', lastTestedAt: nowIso }
+      return { status: 'configuration_error', lastTestedAt: nowIso, errorCategory: null }
     }
 
     return runGeminiTestAndPersist(
@@ -393,6 +449,7 @@ export async function testAiConnection(
       decrypted,
       normalizeSupabaseUserUuid(supabaseUserUuid),
       nowIso,
+      requestId,
     )
   }
 
@@ -400,10 +457,12 @@ export async function testAiConnection(
     where: { businessId_provider: { businessId, provider } },
   })
   if (!row) {
-    return { status: 'not_configured', lastTestedAt: nowIso }
+    return { status: 'not_configured', lastTestedAt: nowIso, errorCategory: null }
   }
 
-  const decrypted = decrypt(row.encryptedApiKey, businessId, provider)
+  const decrypted = normalizeDecryptedApiKey(
+    decrypt(row.encryptedApiKey, businessId, provider),
+  )
   if (decrypted === null) {
     await db.aiProviderSetting.update({
       where: { id: row.id },
@@ -413,10 +472,10 @@ export async function testAiConnection(
         lastErrorCode: 'decryption_failed',
       },
     })
-    return { status: 'configuration_error', lastTestedAt: nowIso }
+    return { status: 'configuration_error', lastTestedAt: nowIso, errorCategory: null }
   }
 
-  return runGeminiTestAndPersistLocal(row.id, decrypted, nowIso)
+  return runGeminiTestAndPersistLocal(row.id, decrypted, nowIso, requestId)
 }
 
 async function runGeminiTestAndPersist(
@@ -425,34 +484,36 @@ async function runGeminiTestAndPersist(
   decryptedKey: string,
   supabaseUserUuid: string | null,
   nowIso: string,
-): Promise<{ status: AiConnectionStatus; lastTestedAt: string }> {
-  const status = await probeGeminiKey(decryptedKey)
+  requestId: string,
+): Promise<AiConnectionTestResult> {
+  const result = await probeGeminiKey(decryptedKey, requestId)
   await updateSupabaseConnectionStatus(
     businessId,
     provider,
-    status,
+    result.status,
     nowIso,
-    status === 'connected' ? null : status === 'invalid' ? 'authentication_failed' : 'connection_error',
+    result.errorCategory,
     supabaseUserUuid,
   )
-  return { status, lastTestedAt: nowIso }
+  return { ...result, lastTestedAt: nowIso }
 }
 
 async function runGeminiTestAndPersistLocal(
   rowId: string,
   decryptedKey: string,
   nowIso: string,
-): Promise<{ status: AiConnectionStatus; lastTestedAt: string }> {
-  const status = await probeGeminiKey(decryptedKey)
+  requestId: string,
+): Promise<AiConnectionTestResult> {
+  const result = await probeGeminiKey(decryptedKey, requestId)
   await db.aiProviderSetting.update({
     where: { id: rowId },
     data: {
-      connectionStatus: status,
+      connectionStatus: result.status,
       lastTestedAt: new Date(),
-      lastErrorCode: status === 'connected' ? null : status === 'invalid' ? 'authentication_failed' : 'connection_error',
+      lastErrorCode: result.errorCategory,
     },
   })
-  return { status, lastTestedAt: nowIso }
+  return { ...result, lastTestedAt: nowIso }
 }
 
 /**

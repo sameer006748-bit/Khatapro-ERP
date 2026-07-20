@@ -36,6 +36,7 @@ async function testConnection(req: NextRequest) {
       PROVIDER,
       session.userId,
       session.supabaseUserUuid,
+      resolveRequestId(req),
     )
 
     await writeAudit({

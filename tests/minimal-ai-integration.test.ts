@@ -44,7 +44,10 @@ test('Supabase AI settings writes use the authenticated UUID without Prisma look
 
 test('release model is centralized on stable Gemini 2.5 Flash', async () => {
   const config = await source('src/lib/ai/config.ts')
+  const client = await source('src/lib/ai/gemini-client.ts')
   assert.match(config, /'gemini-2\.5-flash'/)
+  assert.match(config, /https:\/\/generativelanguage\.googleapis\.com\/v1beta/)
+  assert.match(client, /GEMINI_API_BASE.*models.*encodeURIComponent\(GEMINI_MODEL\).*generateContent/s)
 })
 
 test('permission filtering allows only role-scoped screens', () => {
@@ -134,19 +137,132 @@ test('mocked Gemini success returns only generated text without spending credits
   assert.doesNotMatch(answer, /mock-secret-key/)
 })
 
-test('mocked invalid key and provider error are safely classified without raw leakage', async () => {
-  for (const [status, expected] of [[403, 'invalid_key'], [500, 'connection_error']] as const) {
-    const mockFetch = (async () => new Response('RAW_PROVIDER_SECRET_ERROR', { status })) as typeof fetch
-    await assert.rejects(
-      callGeminiCore({ apiKey: 'secret', url: 'https://example.invalid', body: {}, outputTokens: 4, timeoutMs: 100, fetchImpl: mockFetch }),
-      (error: unknown) => error instanceof GeminiClientError && error.code === expected && !error.message.includes('RAW_PROVIDER_SECRET_ERROR'),
-    )
+async function expectGeminiFailure(args: {
+  status: number
+  googleStatus: string
+  expected: string
+  reason?: string
+  headers?: HeadersInit
+}) {
+  const providerBody = {
+    error: {
+      status: args.googleStatus,
+      message: 'RAW_PROVIDER_SECRET_ERROR',
+      details: args.reason ? [{ reason: args.reason }] : [],
+    },
   }
+  const mockFetch = (async () => new Response(JSON.stringify(providerBody), {
+    status: args.status,
+    headers: args.headers,
+  })) as typeof fetch
+  await assert.rejects(
+    callGeminiCore({
+      apiKey: 'secret-key-never-leak',
+      url: 'https://example.invalid',
+      body: {},
+      outputTokens: 4,
+      timeoutMs: 100,
+      fetchImpl: mockFetch,
+    }),
+    (error: unknown) => error instanceof GeminiClientError
+      && error.category === args.expected
+      && error.httpStatus === args.status
+      && error.googleErrorCode === args.googleStatus
+      && !JSON.stringify(error).includes('secret-key-never-leak')
+      && !error.message.includes('RAW_PROVIDER_SECRET_ERROR'),
+  )
+}
+
+test('invalid Gemini API key is safely mapped without secret leakage', async () => {
+  await expectGeminiFailure({
+    status: 400,
+    googleStatus: 'INVALID_ARGUMENT',
+    reason: 'API_KEY_INVALID',
+    expected: 'invalid_api_key',
+  })
+})
+
+test('Gemini 403 is mapped to permission_denied', async () => {
+  await expectGeminiFailure({
+    status: 403,
+    googleStatus: 'PERMISSION_DENIED',
+    expected: 'permission_denied',
+  })
+})
+
+test('Gemini 429 quota failure is mapped to quota_exceeded', async () => {
+  await expectGeminiFailure({
+    status: 429,
+    googleStatus: 'RESOURCE_EXHAUSTED',
+    expected: 'quota_exceeded',
+  })
+})
+
+test('Gemini 404 is mapped to model_not_found', async () => {
+  await expectGeminiFailure({
+    status: 404,
+    googleStatus: 'NOT_FOUND',
+    expected: 'model_not_found',
+  })
+})
+
+test('Gemini timeout is safely mapped', async () => {
+  const timeoutFetch = ((_input: RequestInfo | URL, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+    init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')))
+  })) as typeof fetch
+  await assert.rejects(
+    callGeminiCore({
+      apiKey: 'secret-key-never-leak',
+      url: 'https://example.invalid',
+      body: {},
+      outputTokens: 4,
+      timeoutMs: 5,
+      fetchImpl: timeoutFetch,
+    }),
+    (error: unknown) => error instanceof GeminiClientError
+      && error.category === 'timeout'
+      && error.httpStatus === null
+      && !JSON.stringify(error).includes('secret-key-never-leak'),
+  )
+})
+
+test('Gemini request contract uses JSON body and trimmed x-goog-api-key', async () => {
+  let capturedHeaders: HeadersInit | undefined
+  let capturedBody = ''
+  const mockFetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+    capturedHeaders = init?.headers
+    capturedBody = String(init?.body)
+    return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: 'OK' }] } }] }), { status: 200 })
+  }) as typeof fetch
+  await callGeminiCore({
+    apiKey: '  trimmed-key  \n',
+    url: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent',
+    body: {
+      systemInstruction: { parts: [{ text: 'Reply with only OK.' }] },
+      contents: [{ role: 'user', parts: [{ text: 'Connection check.' }] }],
+    },
+    outputTokens: 16,
+    timeoutMs: 100,
+    thinkingBudget: 0,
+    fetchImpl: mockFetch,
+  })
+  assert.equal((capturedHeaders as Record<string, string>)['x-goog-api-key'], 'trimmed-key')
+  assert.equal((capturedHeaders as Record<string, string>)['content-type'], 'application/json')
+  const body = JSON.parse(capturedBody)
+  assert.deepEqual(body.contents, [{ role: 'user', parts: [{ text: 'Connection check.' }] }])
+  assert.deepEqual(body.systemInstruction, { parts: [{ text: 'Reply with only OK.' }] })
+  assert.deepEqual(body.generationConfig, {
+    temperature: 0.2,
+    maxOutputTokens: 16,
+    thinkingConfig: { thinkingBudget: 0 },
+  })
 })
 
 test('AI API has safe status handling, request IDs and no payload logging', async () => {
   const route = await source('src/app/api/ai/ask/route.ts')
   const client = await source('src/lib/ai/gemini-client.ts')
+  const core = await source('src/lib/ai/gemini-client-core.ts')
+  const store = await source('src/lib/ai/ai-settings-store.ts')
   assert.match(route, /AI_NOT_CONFIGURED/)
   assert.match(route, /AI_INVALID_KEY/)
   assert.match(route, /AI_CONNECTION_ERROR/)
@@ -154,6 +270,13 @@ test('AI API has safe status handling, request IDs and no payload logging', asyn
   assert.match(route, /consumeAiRequest/)
   assert.doesNotMatch(route, /console\.(log|error).*prompt|console\.(log|error).*context/)
   assert.doesNotMatch(client, /response\.text\(|response\.body/)
+  assert.doesNotMatch(core, /response\.text\(|response\.body/)
+  assert.doesNotMatch(client, /console\.error.*apiKey|console\.error.*decryptedKey/s)
+  assert.match(client, /httpStatus: error\.httpStatus/)
+  assert.match(client, /googleErrorCode: error\.googleErrorCode/)
+  assert.match(client, /category: error\.category/)
+  assert.match(store, /const trimmedKey = update\.apiKey\.trim\(\)/)
+  assert.match(store, /normalizeDecryptedApiKey/)
 })
 
 test('normal ERP rendering does not call Gemini automatically and assistant is lazy', async () => {
