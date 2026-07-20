@@ -5,11 +5,12 @@ import { authOptions } from '@/lib/auth/authOptions'
 import { loadSessionUser, requirePermission, hasPermission } from '@/lib/auth/permissions'
 import { createCodSubmission, listCodSubmissions, getRiderByUserId } from '@/lib/delivery/data-access'
 import { parseMoney } from '@/lib/format'
+import { resolveRequestId, safeMutationError, withObservability } from '@/lib/observability'
 
 const ItemSchema = z.object({ deliveryOrderId: z.string().min(1), amountAllocated: z.string().min(1), riderFeeDeducted: z.string().optional() })
 const Schema = z.object({ riderId: z.string().min(1), items: z.array(ItemSchema).min(1), settlementMode: z.enum(['full', 'net']), requestedAmount: z.string().min(1), notes: z.string().optional() })
 
-export async function GET() {
+async function getCodSubmissionRows() {
   const session = await getServerSession(authOptions)
   if (!session?.user) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
   const loaded = await loadSessionUser((session.user as any).id)
@@ -27,7 +28,10 @@ export async function GET() {
   return NextResponse.json({ rows })
 }
 
+export const GET = withObservability('/api/cod-submission', getCodSubmissionRows)
+
 export async function POST(req: Request) {
+  const requestId = resolveRequestId(req)
   const session = await getServerSession(authOptions)
   if (!session?.user) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
   const loaded = await loadSessionUser((session.user as any).id)
@@ -51,5 +55,7 @@ export async function POST(req: Request) {
       })), settlementMode: parsed.data.settlementMode, requestedAmount, notes: parsed.data.notes ?? null, createdBy: su.userId,
     })
     return NextResponse.json({ ok: true, ...result })
-  } catch (e) { return NextResponse.json({ error: (e as Error).message }, { status: 500 }) }
+  } catch (error) {
+    return safeMutationError({ route: '/api/cod-submission', requestId, errorCode: 'COD_SUBMISSION_FAILED', userMessage: 'The COD submission could not be created.', error })
+  }
 }

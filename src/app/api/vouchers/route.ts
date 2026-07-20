@@ -13,6 +13,7 @@ import { authOptions } from '@/lib/auth/authOptions'
 import { loadSessionUser, requirePermission } from '@/lib/auth/permissions'
 import { postVoucherSmart, VoucherError } from '@/lib/accounting/voucher-supabase'
 import { parseMoney } from '@/lib/format'
+import { resolveRequestId, safeMutationError, withObservability } from '@/lib/observability'
 
 const LineSchema = z.object({
   accountId: z.string().min(1),
@@ -29,6 +30,7 @@ const PostSchema = z.object({
 })
 
 export async function POST(req: Request) {
+  const requestId = resolveRequestId(req)
   const session = await getServerSession(authOptions)
   if (!session?.user) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
   const loaded = await loadSessionUser((session.user as any).id)
@@ -80,15 +82,14 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: true, voucherId })
   } catch (e) {
     const err = e as VoucherError
-    const status =
-      err.code === 'UNBALANCED' || err.code === 'INVALID_LINE' || err.code === 'TOO_FEW_LINES'
-        ? 400
-        : 500
-    return NextResponse.json({ error: err.message, code: err.code }, { status })
+    if (err.code === 'UNBALANCED' || err.code === 'INVALID_LINE' || err.code === 'TOO_FEW_LINES') {
+      return NextResponse.json({ error: err.message, code: err.code }, { status: 400 })
+    }
+    return safeMutationError({ route: '/api/vouchers', requestId, errorCode: 'VOUCHER_POST_FAILED', userMessage: 'The voucher could not be posted.', error: e })
   }
 }
 
-export async function GET() {
+const getVouchers = async () => {
   const session = await getServerSession(authOptions)
   if (!session?.user) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
   const loaded = await loadSessionUser((session.user as any).id)
@@ -111,7 +112,7 @@ export async function GET() {
       .order('posted_at', { ascending: false })
       .limit(100)
     if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 })
+      throw new Error('voucher_list_failed')
     }
     return NextResponse.json({
       rows: (data ?? []).map((v: any) => ({
@@ -167,3 +168,5 @@ export async function GET() {
     })),
   })
 }
+
+export const GET = withObservability('/api/vouchers', getVouchers)

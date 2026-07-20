@@ -167,6 +167,7 @@ export function ProductsView({ user }: { user: MeUser }) {
         <div className="relative flex-1 min-w-[200px]">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
           <Input
+            aria-label="Search products"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search products…"
@@ -195,13 +196,13 @@ export function ProductsView({ user }: { user: MeUser }) {
             }}
           >
             <div className="space-y-1.5">
-              <Label className="text-xs font-medium text-muted-foreground">Item name</Label>
-              <Input value={form.name} onChange={(e) => setForm((s) => ({ ...s, name: e.target.value }))} required className="h-10 bg-background press-sm" placeholder="e.g. Black Cotton Shirt" />
+              <Label htmlFor="product-name" className="text-xs font-medium text-muted-foreground">Item name</Label>
+              <Input id="product-name" value={form.name} onChange={(e) => setForm((s) => ({ ...s, name: e.target.value }))} required className="h-10 bg-background press-sm" placeholder="e.g. Black Cotton Shirt" />
             </div>
             <div className="space-y-1.5">
-              <Label className="text-xs font-medium text-muted-foreground">Category</Label>
+              <Label htmlFor="product-category" className="text-xs font-medium text-muted-foreground">Category</Label>
               <Select value={form.categoryId} onValueChange={(v) => setForm((s) => ({ ...s, categoryId: v }))}>
-                <SelectTrigger className="h-10 bg-background press-sm">
+                <SelectTrigger id="product-category" className="h-10 bg-background press-sm">
                   <SelectValue placeholder="Select category…" />
                 </SelectTrigger>
                 <SelectContent>
@@ -213,20 +214,20 @@ export function ProductsView({ user }: { user: MeUser }) {
               </Select>
             </div>
             <div className="space-y-1.5">
-              <Label className="text-xs font-medium text-muted-foreground">Unit</Label>
-              <Input value="piece" disabled className="h-10 bg-muted" />
+              <Label htmlFor="product-unit" className="text-xs font-medium text-muted-foreground">Unit</Label>
+              <Input id="product-unit" value="piece" disabled className="h-10 bg-muted" />
             </div>
             <div className="space-y-1.5">
-              <Label className="text-xs font-medium text-muted-foreground">Sale price (PKR)</Label>
-              <Input type="number" step="0.01" value={form.salePrice} onChange={(e) => setForm((s) => ({ ...s, salePrice: e.target.value }))} className="h-10 bg-background press-sm" data-num />
+              <Label htmlFor="product-sale-price" className="text-xs font-medium text-muted-foreground">Sale price (PKR)</Label>
+              <Input id="product-sale-price" type="number" step="0.01" value={form.salePrice} onChange={(e) => setForm((s) => ({ ...s, salePrice: e.target.value }))} className="h-10 bg-background press-sm" data-num />
             </div>
             <div className="space-y-1.5">
-              <Label className="text-xs font-medium text-muted-foreground">Purchase price (PKR)</Label>
-              <Input type="number" step="0.01" value={form.purchasePrice} onChange={(e) => setForm((s) => ({ ...s, purchasePrice: e.target.value }))} className="h-10 bg-background press-sm" data-num />
+              <Label htmlFor="product-purchase-price" className="text-xs font-medium text-muted-foreground">Purchase price (PKR)</Label>
+              <Input id="product-purchase-price" type="number" step="0.01" value={form.purchasePrice} onChange={(e) => setForm((s) => ({ ...s, purchasePrice: e.target.value }))} className="h-10 bg-background press-sm" data-num />
             </div>
             <div className="space-y-1.5">
-              <Label className="text-xs font-medium text-muted-foreground">Opening stock (pieces)</Label>
-              <Input type="number" value={form.openingStock} onChange={(e) => setForm((s) => ({ ...s, openingStock: e.target.value }))} className="h-10 bg-background press-sm" data-num />
+              <Label htmlFor="product-opening-stock" className="text-xs font-medium text-muted-foreground">Opening stock (pieces)</Label>
+              <Input id="product-opening-stock" type="number" value={form.openingStock} onChange={(e) => setForm((s) => ({ ...s, openingStock: e.target.value }))} className="h-10 bg-background press-sm" data-num />
             </div>
             <div className="sm:col-span-2 lg:col-span-3 flex items-center gap-3">
               <label className="flex items-center gap-2 text-sm cursor-pointer">

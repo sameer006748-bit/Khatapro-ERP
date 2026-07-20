@@ -9,10 +9,10 @@ import { NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { z } from 'zod'
 import { isSupabaseConfigured } from '@/lib/supabase/config'
-import { createAuthClient } from '@/lib/supabase/auth'
 import { getAdminClient } from '@/lib/supabase/server-admin'
 import { authOptions } from '@/lib/auth/authOptions'
 import { loadSessionUser, requireOwner, writeAudit } from '@/lib/auth/permissions'
+import { resolveRequestId, safeMutationError, withObservability } from '@/lib/observability'
 
 const InviteSchema = z.object({
   email: z.string().email().toLowerCase(),
@@ -22,7 +22,7 @@ const InviteSchema = z.object({
   phone: z.string().max(40).optional(),
 })
 
-export async function GET() {
+async function getUsers() {
   const session = await getServerSession(authOptions)
   if (!session?.user) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
   const loaded = await loadSessionUser((session.user as any).id)
@@ -34,6 +34,7 @@ export async function GET() {
     const { db } = await import('@/lib/db')
     const [users, roles] = await Promise.all([
       db.user.findMany({
+        where: { profile: { is: { businessId: su.businessId } } },
         include: { profile: { include: { role: true } } },
         orderBy: { createdAt: 'asc' },
       }),
@@ -132,13 +133,24 @@ export async function GET() {
       name: r.name,
       isSystem: r.is_system,
       description: r.description,
-      permissionsCount: r.permissions?.count ?? 0,
-      usersCount: r.profiles?.count ?? 0,
+      permissionsCount: embeddedCount(r.permissions),
+      usersCount: embeddedCount(r.profiles),
     })),
   })
 }
 
+export const GET = withObservability('/api/setup/users', getUsers)
+
+function embeddedCount(value: unknown): number {
+  if (Array.isArray(value)) return Number(value[0]?.count ?? 0)
+  if (value && typeof value === 'object' && 'count' in value) {
+    return Number((value as { count?: unknown }).count ?? 0)
+  }
+  return 0
+}
+
 export async function POST(req: Request) {
+  const requestId = resolveRequestId(req)
   const session = await getServerSession(authOptions)
   if (!session?.user) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
   const loaded = await loadSessionUser((session.user as any).id)
@@ -185,13 +197,12 @@ export async function POST(req: Request) {
   }
 
   // Supabase mode
-  const supabase = createAuthClient()
   const admin = getAdminClient()
   if (!admin) {
-    return NextResponse.json({ error: 'SUPABASE_ADMIN_UNAVAILABLE' }, { status: 500 })
+    return safeMutationError({ route: '/api/setup/users', requestId, errorCode: 'USER_CREATE_FAILED', userMessage: 'The user could not be created.', error: 'admin_unavailable' })
   }
 
-  const { data: role, error: roleError }: any = await supabase
+  const { data: role, error: roleError }: any = await admin
     .from('roles')
     .select('id')
     .eq('business_id', su.businessId)
@@ -209,12 +220,12 @@ export async function POST(req: Request) {
   })
 
   if (authCreateError || !created.user) {
-    return NextResponse.json({ error: 'AUTH_USER_CREATE_FAILED' }, { status: 500 })
+    return safeMutationError({ route: '/api/setup/users', requestId, errorCode: 'USER_CREATE_FAILED', userMessage: 'The user could not be created.', error: authCreateError })
   }
 
   const newUserId = created.user.id
 
-  const { error: profileError } = await supabase.from('profiles').insert({
+  const { error: profileError } = await admin.from('profiles').insert({
     user_id: newUserId,
     business_id: su.businessId,
     role_id: role.id,
@@ -225,7 +236,7 @@ export async function POST(req: Request) {
 
   if (profileError) {
     try { await admin.auth.admin.deleteUser(newUserId) } catch {}
-    return NextResponse.json({ error: 'PROFILE_CREATE_FAILED' }, { status: 500 })
+    return safeMutationError({ route: '/api/setup/users', requestId, errorCode: 'USER_CREATE_FAILED', userMessage: 'The user could not be created.', error: profileError })
   }
 
   await writeAudit({

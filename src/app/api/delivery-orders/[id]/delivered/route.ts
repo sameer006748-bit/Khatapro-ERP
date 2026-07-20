@@ -5,6 +5,7 @@ import { authOptions } from '@/lib/auth/authOptions'
 import { loadSessionUser, requirePermission, hasPermission } from '@/lib/auth/permissions'
 import { markDelivered, getDeliveryOrder, getRiderByUserId } from '@/lib/delivery/data-access'
 import { parseMoney } from '@/lib/format'
+import { resolveRequestId, safeMutationError } from '@/lib/observability'
 
 const Schema = z.object({
   collectedAmount: z.string().min(1),
@@ -13,6 +14,7 @@ const Schema = z.object({
 })
 
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const requestId = resolveRequestId(req)
   const session = await getServerSession(authOptions)
   if (!session?.user) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
   const loaded = await loadSessionUser((session.user as any).id)
@@ -43,5 +45,13 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   try {
     const result = await markDelivered(loaded.businessId, id, collectedAmount, parsed.data.recipientName ?? null, parsed.data.deliveryNote ?? null, loaded.userId)
     return NextResponse.json({ ok: true, ...result })
-  } catch (e) { return NextResponse.json({ error: (e as Error).message }, { status: 500 }) }
+  } catch (error) {
+    return safeMutationError({
+      route: '/api/delivery-orders/[id]/delivered',
+      requestId,
+      errorCode: 'DELIVERY_CONFIRM_FAILED',
+      userMessage: 'The delivery could not be confirmed.',
+      error,
+    })
+  }
 }

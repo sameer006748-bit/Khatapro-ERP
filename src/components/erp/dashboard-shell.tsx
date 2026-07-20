@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useEffect, useState, useMemo } from 'react'
 import { signOut } from 'next-auth/react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
@@ -264,11 +264,12 @@ function resolveInitialPage(searchParams: URLSearchParams, user: MeUser): string
 export function DashboardShell({ user, onSignOut }: { user: MeUser; onSignOut: () => void }) {
   const [moreOpen, setMoreOpen] = useState(false)
   const searchParams = useSearchParams()
+  const queryString = searchParams.toString()
   const ledgerAccountId = searchParams.get('ledger')
   const invoiceId = searchParams.get('invoice')
   const voucherId = searchParams.get('voucher')
 
-  const [active, setActive] = useState(() => resolveInitialPage(searchParams, user))
+  const active = resolveInitialPage(searchParams, user)
 
   const cats = useMemo(() => visibleCategories(user), [user])
 
@@ -281,12 +282,49 @@ export function DashboardShell({ user, onSignOut }: { user: MeUser; onSignOut: (
     return init
   })
 
+  const canOpenLedger = user.permissions.includes('can_view_ledgers')
+  const canOpenInvoice = user.permissions.includes('can_view_sales') || user.permissions.includes('can_view_own_sales')
+  const canOpenVoucher = user.permissions.includes('can_view_day_book') || user.permissions.includes('can_view_vouchers')
+
+  // Native history navigation changes the query string independently of local
+  // component state. Keep the rendered page and selected navigation item in
+  // lockstep, and fail closed when a direct URL requests a page/detail the
+  // current role cannot see.
+  useEffect(() => {
+    const params = new URLSearchParams(queryString)
+    const requestedPage = params.get('page')
+    const nextPage = resolveInitialPage(params, user)
+
+    let corrected = false
+    if (requestedPage && requestedPage !== nextPage) {
+      params.set('page', nextPage)
+      corrected = true
+    }
+    if (params.has('ledger') && !canOpenLedger) {
+      params.delete('ledger')
+      corrected = true
+    }
+    if (params.has('invoice') && !canOpenInvoice) {
+      params.delete('invoice')
+      corrected = true
+    }
+    if (params.has('voucher') && !canOpenVoucher) {
+      params.delete('voucher')
+      corrected = true
+    }
+
+    if (corrected) {
+      const nextUrl = params.size > 0 ? `/?${params.toString()}` : '/'
+      window.history.replaceState({}, '', nextUrl)
+    }
+  }, [queryString, user, canOpenLedger, canOpenInvoice, canOpenVoucher])
+
   // If ?ledger= or ?invoice= or ?voucher= is in the URL, show that view instead.
-  const effectiveActive = ledgerAccountId
+  const effectiveActive = ledgerAccountId && canOpenLedger
     ? 'ledger-drilldown'
-    : invoiceId
+    : invoiceId && canOpenInvoice
     ? 'invoice-detail'
-    : voucherId
+    : voucherId && canOpenVoucher
     ? 'voucher-detail'
     : cats.some((c) => c.visibleItems.some((i) => i.key === active))
     ? active
@@ -294,11 +332,10 @@ export function DashboardShell({ user, onSignOut }: { user: MeUser; onSignOut: (
 
   // When active changes, auto-expand its category and sync ?page= to URL.
   function selectItem(key: string) {
-    if (ledgerAccountId || invoiceId || voucherId) {
-      window.history.pushState({}, '', '/')
-    }
-    setActive(key)
     const url = new URL(window.location.href)
+    url.searchParams.delete('ledger')
+    url.searchParams.delete('invoice')
+    url.searchParams.delete('voucher')
     url.searchParams.set('page', key)
     window.history.pushState({}, '', url.toString())
     const cat = categoryForKey(key)
@@ -811,5 +848,10 @@ function ViewRouter({
 
   if (active === 'vouchers') return <DayBookView user={user} onSelectVoucher={(id) => { window.history.pushState({}, '', `/?voucher=${id}`); window.dispatchEvent(new PopStateEvent('popstate')) }} />
 
-  return <OwnerDashboard user={user} />
+  return (
+    <div className="card-3d p-8 text-center max-w-md mx-auto">
+      <p className="text-sm font-medium text-foreground">Page unavailable</p>
+      <p className="text-xs text-muted-foreground mt-1">This page is not available for your role.</p>
+    </div>
+  )
 }

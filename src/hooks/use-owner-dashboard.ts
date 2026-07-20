@@ -70,7 +70,6 @@ export interface OwnerDashboardData {
     action: string
     entity: string
     entityId: string | null
-    details: string
   }>
 }
 

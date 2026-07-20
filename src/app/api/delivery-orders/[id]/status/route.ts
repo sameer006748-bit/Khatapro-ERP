@@ -4,10 +4,12 @@ import { z } from 'zod'
 import { authOptions } from '@/lib/auth/authOptions'
 import { loadSessionUser, hasPermission } from '@/lib/auth/permissions'
 import { updateDeliveryStatus, getDeliveryOrder, getRiderByUserId } from '@/lib/delivery/data-access'
+import { resolveRequestId, safeMutationError } from '@/lib/observability'
 
 const Schema = z.object({ newStatus: z.string(), note: z.string().optional() })
 
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const requestId = resolveRequestId(req)
   const session = await getServerSession(authOptions)
   if (!session?.user) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
   const loaded = await loadSessionUser((session.user as any).id)
@@ -33,5 +35,13 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   try {
     await updateDeliveryStatus(loaded.businessId, id, parsed.data.newStatus, parsed.data.note ?? null, loaded.userId)
     return NextResponse.json({ ok: true })
-  } catch (e) { return NextResponse.json({ error: (e as Error).message }, { status: 500 }) }
+  } catch (error) {
+    return safeMutationError({
+      route: '/api/delivery-orders/[id]/status',
+      requestId,
+      errorCode: 'DELIVERY_STATUS_UPDATE_FAILED',
+      userMessage: 'The delivery status could not be updated.',
+      error,
+    })
+  }
 }

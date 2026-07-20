@@ -6,7 +6,7 @@
 import { strict as assert } from 'node:assert'
 import crypto from 'node:crypto'
 import test from 'node:test'
-import { encrypt, decrypt } from '../src/lib/security/ai-secret-encryption'
+import { encrypt, decrypt } from '../src/lib/security/ai-secret-encryption-core.ts'
 
 const TEST_KEY = crypto.randomBytes(32).toString('hex')
 const TEST_KEY_ID = `key-${TEST_KEY.slice(0, 8)}`

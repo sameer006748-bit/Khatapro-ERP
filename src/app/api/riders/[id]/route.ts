@@ -4,6 +4,7 @@ import { z } from 'zod'
 import { authOptions } from '@/lib/auth/authOptions'
 import { loadSessionUser, requirePermission } from '@/lib/auth/permissions'
 import { updateRider } from '@/lib/delivery/data-access'
+import { resolveRequestId, safeMutationError } from '@/lib/observability'
 
 const Schema = z.object({
   name: z.string().min(1).optional(), phone: z.string().nullable().optional(),
@@ -12,6 +13,7 @@ const Schema = z.object({
 })
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const requestId = resolveRequestId(req)
   const session = await getServerSession(authOptions)
   if (!session?.user) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
   const loaded = await loadSessionUser((session.user as any).id)
@@ -24,5 +26,5 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   try {
     await updateRider(su.businessId, id, parsed.data)
     return NextResponse.json({ ok: true })
-  } catch (e) { return NextResponse.json({ error: (e as Error).message }, { status: 500 }) }
+  } catch (error) { return safeMutationError({ route: '/api/riders/[id]', requestId, errorCode: 'RIDER_UPDATE_FAILED', userMessage: 'The rider could not be updated.', error }) }
 }

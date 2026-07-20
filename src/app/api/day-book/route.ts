@@ -3,9 +3,10 @@ import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth/authOptions'
 import { loadSessionUser, requirePermission, hasPermission } from '@/lib/auth/permissions'
 import { dayBook } from '@/lib/vouchers/data-access'
-import { withObservability } from '@/lib/observability'
+import { resolveRequestId, safeApiError, withObservability } from '@/lib/observability'
 
 export const GET = withObservability('/api/day-book', async (req: Request) => {
+  const requestId = resolveRequestId(req)
   const session = await getServerSession(authOptions)
   if (!session?.user) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
   const loaded = await loadSessionUser((session.user as any).id)
@@ -22,5 +23,13 @@ export const GET = withObservability('/api/day-book', async (req: Request) => {
   try {
     const rows = await dayBook(loaded.businessId, filters)
     return NextResponse.json({ rows })
-  } catch (e) { return NextResponse.json({ error: (e as Error).message }, { status: 500 }) }
+  } catch (error) {
+    return safeApiError({
+      route: '/api/day-book',
+      requestId,
+      errorCode: 'DAY_BOOK_LOAD_FAILED',
+      userMessage: 'The Day Book could not be loaded.',
+      error,
+    })
+  }
 })

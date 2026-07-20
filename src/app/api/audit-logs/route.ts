@@ -8,8 +8,10 @@ import { db } from '@/lib/db'
 import { authOptions } from '@/lib/auth/authOptions'
 import { loadSessionUser, requirePermission } from '@/lib/auth/permissions'
 import { isUsingSupabase } from '@/lib/accounting/data-access'
+import { resolveRequestId, safeApiError, withObservability } from '@/lib/observability'
 
-export async function GET() {
+export const GET = withObservability('/api/audit-logs', async (req: Request) => {
+  const requestId = resolveRequestId(req)
   const session = await getServerSession(authOptions)
   if (!session?.user) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
   const loaded = await loadSessionUser((session.user as any).id)
@@ -21,12 +23,18 @@ export async function GET() {
     const admin = getAdminSupabase()
     const { data, error } = await admin
       .from('audit_logs')
-      .select('id, timestamp, action, entity, entity_id, user_id, details')
+      .select('id, timestamp, action, entity, entity_id, user_id')
       .eq('business_id', su.businessId)
       .order('timestamp', { ascending: false })
       .limit(200)
     if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 })
+      return safeApiError({
+        route: '/api/audit-logs',
+        requestId,
+        errorCode: 'AUDIT_LOG_LOAD_FAILED',
+        userMessage: 'Audit entries could not be loaded.',
+        error,
+      })
     }
     return NextResponse.json({
       rows: (data ?? []).map((r: any) => ({
@@ -35,8 +43,7 @@ export async function GET() {
         action: r.action,
         entity: r.entity,
         entityId: r.entity_id,
-        userId: r.user_id,
-        details: typeof r.details === 'string' ? r.details : JSON.stringify(r.details ?? null),
+        actorCategory: r.user_id ? 'Authenticated user' : 'System',
       })),
     })
   }
@@ -54,8 +61,7 @@ export async function GET() {
       action: r.action,
       entity: r.entity,
       entityId: r.entityId,
-      userId: r.userId,
-      details: r.details,
+      actorCategory: r.userId ? 'Authenticated user' : 'System',
     })),
   })
-}
+})

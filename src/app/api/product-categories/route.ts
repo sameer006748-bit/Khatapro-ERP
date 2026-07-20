@@ -8,8 +8,9 @@ import { z } from 'zod'
 import { authOptions } from '@/lib/auth/authOptions'
 import { loadSessionUser, requirePermission } from '@/lib/auth/permissions'
 import { listProductCategories, createProductCategory } from '@/lib/products/data-access'
+import { resolveRequestId, safeMutationError, withObservability } from '@/lib/observability'
 
-export async function GET() {
+const getProductCategories = async () => {
   const session = await getServerSession(authOptions)
   if (!session?.user) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
   const su = await loadSessionUser((session.user as any).id)
@@ -19,12 +20,15 @@ export async function GET() {
   return NextResponse.json({ rows })
 }
 
+export const GET = withObservability('/api/product-categories', getProductCategories)
+
 const CreateSchema = z.object({
   name: z.string().min(1).max(80),
   description: z.string().max(200).optional(),
 })
 
 export async function POST(req: Request) {
+  const requestId = resolveRequestId(req)
   const session = await getServerSession(authOptions)
   if (!session?.user) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
   const loaded = await loadSessionUser((session.user as any).id)
@@ -40,7 +44,7 @@ export async function POST(req: Request) {
   try {
     const row = await createProductCategory(su.businessId, parsed.data.name, parsed.data.description)
     return NextResponse.json({ row })
-  } catch (e) {
-    return NextResponse.json({ error: (e as Error).message }, { status: 500 })
+  } catch (error) {
+    return safeMutationError({ route: '/api/product-categories', requestId, errorCode: 'PRODUCT_CATEGORY_CREATE_FAILED', userMessage: 'The product category could not be created.', error })
   }
 }

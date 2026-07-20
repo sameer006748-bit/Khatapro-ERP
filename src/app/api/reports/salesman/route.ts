@@ -30,7 +30,7 @@ import {
   reportMyReturns,
   reportMyCommission,
 } from '@/lib/reports/data-access'
-import { withObservability } from '@/lib/observability'
+import { resolveRequestId, safeApiError, withObservability } from '@/lib/observability'
 
 const VALID_TYPES = new Set([
   'my-sales-summary',
@@ -41,6 +41,7 @@ const VALID_TYPES = new Set([
 ])
 
 export const GET = withObservability('/api/reports/salesman', async (req: Request) => {
+  const requestId = resolveRequestId(req)
   const session = await getServerSession(authOptions)
   if (!session?.user) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
   const loaded = await loadSessionUser((session.user as any).id)
@@ -100,7 +101,7 @@ export const GET = withObservability('/api/reports/salesman', async (req: Reques
       default:
         return NextResponse.json({ error: 'UNKNOWN_SALESMAN_REPORT_TYPE' }, { status: 400 })
     }
-  } catch (e) {
-    return NextResponse.json({ error: (e as Error).message }, { status: 500 })
+  } catch (error) {
+    return safeApiError({ route: '/api/reports/salesman', requestId, errorCode: 'SALESMAN_REPORT_LOAD_FAILED', userMessage: 'The salesman report could not be loaded.', error })
   }
 })

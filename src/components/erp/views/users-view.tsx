@@ -333,12 +333,12 @@ function ResetPasswordModal({ displayName, email, onClose, onReset, isPending }:
   }
   return (
     <div className="fixed inset-0 z-50 bg-foreground/30 backdrop-blur-sm flex items-center justify-center p-4" onClick={onClose}>
-      <div className="border border-border rounded-xl bg-card shadow-xl p-5 w-full max-w-sm" onClick={e => e.stopPropagation()}>
-        <div className="flex items-center justify-between mb-4"><h3 className="text-sm font-semibold text-foreground">Reset Password</h3><button onClick={onClose} className="text-muted-foreground hover:text-foreground"><X className="size-4" /></button></div>
+      <div role="dialog" aria-modal="true" aria-labelledby="reset-password-title" className="border border-border rounded-xl bg-card shadow-xl p-5 w-full max-w-sm max-h-[85vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-4"><h3 id="reset-password-title" className="text-sm font-semibold text-foreground">Reset Password</h3><button type="button" aria-label="Close reset password dialog" onClick={onClose} className="text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded"><X className="size-4" /></button></div>
         <div className="space-y-3">
           <div className="text-xs text-muted-foreground">Resetting password for <strong>{displayName}</strong> ({email})</div>
-          <div><Label className="text-xs text-muted-foreground">New Password</Label><Input type="password" value={newPassword} onChange={e => setNewPassword(e.target.value)} placeholder="Min 8 characters" className="h-9 bg-background press-sm" /></div>
-          <div><Label className="text-xs text-muted-foreground">Confirm Password</Label><Input type="password" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} placeholder="Re-enter password" className="h-9 bg-background press-sm" /></div>
+          <div><Label htmlFor="reset-new-password" className="text-xs text-muted-foreground">New Password</Label><Input id="reset-new-password" type="password" value={newPassword} onChange={e => setNewPassword(e.target.value)} placeholder="Min 8 characters" className="h-9 bg-background press-sm" /></div>
+          <div><Label htmlFor="reset-confirm-password" className="text-xs text-muted-foreground">Confirm Password</Label><Input id="reset-confirm-password" type="password" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} placeholder="Re-enter password" className="h-9 bg-background press-sm" /></div>
           {error && <div className="text-xs text-destructive">{error}</div>}
           <Button className="w-full press-sm" disabled={!canSubmit || isPending} onClick={handleSubmit}>{isPending ? 'Resetting…' : 'Reset Password'}</Button>
         </div>
@@ -369,21 +369,21 @@ function InviteForm({
       }}
     >
       <div className="space-y-1.5">
-        <Label className="text-xs font-medium text-muted-foreground">Display name</Label>
-        <Input value={displayName} onChange={(e) => setDisplayName(e.target.value)} required className="h-10 bg-background press-sm" />
+        <Label htmlFor="invite-display-name" className="text-xs font-medium text-muted-foreground">Display name</Label>
+        <Input id="invite-display-name" value={displayName} onChange={(e) => setDisplayName(e.target.value)} required className="h-10 bg-background press-sm" />
       </div>
       <div className="space-y-1.5">
-        <Label className="text-xs font-medium text-muted-foreground">Email</Label>
-        <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required className="h-10 bg-background press-sm" />
+        <Label htmlFor="invite-email" className="text-xs font-medium text-muted-foreground">Email</Label>
+        <Input id="invite-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required className="h-10 bg-background press-sm" />
       </div>
       <div className="space-y-1.5">
-        <Label className="text-xs font-medium text-muted-foreground">Password</Label>
-        <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required minLength={6} className="h-10 bg-background press-sm" />
+        <Label htmlFor="invite-password" className="text-xs font-medium text-muted-foreground">Password</Label>
+        <Input id="invite-password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} required minLength={6} className="h-10 bg-background press-sm" />
       </div>
       <div className="space-y-1.5">
-        <Label className="text-xs font-medium text-muted-foreground">Role</Label>
+        <Label htmlFor="invite-role" className="text-xs font-medium text-muted-foreground">Role</Label>
         <Select value={roleName} onValueChange={setRoleName}>
-          <SelectTrigger className="h-10 bg-background press-sm">
+          <SelectTrigger id="invite-role" className="h-10 bg-background press-sm">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -396,8 +396,8 @@ function InviteForm({
         </Select>
       </div>
       <div className="space-y-1.5">
-        <Label className="text-xs font-medium text-muted-foreground">Phone (optional)</Label>
-        <Input value={phone} onChange={(e) => setPhone(e.target.value)} className="h-10 bg-background press-sm" data-num />
+        <Label htmlFor="invite-phone" className="text-xs font-medium text-muted-foreground">Phone (optional)</Label>
+        <Input id="invite-phone" value={phone} onChange={(e) => setPhone(e.target.value)} className="h-10 bg-background press-sm" data-num />
       </div>
       <div className="sm:col-span-2 lg:col-span-3 flex justify-end pt-1">
         <Button type="submit" disabled={submitting} className="press-md shadow-sm">

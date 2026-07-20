@@ -1,8 +1,9 @@
 'use client'
 
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { MeUser } from '@/components/erp/erp-app'
 import { Lock, Check, Minus } from 'lucide-react'
+import { toast } from 'sonner'
 
 type RoleWithPerms = {
   id: string
@@ -23,15 +24,41 @@ const ROLE_BADGE: Record<string, string> = {
 
 export function PermissionMatrixView({ user }: { user: MeUser }) {
   const isOwner = user.roleName === 'Owner/Admin'
+  const queryClient = useQueryClient()
   const rolesQ = useQuery<{ roles: RoleWithPerms[] }>({
     queryKey: ['roles'],
-    queryFn: () => fetch('/api/setup/roles').then((r) => r.json()),
+    queryFn: async () => {
+      const response = await fetch('/api/setup/roles')
+      if (!response.ok) throw new Error('ROLE_LIST_FAILED')
+      return response.json()
+    },
     enabled: isOwner,
   })
   const permsQ = useQuery<{ modules: Modules }>({
     queryKey: ['permissions'],
-    queryFn: () => fetch('/api/setup/permissions').then((r) => r.json()),
+    queryFn: async () => {
+      const response = await fetch('/api/setup/permissions')
+      if (!response.ok) throw new Error('PERMISSION_LIST_FAILED')
+      return response.json()
+    },
     enabled: isOwner,
+  })
+  const updateRole = useMutation({
+    mutationFn: async ({ roleId, permissionCodes }: { roleId: string; permissionCodes: string[] }) => {
+      const response = await fetch('/api/setup/roles', {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ roleId, permissionCodes }),
+      })
+      if (!response.ok) {
+        const result = await response.json().catch(() => ({}))
+        throw new Error(result?.message ?? result?.error ?? 'ROLE_PERMISSIONS_UPDATE_FAILED')
+      }
+      return response.json()
+    },
+    onSuccess: () => toast.success('Role permissions updated.'),
+    onError: (error: Error) => toast.error(error.message),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ['roles'] }),
   })
 
   if (!isOwner) {
@@ -59,9 +86,8 @@ export function PermissionMatrixView({ user }: { user: MeUser }) {
           Permission Matrix
         </h1>
         <p className="text-sm text-muted-foreground mt-1.5 max-w-2xl">
-          Inspect which permission codes each role has been granted. Owner/Admin has every
-          permission seeded. (Editing a role&apos;s permissions UI arrives in a later phase; the
-          data model already supports it.)
+          Owner/Admin always retains full access. Select a permission cell to configure
+          Accountant, Salesman, or Rider access; existing defaults remain unchanged until you change them.
         </p>
       </div>
 
@@ -119,7 +145,19 @@ export function PermissionMatrixView({ user }: { user: MeUser }) {
               </thead>
               <tbody>
                 {Object.entries(modules).map(([mod, perms]) => (
-                  <Group key={mod} mod={mod} perms={perms} roles={roles} />
+                  <Group
+                    key={mod}
+                    mod={mod}
+                    perms={perms}
+                    roles={roles}
+                    saving={updateRole.isPending}
+                    onToggle={(role, permissionCode) => {
+                      const codes = new Set(role.permissions.map((permission) => permission.code))
+                      if (codes.has(permissionCode)) codes.delete(permissionCode)
+                      else codes.add(permissionCode)
+                      updateRole.mutate({ roleId: role.id, permissionCodes: [...codes] })
+                    }}
+                  />
                 ))}
               </tbody>
             </table>
@@ -134,10 +172,14 @@ function Group({
   mod,
   perms,
   roles,
+  saving,
+  onToggle,
 }: {
   mod: string
   perms: Array<{ code: string; description: string | null }>
   roles: RoleWithPerms[]
+  saving: boolean
+  onToggle: (role: RoleWithPerms, permissionCode: string) => void
 }) {
   return (
     <>
@@ -163,17 +205,28 @@ function Group({
           </td>
           {roles.map((r) => {
             const has = r.permissions.some((rp) => rp.code === p.code)
+            const owner = r.name === 'Owner/Admin'
             return (
               <td key={r.id} className="p-3 text-center">
-                {has ? (
-                  <span className="inline-grid place-items-center size-5 rounded-md bg-primary/10 text-primary">
-                    <Check className="size-3" />
-                  </span>
-                ) : (
-                  <span className="inline-grid place-items-center size-5 rounded-md bg-muted text-muted-foreground/40">
-                    <Minus className="size-3" />
-                  </span>
-                )}
+                <button
+                  type="button"
+                  disabled={owner || saving}
+                  onClick={() => onToggle(r, p.code)}
+                  aria-label={`${has ? 'Remove' : 'Grant'} ${p.code} for ${r.name}`}
+                  aria-pressed={has}
+                  title={owner ? 'Owner/Admin always has full access' : `${has ? 'Remove' : 'Grant'} permission`}
+                  className="inline-grid place-items-center size-8 rounded-md disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  {has ? (
+                    <span className="inline-grid place-items-center size-5 rounded-md bg-primary/10 text-primary">
+                      <Check className="size-3" />
+                    </span>
+                  ) : (
+                    <span className="inline-grid place-items-center size-5 rounded-md bg-muted text-muted-foreground/40">
+                      <Minus className="size-3" />
+                    </span>
+                  )}
+                </button>
               </td>
             )
           })}

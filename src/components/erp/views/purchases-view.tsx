@@ -86,8 +86,8 @@ export function PurchasesView({ user }: { user: MeUser }) {
 
       {/* Toolbar */}
       <div className="flex flex-wrap items-center gap-2">
-        <div className="relative flex-1 min-w-[180px]"><Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" /><Input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by PUR no, vendor, bill…" className="h-9 bg-background pl-8 press-sm" /></div>
-        <div className="flex gap-1">{['all', 'unpaid', 'partial', 'paid', 'returned'].map(f => <button key={f} onClick={() => setFilter(f)} className={`px-2.5 py-1.5 rounded-md text-xs font-medium press-sm ${filter === f ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:bg-muted/70'}`}>{f === 'all' ? 'All' : f.charAt(0).toUpperCase() + f.slice(1)}</button>)}</div>
+        <div className="relative flex-1 min-w-[180px]"><Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" /><Input aria-label="Search purchases" value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by PUR no, vendor, bill…" className="h-9 bg-background pl-8 press-sm" /></div>
+        <div className="flex gap-1">{['all', 'unpaid', 'partial', 'paid', 'returned'].map(f => <button key={f} aria-pressed={filter === f} onClick={() => setFilter(f)} className={`px-2.5 py-1.5 rounded-md text-xs font-medium press-sm ${filter === f ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:bg-muted/70'}`}>{f === 'all' ? 'All' : f.charAt(0).toUpperCase() + f.slice(1)}</button>)}</div>
       </div>
 
       {/* List */}
@@ -129,7 +129,7 @@ function KPI({ icon: Icon, label, value, warn }: { icon: React.ComponentType<{ c
 }
 
 function Shell({ title, onClose, children, wide }: { title: string; onClose: () => void; children: React.ReactNode; wide?: boolean }) {
-  return <div className="fixed inset-0 z-50 bg-foreground/30 backdrop-blur-sm flex items-end sm:items-center justify-center p-4" onClick={onClose}><motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 10 }} className={`border border-border rounded-xl bg-card shadow-xl p-5 w-full ${wide ? 'max-w-2xl' : 'max-w-md'} max-h-[85vh] overflow-y-auto`} onClick={e => e.stopPropagation()}><div className="flex items-center justify-between mb-4"><h3 className="text-sm font-semibold text-foreground">{title}</h3><button onClick={onClose} className="text-muted-foreground hover:text-foreground"><X className="size-4" /></button></div>{children}</motion.div></div>
+  return <div className="fixed inset-0 z-50 bg-foreground/30 backdrop-blur-sm flex items-end sm:items-center justify-center p-4" onClick={onClose}><motion.div role="dialog" aria-modal="true" aria-label={title} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 10 }} className={`border border-border rounded-xl bg-card shadow-xl p-5 w-full ${wide ? 'max-w-2xl' : 'max-w-md'} max-h-[85vh] overflow-y-auto`} onClick={e => e.stopPropagation()}><div className="flex items-center justify-between mb-4"><h3 className="text-sm font-semibold text-foreground">{title}</h3><button type="button" aria-label={`Close ${title}`} onClick={onClose} className="text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded"><X className="size-4" /></button></div>{children}</motion.div></div>
 }
 
 function AddPurchaseModal({ user, onClose, onViewPurchase }: { user: MeUser; onClose: () => void; onViewPurchase: (id: string) => void }) {

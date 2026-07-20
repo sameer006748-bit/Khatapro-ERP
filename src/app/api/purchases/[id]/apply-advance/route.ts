@@ -4,6 +4,7 @@ import { z } from 'zod'
 import { authOptions } from '@/lib/auth/authOptions'
 import { loadSessionUser, requirePermission } from '@/lib/auth/permissions'
 import { postAdvanceApplication } from '@/lib/purchases/data-access'
+import { resolveRequestId, safeMutationError } from '@/lib/observability'
 
 const Schema = z.object({
   vendorId: z.string().min(1),
@@ -13,6 +14,7 @@ const Schema = z.object({
 })
 
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const requestId = resolveRequestId(req)
   const session = await getServerSession(authOptions)
   if (!session?.user) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
   const loaded = await loadSessionUser((session.user as any).id)
@@ -33,5 +35,5 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       createdBy: su.userId,
     })
     return NextResponse.json({ ok: true, paymentId: ppId })
-  } catch (e) { return NextResponse.json({ error: (e as Error).message }, { status: 500 }) }
+  } catch (error) { return safeMutationError({ route: '/api/purchases/[id]/apply-advance', requestId, errorCode: 'ADVANCE_APPLICATION_FAILED', userMessage: 'The vendor advance could not be applied.', error }) }
 }

@@ -111,7 +111,7 @@ async function fetchSupabaseSettings(
     .maybeSingle()
 
   if (error) {
-    console.error('Supabase GET ai_provider_settings error:', error)
+    console.error(JSON.stringify({ event: 'ai_settings_store_failed', operation: 'read', severity: 'error' }))
     return {
       configured: false,
       provider,
@@ -166,7 +166,7 @@ async function upsertSupabaseSettings(
     .upsert(payload, { onConflict: 'business_id,provider' })
 
   if (error) {
-    console.error('Supabase UPSERT ai_provider_settings error:', error)
+    console.error(JSON.stringify({ event: 'ai_settings_store_failed', operation: 'save', severity: 'error' }))
     throw new Error('Failed to save AI settings')
   }
 }
@@ -199,7 +199,7 @@ async function updateSupabaseConnectionStatus(
     .eq('provider', provider)
 
   if (error) {
-    console.error('Supabase UPDATE ai_provider_settings error:', error)
+    console.error(JSON.stringify({ event: 'ai_settings_store_failed', operation: 'update', severity: 'error' }))
     // Do not throw — callers already return the status to the caller.
   }
 }
@@ -220,7 +220,7 @@ async function deleteSupabaseSettings(
     .eq('provider', provider)
 
   if (error) {
-    console.error('Supabase DELETE ai_provider_settings error:', error)
+    console.error(JSON.stringify({ event: 'ai_settings_store_failed', operation: 'delete', severity: 'error' }))
     throw new Error('Failed to remove AI settings')
   }
 }

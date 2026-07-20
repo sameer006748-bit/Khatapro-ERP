@@ -4,11 +4,13 @@ import { z } from 'zod'
 import { authOptions } from '@/lib/auth/authOptions'
 import { loadSessionUser, requirePermission } from '@/lib/auth/permissions'
 import { postPurchaseReturn } from '@/lib/purchases/data-access'
+import { resolveRequestId, safeMutationError } from '@/lib/observability'
 
 const ItemSchema = z.object({ purchaseItemId: z.string().min(1), productId: z.string().nullable().optional(), productName: z.string().min(1), quantity: z.number().int().positive(), unitCostPaisas: z.string().min(1) })
 const Schema = z.object({ returnItems: z.array(ItemSchema).min(1), settlementType: z.enum(['reduce_payable', 'vendor_refund', 'vendor_credit']), settlementAccountId: z.string().nullable().optional(), notes: z.string().optional() })
 
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const requestId = resolveRequestId(req)
   const session = await getServerSession(authOptions)
   if (!session?.user) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
   const loaded = await loadSessionUser((session.user as any).id)
@@ -25,5 +27,5 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       settlementType: parsed.data.settlementType, settlementAccountId: parsed.data.settlementAccountId ?? null, notes: parsed.data.notes ?? null, createdBy: su.userId,
     })
     return NextResponse.json({ ok: true, returnId: result.returnId, returnNo: result.returnNo })
-  } catch (e) { return NextResponse.json({ error: (e as Error).message }, { status: 500 }) }
+  } catch (error) { return safeMutationError({ route: '/api/purchases/[id]/return', requestId, errorCode: 'PURCHASE_RETURN_FAILED', userMessage: 'The purchase return could not be posted.', error }) }
 }

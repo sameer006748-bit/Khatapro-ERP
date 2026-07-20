@@ -3,9 +3,10 @@ import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth/authOptions'
 import { loadSessionUser, hasPermission } from '@/lib/auth/permissions'
 import { riderDashboardSummary, getRiderByUserId, listDeliveryOrders } from '@/lib/delivery/data-access'
-import { withObservability } from '@/lib/observability'
+import { resolveRequestId, safeApiError, withObservability } from '@/lib/observability'
 
 export const GET = withObservability('/api/rider-dashboard', async (request: Request) => {
+  const requestId = resolveRequestId(request)
   try {
     const session = await getServerSession(authOptions)
     if (!session?.user) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
@@ -37,7 +38,13 @@ export const GET = withObservability('/api/rider-dashboard', async (request: Req
       return NextResponse.json({ error: 'FORBIDDEN' }, { status: 403 })
     }
     return NextResponse.json({ summary: null })
-  } catch {
-    return NextResponse.json({ error: 'DASHBOARD_LOAD_FAILED' }, { status: 500 })
+  } catch (error) {
+    return safeApiError({
+      route: '/api/rider-dashboard',
+      requestId,
+      errorCode: 'DASHBOARD_LOAD_FAILED',
+      userMessage: 'The rider dashboard could not be loaded.',
+      error,
+    })
   }
 })

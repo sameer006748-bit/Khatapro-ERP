@@ -5,8 +5,9 @@ import { authOptions } from '@/lib/auth/authOptions'
 import { loadSessionUser, requirePermission, hasPermission } from '@/lib/auth/permissions'
 import { isSupabaseConfigured } from '@/lib/supabase/config'
 import { listRiders, createRider } from '@/lib/delivery/data-access'
+import { resolveRequestId, safeMutationError, withObservability } from '@/lib/observability'
 
-export async function GET() {
+async function getRiders() {
   const session = await getServerSession(authOptions)
   if (!session?.user) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
   const loaded = await loadSessionUser((session.user as any).id)
@@ -18,12 +19,15 @@ export async function GET() {
   return NextResponse.json({ rows })
 }
 
+export const GET = withObservability('/api/riders', getRiders)
+
 const Schema = z.object({
   name: z.string().min(1), phone: z.string().optional(), zone: z.string().optional(),
   vehicleType: z.string().optional(), userId: z.string().nullable().optional(),
 })
 
 export async function POST(req: Request) {
+  const requestId = resolveRequestId(req)
   const session = await getServerSession(authOptions)
   if (!session?.user) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
   const loaded = await loadSessionUser((session.user as any).id)
@@ -71,5 +75,13 @@ export async function POST(req: Request) {
   try {
     const row = await createRider(su.businessId, parsed.data.name, parsed.data.phone, parsed.data.zone, parsed.data.vehicleType, parsed.data.userId ?? null)
     return NextResponse.json({ row })
-  } catch (e) { return NextResponse.json({ error: (e as Error).message }, { status: 500 }) }
+  } catch (error) {
+    return safeMutationError({
+      route: '/api/riders',
+      requestId,
+      errorCode: 'RIDER_CREATE_FAILED',
+      userMessage: 'The rider could not be created.',
+      error,
+    })
+  }
 }

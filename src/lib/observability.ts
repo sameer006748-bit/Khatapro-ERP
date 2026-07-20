@@ -9,6 +9,7 @@ import { NextResponse } from 'next/server'
 
 const REQUEST_ID_HEADER = 'x-request-id'
 const MAX_REQUEST_ID_LEN = 128
+const requestIds = new WeakMap<Request, string>()
 // Allow only safe token chars so a caller-supplied ID can't inject into logs.
 const SAFE_REQUEST_ID = /^[A-Za-z0-9._-]{1,128}$/
 
@@ -48,11 +49,18 @@ export function newRequestId(): string {
 }
 
 export function resolveRequestId(req?: Request): string {
+  if (req) {
+    const existing = requestIds.get(req)
+    if (existing) return existing
+  }
   const incoming = req?.headers?.get(REQUEST_ID_HEADER)
   if (incoming && SAFE_REQUEST_ID.test(incoming) && incoming.length <= MAX_REQUEST_ID_LEN) {
+    if (req) requestIds.set(req, incoming)
     return incoming
   }
-  return newRequestId()
+  const requestId = newRequestId()
+  if (req) requestIds.set(req, requestId)
+  return requestId
 }
 
 function now(): number {
@@ -113,14 +121,45 @@ function log(
 }
 
 /**
- * Build a safe JSON error response for a failed mutation. Logs a sanitized,
- * non-sensitive diagnostic line (never payloads, PII, amounts, IDs, SQL, or
- * stack traces) and returns a body carrying only a safe user-facing message, a
- * stable error code, and the request ID. Sets the X-Request-Id header.
+ * Build a safe JSON error response. Logs only a stable error code and request
+ * metadata (never the raw exception, payloads, PII, amounts, IDs, SQL, or stack
+ * traces), and returns a safe user-facing message plus the request ID.
  *
  * Mirrors the verified Counter Sale error path so every core mutation fails the
  * same safe way.
  */
+export function safeApiError(opts: {
+  route: string
+  requestId: string
+  errorCode: string
+  userMessage: string
+  error: unknown
+  method?: string
+  status?: number
+  durationMs?: number
+}): NextResponse {
+  // Intentionally do not serialize the raw exception. Provider/database
+  // messages can contain SQL, payload fragments, identifiers, or values.
+  void opts.error
+
+  emit({
+    requestId: opts.requestId,
+    route: opts.route,
+    method: opts.method ?? 'GET',
+    status: opts.status ?? 500,
+    ...(opts.durationMs !== undefined ? { durationMs: Math.round(opts.durationMs) } : {}),
+    severity: 'error',
+    environment: environment(),
+    errorCategory: 'internal',
+    errorCode: opts.errorCode,
+  })
+
+  return NextResponse.json(
+    { error: opts.errorCode, message: opts.userMessage, requestId: opts.requestId },
+    { status: opts.status ?? 500, headers: { 'X-Request-Id': opts.requestId } },
+  )
+}
+
 export function safeMutationError(opts: {
   route: string
   requestId: string
@@ -130,28 +169,7 @@ export function safeMutationError(opts: {
   status?: number
   durationMs?: number
 }): NextResponse {
-  const raw = opts.error instanceof Error ? opts.error.message : String(opts.error ?? '')
-  // Truncate and keep only the diagnostic tail server-side; never returned to
-  // the client.
-  const sanitized = raw.length > 200 ? raw.slice(0, 200) + '...' : raw
-
-  emit({
-    requestId: opts.requestId,
-    route: opts.route,
-    method: 'POST',
-    status: opts.status ?? 500,
-    ...(opts.durationMs !== undefined ? { durationMs: Math.round(opts.durationMs) } : {}),
-    severity: 'error',
-    environment: environment(),
-    errorCategory: 'internal',
-    errorCode: opts.errorCode,
-    error: sanitized,
-  })
-
-  return NextResponse.json(
-    { error: opts.errorCode, message: opts.userMessage, requestId: opts.requestId },
-    { status: opts.status ?? 500, headers: { 'X-Request-Id': opts.requestId } },
-  )
+  return safeApiError({ ...opts, method: 'POST' })
 }
 
 type RouteHandler = (...args: any[]) => Promise<Response> | Response
@@ -159,9 +177,9 @@ type RouteHandler = (...args: any[]) => Promise<Response> | Response
 /**
  * Wrap a read-only route handler with timing, a request/trace ID, and slow
  * warnings. Preserves the handler's exact response body, status, headers, and
- * error behavior. Adds the X-Request-Id response header. On a thrown error it
- * still records duration + request ID, then re-throws so the framework handles
- * the response unchanged.
+ * error behavior. Adds the X-Request-Id response header. A thrown provider or
+ * database error is converted to one generic response so framework output can
+ * never expose the internal message.
  */
 export function withObservability(route: string, handler: RouteHandler): RouteHandler {
   return async (...args: any[]): Promise<Response> => {
@@ -180,10 +198,17 @@ export function withObservability(route: string, handler: RouteHandler): RouteHa
         /* immutable headers — return unchanged */
       }
       return res
-    } catch (err) {
+    } catch {
       const durationMs = now() - start
       log(requestId, route, method, 500, durationMs, 'internal')
-      throw err
+      return NextResponse.json(
+        {
+          error: 'REQUEST_FAILED',
+          message: 'The request could not be completed.',
+          requestId,
+        },
+        { status: 500, headers: { 'X-Request-Id': requestId } },
+      )
     }
   }
 }

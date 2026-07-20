@@ -63,9 +63,9 @@ export async function POST(req: Request) {
   } catch (e) {
     if (e instanceof SafeProductError) {
       // The product was created but opening stock rolled back completely. The
-      // user message is safe to show as-is; the sanitized diagnostic (RPC/
-      // Postgres error code + short tail) goes to the server log ONLY, so the
-      // exact cause is traceable by requestId without leaking internals.
+      // The user message is safe to show as-is. Logs contain the stable error
+      // code and request ID only; the raw RPC/Postgres diagnostic is never
+      // serialized.
       return safeMutationError({
         route: '/api/products',
         requestId,

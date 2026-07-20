@@ -265,6 +265,6 @@ export async function writeAudit(args: {
   })
 
   if (error) {
-    console.error('Failed to write audit log', error)
+    console.error(JSON.stringify({ event: 'audit_write_failed', severity: 'error' }))
   }
 }

@@ -5,6 +5,7 @@ import { authOptions } from '@/lib/auth/authOptions'
 import { loadSessionUser, requirePermission } from '@/lib/auth/permissions'
 import { postPaymentVoucher } from '@/lib/vouchers/data-access'
 import { parseMoney } from '@/lib/format'
+import { resolveRequestId, safeMutationError } from '@/lib/observability'
 
 const isUuid = (s: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s)
 const Schema = z.object({
@@ -18,6 +19,7 @@ const Schema = z.object({
 })
 
 export async function POST(req: Request) {
+  const requestId = resolveRequestId(req)
   const session = await getServerSession(authOptions)
   if (!session?.user) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
   const loaded = await loadSessionUser((session.user as any).id)
@@ -44,5 +46,7 @@ export async function POST(req: Request) {
       createdBy: su.userId,
     })
     return NextResponse.json({ ok: true, ...result })
-  } catch (e) { return NextResponse.json({ error: (e as Error).message }, { status: 500 }) }
+  } catch (error) {
+    return safeMutationError({ route: '/api/payment-voucher', requestId, errorCode: 'PAYMENT_VOUCHER_FAILED', userMessage: 'The payment voucher could not be posted.', error })
+  }
 }

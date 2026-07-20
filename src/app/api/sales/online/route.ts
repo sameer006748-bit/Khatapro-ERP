@@ -174,9 +174,9 @@ export async function POST(req: Request) {
       } catch (delivErr) {
         // Invoice posted atomically; only the separate delivery-order seam
         // failed. Report that clearly WITHOUT disguising it as full success and
-        // without leaking the raw backend message. The sanitized diagnostic is
-        // logged server-side against the same request ID.
-        const rawDeliv = delivErr instanceof Error ? delivErr.message : String(delivErr ?? '')
+        // without leaking or logging the raw backend message. The stable code
+        // is logged against the same request ID.
+        void delivErr
         console.error(JSON.stringify({
           event: 'api_request',
           requestId,
@@ -187,7 +187,6 @@ export async function POST(req: Request) {
           environment: process.env.NODE_ENV || 'development',
           errorCategory: 'internal',
           errorCode: 'DELIVERY_ORDER_FAILED',
-          error: rawDeliv.length > 200 ? rawDeliv.slice(0, 200) + '...' : rawDeliv,
         }))
         return NextResponse.json({
           ok: true,
@@ -213,6 +212,12 @@ export async function POST(req: Request) {
       remainingCod: remainingCod.toString(),
     })
   } catch (e) {
-    return NextResponse.json({ error: (e as Error).message }, { status: 500 })
+    return safeMutationError({
+      route: '/api/sales/online',
+      requestId,
+      errorCode: 'ONLINE_SALE_POST_FAILED',
+      userMessage: 'Online Sale could not be posted.',
+      error: e,
+    })
   }
 }

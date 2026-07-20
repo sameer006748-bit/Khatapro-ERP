@@ -3,8 +3,9 @@ import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth/authOptions'
 import { loadSessionUser, hasPermission } from '@/lib/auth/permissions'
 import { getDeliveryOrder, getRiderByUserId } from '@/lib/delivery/data-access'
+import { withObservability } from '@/lib/observability'
 
-export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+const getDeliveryOrderById = async (_req: Request, { params }: { params: Promise<{ id: string }> }) => {
   const session = await getServerSession(authOptions)
   if (!session?.user) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
   const loaded = await loadSessionUser((session.user as any).id)
@@ -26,3 +27,5 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
 
   return NextResponse.json({ order })
 }
+
+export const GET = withObservability('/api/delivery-orders/[id]', getDeliveryOrderById)

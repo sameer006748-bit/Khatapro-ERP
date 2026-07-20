@@ -16,7 +16,7 @@ import { parseMoney } from '@/lib/format'
 import { parseDiscountPaisas } from '@/lib/sales/discount'
 import { assertPhase9SaleFeatures } from '@/lib/supabase/rpc-compatibility'
 import { isSupabaseConfigured } from '@/lib/supabase/config'
-import { resolveRequestId, newRequestId } from '@/lib/observability'
+import { resolveRequestId, newRequestId, withObservability } from '@/lib/observability'
 
 const ItemSchema = z.object({
   productId: z.string().nullable().optional(),
@@ -168,9 +168,6 @@ export async function POST(req: Request) {
       operation = 'post_sale'
     }
 
-    // Sanitize: never log payload, PII, amounts, IDs, or stack traces.
-    const sanitized = msg.length > 200 ? msg.substring(0, 200) + '...' : msg
-
     console.error(JSON.stringify({
       event: 'api_request',
       requestId,
@@ -182,7 +179,6 @@ export async function POST(req: Request) {
       environment: process.env.NODE_ENV || 'development',
       errorCategory,
       operation,
-      error: sanitized,
     }))
 
     const res = NextResponse.json(
@@ -193,7 +189,7 @@ export async function POST(req: Request) {
   }
 }
 
-export async function GET(req: Request) {
+const getSales = async (req: Request) => {
   const session = await getServerSession(authOptions)
   if (!session?.user) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
   const su = await loadSessionUser((session.user as any).id)
@@ -220,3 +216,5 @@ export async function GET(req: Request) {
   const rows = await listInvoices(su.businessId, { type, salesmanId })
   return NextResponse.json({ rows })
 }
+
+export const GET = withObservability('/api/sales/counter', getSales)

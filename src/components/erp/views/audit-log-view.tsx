@@ -10,8 +10,7 @@ type Row = {
   action: string
   entity: string
   entityId: string | null
-  userId: string | null
-  details: string | null
+  actorCategory: string
 }
 
 const ACTION_BADGE: Record<string, string> = {
@@ -60,8 +59,7 @@ export function AuditLogView() {
                     <th className="text-left p-3.5 font-medium">Action</th>
                     <th className="text-left p-3.5 font-medium">Entity</th>
                     <th className="text-left p-3.5 font-medium">Entity ID</th>
-                    <th className="text-left p-3.5 font-medium">User ID</th>
-                    <th className="text-left p-3.5 font-medium">Details</th>
+                    <th className="text-left p-3.5 font-medium">Actor</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -89,11 +87,8 @@ export function AuditLogView() {
                       <td className="p-3.5 text-xs text-muted-foreground font-mono" data-num>
                         {r.entityId ?? '—'}
                       </td>
-                      <td className="p-3.5 text-xs text-muted-foreground font-mono" data-num>
-                        {r.userId ?? '—'}
-                      </td>
-                      <td className="p-3.5 text-xs text-muted-foreground font-mono max-w-[420px] truncate">
-                        {r.details ?? '—'}
+                      <td className="p-3.5 text-xs text-muted-foreground">
+                        {r.actorCategory}
                       </td>
                     </tr>
                   ))}
@@ -129,11 +124,9 @@ export function AuditLogView() {
                     {r.entity}
                   </span>
                 </div>
-                {r.details && (
-                  <div className="mt-3 pt-3 border-t border-border text-xs text-muted-foreground font-mono break-all" data-num>
-                    {r.details}
-                  </div>
-                )}
+                <div className="mt-3 pt-3 border-t border-border text-xs text-muted-foreground">
+                  Actor: {r.actorCategory}
+                </div>
               </div>
             ))}
           </div>

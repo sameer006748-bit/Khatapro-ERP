@@ -5,11 +5,12 @@
 import { NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { isSupabaseConfigured } from '@/lib/supabase/config'
-import { createAuthClient } from '@/lib/supabase/auth'
+import { getAdminClient } from '@/lib/supabase/server-admin'
 import { authOptions } from '@/lib/auth/authOptions'
 import { loadSessionUser, requireOwner } from '@/lib/auth/permissions'
+import { withObservability } from '@/lib/observability'
 
-export async function GET() {
+async function getPermissions() {
   const session = await getServerSession(authOptions)
   if (!session?.user) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
   const loaded = await loadSessionUser((session.user as any).id)
@@ -31,7 +32,10 @@ export async function GET() {
   }
 
   // Supabase mode
-  const supabase = createAuthClient()
+  const supabase = getAdminClient()
+  if (!supabase) {
+    return NextResponse.json({ error: 'PERMISSION_LIST_UNAVAILABLE' }, { status: 500 })
+  }
   const { data: permissions, error } = await supabase
     .from('permissions')
     .select('code, module, description')
@@ -50,3 +54,5 @@ export async function GET() {
 
   return NextResponse.json({ modules: grouped })
 }
+
+export const GET = withObservability('/api/setup/permissions', getPermissions)

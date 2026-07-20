@@ -9,6 +9,7 @@ import { z } from 'zod'
 import { authOptions } from '@/lib/auth/authOptions'
 import { loadSessionUser, requirePermission } from '@/lib/auth/permissions'
 import { updateProduct } from '@/lib/products/data-access'
+import { resolveRequestId, safeMutationError } from '@/lib/observability'
 
 const UpdateSchema = z.object({
   name: z.string().min(1).max(120).optional(),
@@ -25,6 +26,7 @@ export async function PATCH(
   req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const requestId = resolveRequestId(req)
   const session = await getServerSession(authOptions)
   if (!session?.user) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
   const loaded = await loadSessionUser((session.user as any).id)
@@ -41,7 +43,7 @@ export async function PATCH(
   try {
     await updateProduct(su.businessId, id, parsed.data)
     return NextResponse.json({ ok: true })
-  } catch (e) {
-    return NextResponse.json({ error: (e as Error).message }, { status: 500 })
+  } catch (error) {
+    return safeMutationError({ route: '/api/products/[id]', requestId, errorCode: 'PRODUCT_UPDATE_FAILED', userMessage: 'The product could not be updated.', error })
   }
 }

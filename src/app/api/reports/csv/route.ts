@@ -24,6 +24,7 @@ import {
 import { dayBook } from '@/lib/vouchers/data-access'
 import { accountLedgerSmart } from '@/lib/accounting/voucher-supabase'
 import { getAccountById } from '@/lib/accounting/data-access'
+import { resolveRequestId, safeApiError } from '@/lib/observability'
 
 // ─── CSV helpers ─────────────────────────────────────────────
 function csvEscape(v: unknown): string {
@@ -262,6 +263,7 @@ function buildExceptionsCsv(rows: any[]): string {
 
 // ─── Main route ──────────────────────────────────────────────
 export async function GET(req: Request) {
+  const requestId = resolveRequestId(req)
   const session = await getServerSession(authOptions)
   if (!session?.user) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
   const loaded = await loadSessionUser((session.user as any).id)
@@ -374,7 +376,7 @@ export async function GET(req: Request) {
         'Cache-Control': 'no-store, no-cache, must-revalidate',
       },
     })
-  } catch (e) {
-    return NextResponse.json({ error: (e as Error).message }, { status: 500 })
+  } catch (error) {
+    return safeApiError({ route: '/api/reports/csv', requestId, errorCode: 'REPORT_EXPORT_FAILED', userMessage: 'The report export could not be generated.', error })
   }
 }

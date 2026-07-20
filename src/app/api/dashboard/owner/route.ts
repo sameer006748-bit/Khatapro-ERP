@@ -6,12 +6,13 @@ import { getAdminSupabase } from '@/lib/supabase/admin'
 import { db } from '@/lib/db'
 import { getAccountByCode } from '@/lib/accounting/data-access'
 import { bizDateString } from '@/lib/dates'
-import { withObservability } from '@/lib/observability'
+import { resolveRequestId, safeApiError, withObservability } from '@/lib/observability'
 
 const RECENT_LIMIT = 5
 const STOCK_ALERT_LIMIT = 6
 
 export const GET = withObservability('/api/dashboard/owner', async (req: Request) => {
+  const requestId = resolveRequestId(req)
   try {
     const session = await getServerSession(authOptions)
     if (!session?.user)
@@ -162,11 +163,14 @@ export const GET = withObservability('/api/dashboard/owner', async (req: Request
       negativeStockProducts: stockResult.negativeStockProducts,
       auditLogs,
     })
-  } catch {
-    return NextResponse.json(
-      { error: 'DASHBOARD_LOAD_FAILED' },
-      { status: 500 },
-    )
+  } catch (error) {
+    return safeApiError({
+      route: '/api/dashboard/owner',
+      requestId,
+      errorCode: 'DASHBOARD_LOAD_FAILED',
+      userMessage: 'The dashboard could not be loaded.',
+      error,
+    })
   }
 })
 
@@ -502,20 +506,15 @@ async function getRecentAuditLogs(businessId: string) {
   const admin = getAdminSupabase()
   const { data: auditLogsRaw } = await admin
     .from('audit_logs')
-    .select('id, timestamp, action, entity, entity_id, details')
+    .select('id, timestamp, action, entity, entity_id')
     .eq('business_id', businessId)
     .order('timestamp', { ascending: false })
     .limit(20)
-  return (auditLogsRaw ?? []).map((r: any) => {
-    const details =
-      typeof r.details === 'string' ? r.details : JSON.stringify(r.details ?? null)
-    return {
-      id: r.id,
-      timestamp: r.timestamp,
-      action: r.action,
-      entity: r.entity,
-      entityId: r.entity_id,
-      details: details.length > 200 ? details.slice(0, 200) + '...' : details,
-    }
-  })
+  return (auditLogsRaw ?? []).map((r: any) => ({
+    id: r.id,
+    timestamp: r.timestamp,
+    action: r.action,
+    entity: r.entity,
+    entityId: r.entity_id,
+  }))
 }

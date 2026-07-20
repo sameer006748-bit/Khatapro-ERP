@@ -4,10 +4,12 @@ import { z } from 'zod'
 import { authOptions } from '@/lib/auth/authOptions'
 import { loadSessionUser, requirePermission, hasPermission } from '@/lib/auth/permissions'
 import { markReturned, getDeliveryOrder, getRiderByUserId } from '@/lib/delivery/data-access'
+import { resolveRequestId, safeMutationError } from '@/lib/observability'
 
 const Schema = z.object({ returnReason: z.string().optional() })
 
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const requestId = resolveRequestId(req)
   const session = await getServerSession(authOptions)
   if (!session?.user) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
   const loaded = await loadSessionUser((session.user as any).id)
@@ -33,5 +35,13 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   try {
     const result = await markReturned(loaded.businessId, id, parsed.data.returnReason ?? null, loaded.userId)
     return NextResponse.json({ ok: true, ...result })
-  } catch (e) { return NextResponse.json({ error: (e as Error).message }, { status: 500 }) }
+  } catch (error) {
+    return safeMutationError({
+      route: '/api/delivery-orders/[id]/returned',
+      requestId,
+      errorCode: 'DELIVERY_RETURN_FAILED',
+      userMessage: 'The return could not be recorded.',
+      error,
+    })
+  }
 }

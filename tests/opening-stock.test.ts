@@ -2,18 +2,18 @@ import { strict as assert } from 'node:assert'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 
-import { planOpeningStock, SafeProductError } from '../src/lib/products/opening-stock'
+import { planOpeningStock, SafeProductError } from '../src/lib/products/opening-stock.ts'
 
 // ── planOpeningStock: validation and money math ──────────────────────────────
 
 test('positive quantity and cost produce exactly one posting plan', () => {
-  const plan = planOpeningStock(10, 250)
+  const plan = planOpeningStock(2, 50)
   assert.ok(plan)
-  assert.equal(plan.openingQty, 10)
+  assert.equal(plan.openingQty, 2)
   // WAC must equal the opening cost (rupees → paisas)
-  assert.equal(plan.unitCostPaisas, 25000)
+  assert.equal(plan.unitCostPaisas, 5000)
   // valuation = quantity × opening cost
-  assert.equal(plan.valuePaisas, 250000)
+  assert.equal(plan.valuePaisas, 10000)
 })
 
 test('accounting is balanced: the single value drives both debit and credit', () => {

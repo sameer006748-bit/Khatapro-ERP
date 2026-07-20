@@ -9,7 +9,7 @@ import {
   PHASE_8_POST_SALE_ARGUMENT_NAMES,
   buildPhase8PostReceiptVoucherPayload,
   buildPhase9PostSalePayload,
-} from '../src/lib/supabase/rpc-compatibility'
+} from '../src/lib/supabase/rpc-compatibility.ts'
 
 const saleInput = {
   p_business_id: 'business-1',

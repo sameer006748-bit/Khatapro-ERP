@@ -3,8 +3,9 @@ import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth/authOptions'
 import { loadSessionUser, hasPermission } from '@/lib/auth/permissions'
 import { listCodSubmissions, getRiderByUserId } from '@/lib/delivery/data-access'
+import { resolveRequestId, safeMutationError, withObservability } from '@/lib/observability'
 
-export async function GET(req: Request) {
+const getCodSubmissions = async (req: Request) => {
   const session = await getServerSession(authOptions)
   if (!session?.user) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
   const loaded = await loadSessionUser((session.user as any).id)
@@ -22,6 +23,8 @@ export async function GET(req: Request) {
   const rows = await listCodSubmissions(loaded.businessId, riderId)
   return NextResponse.json({ rows })
 }
+
+export const GET = withObservability('/api/cod-submissions', getCodSubmissions)
 
 import { z } from 'zod'
 import { requirePermission } from '@/lib/auth/permissions'
@@ -42,6 +45,7 @@ const Schema = z.object({
 })
 
 export async function POST(req: Request) {
+  const requestId = resolveRequestId(req)
   const session = await getServerSession(authOptions)
   if (!session?.user) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
   const loaded = await loadSessionUser((session.user as any).id)
@@ -74,5 +78,7 @@ export async function POST(req: Request) {
       notes: parsed.data.notes ?? null, createdBy: su.userId,
     })
     return NextResponse.json({ ok: true, ...result })
-  } catch (e) { return NextResponse.json({ error: (e as Error).message }, { status: 500 }) }
+  } catch (error) {
+    return safeMutationError({ route: '/api/cod-submissions', requestId, errorCode: 'COD_SUBMISSION_FAILED', userMessage: 'The COD submission could not be created.', error })
+  }
 }
