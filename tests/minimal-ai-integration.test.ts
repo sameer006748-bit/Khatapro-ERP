@@ -31,6 +31,22 @@ test('AI settings mutations require Owner/Admin and reject other roles', async (
   assert.match(route, /requireAiSettingsOwner\(req\)/)
 })
 
+test('Supabase AI settings writes use the authenticated UUID without Prisma lookup', async () => {
+  const store = await source('src/lib/ai/ai-settings-store.ts')
+  const route = await source('src/app/api/ai-settings/route.ts')
+  const testRoute = await source('src/app/api/ai-settings/test/route.ts')
+  assert.doesNotMatch(store, /db\.user\.(findUnique|findFirst)/)
+  assert.match(store, /normalizeSupabaseUserUuid\(supabaseUserUuid\)/)
+  assert.match(route, /session\.supabaseUserUuid/)
+  assert.match(testRoute, /session\.supabaseUserUuid/)
+  assert.match(store, /classification: 'database_upsert_failed'/)
+})
+
+test('release model is centralized on stable Gemini 2.5 Flash', async () => {
+  const config = await source('src/lib/ai/config.ts')
+  assert.match(config, /'gemini-2\.5-flash'/)
+})
+
 test('permission filtering allows only role-scoped screens', () => {
   assert.equal(canUseAiForScreen({ roleName: 'Owner/Admin', permissions: [] }, 'reports'), true)
   assert.equal(canUseAiForScreen({ roleName: 'Accountant', permissions: ['can_view_trial_balance'] }, 'trial-balance'), true)

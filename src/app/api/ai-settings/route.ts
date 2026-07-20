@@ -72,6 +72,7 @@ async function saveSettings(req: NextRequest) {
       PROVIDER,
       parsed.data,
       session.userId,
+      session.supabaseUserUuid,
     )
 
     await writeAudit({

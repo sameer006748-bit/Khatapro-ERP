@@ -31,31 +31,16 @@ export type AiSettingsUpdate = {
   apiKey: string
 }
 
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
 /**
- * Resolve a Prisma user id to a Supabase auth.users UUID.
- * Returns null when:
- * - Supabase is not configured.
- * - The user has no supabaseUserUuid populated.
- * This prevents invalid UUID writes to ai_provider_settings.
+ * Supabase-mode sessions already carry the authenticated auth.users UUID.
+ * Validate that value locally instead of querying the development-only
+ * Prisma/SQLite user table from a serverless production function.
  */
-async function resolveSupabaseUserUuid(
-  userOrId: string,
-): Promise<string | null> {
-  let row: { supabaseUserUuid: string | null } | null = null
-  if (userOrId.length > 30) {
-    // Looks like a UUID already (Prisma cuid is 25 chars; Supabase UUID is 36)
-    row = await db.user.findUnique({
-      where: { id: userOrId },
-      select: { supabaseUserUuid: true },
-    })
-  }
-  if (!row) {
-    row = await db.user.findFirst({
-      where: { supabaseUserUuid: userOrId },
-      select: { supabaseUserUuid: true },
-    })
-  }
-  return row?.supabaseUserUuid ?? null
+function normalizeSupabaseUserUuid(userId: string | null): string | null {
+  const normalized = userId?.trim() ?? ''
+  return UUID_PATTERN.test(normalized) ? normalized : null
 }
 
 // ---------------------------------------------------------------------------
@@ -104,7 +89,7 @@ async function fetchSupabaseSettings(
     .maybeSingle()
 
   if (error) {
-    console.error(JSON.stringify({ event: 'ai_settings_store_failed', operation: 'read', severity: 'error' }))
+    console.error(JSON.stringify({ event: 'ai_settings_store_failed', operation: 'read', classification: 'database_read_failed', severity: 'error' }))
     return {
       configured: false,
       provider,
@@ -157,7 +142,7 @@ async function upsertSupabaseSettings(
     .upsert(payload, { onConflict: 'business_id,provider' })
 
   if (error) {
-    console.error(JSON.stringify({ event: 'ai_settings_store_failed', operation: 'save', severity: 'error' }))
+    console.error(JSON.stringify({ event: 'ai_settings_store_failed', operation: 'save', classification: 'database_upsert_failed', severity: 'error' }))
     throw new Error('Failed to save AI settings')
   }
 }
@@ -190,7 +175,7 @@ async function updateSupabaseConnectionStatus(
     .eq('provider', provider)
 
   if (error) {
-    console.error(JSON.stringify({ event: 'ai_settings_store_failed', operation: 'update', severity: 'error' }))
+    console.error(JSON.stringify({ event: 'ai_settings_store_failed', operation: 'update', classification: 'database_status_update_failed', severity: 'error' }))
     // Do not throw — callers already return the status to the caller.
   }
 }
@@ -211,7 +196,7 @@ async function deleteSupabaseSettings(
     .eq('provider', provider)
 
   if (error) {
-    console.error(JSON.stringify({ event: 'ai_settings_store_failed', operation: 'delete', severity: 'error' }))
+    console.error(JSON.stringify({ event: 'ai_settings_store_failed', operation: 'delete', classification: 'database_delete_failed', severity: 'error' }))
     throw new Error('Failed to remove AI settings')
   }
 }
@@ -267,6 +252,7 @@ export async function saveAiSettings(
   provider: string,
   update: AiSettingsUpdate,
   userId: string,
+  supabaseUserUuid: string | null = null,
 ): Promise<AiSettingsRecord> {
   const trimmedKey = update.apiKey.trim()
   if (trimmedKey.length < 8 || trimmedKey.length > 2000) {
@@ -281,7 +267,7 @@ export async function saveAiSettings(
   }
 
   if (isSupabaseConfigured()) {
-    const supabaseUuid = await resolveSupabaseUserUuid(userId)
+    const supabaseUuid = normalizeSupabaseUserUuid(supabaseUserUuid)
     await upsertSupabaseSettings(
       businessId,
       provider,
@@ -366,6 +352,7 @@ export async function testAiConnection(
   businessId: string,
   provider: string,
   userId: string,
+  supabaseUserUuid: string | null = null,
 ): Promise<{ status: AiConnectionStatus; lastTestedAt: string }> {
   const nowIso = new Date().toISOString()
 
@@ -388,7 +375,7 @@ export async function testAiConnection(
 
     const decrypted = decrypt(data.encrypted_api_key, businessId, provider)
     if (decrypted === null) {
-      const supabaseUuid = await resolveSupabaseUserUuid(userId)
+      const supabaseUuid = normalizeSupabaseUserUuid(supabaseUserUuid)
       await updateSupabaseConnectionStatus(
         businessId,
         provider,
@@ -400,7 +387,13 @@ export async function testAiConnection(
       return { status: 'configuration_error', lastTestedAt: nowIso }
     }
 
-    return runGeminiTestAndPersist(businessId, provider, decrypted, userId, nowIso)
+    return runGeminiTestAndPersist(
+      businessId,
+      provider,
+      decrypted,
+      normalizeSupabaseUserUuid(supabaseUserUuid),
+      nowIso,
+    )
   }
 
   const row = await db.aiProviderSetting.findUnique({
@@ -430,18 +423,17 @@ async function runGeminiTestAndPersist(
   businessId: string,
   provider: string,
   decryptedKey: string,
-  userId: string,
+  supabaseUserUuid: string | null,
   nowIso: string,
 ): Promise<{ status: AiConnectionStatus; lastTestedAt: string }> {
   const status = await probeGeminiKey(decryptedKey)
-  const supabaseUuid = await resolveSupabaseUserUuid(userId)
   await updateSupabaseConnectionStatus(
     businessId,
     provider,
     status,
     nowIso,
     status === 'connected' ? null : status === 'invalid' ? 'authentication_failed' : 'connection_error',
-    supabaseUuid,
+    supabaseUserUuid,
   )
   return { status, lastTestedAt: nowIso }
 }
