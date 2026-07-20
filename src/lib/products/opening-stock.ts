@@ -10,9 +10,16 @@
 /** Error whose message is safe to show to the end user. */
 export class SafeProductError extends Error {
   readonly safe = true
-  constructor(message: string) {
+  /**
+   * Sanitized, non-sensitive diagnostic for the SERVER LOG only (never returned
+   * to the client). Carries the underlying RPC/Postgres error code + a short
+   * message tail so a swallowed failure becomes diagnosable via its requestId.
+   */
+  readonly diagnostic?: string
+  constructor(message: string, diagnostic?: string) {
     super(message)
     this.name = 'SafeProductError'
+    this.diagnostic = diagnostic
   }
 }
 

@@ -9,7 +9,7 @@ import { authOptions } from '@/lib/auth/authOptions'
 import { loadSessionUser, requirePermission } from '@/lib/auth/permissions'
 import { listProducts, createProduct } from '@/lib/products/data-access'
 import { SafeProductError } from '@/lib/products/opening-stock'
-import { withObservability } from '@/lib/observability'
+import { withObservability, resolveRequestId, safeMutationError } from '@/lib/observability'
 
 export const GET = withObservability('/api/products', async (req: Request) => {
   const session = await getServerSession(authOptions)
@@ -37,6 +37,7 @@ const CreateSchema = z.object({
 })
 
 export async function POST(req: Request) {
+  const requestId = resolveRequestId(req)
   const session = await getServerSession(authOptions)
   if (!session?.user) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
   const loaded = await loadSessionUser((session.user as any).id)
@@ -55,11 +56,32 @@ export async function POST(req: Request) {
       idempotencyKey: parsed.data.idempotencyKey ?? undefined,
       createdBy: su.userId,
     })
-    return NextResponse.json({ row: result.product, stockMovementId: result.stockMovementId })
+    return NextResponse.json(
+      { row: result.product, stockMovementId: result.stockMovementId },
+      { headers: { 'X-Request-Id': requestId } },
+    )
   } catch (e) {
     if (e instanceof SafeProductError) {
-      return NextResponse.json({ error: e.message }, { status: 400 })
+      // The product was created but opening stock rolled back completely. The
+      // user message is safe to show as-is; the sanitized diagnostic (RPC/
+      // Postgres error code + short tail) goes to the server log ONLY, so the
+      // exact cause is traceable by requestId without leaking internals.
+      return safeMutationError({
+        route: '/api/products',
+        requestId,
+        errorCode: 'OPENING_STOCK_FAILED',
+        userMessage: e.message,
+        error: e.diagnostic ?? e.message,
+        status: 400,
+      })
     }
-    return NextResponse.json({ error: 'Failed to create product. Please try again.' }, { status: 500 })
+    return safeMutationError({
+      route: '/api/products',
+      requestId,
+      errorCode: 'PRODUCT_CREATE_FAILED',
+      userMessage: 'Failed to create product. Please try again.',
+      error: e,
+      status: 500,
+    })
   }
 }

@@ -352,10 +352,20 @@ export async function createProduct(
       })
       if (openingErr) {
         // The RPC rolled back completely: the product exists at zero quantity
-        // with no movement and no voucher. Surface that honestly.
+        // with no movement and no voucher. Surface that honestly to the user,
+        // and carry a sanitized diagnostic (PostgREST error code + truncated
+        // message) for the SERVER LOG only so the failure is diagnosable via
+        // its requestId. PostgREST codes distinguish the likely causes:
+        //   PGRST202 → function missing from the schema cache
+        //   42501    → nested EXECUTE denied (function-owner privilege chain)
+        //   P0001    → a business rule RAISE inside the RPC
+        const code = (openingErr as any).code ? String((openingErr as any).code) : 'unknown'
+        const rawMsg = (openingErr as any).message ? String((openingErr as any).message) : ''
+        const diagnostic = `post_opening_stock [${code}] ${rawMsg}`.slice(0, 200)
         throw new SafeProductError(
           `Product "${input.name}" was created, but opening stock could not be posted. ` +
           'The product currently has zero stock. Add the opening quantity via Stock Entry, or retry later.',
+          diagnostic,
         )
       }
       stockMovementId = ((opening as any)?.movement_id as string) || undefined
