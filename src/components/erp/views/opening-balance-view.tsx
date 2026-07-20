@@ -18,6 +18,8 @@ import { formatMoney, parseMoney } from '@/lib/format'
 import { toast } from 'sonner'
 import { ArrowRight, AlertCircle, CheckCircle2, Wallet } from 'lucide-react'
 import { motion } from 'framer-motion'
+import type { MeUser } from '@/components/erp/erp-app'
+import { AiFieldHelp } from '@/components/erp/ai-actions'
 
 type Account = {
   id: string
@@ -36,7 +38,7 @@ type Category = {
   accounts: Account[]
 }
 
-export function OpeningBalanceView() {
+export function OpeningBalanceView({ user }: { user: MeUser }) {
   const qc = useQueryClient()
   const [accountId, setAccountId] = useState('')
   const [amount, setAmount] = useState('')
@@ -97,7 +99,7 @@ export function OpeningBalanceView() {
       <div className="card-3d p-5 sm:p-6">
         <div className="space-y-4">
           <div className="space-y-1.5">
-            <Label className="text-xs font-medium text-muted-foreground">Account</Label>
+            <div className="flex items-center"><Label className="text-xs font-medium text-muted-foreground">Account</Label><AiFieldHelp fieldName="accountId" fieldLabel="Opening balance account" currentScreen="opening-balance" role={user.roleName} valueCategory="account" accountingContext="asset liability equity receivable or payable" /></div>
             <Select value={accountId} onValueChange={setAccountId}>
               <SelectTrigger className="h-10 bg-background press-sm">
                 <SelectValue placeholder="Select account…" />
@@ -135,7 +137,7 @@ export function OpeningBalanceView() {
               )}
             </div>
             <div className="space-y-1.5">
-              <Label className="text-xs font-medium text-muted-foreground">Side</Label>
+              <div className="flex items-center"><Label className="text-xs font-medium text-muted-foreground">Side</Label><AiFieldHelp fieldName="side" fieldLabel="Debit or credit side" currentScreen="opening-balance" role={user.roleName} valueCategory="debit or credit" accountingContext="opening balance normal side" /></div>
               <RadioGroup
                 value={side}
                 onValueChange={(v) => setSide(v as 'debit' | 'credit')}

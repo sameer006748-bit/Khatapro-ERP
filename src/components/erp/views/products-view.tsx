@@ -16,6 +16,7 @@ import { toast } from 'sonner'
 import { Plus, X, Package, Search, AlertTriangle, Ghost, Edit2 } from 'lucide-react'
 import { formatMoney, formatTableDate } from '@/lib/format'
 import type { MeUser } from '@/components/erp/erp-app'
+import { AiFieldHelp } from '@/components/erp/ai-actions'
 
 type Product = {
   id: string
@@ -218,15 +219,15 @@ export function ProductsView({ user }: { user: MeUser }) {
               <Input id="product-unit" value="piece" disabled className="h-10 bg-muted" />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="product-sale-price" className="text-xs font-medium text-muted-foreground">Sale price (PKR)</Label>
+              <div className="flex items-center"><Label htmlFor="product-sale-price" className="text-xs font-medium text-muted-foreground">Sale price (PKR)</Label><AiFieldHelp fieldName="salePrice" fieldLabel="Sale price" currentScreen="products" role={user.roleName} valueCategory="money" accountingContext="pricing" /></div>
               <Input id="product-sale-price" type="number" step="0.01" value={form.salePrice} onChange={(e) => setForm((s) => ({ ...s, salePrice: e.target.value }))} className="h-10 bg-background press-sm" data-num />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="product-purchase-price" className="text-xs font-medium text-muted-foreground">Purchase price (PKR)</Label>
+              <div className="flex items-center"><Label htmlFor="product-purchase-price" className="text-xs font-medium text-muted-foreground">Purchase price (PKR)</Label><AiFieldHelp fieldName="purchasePrice" fieldLabel="Purchase price" currentScreen="products" role={user.roleName} valueCategory="money" accountingContext="cost and WAC" /></div>
               <Input id="product-purchase-price" type="number" step="0.01" value={form.purchasePrice} onChange={(e) => setForm((s) => ({ ...s, purchasePrice: e.target.value }))} className="h-10 bg-background press-sm" data-num />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="product-opening-stock" className="text-xs font-medium text-muted-foreground">Opening stock (pieces)</Label>
+              <div className="flex items-center"><Label htmlFor="product-opening-stock" className="text-xs font-medium text-muted-foreground">Opening stock (pieces)</Label><AiFieldHelp fieldName="openingStock" fieldLabel="Opening stock" currentScreen="products" role={user.roleName} valueCategory="quantity" accountingContext="inventory opening balance" /></div>
               <Input id="product-opening-stock" type="number" value={form.openingStock} onChange={(e) => setForm((s) => ({ ...s, openingStock: e.target.value }))} className="h-10 bg-background press-sm" data-num />
             </div>
             <div className="sm:col-span-2 lg:col-span-3 flex items-center gap-3">

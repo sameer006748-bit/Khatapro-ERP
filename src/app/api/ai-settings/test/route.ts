@@ -6,30 +6,27 @@ import {
   requireAiSettingsOwner,
   requireSameOrigin,
 } from '@/lib/ai/ai-settings-auth'
+import { AI_PROVIDER } from '@/lib/ai/config'
+import { resolveRequestId, safeApiError, withObservability } from '@/lib/observability'
 
-const PROVIDER = 'gemini'
+const PROVIDER = AI_PROVIDER
 
-function safeErrorResponse(error: unknown) {
+function safeErrorResponse(error: unknown, req: NextRequest) {
+  const requestId = resolveRequestId(req)
   if (error instanceof AiSettingsAuthError) {
     return NextResponse.json(
-      { error: error.code },
+      { error: error.code, requestId },
       {
         status: error.status,
-        headers: { 'Cache-Control': 'no-store' },
+        headers: { 'Cache-Control': 'no-store', 'X-Request-Id': requestId },
       },
     )
   }
 
-  return NextResponse.json(
-    { error: 'INTERNAL_ERROR' },
-    {
-      status: 500,
-      headers: { 'Cache-Control': 'no-store' },
-    },
-  )
+  return safeApiError({ route: '/api/ai-settings/test', requestId, errorCode: 'AI_CONNECTION_TEST_FAILED', userMessage: 'The Gemini connection could not be tested.', error, method: 'POST' })
 }
 
-export async function POST(req: NextRequest) {
+async function testConnection(req: NextRequest) {
   try {
     requireSameOrigin(req)
 
@@ -56,6 +53,8 @@ export async function POST(req: NextRequest) {
       headers: { 'Cache-Control': 'no-store' },
     })
   } catch (error) {
-    return safeErrorResponse(error)
+    return safeErrorResponse(error, req)
   }
 }
+
+export const POST = withObservability('/api/ai-settings/test', testConnection)

@@ -11,34 +11,31 @@ import {
   requireAiSettingsOwner,
   requireSameOrigin,
 } from '@/lib/ai/ai-settings-auth'
+import { AI_PROVIDER } from '@/lib/ai/config'
+import { resolveRequestId, safeApiError, withObservability } from '@/lib/observability'
 
-const PROVIDER = 'gemini'
+const PROVIDER = AI_PROVIDER
 
 const saveSchema = z.object({
   apiKey: z.string().trim().min(8).max(2000),
 })
 
-function safeErrorResponse(error: unknown) {
+function safeErrorResponse(error: unknown, req: NextRequest) {
+  const requestId = resolveRequestId(req)
   if (error instanceof AiSettingsAuthError) {
     return NextResponse.json(
-      { error: error.code },
+      { error: error.code, requestId },
       {
         status: error.status,
-        headers: { 'Cache-Control': 'no-store' },
+        headers: { 'Cache-Control': 'no-store', 'X-Request-Id': requestId },
       },
     )
   }
 
-  return NextResponse.json(
-    { error: 'INTERNAL_ERROR' },
-    {
-      status: 500,
-      headers: { 'Cache-Control': 'no-store' },
-    },
-  )
+  return safeApiError({ route: '/api/ai-settings', requestId, errorCode: 'AI_SETTINGS_FAILED', userMessage: 'AI settings could not be updated.', error, method: req.method })
 }
 
-export async function GET(req: NextRequest) {
+async function getSettings(req: NextRequest) {
   try {
     const session = await requireAiSettingsOwner(req)
     const settings = await getAiSettings(session.businessId, PROVIDER)
@@ -48,11 +45,11 @@ export async function GET(req: NextRequest) {
       headers: { 'Cache-Control': 'no-store' },
     })
   } catch (error) {
-    return safeErrorResponse(error)
+    return safeErrorResponse(error, req)
   }
 }
 
-export async function POST(req: NextRequest) {
+async function saveSettings(req: NextRequest) {
   try {
     requireSameOrigin(req)
 
@@ -93,11 +90,11 @@ export async function POST(req: NextRequest) {
       headers: { 'Cache-Control': 'no-store' },
     })
   } catch (error) {
-    return safeErrorResponse(error)
+    return safeErrorResponse(error, req)
   }
 }
 
-export async function DELETE(req: NextRequest) {
+async function removeSettings(req: NextRequest) {
   try {
     requireSameOrigin(req)
 
@@ -117,7 +114,6 @@ export async function DELETE(req: NextRequest) {
       {
         configured: false,
         provider: PROVIDER,
-        maskedKey: null,
         status: 'not_configured',
         lastTestedAt: null,
       },
@@ -127,6 +123,10 @@ export async function DELETE(req: NextRequest) {
       },
     )
   } catch (error) {
-    return safeErrorResponse(error)
+    return safeErrorResponse(error, req)
   }
 }
+
+export const GET = withObservability('/api/ai-settings', getSettings)
+export const POST = withObservability('/api/ai-settings', saveSettings)
+export const DELETE = withObservability('/api/ai-settings', removeSettings)

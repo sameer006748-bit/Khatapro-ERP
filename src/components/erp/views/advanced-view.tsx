@@ -38,7 +38,7 @@ export function AdvancedView({ user }: { user: MeUser }) {
           <JournalVoucherView user={user} />
         </div>
       )}
-      {tab === 'opening' && <OpeningBalanceView />}
+      {tab === 'opening' && <OpeningBalanceView user={user} />}
       {tab === 'audit' && <AuditLogView />}
     </div>
   )

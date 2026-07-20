@@ -11,6 +11,7 @@ import { toast } from 'sonner'
 import { Plus, Trash2, ArrowRight, AlertCircle, CheckCircle2 } from 'lucide-react'
 import { formatMoney, parseMoney } from '@/lib/format'
 import type { MeUser } from '@/components/erp/erp-app'
+import { AiFieldHelp } from '@/components/erp/ai-actions'
 
 type Account = { id: string; code: string; name: string }
 type Category = { id: string; code: string; name: string; type: string; accounts: Account[] }
@@ -67,7 +68,7 @@ export function JournalVoucherView({ user }: { user: MeUser }) {
       <div className="card-3d p-5">
         <div className="grid sm:grid-cols-2 gap-3">
           <div><Label className="text-xs text-muted-foreground">Date (Asia/Karachi)</Label><Input type="date" value={jvDate} onChange={e => setJvDate(e.target.value)} className="h-9 bg-background" data-num /></div>
-          <div><Label className="text-xs text-muted-foreground">Narration</Label><Input value={memo} onChange={e => setMemo(e.target.value)} placeholder="Optional" className="h-9 bg-background" /></div>
+          <div><div className="flex items-center"><Label className="text-xs text-muted-foreground">Narration</Label><AiFieldHelp fieldName="memo" fieldLabel="Narration" currentScreen="journal-voucher" role={user.roleName} valueCategory="short text" accountingContext="voucher audit explanation" /></div><Input value={memo} onChange={e => setMemo(e.target.value)} placeholder="Optional" className="h-9 bg-background" /></div>
         </div>
       </div>
 

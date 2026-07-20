@@ -12,6 +12,7 @@ import { ArrowRight, AlertCircle, CheckCircle2, ChevronRight, BookOpen } from 'l
 import { formatMoney, parseMoney } from '@/lib/format'
 import { motion } from 'framer-motion'
 import type { MeUser } from '@/components/erp/erp-app'
+import { AiFieldHelp } from '@/components/erp/ai-actions'
 
 type Account = { id: string; code: string; name: string; categoryType: string }
 
@@ -77,11 +78,11 @@ export function PaymentVoucherView({ user }: { user: MeUser }) {
       <div className="card-3d p-5 space-y-3">
         <div><Label className="text-xs text-muted-foreground">Date</Label><Input type="date" value={paymentDate} onChange={e => setPaymentDate(e.target.value)} className="h-9 bg-background" data-num /></div>
         <div>
-          <Label className="text-xs text-muted-foreground">Pay To</Label>
+          <div className="flex items-center"><Label className="text-xs text-muted-foreground">Pay To</Label><AiFieldHelp fieldName="debitAccountId" fieldLabel="Debit account / Pay To" currentScreen="payment-voucher" role={user.roleName} valueCategory="account" accountingContext="debit side" /></div>
           <Select value={debitAccountId} onValueChange={setDebitAccountId}><SelectTrigger className="h-9 bg-background"><SelectValue placeholder="Select account…" /></SelectTrigger><SelectContent>{accounts.map(a => <SelectItem key={a.id} value={a.id}><span data-num>{a.code}</span> · {a.name}</SelectItem>)}</SelectContent></Select>
         </div>
         <div>
-          <Label className="text-xs text-muted-foreground">Paid From</Label>
+          <div className="flex items-center"><Label className="text-xs text-muted-foreground">Paid From</Label><AiFieldHelp fieldName="paidFromAccountId" fieldLabel="Credit account / Paid From" currentScreen="payment-voucher" role={user.roleName} valueCategory="business account" accountingContext="cash or bank credit" /></div>
           <Select value={paidFromAccountId} onValueChange={setPaidFromAccountId}><SelectTrigger className="h-9 bg-background"><SelectValue placeholder="Select account…" /></SelectTrigger><SelectContent>{businessAccounts.map(a => <SelectItem key={a.id} value={a.id}><span data-num>{a.code}</span> · {a.name}</SelectItem>)}</SelectContent></Select>
         </div>
         <div><Label className="text-xs text-muted-foreground">Amount (Rs)</Label><Input type="text" value={amount} onChange={e => setAmount(e.target.value)} placeholder="0.00" className="h-9 bg-background" data-num /></div>
@@ -139,11 +140,11 @@ export function ReceiptVoucherView({ user }: { user: MeUser }) {
       <div className="card-3d p-5 space-y-3">
         <div><Label className="text-xs text-muted-foreground">Date</Label><Input type="date" value={receiptDate} onChange={e => setReceiptDate(e.target.value)} className="h-9 bg-background" data-num /></div>
         <div>
-          <Label className="text-xs text-muted-foreground">Received From</Label>
+          <div className="flex items-center"><Label className="text-xs text-muted-foreground">Received From</Label><AiFieldHelp fieldName="creditAccountId" fieldLabel="Credit account / Received From" currentScreen="receipt-voucher" role={user.roleName} valueCategory="account" accountingContext="credit side" /></div>
           <Select value={creditAccountId} onValueChange={setCreditAccountId}><SelectTrigger className="h-9 bg-background"><SelectValue placeholder="Select account…" /></SelectTrigger><SelectContent>{accounts.map(a => <SelectItem key={a.id} value={a.id}><span data-num>{a.code}</span> · {a.name}</SelectItem>)}</SelectContent></Select>
         </div>
         <div>
-          <Label className="text-xs text-muted-foreground">Deposit Into</Label>
+          <div className="flex items-center"><Label className="text-xs text-muted-foreground">Deposit Into</Label><AiFieldHelp fieldName="receivedIntoAccountId" fieldLabel="Debit account / Deposit Into" currentScreen="receipt-voucher" role={user.roleName} valueCategory="business account" accountingContext="cash or bank debit" /></div>
           <Select value={receivedIntoAccountId} onValueChange={setReceivedIntoAccountId}><SelectTrigger className="h-9 bg-background"><SelectValue placeholder="Select account…" /></SelectTrigger><SelectContent>{businessAccounts.map(a => <SelectItem key={a.id} value={a.id}><span data-num>{a.code}</span> · {a.name}</SelectItem>)}</SelectContent></Select>
         </div>
         <div><Label className="text-xs text-muted-foreground">Amount (Rs)</Label><Input type="text" value={amount} onChange={e => setAmount(e.target.value)} placeholder="0.00" className="h-9 bg-background" data-num /></div>
@@ -201,11 +202,11 @@ export function ContraEntryView({ user }: { user: MeUser }) {
         </div>
         <div className="grid sm:grid-cols-2 gap-3">
           <div>
-            <Label className="text-xs text-muted-foreground">Transfer From (credit)</Label>
+            <div className="flex items-center"><Label className="text-xs text-muted-foreground">Transfer From (credit)</Label><AiFieldHelp fieldName="fromAccountId" fieldLabel="Transfer From" currentScreen="contra-entry" role={user.roleName} valueCategory="business account" accountingContext="credit source asset" /></div>
             <Select value={fromAccountId} onValueChange={setFromAccountId}><SelectTrigger className="h-9 bg-background"><SelectValue placeholder="Select…" /></SelectTrigger><SelectContent>{businessAccounts.map(a => <SelectItem key={a.id} value={a.id}><span data-num>{a.code}</span> · {a.name}</SelectItem>)}</SelectContent></Select>
           </div>
           <div>
-            <Label className="text-xs text-muted-foreground">Transfer To (debit)</Label>
+            <div className="flex items-center"><Label className="text-xs text-muted-foreground">Transfer To (debit)</Label><AiFieldHelp fieldName="toAccountId" fieldLabel="Transfer To" currentScreen="contra-entry" role={user.roleName} valueCategory="business account" accountingContext="debit destination asset" /></div>
             <Select value={toAccountId} onValueChange={setToAccountId}><SelectTrigger className="h-9 bg-background"><SelectValue placeholder="Select…" /></SelectTrigger><SelectContent>{businessAccounts.map(a => <SelectItem key={a.id} value={a.id}><span data-num>{a.code}</span> · {a.name}</SelectItem>)}</SelectContent></Select>
           </div>
         </div>

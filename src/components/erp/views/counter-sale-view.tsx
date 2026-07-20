@@ -22,6 +22,7 @@ import {
 import { formatWholeRupees, parseMoney } from '@/lib/format'
 import { motion, AnimatePresence } from 'framer-motion'
 import type { MeUser } from '@/components/erp/erp-app'
+import { AiFieldHelp } from '@/components/erp/ai-actions'
 
 type Product = { id: string; name: string; currentStock: number; salePrice: number; unit: string }
 type Salesman = { id: string; name: string; commissionPct: number }
@@ -267,7 +268,9 @@ export function CounterSaleView({ user }: { user: MeUser }) {
             <SelectTrigger className="h-8 w-auto bg-background press-sm text-xs"><SelectValue placeholder="Salesman…" /></SelectTrigger>
             <SelectContent>{salesmenQ.data?.rows.map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}</SelectContent>
           </Select>
+          <AiFieldHelp fieldName="salesmanId" fieldLabel="Salesman" currentScreen="counter-sale" role={user.roleName} valueCategory="staff reference" accountingContext="sales attribution and commission" />
           <Button variant="ghost" size="sm" className="h-8 text-xs press-sm" onClick={() => setShowCustomer(v => !v)}><User className="size-3" /> {showCustomer ? 'Hide' : 'Customer'}</Button>
+          <AiFieldHelp fieldName="customerName" fieldLabel="Customer" currentScreen="counter-sale" role={user.roleName} valueCategory="party reference" accountingContext="receivable balance" />
         </div>
       </div>
 
@@ -347,6 +350,7 @@ export function CounterSaleView({ user }: { user: MeUser }) {
             <div className="card-3d p-3">
               <div className="flex items-center gap-1.5 mb-2">
                 <span className="text-sm font-semibold text-foreground">Payment</span>
+                <AiFieldHelp fieldName="paymentAccountId" fieldLabel="Payment account and paid amount" currentScreen="counter-sale" role={user.roleName} valueCategory="money allocation" accountingContext="cash versus customer balance" />
                 {!showAdvanced && (
                   <button onClick={() => setShowAdvanced(true)} className="ml-auto text-[10px] text-muted-foreground hover:text-foreground">Split →</button>
                 )}

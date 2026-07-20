@@ -10,11 +10,11 @@ import { db } from '@/lib/db'
 import { isSupabaseConfigured } from '@/lib/supabase/config'
 import { getAdminClient } from '@/lib/supabase/server-admin'
 import { encrypt, decrypt } from '@/lib/security/ai-secret-encryption'
+import { probeGeminiKey } from '@/lib/ai/gemini-client'
 
 export type AiSettingsRecord = {
   configured: boolean
   provider: string
-  maskedKey: string | null
   status: AiConnectionStatus
   lastTestedAt: string | null
 }
@@ -29,10 +29,6 @@ export type AiConnectionStatus =
 
 export type AiSettingsUpdate = {
   apiKey: string
-}
-
-export function maskApiKey(keyLast4: string): string {
-  return `****************${keyLast4}`
 }
 
 /**
@@ -70,7 +66,6 @@ function mapSupabaseRow(row: {
   business_id: string
   provider: string
   encrypted_api_key: string
-  key_last4: string
   connection_status: string
   last_tested_at: string | null
 }): AiSettingsRecord {
@@ -82,7 +77,6 @@ function mapSupabaseRow(row: {
   return {
     configured: row.encrypted_api_key.length > 0,
     provider: row.provider,
-    maskedKey: maskApiKey(row.key_last4),
     status: effectiveStatus,
     lastTestedAt: row.last_tested_at ?? null,
   }
@@ -97,7 +91,6 @@ async function fetchSupabaseSettings(
     return {
       configured: false,
       provider,
-      maskedKey: null,
       status: 'configuration_error',
       lastTestedAt: null,
     }
@@ -105,7 +98,7 @@ async function fetchSupabaseSettings(
 
   const { data, error } = await admin
     .from('ai_provider_settings')
-    .select('business_id,provider,encrypted_api_key,key_last4,connection_status,last_tested_at')
+    .select('business_id,provider,encrypted_api_key,connection_status,last_tested_at')
     .eq('business_id', businessId)
     .eq('provider', provider)
     .maybeSingle()
@@ -115,7 +108,6 @@ async function fetchSupabaseSettings(
     return {
       configured: false,
       provider,
-      maskedKey: null,
       status: 'configuration_error',
       lastTestedAt: null,
     }
@@ -125,7 +117,6 @@ async function fetchSupabaseSettings(
     return {
       configured: false,
       provider,
-      maskedKey: null,
       status: 'not_configured',
       lastTestedAt: null,
     }
@@ -248,7 +239,6 @@ export async function getAiSettings(
     return {
       configured: false,
       provider,
-      maskedKey: null,
       status: 'not_configured',
       lastTestedAt: null,
     }
@@ -262,7 +252,6 @@ export async function getAiSettings(
   return {
     configured: row.encryptedApiKey.length > 0,
     provider: row.provider,
-    maskedKey: maskApiKey(row.keyLast4),
     status: effectiveStatus,
     lastTestedAt: row.lastTestedAt?.toISOString() ?? null,
   }
@@ -305,7 +294,6 @@ export async function saveAiSettings(
     return {
       configured: true,
       provider,
-      maskedKey: maskApiKey(keyLast4),
       status: 'not_tested',
       lastTestedAt: null,
     }
@@ -337,10 +325,37 @@ export async function saveAiSettings(
   return {
     configured: true,
     provider,
-    maskedKey: maskApiKey(keyLast4),
     status: 'not_tested',
     lastTestedAt: null,
   }
+}
+
+/**
+ * Server-only plaintext key access for an already authenticated and authorized
+ * AI request. The key is never returned by an API route.
+ */
+export async function getAiApiKey(
+  businessId: string,
+  provider: string = 'gemini',
+): Promise<string | null> {
+  if (isSupabaseConfigured()) {
+    const admin = getAdminClient()
+    if (!admin) return null
+    const { data, error } = await admin
+      .from('ai_provider_settings')
+      .select('encrypted_api_key')
+      .eq('business_id', businessId)
+      .eq('provider', provider)
+      .maybeSingle()
+    if (error || !data?.encrypted_api_key) return null
+    return decrypt(data.encrypted_api_key, businessId, provider)
+  }
+
+  const row = await db.aiProviderSetting.findUnique({
+    where: { businessId_provider: { businessId, provider } },
+    select: { encryptedApiKey: true },
+  })
+  return row ? decrypt(row.encryptedApiKey, businessId, provider) : null
 }
 
 /**
@@ -408,7 +423,7 @@ export async function testAiConnection(
     return { status: 'configuration_error', lastTestedAt: nowIso }
   }
 
-  return runGeminiTestAndPersistLocal(row.id, businessId, provider, decrypted, nowIso)
+  return runGeminiTestAndPersistLocal(row.id, decrypted, nowIso)
 }
 
 async function runGeminiTestAndPersist(
@@ -418,135 +433,34 @@ async function runGeminiTestAndPersist(
   userId: string,
   nowIso: string,
 ): Promise<{ status: AiConnectionStatus; lastTestedAt: string }> {
-  try {
-    const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), 10000)
-    let response: Response
-    try {
-      response = await fetch(
-        'https://generativelanguage.googleapis.com/v1beta/models',
-        {
-          method: 'GET',
-          headers: {
-            'x-goog-api-key': decryptedKey,
-            accept: 'application/json',
-          },
-          signal: controller.signal,
-          cache: 'no-store',
-        },
-      )
-    } finally {
-      clearTimeout(timeout)
-    }
-
-    let status: AiConnectionStatus
-    let errorCode: string | null = null
-
-    if (response.ok) {
-      status = 'connected'
-    } else if (response.status === 401 || response.status === 403) {
-      status = 'invalid'
-      errorCode = 'authentication_failed'
-    } else {
-      status = 'failed'
-      errorCode = `provider_error:${response.status}`
-    }
-
-    const supabaseUuid = await resolveSupabaseUserUuid(userId)
-    await updateSupabaseConnectionStatus(
-      businessId,
-      provider,
-      status,
-      nowIso,
-      errorCode,
-      supabaseUuid,
-    )
-    return { status, lastTestedAt: nowIso }
-  } catch (err: unknown) {
-    const errorMessage = err instanceof Error ? err.name : 'unknown'
-    const status: AiConnectionStatus =
-      errorMessage === 'AbortError' ? 'failed' : 'failed'
-    const errorCode = errorMessage === 'AbortError' ? 'timeout' : 'network_error'
-
-    const supabaseUuid = await resolveSupabaseUserUuid(userId)
-    await updateSupabaseConnectionStatus(
-      businessId,
-      provider,
-      status,
-      nowIso,
-      errorCode,
-      supabaseUuid,
-    )
-    return { status, lastTestedAt: nowIso }
-  }
+  const status = await probeGeminiKey(decryptedKey)
+  const supabaseUuid = await resolveSupabaseUserUuid(userId)
+  await updateSupabaseConnectionStatus(
+    businessId,
+    provider,
+    status,
+    nowIso,
+    status === 'connected' ? null : status === 'invalid' ? 'authentication_failed' : 'connection_error',
+    supabaseUuid,
+  )
+  return { status, lastTestedAt: nowIso }
 }
 
 async function runGeminiTestAndPersistLocal(
   rowId: string,
-  businessId: string,
-  provider: string,
   decryptedKey: string,
   nowIso: string,
 ): Promise<{ status: AiConnectionStatus; lastTestedAt: string }> {
-  try {
-    const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), 10000)
-    let response: Response
-    try {
-      response = await fetch(
-        'https://generativelanguage.googleapis.com/v1beta/models',
-        {
-          method: 'GET',
-          headers: {
-            'x-goog-api-key': decryptedKey,
-            accept: 'application/json',
-          },
-          signal: controller.signal,
-          cache: 'no-store',
-        },
-      )
-    } finally {
-      clearTimeout(timeout)
-    }
-
-    let status: AiConnectionStatus
-    let errorCode: string | null = null
-
-    if (response.ok) {
-      status = 'connected'
-    } else if (response.status === 401 || response.status === 403) {
-      status = 'invalid'
-      errorCode = 'authentication_failed'
-    } else {
-      status = 'failed'
-      errorCode = `provider_error:${response.status}`
-    }
-
-    await db.aiProviderSetting.update({
-      where: { id: rowId },
-      data: {
-        connectionStatus: status,
-        lastTestedAt: new Date(),
-        lastErrorCode: errorCode,
-      },
-    })
-    return { status, lastTestedAt: nowIso }
-  } catch (err: unknown) {
-    const errorMessage = err instanceof Error ? err.name : 'unknown'
-    const status: AiConnectionStatus =
-      errorMessage === 'AbortError' ? 'failed' : 'failed'
-    const errorCode = errorMessage === 'AbortError' ? 'timeout' : 'network_error'
-
-    await db.aiProviderSetting.update({
-      where: { id: rowId },
-      data: {
-        connectionStatus: status,
-        lastTestedAt: new Date(),
-        lastErrorCode: errorCode,
-      },
-    })
-    return { status, lastTestedAt: nowIso }
-  }
+  const status = await probeGeminiKey(decryptedKey)
+  await db.aiProviderSetting.update({
+    where: { id: rowId },
+    data: {
+      connectionStatus: status,
+      lastTestedAt: new Date(),
+      lastErrorCode: status === 'connected' ? null : status === 'invalid' ? 'authentication_failed' : 'connection_error',
+    },
+  })
+  return { status, lastTestedAt: nowIso }
 }
 
 /**

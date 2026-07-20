@@ -1,10 +1,10 @@
 import { useQuery } from '@tanstack/react-query'
 
 export interface AiSettings {
-  enabled: boolean
+  configured: boolean
   provider: string
-  connected: boolean
-  hasKey: boolean
+  status: 'not_configured' | 'not_tested' | 'connected' | 'invalid' | 'failed' | 'configuration_error'
+  lastTestedAt: string | null
 }
 
 async function fetchAiSettings(): Promise<AiSettings> {

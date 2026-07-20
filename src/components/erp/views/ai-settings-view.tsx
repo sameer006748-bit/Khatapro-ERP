@@ -22,7 +22,6 @@ type ConnectionStatus =
 type AiSettingsData = {
   configured: boolean
   provider: string
-  maskedKey: string | null
   status: ConnectionStatus
   lastTestedAt: string | null
 }
@@ -31,9 +30,9 @@ const STATUS_CONFIG: Record<ConnectionStatus, { label: string; color: 'default' 
   not_configured: { label: 'Not configured', color: 'secondary', icon: AlertTriangle },
   not_tested: { label: 'Saved, not tested', color: 'outline', icon: RefreshCw },
   connected: { label: 'Connected', color: 'default', icon: CheckCircle2 },
-  invalid: { label: 'Invalid API key', color: 'destructive', icon: XCircle },
-  failed: { label: 'Connection failed', color: 'destructive', icon: XCircle },
-  configuration_error: { label: 'Configuration error', color: 'destructive', icon: AlertTriangle },
+  invalid: { label: 'Invalid key', color: 'destructive', icon: XCircle },
+  failed: { label: 'Connection error', color: 'destructive', icon: XCircle },
+  configuration_error: { label: 'Connection error', color: 'destructive', icon: AlertTriangle },
 }
 
 async function fetchSettings(): Promise<AiSettingsData> {
@@ -90,8 +89,6 @@ export function AiSettingsView() {
       setShowInput(false)
       setShowKey(false)
       void qc.invalidateQueries({ queryKey: ['ai-settings'] })
-      // Auto-test after save
-      testMut.mutate()
     },
     onError: (e: Error) => {
       toast.error(e.message)
@@ -152,20 +149,18 @@ export function AiSettingsView() {
             </CardTitle>
             <CardDescription>Google Gemini AI provider configuration</CardDescription>
           </div>
-          {settings?.configured && (
-            <Badge variant={statusCfg.color} className="gap-1.5">
-              <StatusIcon className="size-3" />
-              {statusCfg.label}
-            </Badge>
-          )}
+          <Badge variant={statusCfg.color} className="gap-1.5">
+            <StatusIcon className="size-3" />
+            {statusCfg.label}
+          </Badge>
         </CardHeader>
         <CardContent className="space-y-4">
-          {/* Masked key display */}
-          {settings?.configured && settings.maskedKey && (
+          {/* Never render any stored key characters back into the browser. */}
+          {settings?.configured && (
             <div className="space-y-1">
-              <Label className="text-xs text-muted-foreground">Saved API key</Label>
-              <div className="font-mono text-sm bg-muted px-3 py-2 rounded-md select-all">
-                {settings.maskedKey}
+              <Label className="text-xs text-muted-foreground">Gemini API key</Label>
+              <div className="text-sm bg-muted px-3 py-2 rounded-md">
+                Stored securely. The saved key cannot be displayed.
               </div>
             </div>
           )}
@@ -288,18 +283,6 @@ export function AiSettingsView() {
                 </Button>
               )}
             </div>
-          )}
-
-          {/* Show "Add key" when not configured and input is not shown */}
-          {!settings?.configured && !showInput && (
-            <Button
-              size="sm"
-              onClick={() => setShowInput(true)}
-              disabled={isBusy}
-              className="press-sm"
-            >
-              Add Gemini API key
-            </Button>
           )}
 
           {/* Last tested */}

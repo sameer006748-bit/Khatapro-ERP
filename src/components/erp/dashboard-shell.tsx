@@ -38,6 +38,7 @@ import {
   Banknote,
 } from 'lucide-react'
 import { useSearchParams } from 'next/navigation'
+import dynamic from 'next/dynamic'
 import type { MeUser } from '@/components/erp/erp-app'
 import { KhataProLogo } from '@/components/erp/logo'
 import { OwnerDashboard } from '@/components/erp/views/owner-dashboard'
@@ -81,8 +82,16 @@ import { AccountsView } from '@/components/erp/views/accounts-view'
 import { AdvancedView } from '@/components/erp/views/advanced-view'
 import { AiSettingsView } from '@/components/erp/views/ai-settings-view'
 import { MyProfileView } from '@/components/erp/views/my-profile-view'
+import { AiExplainButton } from '@/components/erp/ai-actions'
+import { AI_SCREENS, type AiScreen } from '@/lib/ai/safety-core'
 
 import { SupabaseStatusBadge } from '@/components/erp/supabase-status-badge'
+
+const LazyAiAssistant = dynamic(
+  () => import('@/components/erp/ai-assistant').then((module) => module.AiAssistant),
+  { ssr: false },
+)
+const AI_SCREEN_SET = new Set<string>(AI_SCREENS)
 
 // ──────────────────────────────────────────────────────────────────────────
 // Navigation model: 6 compact top-level groups — Home, Daily Work, Money,
@@ -430,6 +439,11 @@ export function DashboardShell({ user, onSignOut }: { user: MeUser; onSignOut: (
         {/* Main content */}
         <main className="flex-1 overflow-y-auto pb-28 md:pb-8">
           <div className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto">
+            {AI_SCREEN_SET.has(effectiveActive) && (
+              <div className="flex justify-end mb-3">
+                <AiExplainButton screen={effectiveActive as AiScreen} />
+              </div>
+            )}
             <AnimatePresence mode="wait">
               <motion.div
                 key={effectiveActive + (ledgerAccountId ?? '')}
@@ -467,6 +481,7 @@ export function DashboardShell({ user, onSignOut }: { user: MeUser; onSignOut: (
           }}
         />
       )}
+      <LazyAiAssistant user={user} activeScreen={effectiveActive} />
     </div>
   )
 }
@@ -809,7 +824,7 @@ function ViewRouter({
   if (active === 'petty-cash') return <PettyCashView user={user} />
   if (active === 'expense-batch') return <ExpenseBatchView user={user} />
   if (active === 'day-book') return <DayBookView user={user} onSelectVoucher={(id) => { window.history.pushState({}, '', `/?voucher=${id}`); window.dispatchEvent(new PopStateEvent('popstate')) }} />
-  if (active === 'opening-balance') return <OpeningBalanceView />
+  if (active === 'opening-balance') return <OpeningBalanceView user={user} />
   if (active === 'trial-balance') return <TrialBalanceView />
   if (active === 'audit') return <AuditLogView />
   if (active === 'biz-day-test') return <BizDayTestView />

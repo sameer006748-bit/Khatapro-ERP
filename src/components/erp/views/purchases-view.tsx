@@ -13,6 +13,7 @@ import { bizDate, bizDateString } from '@/lib/dates'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useRouter } from 'next/navigation'
 import type { MeUser } from '@/components/erp/erp-app'
+import { AiFieldHelp } from '@/components/erp/ai-actions'
 
 type Purchase = { id: string; purchaseNo: string; vendorId: string; vendorName: string | null; vendorPhone?: string | null; vendorAddress?: string | null; vendorCity?: string | null; supplierBillNo: string | null; purchaseDate: string; total: string; paidAmount: string; outstandingAmount: string; status: string }
 type Vendor = { id: string; name: string; phone: string | null }
@@ -175,7 +176,7 @@ function AddPurchaseModal({ user, onClose, onViewPurchase }: { user: MeUser; onC
       {/* Left: vendor + items */}
       <div className="lg:col-span-2 space-y-3">
         <div className="grid grid-cols-2 gap-2">
-          <div><Label className="text-xs text-muted-foreground">Vendor *</Label><Select value={vendorId} onValueChange={setVendorId}><SelectTrigger className="h-9 bg-background"><SelectValue placeholder="Select…" /></SelectTrigger><SelectContent>{vendorsQ.data?.rows.map(v => <SelectItem key={v.id} value={v.id}>{v.name}</SelectItem>)}</SelectContent></Select></div>
+          <div><div className="flex items-center"><Label className="text-xs text-muted-foreground">Vendor *</Label><AiFieldHelp fieldName="vendorId" fieldLabel="Supplier" currentScreen="purchases" role={user.roleName} valueCategory="party reference" accountingContext="supplier payable" /></div><Select value={vendorId} onValueChange={setVendorId}><SelectTrigger className="h-9 bg-background"><SelectValue placeholder="Select…" /></SelectTrigger><SelectContent>{vendorsQ.data?.rows.map(v => <SelectItem key={v.id} value={v.id}>{v.name}</SelectItem>)}</SelectContent></Select></div>
           <div><Label className="text-xs text-muted-foreground">Date</Label><Input type="date" value={purchaseDate} onChange={e => setPurchaseDate(e.target.value)} className="h-9 bg-background" data-num /></div>
         </div>
         <Input value={supplierBillNo} onChange={e => setSupplierBillNo(e.target.value)} placeholder="Supplier bill no (optional)" className="h-9 bg-background" />
@@ -196,7 +197,7 @@ function AddPurchaseModal({ user, onClose, onViewPurchase }: { user: MeUser; onC
         <div className="border border-border rounded-lg p-3 bg-muted/30"><div className="text-xs text-muted-foreground mb-1">Total</div><div className="text-lg font-bold text-foreground" data-num>{formatWholeRupees(totalPaisas)}</div></div>
         {/* Payment */}
         <div className="space-y-2">
-          <Label className="text-xs text-muted-foreground">Payment</Label>
+          <div className="flex items-center"><Label className="text-xs text-muted-foreground">Payment</Label><AiFieldHelp fieldName="payments" fieldLabel="Purchase payment" currentScreen="purchases" role={user.roleName} valueCategory="money allocation" accountingContext="cash versus payable" /></div>
           {payments.map((p, i) => <div key={i} className="space-y-1">
             <Select value={p.paymentType} onValueChange={v => setPayments(ls => ls.map((x, j) => j === i ? { ...x, paymentType: v } : x))}><SelectTrigger className="h-8 bg-background text-sm"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="purchase_payment">Cash/Bank Payment</SelectItem><SelectItem value="credit">Credit (No Payment)</SelectItem></SelectContent></Select>
             {p.paymentType !== 'credit' && <><Select value={p.accountId} onValueChange={v => setPayments(ls => ls.map((x, j) => j === i ? { ...x, accountId: v } : x))}><SelectTrigger className="h-8 bg-background text-sm"><SelectValue placeholder="Account…" /></SelectTrigger><SelectContent>{accounts.map(a => <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>)}</SelectContent></Select>
