@@ -17,10 +17,15 @@ import type { MeUser } from '@/components/erp/erp-app'
 
 type Product = { id: string; name: string; salePrice: number }
 type Account = { id: string; code: string; name: string }
+type Salesman = { id: string; name: string; commissionPct: number; isActive?: boolean }
 type Item = { key: string; productId: string; productName: string; qty: string; unitPrice: string }
 
 export function OfcSaleView({ user }: { user: MeUser }) {
   const qc = useQueryClient()
+  // Owner/Admin/Accountant (can_view_sales) must pick the salesman; a
+  // salesman-role user (can_view_own_sales only) is resolved server-side.
+  const mustPickSalesman = user.permissions.includes('can_view_sales')
+  const [salesmanId, setSalesmanId] = useState('')
   const [form, setForm] = useState({
     customerName: '', customerPhone: '', customerCity: '', customerAddress: '',
     courierNote: '', advanceReceived: '', discountRupees: '',
@@ -33,6 +38,12 @@ export function OfcSaleView({ user }: { user: MeUser }) {
 
   const coaQ = useQuery({ queryKey: ['coa'], queryFn: () => fetch('/api/setup/coa').then(r => r.json()), staleTime: 300_000 })
   const productsQ = useQuery<{ rows: Product[] }>({ queryKey: ['products'], queryFn: () => fetch('/api/products').then(r => r.json()), staleTime: 30_000 })
+  const salesmenQ = useQuery<{ rows: Salesman[] }>({ queryKey: ['salesmen'], queryFn: () => fetch('/api/salesmen').then(r => r.json()), staleTime: 300_000, enabled: mustPickSalesman })
+
+  const activeSalesmen = useMemo(() => (salesmenQ.data?.rows ?? []).filter(s => s.isActive !== false), [salesmenQ.data])
+  // Same rule as Counter Sale: auto-select only when there is exactly ONE
+  // active salesman (unambiguous) — never guess among several.
+  const effectiveSalesmanId = useMemo(() => salesmanId || (activeSalesmen.length === 1 ? activeSalesmen[0].id : ''), [salesmanId, activeSalesmen])
 
   const businessAccounts: Account[] = useMemo(() => {
     if (!coaQ.data?.categories) return []
@@ -87,6 +98,7 @@ export function OfcSaleView({ user }: { user: MeUser }) {
             qty: parseInt(it.qty) || 1, unitPrice: it.unitPrice,
           })),
           payments,
+          salesmanId: mustPickSalesman ? effectiveSalesmanId : undefined,
           customerName: form.customerName, customerPhone: form.customerPhone,
           customerAddress: form.customerAddress, customerCity: form.customerCity || undefined,
           memo: form.courierNote ? `Courier: ${form.courierNote}` : undefined,
@@ -157,11 +169,26 @@ export function OfcSaleView({ user }: { user: MeUser }) {
 
   const canPost = form.customerName && form.customerPhone && form.customerAddress && form.customerCity &&
     items.some(it => it.productId || it.productName) &&
+    (!mustPickSalesman || !!effectiveSalesmanId) &&
     !discountError && (form.discountRupees === '' || discountPaisas >= 0n)
 
   return (
     <div className="space-y-4">
       <h1 className="text-xl font-semibold tracking-tight text-foreground">OFC Sale</h1>
+
+      {/* ── Salesman ── */}
+      {mustPickSalesman && (
+        <div className="card-3d p-4 space-y-2">
+          <h2 className="text-sm font-semibold text-foreground">Salesman *</h2>
+          <Select value={salesmanId} onValueChange={setSalesmanId}>
+            <SelectTrigger className="h-11 bg-background press-sm text-sm"><SelectValue placeholder="Select salesman…" /></SelectTrigger>
+            <SelectContent>{activeSalesmen.map(s => <SelectItem key={s.id} value={s.id} className="min-h-11">{s.name}</SelectItem>)}</SelectContent>
+          </Select>
+          {salesmenQ.isSuccess && activeSalesmen.length === 0 && (
+            <div className="text-[10px] text-destructive">No active salesman found. Add one before posting.</div>
+          )}
+        </div>
+      )}
 
       {/* ── Customer ── */}
       <div className="card-3d p-4 space-y-3">

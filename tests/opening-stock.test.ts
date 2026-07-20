@@ -1,0 +1,101 @@
+import { strict as assert } from 'node:assert'
+import { readFile } from 'node:fs/promises'
+import test from 'node:test'
+
+import { planOpeningStock, SafeProductError } from '../src/lib/products/opening-stock'
+
+// ── planOpeningStock: validation and money math ──────────────────────────────
+
+test('positive quantity and cost produce exactly one posting plan', () => {
+  const plan = planOpeningStock(10, 250)
+  assert.ok(plan)
+  assert.equal(plan.openingQty, 10)
+  // WAC must equal the opening cost (rupees → paisas)
+  assert.equal(plan.unitCostPaisas, 25000)
+  // valuation = quantity × opening cost
+  assert.equal(plan.valuePaisas, 250000)
+})
+
+test('accounting is balanced: the single value drives both debit and credit', () => {
+  const plan = planOpeningStock(7, 99.99)
+  assert.ok(plan)
+  const debit = plan.valuePaisas
+  const credit = plan.valuePaisas
+  assert.equal(debit, credit)
+  assert.equal(plan.valuePaisas, 7 * 9999)
+})
+
+test('zero opening quantity creates no posting', () => {
+  assert.equal(planOpeningStock(0, 500), null)
+})
+
+test('negative quantity is rejected', () => {
+  assert.throws(() => planOpeningStock(-1, 100), SafeProductError)
+})
+
+test('fractional quantity is rejected', () => {
+  assert.throws(() => planOpeningStock(1.5, 100), SafeProductError)
+})
+
+test('negative cost is rejected', () => {
+  assert.throws(() => planOpeningStock(5, -10), SafeProductError)
+})
+
+test('positive quantity with zero cost is rejected (no quantity without valuation)', () => {
+  assert.throws(() => planOpeningStock(5, 0), SafeProductError)
+})
+
+// ── Migration 00012: atomicity and safety properties ─────────────────────────
+
+const MIGRATION = 'supabase/migrations/00012_post_opening_stock.sql'
+
+test('migration defines post_opening_stock and nothing else structural', async () => {
+  const sql = (await readFile(MIGRATION, 'utf8')).toLowerCase()
+  assert.ok(sql.includes('create or replace function public.post_opening_stock'))
+  // Additive-only: no table/column/data changes
+  assert.ok(!sql.includes('create table'))
+  assert.ok(!sql.includes('alter table'))
+  assert.ok(!sql.includes('drop table'))
+  assert.ok(!sql.includes('update public.products set')) // stock is updated only via create_stock_movement
+  // No auth.uid() dependency
+  assert.ok(!sql.includes('auth.uid'))
+})
+
+test('migration grants execute to service_role only', async () => {
+  const sql = (await readFile(MIGRATION, 'utf8')).toLowerCase()
+  assert.ok(/revoke execute on function public\.post_opening_stock[\s\S]*?from public, anon, authenticated/.test(sql))
+  assert.ok(/grant execute on function public\.post_opening_stock[\s\S]*?to service_role/.test(sql))
+})
+
+test('migration rejects duplicates and invalid quantity/cost inside one transaction', async () => {
+  const sql = (await readFile(MIGRATION, 'utf8'))
+  assert.ok(sql.includes("movement_type = 'opening'"), 'duplicate-opening guard present')
+  assert.ok(sql.includes('already has opening stock'), 'duplicate raises a safe error')
+  assert.ok(sql.includes('p_quantity is null or p_quantity <= 0'), 'quantity validated')
+  assert.ok(sql.includes('p_unit_cost_paisas is null or p_unit_cost_paisas <= 0'), 'cost validated')
+  assert.ok(sql.includes('for update'), 'product row locked against concurrent opening attempts')
+  // Reuses the authoritative Phase-8 engines, in the same transaction
+  assert.ok(sql.includes('public.create_stock_movement('))
+  assert.ok(sql.includes('public.post_voucher('))
+  // Debit Inventory (1100) / Credit Opening Balance Equity (3030)
+  assert.ok(sql.includes("a.code = '1100'"))
+  assert.ok(sql.includes("a.code = '3030'"))
+})
+
+test('migration balances the voucher with one value for both legs', async () => {
+  const sql = await readFile(MIGRATION, 'utf8')
+  const debitLegs = sql.match(/'debit', v_value_paisas/g) ?? []
+  const creditLegs = sql.match(/'credit', v_value_paisas/g) ?? []
+  assert.equal(debitLegs.length, 1)
+  assert.equal(creditLegs.length, 1)
+})
+
+// ── Application flow: product is created at zero stock, opening only via RPC ─
+
+test('createProduct inserts with zero stock and posts opening only via post_opening_stock', async () => {
+  const src = await readFile('src/lib/products/data-access.ts', 'utf8')
+  assert.ok(!src.includes('atomic_create_product'), 'no dependency on the unavailable migration 00011 RPC')
+  assert.ok(src.includes('current_stock: 0'), 'product row starts at zero quantity')
+  assert.ok(src.includes("rpc('post_opening_stock'"), 'opening stock goes through the atomic RPC')
+  assert.ok(src.includes('planOpeningStock('), 'input validated before any write')
+})

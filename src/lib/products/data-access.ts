@@ -13,6 +13,7 @@ import { db } from '@/lib/db'
 import { getAdminSupabase } from '@/lib/supabase/admin'
 import { probeTable } from '@/lib/supabase/phase-probe'
 import { resolveSupabaseUuid } from '@/lib/accounting/voucher-supabase'
+import { planOpeningStock, SafeProductError } from '@/lib/products/opening-stock'
 
 /**
  * Fail-closed Supabase phase probe.
@@ -206,6 +207,45 @@ export async function listProducts(
   }))
 }
 
+async function fetchProductRow(admin: ReturnType<typeof getAdminSupabase>, productId: string): Promise<ProductRow | null> {
+  let result = await admin
+    .from('products')
+    .select(
+      'id, name, category_id, unit, sale_price, purchase_price, current_stock, is_temporary, is_active, marked_for_merge, low_stock_threshold, created_at',
+    )
+    .eq('id', productId)
+    .single()
+  // Same fallback as listProducts: retry without low_stock_threshold if the
+  // column is missing in this environment.
+  if (result.error && result.error.message.includes('low_stock_threshold')) {
+    result = await admin
+      .from('products')
+      .select(
+        'id, name, category_id, unit, sale_price, purchase_price, current_stock, is_temporary, is_active, marked_for_merge, created_at',
+      )
+      .eq('id', productId)
+      .single() as typeof result
+  }
+  const { data, error } = result
+  if (error || !data) return null
+  const p = data as any
+  return {
+    id: p.id,
+    name: p.name,
+    categoryId: p.category_id,
+    categoryName: null,
+    unit: p.unit,
+    salePrice: Number(p.sale_price),
+    purchasePrice: Number(p.purchase_price),
+    currentStock: p.current_stock,
+    isTemporary: p.is_temporary,
+    isActive: p.is_active,
+    markedForMerge: p.marked_for_merge,
+    lowStockThreshold: p.low_stock_threshold ?? 5,
+    createdAt: p.created_at,
+  }
+}
+
 export async function createProduct(
   businessId: string,
   input: {
@@ -217,64 +257,113 @@ export async function createProduct(
     isTemporary?: boolean
     lowStockThreshold?: number
     idempotencyKey?: string
+    createdBy?: string | null
   },
 ): Promise<{ product: ProductRow; stockMovementId?: string }> {
   const openingStock = input.openingStock ?? 0
+  // Validate up-front: throws a safe error on negative/fractional quantity or
+  // negative cost, and on positive quantity with zero cost (which would create
+  // stock quantity without valuation or accounting). Null = nothing to post.
+  const openingPlan = planOpeningStock(openingStock, input.purchasePrice ?? 0)
 
   if (await isPhase3Live()) {
     const admin = getAdminSupabase()
-    // Atomic RPC: create product + opening stock movement in one transaction.
-    // Idempotency key prevents duplicate products from retried POST requests.
-    const { data: rpcResult, error: rpcErr } = await admin.rpc(
-      'atomic_create_product',
-      {
-        p_business_id: businessId,
-        p_name: input.name,
-        p_category_id: input.categoryId ?? null,
-        p_sale_price: input.salePrice ?? 0,
-        p_purchase_price: input.purchasePrice ?? 0,
-        p_opening_stock: openingStock,
-        p_is_temporary: input.isTemporary ?? false,
-        p_low_stock_threshold: input.lowStockThreshold ?? 5,
-        p_idempotency_key: input.idempotencyKey ?? null,
-        p_created_by: null,
-      },
-    )
-    if (rpcErr) throw new Error('Failed to create product. Please try again.')
-    const result = rpcResult as any
-    const productId = result.product_id as string
-    const stockMovementId = (result.stock_movement_id as string) || undefined
-    const finalStock = (result.current_stock as number) ?? 0
 
-    // Fetch the full product row.
-    const { data: fresh, error: freshErr } = await admin
-      .from('products')
-      .select(
-        'id, name, category_id, unit, sale_price, purchase_price, current_stock, is_temporary, is_active, marked_for_merge, low_stock_threshold, created_at',
-      )
-      .eq('id', productId)
-      .single()
-    if (freshErr || !fresh) throw new Error('Failed to read created product.')
-
-    const p = fresh as any
-    return {
-      product: {
-        id: p.id,
-        name: p.name,
-        categoryId: p.category_id,
-        categoryName: null,
-        unit: p.unit,
-        salePrice: Number(p.sale_price),
-        purchasePrice: Number(p.purchase_price),
-        currentStock: finalStock,
-        isTemporary: p.is_temporary,
-        isActive: p.is_active,
-        markedForMerge: p.marked_for_merge,
-        lowStockThreshold: p.low_stock_threshold ?? 5,
-        createdAt: p.created_at,
-      },
-      stockMovementId,
+    // Idempotency: retried POSTs with the same key return the original product
+    // instead of creating a duplicate. Backed by the CREATE_PRODUCT audit row
+    // (the Phase-8 products table has no idempotency_key column).
+    const idempotencyKey = input.idempotencyKey ?? null
+    if (idempotencyKey) {
+      const { data: priorAudit } = await admin
+        .from('audit_logs')
+        .select('entity_id')
+        .eq('business_id', businessId)
+        .eq('action', 'CREATE_PRODUCT')
+        .eq('details->>idempotency_key', idempotencyKey)
+        .limit(1)
+        .maybeSingle()
+      if (priorAudit?.entity_id) {
+        const existing = await fetchProductRow(admin, priorAudit.entity_id as string)
+        if (existing) {
+          const { data: sm } = await admin
+            .from('stock_movements')
+            .select('id')
+            .eq('product_id', existing.id)
+            .eq('movement_type', 'opening')
+            .limit(1)
+            .maybeSingle()
+          return { product: existing, stockMovementId: (sm as any)?.id }
+        }
+      }
     }
+
+    // Step 1: create the product with ZERO stock. Opening quantity is only
+    // ever applied by the atomic post_opening_stock RPC below — never here —
+    // so a failure cannot leave quantity without valuation/accounting.
+    const { data: created, error: createErr } = await admin
+      .from('products')
+      .insert({
+        business_id: businessId,
+        name: input.name,
+        category_id: input.categoryId ?? null,
+        unit: 'piece',
+        sale_price: input.salePrice ?? 0,
+        purchase_price: input.purchasePrice ?? 0,
+        current_stock: 0,
+        is_temporary: input.isTemporary ?? false,
+      })
+      .select('id')
+      .single()
+    if (createErr || !created) throw new Error('Failed to create product. Please try again.')
+    const productId = (created as any).id as string
+
+    // low_stock_threshold column may not exist yet — set it separately and
+    // tolerate failure (same posture as updateProduct).
+    if (input.lowStockThreshold !== undefined) {
+      await admin.from('products').update({ low_stock_threshold: input.lowStockThreshold }).eq('id', productId)
+    }
+
+    const supabaseCreatedBy = await resolveSupabaseUuid(input.createdBy)
+
+    // Audit the creation (also anchors the idempotency lookup above).
+    await admin.from('audit_logs').insert({
+      business_id: businessId,
+      user_id: supabaseCreatedBy,
+      action: 'CREATE_PRODUCT',
+      entity: 'product',
+      entity_id: productId,
+      details: {
+        name: input.name,
+        opening_stock: openingStock,
+        idempotency_key: idempotencyKey,
+      },
+    })
+
+    // Step 2: post opening stock atomically (movement + WAC + Inventory
+    // debit / Opening Balance Equity credit voucher + audit, one transaction).
+    let stockMovementId: string | undefined
+    if (openingPlan) {
+      const { data: opening, error: openingErr } = await admin.rpc('post_opening_stock', {
+        p_business_id: businessId,
+        p_product_id: productId,
+        p_quantity: openingPlan.openingQty,
+        p_unit_cost_paisas: openingPlan.unitCostPaisas.toString(),
+        p_created_by: supabaseCreatedBy,
+      })
+      if (openingErr) {
+        // The RPC rolled back completely: the product exists at zero quantity
+        // with no movement and no voucher. Surface that honestly.
+        throw new SafeProductError(
+          `Product "${input.name}" was created, but opening stock could not be posted. ` +
+          'The product currently has zero stock. Add the opening quantity via Stock Entry, or retry later.',
+        )
+      }
+      stockMovementId = ((opening as any)?.movement_id as string) || undefined
+    }
+
+    const fresh = await fetchProductRow(admin, productId)
+    if (!fresh) throw new Error('Failed to read created product.')
+    return { product: fresh, stockMovementId }
   }
 
   // Prisma fallback — duplicate-safe with idempotency key.
@@ -330,21 +419,21 @@ export async function createProduct(
   })
 
   let stockMovementId: string | undefined
-  if (openingStock !== 0) {
+  if (openingPlan) {
     const sm = await db.stockMovement.create({
       data: {
         businessId,
         productId: p.id,
         movementType: 'opening',
-        quantity: Math.abs(openingStock),
-        balanceAfter: openingStock,
+        quantity: openingPlan.openingQty,
+        balanceAfter: openingPlan.openingQty,
         reason: 'Opening stock',
       },
     })
     stockMovementId = sm.id
     await db.product.update({
       where: { id: p.id },
-      data: { currentStock: openingStock },
+      data: { currentStock: openingPlan.openingQty },
     })
   }
 
@@ -357,7 +446,7 @@ export async function createProduct(
       unit: p.unit,
       salePrice: p.salePrice,
       purchasePrice: p.purchasePrice,
-      currentStock: openingStock,
+      currentStock: openingPlan?.openingQty ?? 0,
       isTemporary: p.isTemporary,
       isActive: p.isActive,
       markedForMerge: p.markedForMerge,
