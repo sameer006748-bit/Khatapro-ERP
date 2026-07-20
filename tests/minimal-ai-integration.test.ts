@@ -1,12 +1,14 @@
 import { strict as assert } from 'node:assert'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
-import { callGeminiCore, GeminiClientError } from '../src/lib/ai/gemini-client-core.ts'
+import { callGeminiCore, GeminiClientError, runGeminiWithSingleRetry } from '../src/lib/ai/gemini-client-core.ts'
 import {
   buildSystemInstruction,
   canUseAiForScreen,
   parseStructuredAnswer,
+  resolveAnswerLanguage,
   sanitizeFieldMetadata,
+  validateAiAnswer,
   validatePrompt,
 } from '../src/lib/ai/safety-core.ts'
 
@@ -107,7 +109,7 @@ test('Roman Urdu is default policy and Simple English is selectable', () => {
   const roman = buildSystemInstruction('roman-urdu')
   const english = buildSystemInstruction('simple-english')
   assert.match(roman, /Roman Urdu/)
-  assert.match(english, /Simple English/)
+  assert.match(english, /simple, professional English/i)
   assert.match(roman, /read-only/)
   assert.match(roman, /Never invent figures/)
 })
@@ -304,7 +306,7 @@ test('parseStructuredAnswer parses valid JSON correctly', () => {
 
 test('parseStructuredAnswer handles empty optional fields', () => {
   const result = parseStructuredAnswer('{"simpleAnswer":"Simple answer.","accountingEffect":"","nextCheck":""}')
-  assert.equal(result.simpleAnswer, 'Simple answer.')
+  assert.equal(result.simpleAnswer, '')
   assert.equal(result.accountingEffect, undefined)
   assert.equal(result.nextCheck, undefined)
 })
@@ -314,11 +316,11 @@ test('parseStructuredAnswer strips markdown code fences', () => {
   assert.equal(result.simpleAnswer, 'Test.')
 })
 
-test('parseStructuredAnswer falls back to heading-based parsing for plain text', () => {
+test('parseStructuredAnswer safely converts unexpected labelled text into Summary only', () => {
   const result = parseStructuredAnswer('Simple answer: This is the main answer. Accounting effect: Debit 100 Credit 100. What to check next: Verify the balance.')
-  assert.equal(result.simpleAnswer, 'This is the main answer.')
-  assert.equal(result.accountingEffect, 'Debit 100 Credit 100.')
-  assert.equal(result.nextCheck, 'Verify the balance.')
+  assert.equal(result.simpleAnswer, 'This is the main answer. Debit 100 Credit 100. Verify the balance.')
+  assert.equal(result.accountingEffect, undefined)
+  assert.equal(result.nextCheck, undefined)
 })
 
 test('parseStructuredAnswer handles plain text without headings', () => {
@@ -411,40 +413,124 @@ test('callGeminiCore throws on empty response despite 200 status', async () => {
 // System instruction quality checks
 // ---------------------------------------------------------------------------
 
-test('system instruction requests JSON output and natural Roman Urdu', () => {
+test('system instruction requests concise structured output and professional Roman Urdu', () => {
   const sys = buildSystemInstruction('roman-urdu')
-  assert.match(sys, /valid JSON only/)
+  assert.match(sys, /valid JSON object/)
   assert.match(sys, /"simpleAnswer"/)
   assert.match(sys, /"accountingEffect"/)
   assert.match(sys, /"nextCheck"/)
   assert.match(sys, /Roman Urdu/)
-  // The system instruction uses "Simple answer" in quotes as instruction text — OK
-  assert.match(sys, /"Simple answer" as text/)
+  assert.match(sys, /business and accounting words naturally/)
+  assert.match(sys, /avoid slang/)
+  assert.match(sys, /Do not repeat the question/)
 })
 
-test('system instruction for Simple English uses only Roman Urdu in JSON field description', () => {
+test('English and Roman Urdu questions resolve to the requested professional language', () => {
   const sys = buildSystemInstruction('simple-english')
-  assert.match(sys, /valid JSON only/)
-  assert.match(sys, /Simple English/)
-  assert.match(sys, /Roman Urdu/) // Mentioned in field description: "natural Roman Urdu (or Simple English)"
-  assert.match(sys, /Write in short, plain Simple English/)
+  assert.equal(resolveAnswerLanguage('Please explain this Trial Balance report.', 'roman-urdu'), 'simple-english')
+  assert.equal(resolveAnswerLanguage('Aaj business ki position kya hai?', 'simple-english'), 'roman-urdu')
+  assert.match(sys, /simple, professional English/i)
 })
 
-test('system instruction forbids inventing figures and heading output', () => {
+test('system instruction forbids invented figures, repeated labels and internal details', () => {
   const sys = buildSystemInstruction('roman-urdu')
   assert.match(sys, /Never invent figures/)
-  assert.match(sys, /Never output headings/)
+  assert.match(sys, /Do not repeat.*section labels/)
+  assert.match(sys, /Never mention any external service, technical implementation/)
 })
 
 // ---------------------------------------------------------------------------
 // Truncated response handling in API route
 // ---------------------------------------------------------------------------
 
-test('API route handles AI_RESPONSE_TRUNCATED error code', async () => {
+test('API route hides truncation and technical details behind a safe message', async () => {
   const route = await source('src/app/api/ai/ask/route.ts')
-  assert.match(route, /AI_RESPONSE_TRUNCATED/)
+  assert.match(route, /AI_RESPONSE_INCOMPLETE/)
   assert.match(route, /'truncated'/)
-  assert.match(route, /answer was too long/)
+  assert.match(route, /KhataPro AI could not complete this explanation\. Please try again\./)
+  assert.doesNotMatch(route, /answer was too long|ask a more specific question/i)
+})
+
+test('MAX_TOKENS triggers exactly one stricter retry and successful recovery', async () => {
+  let calls = 0
+  const strictAttempts: boolean[] = []
+  const result = await runGeminiWithSingleRetry({
+    call: async (strict) => {
+      calls += 1
+      strictAttempts.push(strict)
+      if (calls === 1) throw new GeminiClientError('truncated', 200, 'MAX_TOKENS')
+      return '{"simpleAnswer":"Business position stable hai.","accountingEffect":"Cash movement verify karna zaroori hai.","nextCheck":"Recent entries check karein."}'
+    },
+    validate: (text, strict) => {
+      const checked = validateAiAnswer(text, strict)
+      return checked.valid ? { valid: true, value: checked.answer } : checked
+    },
+  })
+  assert.equal(calls, 2)
+  assert.deepEqual(strictAttempts, [false, true])
+  assert.equal(result.simpleAnswer, 'Business position stable hai.')
+})
+
+test('incomplete structured output retries once and never loops', async () => {
+  let calls = 0
+  await assert.rejects(
+    runGeminiWithSingleRetry({
+      call: async () => {
+        calls += 1
+        return '{"simpleAnswer":"Sentence ends abruptly","accountingEffect":"","nextCheck":""}'
+      },
+      validate: (text, strict) => {
+        const checked = validateAiAnswer(text, strict)
+        return checked.valid ? { valid: true, value: checked.answer } : checked
+      },
+    }),
+    (error: unknown) => error instanceof GeminiClientError && error.category === 'truncated',
+  )
+  assert.equal(calls, 2)
+})
+
+test('permanent provider failures do not retry', async () => {
+  let calls = 0
+  await assert.rejects(
+    runGeminiWithSingleRetry({
+      call: async () => {
+        calls += 1
+        throw new GeminiClientError('invalid_api_key', 400, 'API_KEY_INVALID')
+      },
+      validate: () => ({ valid: false, retryable: true, reason: 'empty' }),
+    }),
+    (error: unknown) => error instanceof GeminiClientError && error.category === 'invalid_api_key',
+  )
+  assert.equal(calls, 1)
+})
+
+test('retry instruction is stricter and uses at most two sentences per section', () => {
+  const normal = buildSystemInstruction('simple-english', { screen: 'reports', mode: 'explain' })
+  const retry = buildSystemInstruction('simple-english', { strict: true, screen: 'reports', mode: 'explain' })
+  assert.match(normal, /at most 3 short, complete sentences/)
+  assert.match(retry, /at most 2 short, complete sentences/)
+  assert.match(retry, /no introduction, no examples unless requested/)
+})
+
+test('response validation rejects placeholders, abrupt text and provider details', () => {
+  assert.equal(validateAiAnswer('{"simpleAnswer":"Simple answer","accountingEffect":"","nextCheck":""}').valid, false)
+  assert.equal(validateAiAnswer('{"simpleAnswer":"Business position is stable-","accountingEffect":"","nextCheck":""}').valid, false)
+  const unsafe = validateAiAnswer('{"simpleAnswer":"The Gemini backend returned JSON.","accountingEffect":"","nextCheck":""}')
+  assert.deepEqual(unsafe, { valid: false, retryable: false, reason: 'unsafe_output' })
+})
+
+test('screen-specific explanation contracts remain concise and accurate', () => {
+  const money = buildSystemInstruction('roman-urdu', { screen: 'accounts', mode: 'explain' })
+  const dayBook = buildSystemInstruction('roman-urdu', { screen: 'day-book', mode: 'explain' })
+  const trial = buildSystemInstruction('roman-urdu', { screen: 'trial-balance', mode: 'explain' })
+  assert.match(money, /current position from available aggregates/)
+  assert.match(money, /most important concern/)
+  assert.match(dayBook, /posted accounting activity/)
+  assert.match(dayBook, /debit and credit balance/)
+  assert.match(dayBook, /only one important activity/)
+  assert.match(trial, /total debit and credit match/)
+  assert.match(trial, /never claim the books are fully correct/i)
+  assert.match(trial, /unusual or negative balances/)
 })
 
 // ---------------------------------------------------------------------------
@@ -465,6 +551,22 @@ test('AI assistant hides empty sections', async () => {
   assert.match(assistant, /sections\.simpleAnswer &&/)
   assert.match(assistant, /sections\.accountingEffect &&/)
   assert.match(assistant, /sections\.nextCheck &&/)
+})
+
+test('user-facing assistant UI is English, branded, and contains no provider terms', async () => {
+  const assistant = await source('src/components/erp/ai-assistant.tsx')
+  const actions = await source('src/components/erp/ai-actions.tsx')
+  assert.match(assistant, /KhataPro AI is reviewing your business data/)
+  assert.match(assistant, /The response could not be completed\. Retrying/)
+  assert.match(assistant, /Read-only business and accounting assistance/)
+  assert.match(assistant, />Summary</)
+  assert.match(assistant, />Accounting Impact</)
+  assert.match(assistant, />Recommended Check</)
+  assert.match(actions, /Explain with KhataPro AI/)
+  assert.doesNotMatch(`${assistant}\n${actions}`, /Gemini|Google|\bprovider\b|\bbackend\b|\bmodel\b|\btokens?\b|\bquota\b|MAX_TOKENS|rate limit/i)
+  assert.doesNotMatch(`${assistant}\n${actions}`, />[^\n<]*\bAPI\b[^\n<]*</i)
+  assert.doesNotMatch(`${assistant}\n${actions}`, /'[^'\n]*\bAPI\b[^'\n]*[.!?][^'\n]*'/i)
+  assert.doesNotMatch(`${assistant}\n${actions}`, /\b(kya|kyun|kaise|batao|samjhao|likhein|poochain|karein)\b/i)
 })
 
 // ---------------------------------------------------------------------------

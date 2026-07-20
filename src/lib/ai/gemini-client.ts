@@ -1,9 +1,17 @@
 import 'server-only'
 import { AI_LIMITS, GEMINI_API_BASE, GEMINI_MODEL } from '@/lib/ai/config'
-import { buildSystemInstruction, clampAiResponse, type AiLanguage } from '@/lib/ai/safety-core'
+import {
+  buildSystemInstruction,
+  serializeStructuredAnswer,
+  validateAiAnswer,
+  type AiLanguage,
+  type AiMode,
+  type AiScreen,
+} from '@/lib/ai/safety-core'
 import {
   callGeminiCore,
   GeminiClientError,
+  runGeminiWithSingleRetry,
   type GeminiFailureCategory,
 } from '@/lib/ai/gemini-client-core'
 export { GeminiClientError } from '@/lib/ai/gemini-client-core'
@@ -30,16 +38,43 @@ export async function generateGeminiAnswer(args: {
   language: AiLanguage
   prompt: string
   context: Record<string, unknown>
+  screen: AiScreen
+  mode: AiMode
+  requestId: string
 }): Promise<string> {
-  const text = await callGemini(args.apiKey, {
-    systemInstruction: { parts: [{ text: buildSystemInstruction(args.language) }] },
-    contents: [{
-      role: 'user',
-      parts: [{ text: JSON.stringify({ question: args.prompt, authorizedContext: args.context }) }],
-    }],
-  }, AI_LIMITS.outputTokens)
+  const contents = [{
+    role: 'user',
+    parts: [{ text: JSON.stringify({ question: args.prompt, authorizedContext: args.context }) }],
+  }]
 
-  return clampAiResponse(text, AI_LIMITS.responseCharacters)
+  return runGeminiWithSingleRetry({
+    call: (strict) => callGemini(args.apiKey, {
+      systemInstruction: {
+        parts: [{
+          text: buildSystemInstruction(args.language, {
+            strict,
+            screen: args.screen,
+            mode: args.mode,
+          }),
+        }],
+      },
+      contents,
+    }, AI_LIMITS.outputTokens),
+    validate: (text, strict) => {
+      const result = validateAiAnswer(text, strict)
+      return result.valid
+        ? { valid: true, value: serializeStructuredAnswer(result.answer) }
+        : result
+    },
+    onRetry: (reason) => {
+      console.warn(JSON.stringify({
+        event: 'ai_answer_retry',
+        requestId: args.requestId,
+        category: reason,
+        attempt: 2,
+      }))
+    },
+  })
 }
 
 export type GeminiProbeResult = {

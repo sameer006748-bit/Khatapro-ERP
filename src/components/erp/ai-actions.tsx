@@ -21,10 +21,10 @@ export function AiExplainButton({ screen }: { screen: AiScreen }) {
       onClick={() => window.dispatchEvent(new CustomEvent<OpenAiDetail>('khatapro-ai-open', { detail: {
         mode: 'explain',
         screen,
-        prompt: 'Is screen/report ka simple meaning, important point, possible concern aur next check batao.',
+        prompt: 'Explain this screen or report, its most important point, any possible concern, and the recommended next check.',
       } }))}
     >
-      <Sparkles className="size-3.5" /> Explain with AI
+      <Sparkles className="size-3.5" /> Explain with KhataPro AI
     </Button>
   )
 }
@@ -48,13 +48,13 @@ export function AiFieldHelp(props: {
     <button
       type="button"
       className="inline-grid size-7 place-items-center rounded-full text-muted-foreground hover:bg-muted hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-      aria-label={`AI help for ${props.fieldLabel}`}
+      aria-label={`KhataPro AI help for ${props.fieldLabel}`}
       title={`${props.fieldLabel} help for ${props.role}`}
       onClick={() => window.dispatchEvent(new CustomEvent<OpenAiDetail>('khatapro-ai-open', { detail: {
         mode: 'field-help',
         screen: props.currentScreen,
         field,
-        prompt: `${props.fieldLabel}: yeh field kya hai, kya likhna hai aur accounting effect kya hoga?`,
+        prompt: `Explain the ${props.fieldLabel} field, what should be entered, and its accounting impact.`,
       } }))}
     >
       <HelpCircle className="size-3.5" />

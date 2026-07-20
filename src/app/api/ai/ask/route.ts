@@ -14,6 +14,7 @@ import {
   AI_MODES,
   AI_SCREENS,
   canUseAiForScreen,
+  resolveAnswerLanguage,
   sanitizeFieldMetadata,
   validatePrompt,
 } from '@/lib/ai/safety-core'
@@ -64,12 +65,13 @@ async function post(req: NextRequest) {
   if (validation === 'too_long') return response('PROMPT_TOO_LONG', 'Please shorten your question.', 400, requestId)
   if (validation === 'write_request') return response('READ_ONLY_REQUEST', 'KhataPro AI is read-only and cannot post or change ERP records.', 400, requestId)
   if (validation === 'secret_or_injection') return response('UNSAFE_REQUEST', 'KhataPro AI cannot reveal secrets or bypass safety rules.', 400, requestId)
-  if (!consumeAiRequest(session.userId)) return response('RATE_LIMITED', 'Too many AI requests. Please wait one minute.', 429, requestId)
+  if (!consumeAiRequest(session.userId)) return response('RATE_LIMITED', 'KhataPro AI is temporarily unavailable. Please try again later.', 429, requestId)
 
   const apiKey = await getAiApiKey(session.businessId, AI_PROVIDER)
-  if (!apiKey) return response('AI_NOT_CONFIGURED', 'Gemini is not configured. Ask an Owner/Admin to connect it.', 409, requestId)
+  if (!apiKey) return response('AI_NOT_CONFIGURED', 'KhataPro AI is not configured. Please update the AI settings.', 409, requestId)
 
   try {
+    const answerLanguage = resolveAnswerLanguage(parsed.data.prompt, parsed.data.language)
     const context = await buildAiContext({
       session,
       screen: parsed.data.screen,
@@ -79,32 +81,32 @@ async function post(req: NextRequest) {
     })
     const answer = await generateGeminiAnswer({
       apiKey,
-      language: parsed.data.language,
+      language: answerLanguage,
       prompt: parsed.data.prompt,
       context,
+      screen: parsed.data.screen,
+      mode: parsed.data.mode,
+      requestId,
     })
 
     return NextResponse.json(
-      { answer, language: parsed.data.language, readOnly: true },
+      { answer, language: answerLanguage, readOnly: true },
       { headers: { 'Cache-Control': 'no-store', 'X-Request-Id': requestId } },
     )
   } catch (error) {
     if (error instanceof GeminiClientError) {
-      if (error.category === 'invalid_api_key') return response('AI_INVALID_KEY', 'The Gemini key is invalid. An Owner/Admin should test or replace it.', 502, requestId)
-      if (error.category === 'permission_denied') return response('AI_ACCESS_DENIED', 'Gemini access is denied for the configured key.', 502, requestId)
-      if (error.category === 'quota_exceeded') return response('AI_QUOTA_EXHAUSTED', 'The Gemini quota is exhausted.', 429, requestId)
-      if (error.category === 'rate_limited') return response('AI_RATE_LIMITED', 'Gemini is rate limited. Please wait and retry.', 429, requestId)
-      if (error.category === 'model_not_found') return response('AI_MODEL_UNAVAILABLE', 'The configured Gemini model is unavailable.', 502, requestId)
-      if (error.category === 'timeout') return response('AI_TIMEOUT', 'Gemini took too long. Please retry once.', 504, requestId)
-      if (error.category === 'malformed_request') return response('AI_REQUEST_INVALID', 'Gemini rejected the request format.', 502, requestId)
-      if (error.category === 'truncated') return response('AI_RESPONSE_TRUNCATED', 'The AI answer was too long and got cut off. Please ask a more specific question.', 502, requestId)
-      return response('AI_CONNECTION_ERROR', 'Gemini is temporarily unavailable. Please retry once.', 502, requestId)
+      if (error.category === 'invalid_api_key') return response('AI_INVALID_KEY', 'AI connection is not authorized. Please update the AI settings.', 502, requestId)
+      if (error.category === 'permission_denied') return response('AI_ACCESS_DENIED', 'You do not have permission to use this feature.', 502, requestId)
+      if (error.category === 'quota_exceeded' || error.category === 'rate_limited') return response('AI_TEMPORARILY_UNAVAILABLE', 'KhataPro AI is temporarily unavailable. Please try again later.', 429, requestId)
+      if (error.category === 'timeout' || error.category === 'model_not_found' || error.category === 'provider_unavailable') return response('AI_CONNECTION_ERROR', 'KhataPro AI could not respond right now. Please try again.', 502, requestId)
+      if (error.category === 'truncated') return response('AI_RESPONSE_INCOMPLETE', 'KhataPro AI could not complete this explanation. Please try again.', 502, requestId)
+      return response('AI_REQUEST_FAILED', 'Something went wrong. Please try again.', 502, requestId)
     }
     return safeApiError({
       route: '/api/ai/ask',
       requestId,
       errorCode: 'AI_REQUEST_FAILED',
-      userMessage: 'AI help could not be generated.',
+      userMessage: 'KhataPro AI could not respond right now. Please try again.',
       error,
       method: 'POST',
     })
