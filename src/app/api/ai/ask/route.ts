@@ -97,6 +97,7 @@ async function post(req: NextRequest) {
       if (error.category === 'model_not_found') return response('AI_MODEL_UNAVAILABLE', 'The configured Gemini model is unavailable.', 502, requestId)
       if (error.category === 'timeout') return response('AI_TIMEOUT', 'Gemini took too long. Please retry once.', 504, requestId)
       if (error.category === 'malformed_request') return response('AI_REQUEST_INVALID', 'Gemini rejected the request format.', 502, requestId)
+      if (error.category === 'truncated') return response('AI_RESPONSE_TRUNCATED', 'The AI answer was too long and got cut off. Please ask a more specific question.', 502, requestId)
       return response('AI_CONNECTION_ERROR', 'Gemini is temporarily unavailable. Please retry once.', 502, requestId)
     }
     return safeApiError({

@@ -7,6 +7,7 @@ export const GEMINI_FAILURE_CATEGORIES = [
   'timeout',
   'malformed_request',
   'provider_unavailable',
+  'truncated',
 ] as const
 
 export type GeminiFailureCategory = typeof GEMINI_FAILURE_CATEGORIES[number]
@@ -29,7 +30,17 @@ export class GeminiClientError extends Error {
 }
 
 type GeminiResponse = {
-  candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>
+  candidates?: Array<{
+    content?: { parts?: Array<{ text?: string }> }
+    finishReason?: string
+    safetyRatings?: Array<Record<string, unknown>>
+    tokenCount?: number
+  }>
+  usageMetadata?: {
+    promptTokenCount?: number
+    candidatesTokenCount?: number
+    totalTokenCount?: number
+  }
 }
 
 type GeminiErrorResponse = {
@@ -140,8 +151,15 @@ export async function callGeminiCore(args: {
     }
 
     const payload = await response.json() as GeminiResponse
-    const text = payload.candidates?.[0]?.content?.parts?.map((part) => part.text ?? '').join('').trim()
+    const candidate = payload.candidates?.[0]
+    const text = candidate?.content?.parts?.map((part) => part.text ?? '').join('').trim()
     if (!text) throw new GeminiClientError('provider_unavailable', 200, 'EMPTY_RESPONSE')
+
+    // Detect truncation from finishReason
+    if (candidate?.finishReason === 'MAX_TOKENS') {
+      throw new GeminiClientError('truncated', 200, 'MAX_TOKENS')
+    }
+
     return text
   } catch (error) {
     if (error instanceof GeminiClientError) throw error

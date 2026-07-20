@@ -5,6 +5,7 @@ import { callGeminiCore, GeminiClientError } from '../src/lib/ai/gemini-client-c
 import {
   buildSystemInstruction,
   canUseAiForScreen,
+  parseStructuredAnswer,
   sanitizeFieldMetadata,
   validatePrompt,
 } from '../src/lib/ai/safety-core.ts'
@@ -288,4 +289,194 @@ test('normal ERP rendering does not call Gemini automatically and assistant is l
   assert.doesNotMatch(shell, /\/api\/ai\/ask/)
   assert.match(assistant, /onSubmit=.*submit/)
   assert.doesNotMatch(settings, /Auto-test after save|testMut\.mutate\(\).*onSuccess/s)
+})
+
+// ---------------------------------------------------------------------------
+// Structured answer parsing (parseStructuredAnswer)
+// ---------------------------------------------------------------------------
+
+test('parseStructuredAnswer parses valid JSON correctly', () => {
+  const result = parseStructuredAnswer('{"simpleAnswer":"Aaj business stable hai.","accountingEffect":"Total debit 5 lac, total credit 5 lac.","nextCheck":"Day Book check karein."}')
+  assert.equal(result.simpleAnswer, 'Aaj business stable hai.')
+  assert.equal(result.accountingEffect, 'Total debit 5 lac, total credit 5 lac.')
+  assert.equal(result.nextCheck, 'Day Book check karein.')
+})
+
+test('parseStructuredAnswer handles empty optional fields', () => {
+  const result = parseStructuredAnswer('{"simpleAnswer":"Simple answer.","accountingEffect":"","nextCheck":""}')
+  assert.equal(result.simpleAnswer, 'Simple answer.')
+  assert.equal(result.accountingEffect, undefined)
+  assert.equal(result.nextCheck, undefined)
+})
+
+test('parseStructuredAnswer strips markdown code fences', () => {
+  const result = parseStructuredAnswer('```json\n{"simpleAnswer":"Test.","accountingEffect":"","nextCheck":""}\n```')
+  assert.equal(result.simpleAnswer, 'Test.')
+})
+
+test('parseStructuredAnswer falls back to heading-based parsing for plain text', () => {
+  const result = parseStructuredAnswer('Simple answer: This is the main answer. Accounting effect: Debit 100 Credit 100. What to check next: Verify the balance.')
+  assert.equal(result.simpleAnswer, 'This is the main answer.')
+  assert.equal(result.accountingEffect, 'Debit 100 Credit 100.')
+  assert.equal(result.nextCheck, 'Verify the balance.')
+})
+
+test('parseStructuredAnswer handles plain text without headings', () => {
+  const result = parseStructuredAnswer('Business achi hai aur profit stable hai.')
+  assert.equal(result.simpleAnswer, 'Business achi hai aur profit stable hai.')
+  assert.equal(result.accountingEffect, undefined)
+  assert.equal(result.nextCheck, undefined)
+})
+
+test('parseStructuredAnswer never returns placeholder labels as content', () => {
+  // Simulate truncated response where only the heading label appears
+  const result = parseStructuredAnswer('Simple answer:')
+  assert.equal(result.simpleAnswer, '')
+})
+
+test('parseStructuredAnswer handles colon-only heading with no content', () => {
+  const result = parseStructuredAnswer('Simple answer:  ')
+  assert.equal(result.simpleAnswer, '')
+})
+
+test('parseStructuredAnswer does not duplicate Simple answer heading', () => {
+  // Legacy heading text — the heading label should not appear in the extracted content
+  const result = parseStructuredAnswer('Simple answer: This is the answer.')
+  assert.doesNotMatch(result.simpleAnswer, /Simple answer/i)
+})
+
+// ---------------------------------------------------------------------------
+// Gemini finishReason handling
+// ---------------------------------------------------------------------------
+
+test('callGeminiCore throws truncated on MAX_TOKENS finishReason', async () => {
+  const mockFetch = (async () => new Response(JSON.stringify({
+    candidates: [{
+      content: { parts: [{ text: 'Incomplete answer that got cut off because of token limit reached eventually' }] },
+      finishReason: 'MAX_TOKENS',
+    }],
+  }), { status: 200 })) as typeof fetch
+  await assert.rejects(
+    callGeminiCore({
+      apiKey: 'test-key',
+      url: 'https://example.invalid',
+      body: {},
+      outputTokens: 10,
+      timeoutMs: 100,
+      fetchImpl: mockFetch,
+    }),
+    (error: unknown) => error instanceof GeminiClientError && error.category === 'truncated' && error.googleErrorCode === 'MAX_TOKENS',
+  )
+})
+
+test('callGeminiCore succeeds on STOP finishReason even if short', async () => {
+  const mockFetch = (async () => new Response(JSON.stringify({
+    candidates: [{
+      content: { parts: [{ text: 'Short OK.' }] },
+      finishReason: 'STOP',
+    }],
+  }), { status: 200 })) as typeof fetch
+  const result = await callGeminiCore({
+    apiKey: 'test-key',
+    url: 'https://example.invalid',
+    body: {},
+    outputTokens: 800,
+    timeoutMs: 100,
+    fetchImpl: mockFetch,
+  })
+  assert.equal(result, 'Short OK.')
+})
+
+test('callGeminiCore throws on empty response despite 200 status', async () => {
+  const mockFetch = (async () => new Response(JSON.stringify({
+    candidates: [{
+      content: { parts: [] },
+      finishReason: 'STOP',
+    }],
+  }), { status: 200 })) as typeof fetch
+  await assert.rejects(
+    callGeminiCore({
+      apiKey: 'test-key',
+      url: 'https://example.invalid',
+      body: {},
+      outputTokens: 100,
+      timeoutMs: 100,
+      fetchImpl: mockFetch,
+    }),
+    (error: unknown) => error instanceof GeminiClientError && error.category === 'provider_unavailable',
+  )
+})
+
+// ---------------------------------------------------------------------------
+// System instruction quality checks
+// ---------------------------------------------------------------------------
+
+test('system instruction requests JSON output and natural Roman Urdu', () => {
+  const sys = buildSystemInstruction('roman-urdu')
+  assert.match(sys, /valid JSON only/)
+  assert.match(sys, /"simpleAnswer"/)
+  assert.match(sys, /"accountingEffect"/)
+  assert.match(sys, /"nextCheck"/)
+  assert.match(sys, /Roman Urdu/)
+  // The system instruction uses "Simple answer" in quotes as instruction text — OK
+  assert.match(sys, /"Simple answer" as text/)
+})
+
+test('system instruction for Simple English uses only Roman Urdu in JSON field description', () => {
+  const sys = buildSystemInstruction('simple-english')
+  assert.match(sys, /valid JSON only/)
+  assert.match(sys, /Simple English/)
+  assert.match(sys, /Roman Urdu/) // Mentioned in field description: "natural Roman Urdu (or Simple English)"
+  assert.match(sys, /Write in short, plain Simple English/)
+})
+
+test('system instruction forbids inventing figures and heading output', () => {
+  const sys = buildSystemInstruction('roman-urdu')
+  assert.match(sys, /Never invent figures/)
+  assert.match(sys, /Never output headings/)
+})
+
+// ---------------------------------------------------------------------------
+// Truncated response handling in API route
+// ---------------------------------------------------------------------------
+
+test('API route handles AI_RESPONSE_TRUNCATED error code', async () => {
+  const route = await source('src/app/api/ai/ask/route.ts')
+  assert.match(route, /AI_RESPONSE_TRUNCATED/)
+  assert.match(route, /'truncated'/)
+  assert.match(route, /answer was too long/)
+})
+
+// ---------------------------------------------------------------------------
+// UI rendering checks
+// ---------------------------------------------------------------------------
+
+test('AI assistant uses parseStructuredAnswer instead of parseAnswer', async () => {
+  const assistant = await source('src/components/erp/ai-assistant.tsx')
+  assert.match(assistant, /parseStructuredAnswer/)
+  assert.doesNotMatch(assistant, /function parseAnswer/)
+  assert.match(assistant, /sections\.simpleAnswer/)
+  assert.match(assistant, /sections\.accountingEffect/)
+  assert.match(assistant, /sections\.nextCheck/)
+})
+
+test('AI assistant hides empty sections', async () => {
+  const assistant = await source('src/components/erp/ai-assistant.tsx')
+  assert.match(assistant, /sections\.simpleAnswer &&/)
+  assert.match(assistant, /sections\.accountingEffect &&/)
+  assert.match(assistant, /sections\.nextCheck &&/)
+})
+
+// ---------------------------------------------------------------------------
+// Output token limit verification
+// ---------------------------------------------------------------------------
+
+test('output token limit is increased to 800 for production quality', async () => {
+  const config = await source('src/lib/ai/config.ts')
+  assert.match(config, /outputTokens: 800/)
+})
+
+test('response character limit is increased to 2400', async () => {
+  const safetyCore = await source('src/lib/ai/safety-core.ts')
+  assert.match(safetyCore, /maxCharacters = 2400/)
 })

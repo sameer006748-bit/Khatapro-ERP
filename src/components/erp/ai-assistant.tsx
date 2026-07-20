@@ -7,7 +7,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import type { MeUser } from '@/components/erp/erp-app'
-import { AI_SCREENS, type AiFieldMetadata, type AiLanguage, type AiMode, type AiScreen } from '@/lib/ai/safety-core'
+import { AI_SCREENS, parseStructuredAnswer, type AiFieldMetadata, type AiLanguage, type AiMode, type AiScreen, type AiStructuredAnswer } from '@/lib/ai/safety-core'
 
 type OpenAiDetail = {
   mode?: AiMode
@@ -32,18 +32,7 @@ function normalizeScreen(screen: string): AiScreen {
   return SCREEN_SET.has(screen) ? screen as AiScreen : 'home'
 }
 
-function parseAnswer(answer: string) {
-  const normalized = answer.replace(/\*\*/g, '')
-  const accountingIndex = normalized.search(/\bAccounting effect\s*:?/i)
-  const nextIndex = normalized.search(/\bWhat to check next\s*:?/i)
-  const simpleStart = normalized.search(/\bSimple answer\s*:?/i)
-  const simple = normalized.slice(simpleStart >= 0 ? normalized.indexOf(':', simpleStart) + 1 : 0, accountingIndex >= 0 ? accountingIndex : nextIndex >= 0 ? nextIndex : undefined).trim()
-  const accounting = accountingIndex >= 0
-    ? normalized.slice(normalized.indexOf(':', accountingIndex) + 1, nextIndex >= 0 ? nextIndex : undefined).trim()
-    : ''
-  const next = nextIndex >= 0 ? normalized.slice(normalized.indexOf(':', nextIndex) + 1).trim() : ''
-  return { simple: simple || answer, accounting, next }
-}
+
 
 async function askAi(payload: {
   prompt: string
@@ -171,17 +160,22 @@ export function AiAssistant({ user, activeScreen }: { user: MeUser; activeScreen
                   {lastRequest && <Button type="button" size="sm" variant="outline" className="mt-2 w-full" onClick={() => void submit(lastRequest)} disabled={loading}><RotateCcw className="size-3.5" /> Retry</Button>}
                 </div>
               )
-              const sections = parseAnswer(message.text)
+              const sections = parseStructuredAnswer(message.text)
               return (
                 <div key={message.id} className="rounded-xl border border-border bg-card p-3 text-sm space-y-3">
-                  <div><div className="text-xs font-semibold text-muted-foreground mb-1">Simple answer</div><p className="whitespace-pre-wrap">{sections.simple}</p></div>
-                  {sections.accounting && (
+                  {sections.simpleAnswer && (
+                    <div>
+                      <div className="text-xs font-semibold text-muted-foreground mb-1">Simple answer</div>
+                      <p className="whitespace-pre-wrap">{sections.simpleAnswer}</p>
+                    </div>
+                  )}
+                  {sections.accountingEffect && (
                     <Collapsible>
                       <CollapsibleTrigger className="flex w-full items-center justify-between rounded-md bg-muted/40 px-2 py-1.5 text-xs font-medium">Accounting Detail <ChevronDown className="size-3.5" /></CollapsibleTrigger>
-                      <CollapsibleContent className="pt-2 whitespace-pre-wrap text-muted-foreground">{sections.accounting}</CollapsibleContent>
+                      <CollapsibleContent className="pt-2 whitespace-pre-wrap text-muted-foreground">{sections.accountingEffect}</CollapsibleContent>
                     </Collapsible>
                   )}
-                  {sections.next && <div><div className="text-xs font-semibold text-muted-foreground mb-1">What to check next</div><p className="whitespace-pre-wrap">{sections.next}</p></div>}
+                  {sections.nextCheck && <div><div className="text-xs font-semibold text-muted-foreground mb-1">What to check next</div><p className="whitespace-pre-wrap">{sections.nextCheck}</p></div>}
                 </div>
               )
             })}
