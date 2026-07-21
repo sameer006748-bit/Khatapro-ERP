@@ -152,6 +152,7 @@ model Business {
   paymentAllocations  PaymentAllocation[]
   salesmanCommissions SalesmanCommission[]
   salesReturns        SalesReturn[]
+  salesReturnLines    SaleReturnLine[]
   aiSettings          AiProviderSetting[]
   commissionEvents    CommissionEvent[]
   identitySequences   IdentitySequence[]
@@ -475,6 +476,7 @@ model InvoiceItem {
   originalInvoiceItemId String?
   originalInvoiceItem   InvoiceItem?      @relation("InvoiceItemReturnLink", fields: [originalInvoiceItemId], references: [id])
   returnLines           InvoiceItem[]     @relation("InvoiceItemReturnLink")
+  salesReturnLines      SaleReturnLine[]
   commissionEvents      CommissionEvent[]
   createdAt             DateTime          @default(now())
 
@@ -525,20 +527,46 @@ model SalesmanCommission {
 }
 
 model SalesReturn {
-  id                String   @id @default(cuid())
+  id                String           @id @default(cuid())
   businessId        String
-  business          Business @relation(fields: [businessId], references: [id])
+  business          Business         @relation(fields: [businessId], references: [id])
   originalInvoiceId String
-  originalInvoice   Invoice  @relation(fields: [originalInvoiceId], references: [id], onDelete: Restrict)
+  originalInvoice   Invoice          @relation(fields: [originalInvoiceId], references: [id], onDelete: Restrict)
   returnVoucherId   String?
-  returnDate        DateTime @default(now())
-  total             BigInt
+  returnDate        DateTime         @default(now())
+  total             BigInt           @default(0)
+  returnNo          String           @default(cuid())
+  status            String           @default("draft")
   reason            String?
   createdBy         String?
-  idempotencyKey    String?  @unique
-  createdAt         DateTime @default(now())
+  idempotencyKey    String           @default(cuid())
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+  lines             SaleReturnLine[]
 
+  @@unique([businessId, returnNo])
+  @@unique([businessId, idempotencyKey])
   @@index([originalInvoiceId])
+  @@map("sale_return_documents")
+}
+
+model SaleReturnLine {
+  id                    String      @id @default(cuid())
+  businessId            String
+  business              Business    @relation(fields: [businessId], references: [id])
+  saleReturnId          String
+  saleReturn            SalesReturn @relation(fields: [saleReturnId], references: [id], onDelete: Restrict)
+  originalInvoiceItemId String
+  originalInvoiceItem   InvoiceItem @relation(fields: [originalInvoiceItemId], references: [id], onDelete: Restrict)
+  returnedQty           Int
+  reason                String?
+  createdAt             DateTime    @default(now())
+  updatedAt             DateTime    @updatedAt
+
+  @@unique([saleReturnId, originalInvoiceItemId])
+  @@index([businessId])
+  @@index([originalInvoiceItemId])
+  @@map("sale_return_lines")
 }
 
 // =================== Phase 5: Purchases & Vendors ===================

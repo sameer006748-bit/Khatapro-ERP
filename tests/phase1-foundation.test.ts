@@ -69,9 +69,24 @@ test('returnedQty is documented as cached aggregate', () => {
   assert.ok(MIGRATION_14.includes('select ... for update') || MIGRATION_14.includes('atomic rpc') || MIGRATION_14.includes('atomic'), 'migration must reference atomic enforcement requirement')
 })
 
-test('sales_returns has idempotency_key unique index', () => {
-  assert.ok(MIGRATION_14.includes('sales_returns_idempotency_key_idx') || MIGRATION_14.includes('sales_returns'), 'sales_returns must have idempotency')
-  assert.ok(PRISMA_SCHEMA.includes('idempotencykey'), 'Prisma must have idempotencyKey')
+test('linked-return tables replace the nonexistent historical sales_returns assumption', () => {
+  assert.ok(!MIGRATION_14.includes('public.sales_returns'), '00014 must not ALTER or target the nonexistent guessed table')
+  assert.ok(MIGRATION_14.includes('create table if not exists public.sale_return_documents'), 'return document table must be created')
+  assert.ok(MIGRATION_14.includes('create table if not exists public.sale_return_lines'), 'return line table must be created')
+  assert.ok(PRISMA_SCHEMA.includes('@@map("sale_return_documents")'), 'SalesReturn must map to the return document table')
+  assert.ok(PRISMA_SCHEMA.includes('@@map("sale_return_lines")'), 'SaleReturnLine must map to the return line table')
+})
+
+test('return document idempotency is unique within a business', () => {
+  assert.ok(MIGRATION_14.includes('sale_return_documents_business_idempotency_key_key'), 'business-scoped idempotency constraint is required')
+  assert.ok(PRISMA_SCHEMA.includes('@@unique([businessid, idempotencykey])'), 'Prisma must model business-scoped idempotency')
+})
+
+test('return lines have immutable original-invoice relationships and quantities', () => {
+  assert.ok(MIGRATION_14.includes('references public.invoices(id) on delete restrict'), 'return document must retain original invoice')
+  assert.ok(MIGRATION_14.includes('references public.invoice_items(id) on delete restrict'), 'return line must retain original invoice item')
+  assert.ok(MIGRATION_14.includes('sale_return_lines_returned_qty_positive'), 'return quantities must be positive')
+  assert.ok(PRISMA_SCHEMA.includes('originalinvoiceitemid') && PRISMA_SCHEMA.includes('returnedqty'), 'Prisma must model return-line lineage and quantity')
 })
 
 test('original invoice lines remain immutable — no destructive edit fields', () => {
@@ -183,6 +198,19 @@ test('00014 is wrapped in transaction', () => {
   assert.ok(MIGRATION_14.includes('commit;'), 'must end with COMMIT')
 })
 
+test('every ALTER target is explicitly verified before DDL', () => {
+  const verifiedTargets = [
+    'public.products', 'public.invoice_items', 'public.account_categories',
+    'public.accounts', 'public.delivery_orders', 'public.delivery_status_events',
+    'public.rider_cod_submissions',
+  ]
+  for (const target of verifiedTargets) {
+    assert.ok(MIGRATION_14.includes(`to_regclass('${target}')`), `${target} must be a required base table`)
+    assert.ok(MIGRATION_14.includes(`alter table ${target}`), `${target} must be altered only after precondition verification`)
+  }
+  assert.ok(!MIGRATION_14.includes('alter table if exists'), 'missing base tables must not be silently skipped')
+})
+
 test('no production-specific hardcoded IDs in 00014', () => {
   const lines = MIGRATION_14.split('\n')
   for (const line of lines) {
@@ -201,7 +229,7 @@ test('Prisma large diff is formatting-only; no semantic change to pre-existing m
     'rolepermission', 'business', 'accountcategory', 'account', 'businessaccount',
     'auditlog', 'voucher', 'voucherline', 'productcategory', 'product',
     'stockmovement', 'salesman', 'customer', 'invoice', 'invoiceitem',
-    'paymentallocation', 'salesmancommission', 'salesreturn', 'vendor',
+    'paymentallocation', 'salesmancommission', 'salesreturn', 'salereturnline', 'vendor',
     'purchase', 'purchaseitem', 'purchasepayment', 'purchasereturn',
     'purchasereturnitem',
   ]
@@ -269,7 +297,8 @@ test('inspection SQL never selects from Phase 1 application tables', () => {
   const phase1Tables = [
     'products',
     'invoice_items',
-    'sales_returns',
+    'sale_return_documents',
+    'sale_return_lines',
     'commission_events',
     'identity_sequences',
     'account_categories',
@@ -292,8 +321,22 @@ test('inspection SQL covers every Phase 1 object from migration 00014', () => {
     'invoice_items.returned_qty',
     'invoice_items.original_invoice_item_id',
     'invoice_items_original_idx',
-    'sales_returns.idempotency_key',
-    'sales_returns_idempotency_key_idx',
+    'base table: products',
+    'base table: invoice_items',
+    'base table: business',
+    'base table: invoices',
+    'sale_return_documents table',
+    'sale_return_documents original invoice relation',
+    'sale_return_documents idempotency constraint',
+    'sale_return_documents original invoice index',
+    'sale_return_documents rls',
+    'sale_return_documents service_role insert',
+    'sale_return_lines table',
+    'sale_return_lines original invoice item relation',
+    'sale_return_lines returned quantity',
+    'sale_return_lines document relation',
+    'sale_return_lines rls',
+    'sale_return_lines service_role insert',
     'commission_events table',
     'commission_events idempotency index',
     'commission_events biz-invoice index',
@@ -340,7 +383,8 @@ test('migration 00014 table names match verified production tables', () => {
   const verified = [
     'public.products',
     'public.invoice_items',
-    'public.sales_returns',
+    'public.sale_return_documents',
+    'public.sale_return_lines',
     'public.commission_events',
     'public.identity_sequences',
     'public.account_categories',
