@@ -20,20 +20,20 @@ datasource db {
 // (keyLast4) are returned for masked display.
 
 model AiProviderSetting {
-  id               String   @id @default(cuid())
+  id               String    @id @default(cuid())
   businessId       String
-  business         Business @relation(fields: [businessId], references: [id])
-  provider         String   @default("gemini")
+  business         Business  @relation(fields: [businessId], references: [id])
+  provider         String    @default("gemini")
   encryptedApiKey  String
   keyLast4         String
   encryptionKeyId  String
-  connectionStatus String   @default("not_tested")
+  connectionStatus String    @default("not_tested")
   lastTestedAt     DateTime?
   lastErrorCode    String?
   createdBy        String?
   updatedBy        String?
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
   @@unique([businessId, provider])
   @@index([businessId])
@@ -46,18 +46,18 @@ model AiProviderSetting {
 // no duplicated standalone `users` auth table.
 
 model User {
-  id                String   @id @default(cuid())
-  email             String   @unique
-  name              String?
-  passwordHash      String
+  id               String   @id @default(cuid())
+  email            String   @unique
+  name             String?
+  passwordHash     String
   // Phase 2.1: UUID from Supabase auth.users. Used as posted_by / user_id
   // for all Supabase writes (vouchers, audit_logs, etc.). Populated by
   // scripts/align-supabase-auth.ts. Nullable so the app still works if
   // Supabase Auth isn't configured yet.
-  supabaseUserUuid  String?
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
-  profile           Profile?
+  supabaseUserUuid String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  profile          Profile?
 
   @@index([supabaseUserUuid])
 }
@@ -107,11 +107,11 @@ model Permission {
 }
 
 model RolePermission {
-  id           String      @id @default(cuid())
+  id           String     @id @default(cuid())
   roleId       String
-  role         Role        @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
   permissionId String
-  permission   Permission  @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
 
   @@unique([roleId, permissionId])
 }
@@ -119,85 +119,96 @@ model RolePermission {
 // =================== Business ===================
 
 model Business {
-  id         String   @id @default(cuid())
-  name       String
-  legalName  String?
-  phone      String?
-  address    String?
-  currency   String   @default("PKR")
-  timezone   String   @default("Asia/Karachi")
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  id        String   @id @default(cuid())
+  name      String
+  legalName String?
+  phone     String?
+  address   String?
+  currency  String   @default("PKR")
+  timezone  String   @default("Asia/Karachi")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  profiles         Profile[]
-  roles            Role[]
-  accountCategories AccountCategory[]
-  accounts         Account[]
-  businessAccounts BusinessAccount[]
-  auditLogs        AuditLog[]
-  vouchers         Voucher[]
-  productCategories ProductCategory[]
-  products         Product[]
-  vendors          Vendor[]
-  purchases        Purchase[]
-  purchaseReturns  PurchaseReturn[]
-  purchaseItems    PurchaseItem[]
-  purchasePayments PurchasePayment[]
+  profiles            Profile[]
+  roles               Role[]
+  accountCategories   AccountCategory[]
+  accounts            Account[]
+  businessAccounts    BusinessAccount[]
+  auditLogs           AuditLog[]
+  vouchers            Voucher[]
+  productCategories   ProductCategory[]
+  products            Product[]
+  vendors             Vendor[]
+  purchases           Purchase[]
+  purchaseReturns     PurchaseReturn[]
+  purchaseItems       PurchaseItem[]
+  purchasePayments    PurchasePayment[]
   purchaseReturnItems PurchaseReturnItem[]
-  stockMovements   StockMovement[]
-  salesmen         Salesman[]
-  customers        Customer[]
-  invoices         Invoice[]
-  invoiceItems     InvoiceItem[]
-  paymentAllocations PaymentAllocation[]
+  stockMovements      StockMovement[]
+  salesmen            Salesman[]
+  customers           Customer[]
+  invoices            Invoice[]
+  invoiceItems        InvoiceItem[]
+  paymentAllocations  PaymentAllocation[]
   salesmanCommissions SalesmanCommission[]
-  salesReturns     SalesReturn[]
-  aiSettings       AiProviderSetting[]
+  salesReturns        SalesReturn[]
+  aiSettings          AiProviderSetting[]
+  commissionEvents    CommissionEvent[]
+  identitySequences   IdentitySequence[]
 }
 
 // =================== Chart of Accounts ===================
 
 model AccountCategory {
-  id         String   @id @default(cuid())
+  id         String            @id @default(cuid())
   businessId String
-  business   Business @relation(fields: [businessId], references: [id])
+  business   Business          @relation(fields: [businessId], references: [id])
   code       String
   name       String
   type       String
+  parentId   String?
+  parent     AccountCategory?  @relation("AccountCategoryHierarchy", fields: [parentId], references: [id])
+  children   AccountCategory[] @relation("AccountCategoryHierarchy")
+  isActive   Boolean           @default(true)
+  createdAt  DateTime          @default(now())
+  updatedAt  DateTime          @updatedAt
 
   accounts Account[]
 
   @@unique([businessId, code])
+  @@index([parentId])
+  @@index([businessId])
 }
 
 model Account {
-  id                 String           @id @default(cuid())
-  businessId         String
-  business           Business         @relation(fields: [businessId], references: [id])
-  code               String
-  name               String
-  categoryId         String
-  category           AccountCategory  @relation(fields: [categoryId], references: [id])
-  parentId           String?
-  parent             Account?         @relation("AccountHierarchy", fields: [parentId], references: [id])
-  children           Account[]        @relation("AccountHierarchy")
-  isActive           Boolean          @default(true)
-  isBusinessAccount  Boolean          @default(false)
-  isPartyAccount     Boolean          @default(false)
-  partyType          String?
+  id                String          @id @default(cuid())
+  businessId        String
+  business          Business        @relation(fields: [businessId], references: [id])
+  code              String
+  name              String
+  categoryId        String
+  category          AccountCategory @relation(fields: [categoryId], references: [id])
+  parentId          String?
+  parent            Account?        @relation("AccountHierarchy", fields: [parentId], references: [id])
+  children          Account[]       @relation("AccountHierarchy")
+  isActive          Boolean         @default(true)
+  isBusinessAccount Boolean         @default(false)
+  isPartyAccount    Boolean         @default(false)
+  isSystem          Boolean         @default(false)
+  partyType         String?
   // Server-maintained cache in paisas; always derived from voucher lines.
   // In Phase 1 (no vouchers yet) it stays 0 for newly-created business accounts.
-  balanceCache       BigInt           @default(0)
-  createdAt          DateTime         @default(now())
-  updatedAt          DateTime         @updatedAt
+  balanceCache      BigInt          @default(0)
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
 
-  businessAccount BusinessAccount?
-  voucherLines    VoucherLine[]
-  salesmen        Salesman[]
-  customers       Customer[]
+  businessAccount    BusinessAccount?
+  voucherLines       VoucherLine[]
+  salesmen           Salesman[]
+  customers          Customer[]
   paymentAllocations PaymentAllocation[]
-  vendors         Vendor[]
-  purchasePayments PurchasePayment[]
+  vendors            Vendor[]
+  purchasePayments   PurchasePayment[]
 
   @@unique([businessId, code])
   @@index([categoryId])
@@ -244,25 +255,25 @@ model AuditLog {
 // =================== Phase 2: Accounting Engine ===================
 
 model Voucher {
-  id              String         @id @default(cuid())
+  id              String        @id @default(cuid())
   businessId      String
-  business        Business       @relation(fields: [businessId], references: [id])
+  business        Business      @relation(fields: [businessId], references: [id])
   voucherNo       String?
   voucherType     String
   referenceId     String?
   referenceType   String?
   memo            String?
   voucherDate     DateTime
-  postedAt        DateTime       @default(now())
+  postedAt        DateTime      @default(now())
   postedBy        String?
-  isCancelled     Boolean        @default(false)
+  isCancelled     Boolean       @default(false)
   cancelledAt     DateTime?
   cancelledBy     String?
   cancelVoucherId String?
-  totalDebit      BigInt         @default(0)
-  totalCredit     BigInt         @default(0)
-  createdAt       DateTime       @default(now())
-  updatedAt       DateTime       @updatedAt
+  totalDebit      BigInt        @default(0)
+  totalCredit     BigInt        @default(0)
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
   lines           VoucherLine[]
 
   @@index([businessId, voucherDate])
@@ -271,17 +282,17 @@ model Voucher {
 }
 
 model VoucherLine {
-  id          String   @id @default(cuid())
-  businessId  String
-  voucherId   String
-  voucher     Voucher  @relation(fields: [voucherId], references: [id], onDelete: Restrict)
-  accountId   String
-  account     Account  @relation(fields: [accountId], references: [id], onDelete: Restrict)
-  debit       BigInt   @default(0)
-  credit      BigInt   @default(0)
-  memo        String?
-  lineOrder   Int      @default(0)
-  createdAt   DateTime @default(now())
+  id         String   @id @default(cuid())
+  businessId String
+  voucherId  String
+  voucher    Voucher  @relation(fields: [voucherId], references: [id], onDelete: Restrict)
+  accountId  String
+  account    Account  @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  debit      BigInt   @default(0)
+  credit     BigInt   @default(0)
+  memo       String?
+  lineOrder  Int      @default(0)
+  createdAt  DateTime @default(now())
 
   @@index([voucherId])
   @@index([businessId, accountId])
@@ -298,31 +309,35 @@ model ProductCategory {
   isActive    Boolean  @default(true)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
-  products    Product[]
+
+  products Product[]
 
   @@unique([businessId, name])
   @@index([businessId])
 }
 
 model Product {
-  id             String   @id @default(cuid())
-  businessId     String
-  business       Business @relation(fields: [businessId], references: [id])
-  name           String
-  categoryId     String?
-  category       ProductCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
-  unit           String   @default("piece")
-  salePrice      Float    @default(0)
-  purchasePrice  Float    @default(0)
-  currentStock   Int      @default(0)
-  isTemporary    Boolean  @default(false)
-  isActive       Boolean  @default(true)
-  lowStockThreshold Int   @default(5)
-  mergedIntoId   String?
-  markedForMerge Boolean  @default(false)
-  idempotencyKey String?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  id                String           @id @default(cuid())
+  businessId        String
+  business          Business         @relation(fields: [businessId], references: [id])
+  name              String
+  categoryId        String?
+  category          ProductCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  unit              String           @default("piece")
+  salePrice         Float            @default(0)
+  purchasePrice     Float            @default(0)
+  currentStock      Int              @default(0)
+  isTemporary       Boolean          @default(false)
+  isActive          Boolean          @default(true)
+  lowStockThreshold Int              @default(5)
+  mergedIntoId      String?
+  markedForMerge    Boolean          @default(false)
+  idempotencyKey    String?
+  // Phase 1 commission rate: whole rupees per piece, stored as paisas to avoid float drift.
+  // NULL means no commission for this product.
+  commissionRate    BigInt?
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
 
   stockMovements StockMovement[]
   invoiceItems   InvoiceItem[]
@@ -335,19 +350,19 @@ model Product {
 }
 
 model StockMovement {
-  id            String   @id @default(cuid())
-  businessId    String
-  business      Business @relation(fields: [businessId], references: [id])
-  productId     String
-  product       Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
-  movementType  String
-  quantity      Int
-  balanceAfter  Int
-  reason        String?
-  movementDate  DateTime @default(now())
-  createdBy     String?
-  createdAt     DateTime @default(now())
-  voucherId     String?
+  id           String   @id @default(cuid())
+  businessId   String
+  business     Business @relation(fields: [businessId], references: [id])
+  productId    String
+  product      Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  movementType String
+  quantity     Int
+  balanceAfter Int
+  reason       String?
+  movementDate DateTime @default(now())
+  createdBy    String?
+  createdAt    DateTime @default(now())
+  voucherId    String?
 
   @@index([productId])
   @@index([businessId, movementDate])
@@ -366,12 +381,13 @@ model Salesman {
   phone         String?
   commissionPct Float    @default(5.0)
   isActive      Boolean  @default(true)
-  userId        String?  // Links to Supabase auth.users UUID (via Prisma User.supabaseUserUuid)
+  userId        String? // Links to Supabase auth.users UUID (via Prisma User.supabaseUserUuid)
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
-  invoices    Invoice[]
-  commissions SalesmanCommission[]
+  invoices         Invoice[]
+  commissions      SalesmanCommission[]
+  commissionEvents CommissionEvent[]
 
   @@index([businessId])
   @@index([userId])
@@ -397,11 +413,11 @@ model Customer {
 }
 
 model Invoice {
-  id              String   @id @default(cuid())
+  id              String    @id @default(cuid())
   businessId      String
-  business        Business @relation(fields: [businessId], references: [id])
+  business        Business  @relation(fields: [businessId], references: [id])
   invoiceNo       String
-  invoiceType     String   // COUNTER | ONLINE | OFC
+  invoiceType     String // COUNTER | ONLINE | OFC
   invoiceDate     DateTime
   customerId      String?
   customer        Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
@@ -411,25 +427,27 @@ model Invoice {
   customerPhone   String?
   customerAddress String?
   customerCity    String?
-  subtotal        BigInt   @default(0)
-  discount        BigInt   @default(0)
-  total           BigInt   @default(0)
-  paidAmount      BigInt   @default(0)
+  subtotal        BigInt    @default(0)
+  discount        BigInt    @default(0)
+  total           BigInt    @default(0)
+  paidAmount      BigInt    @default(0)
   voucherId       String?
-  isCancelled     Boolean  @default(false)
+  isCancelled     Boolean   @default(false)
   cancelledAt     DateTime?
   cancelVoucherId String?
-  isReturned      Boolean  @default(false)
+  isReturned      Boolean   @default(false)
   returnVoucherId String?
   memo            String?
+  returnReason    String?
   createdBy       String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
   items              InvoiceItem[]
   paymentAllocations PaymentAllocation[]
   commissions        SalesmanCommission[]
   salesReturns       SalesReturn[]
+  commissionEvents   CommissionEvent[]
 
   @@unique([businessId, invoiceNo])
   @@index([businessId, invoiceDate])
@@ -439,23 +457,30 @@ model Invoice {
 }
 
 model InvoiceItem {
-  id              String   @id @default(cuid())
-  businessId      String
-  business        Business @relation(fields: [businessId], references: [id])
-  invoiceId       String
-  invoice         Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
-  productId       String?
-  product         Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
-  productName     String
-  qty             Int
-  unitPrice       BigInt
-  lineTotal       BigInt
-  isTemporary     Boolean  @default(false)
-  stockMovementId String?
-  createdAt       DateTime @default(now())
+  id                    String            @id @default(cuid())
+  businessId            String
+  business              Business          @relation(fields: [businessId], references: [id])
+  invoiceId             String
+  invoice               Invoice           @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  productId             String?
+  product               Product?          @relation(fields: [productId], references: [id], onDelete: SetNull)
+  productName           String
+  qty                   Int
+  unitPrice             BigInt
+  lineTotal             BigInt
+  isTemporary           Boolean           @default(false)
+  stockMovementId       String?
+  // Phase 1 foundation for linked return lines.
+  returnedQty           Int               @default(0)
+  originalInvoiceItemId String?
+  originalInvoiceItem   InvoiceItem?      @relation("InvoiceItemReturnLink", fields: [originalInvoiceItemId], references: [id])
+  returnLines           InvoiceItem[]     @relation("InvoiceItemReturnLink")
+  commissionEvents      CommissionEvent[]
+  createdAt             DateTime          @default(now())
 
   @@index([invoiceId])
   @@index([productId])
+  @@index([originalInvoiceItemId])
 }
 
 model PaymentAllocation {
@@ -480,19 +505,19 @@ model PaymentAllocation {
 }
 
 model SalesmanCommission {
-  id               String   @id @default(cuid())
+  id               String            @id @default(cuid())
   businessId       String
-  business         Business @relation(fields: [businessId], references: [id])
+  business         Business          @relation(fields: [businessId], references: [id])
   salesmanId       String
-  salesman         Salesman  @relation(fields: [salesmanId], references: [id], onDelete: Cascade)
+  salesman         Salesman          @relation(fields: [salesmanId], references: [id], onDelete: Cascade)
   invoiceId        String
-  invoice          Invoice   @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  invoice          Invoice           @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
   allocationId     String
   allocation       PaymentAllocation @relation(fields: [allocationId], references: [id], onDelete: Cascade)
   collectedAmount  BigInt
   commissionPct    Float
   commissionAmount BigInt
-  createdAt        DateTime @default(now())
+  createdAt        DateTime          @default(now())
 
   @@unique([allocationId, salesmanId])
   @@index([salesmanId])
@@ -500,17 +525,18 @@ model SalesmanCommission {
 }
 
 model SalesReturn {
-  id                 String   @id @default(cuid())
-  businessId         String
-  business           Business @relation(fields: [businessId], references: [id])
-  originalInvoiceId  String
-  originalInvoice    Invoice  @relation(fields: [originalInvoiceId], references: [id], onDelete: Restrict)
-  returnVoucherId    String?
-  returnDate         DateTime @default(now())
-  total              BigInt
-  reason             String?
-  createdBy          String?
-  createdAt          DateTime @default(now())
+  id                String   @id @default(cuid())
+  businessId        String
+  business          Business @relation(fields: [businessId], references: [id])
+  originalInvoiceId String
+  originalInvoice   Invoice  @relation(fields: [originalInvoiceId], references: [id], onDelete: Restrict)
+  returnVoucherId   String?
+  returnDate        DateTime @default(now())
+  total             BigInt
+  reason            String?
+  createdBy         String?
+  idempotencyKey    String?  @unique
+  createdAt         DateTime @default(now())
 
   @@index([originalInvoiceId])
 }
@@ -518,20 +544,20 @@ model SalesReturn {
 // =================== Phase 5: Purchases & Vendors ===================
 
 model Vendor {
-  id          String   @id @default(cuid())
-  businessId  String
-  business    Business @relation(fields: [businessId], references: [id])
-  accountId   String   @unique
-  account     Account  @relation(fields: [accountId], references: [id], onDelete: Restrict)
-  name        String
-  phone       String?
-  email       String?
-  address     String?
-  city        String?
-  isActive    Boolean  @default(true)
-  notes       String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id         String   @id @default(cuid())
+  businessId String
+  business   Business @relation(fields: [businessId], references: [id])
+  accountId  String   @unique
+  account    Account  @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  name       String
+  phone      String?
+  email      String?
+  address    String?
+  city       String?
+  isActive   Boolean  @default(true)
+  notes      String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 
   purchases Purchase[]
   payments  PurchasePayment[]
@@ -540,26 +566,26 @@ model Vendor {
 }
 
 model Purchase {
-  id              String   @id @default(cuid())
-  businessId      String
-  business        Business @relation(fields: [businessId], references: [id])
-  purchaseNo      String
-  vendorId        String
-  vendor          Vendor   @relation(fields: [vendorId], references: [id], onDelete: Restrict)
-  supplierBillNo  String?
-  purchaseDate    DateTime
-  subtotal        BigInt   @default(0)
-  discount        BigInt   @default(0)
-  additionalCharges BigInt @default(0)
-  total           BigInt   @default(0)
-  paidAmount      BigInt   @default(0)
-  outstandingAmount BigInt @default(0)
-  status          String   @default("posted")
-  notes           String?
-  voucherId       String?
-  createdBy       String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id                String   @id @default(cuid())
+  businessId        String
+  business          Business @relation(fields: [businessId], references: [id])
+  purchaseNo        String
+  vendorId          String
+  vendor            Vendor   @relation(fields: [vendorId], references: [id], onDelete: Restrict)
+  supplierBillNo    String?
+  purchaseDate      DateTime
+  subtotal          BigInt   @default(0)
+  discount          BigInt   @default(0)
+  additionalCharges BigInt   @default(0)
+  total             BigInt   @default(0)
+  paidAmount        BigInt   @default(0)
+  outstandingAmount BigInt   @default(0)
+  status            String   @default("posted")
+  notes             String?
+  voucherId         String?
+  createdBy         String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 
   items    PurchaseItem[]
   payments PurchasePayment[]
@@ -571,42 +597,42 @@ model Purchase {
 }
 
 model PurchaseItem {
-  id              String   @id @default(cuid())
-  businessId      String
-  business        Business @relation(fields: [businessId], references: [id])
-  purchaseId      String
-  purchase        Purchase @relation(fields: [purchaseId], references: [id], onDelete: Cascade)
-  productId       String?
-  product         Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
-  productName     String
-  quantity        Int
-  unitCost        BigInt
-  lineTotal       BigInt
-  returnedQuantity Int    @default(0)
-  stockMovementId String?
-  createdAt       DateTime @default(now())
+  id               String   @id @default(cuid())
+  businessId       String
+  business         Business @relation(fields: [businessId], references: [id])
+  purchaseId       String
+  purchase         Purchase @relation(fields: [purchaseId], references: [id], onDelete: Cascade)
+  productId        String?
+  product          Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
+  productName      String
+  quantity         Int
+  unitCost         BigInt
+  lineTotal        BigInt
+  returnedQuantity Int      @default(0)
+  stockMovementId  String?
+  createdAt        DateTime @default(now())
 
   @@index([purchaseId])
   @@index([productId])
 }
 
 model PurchasePayment {
-  id           String   @id @default(cuid())
-  businessId   String
-  business     Business @relation(fields: [businessId], references: [id])
-  purchaseId   String?
-  purchase     Purchase? @relation(fields: [purchaseId], references: [id], onDelete: SetNull)
-  vendorId     String
-  vendor       Vendor   @relation(fields: [vendorId], references: [id], onDelete: Restrict)
-  accountId    String
-  account      Account  @relation(fields: [accountId], references: [id], onDelete: Restrict)
-  amount       BigInt
-  paymentDate  DateTime @default(now())
-  paymentType  String   @default("purchase_payment")
-  voucherId    String?
-  notes        String?
-  createdBy    String?
-  createdAt    DateTime @default(now())
+  id          String    @id @default(cuid())
+  businessId  String
+  business    Business  @relation(fields: [businessId], references: [id])
+  purchaseId  String?
+  purchase    Purchase? @relation(fields: [purchaseId], references: [id], onDelete: SetNull)
+  vendorId    String
+  vendor      Vendor    @relation(fields: [vendorId], references: [id], onDelete: Restrict)
+  accountId   String
+  account     Account   @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  amount      BigInt
+  paymentDate DateTime  @default(now())
+  paymentType String    @default("purchase_payment")
+  voucherId   String?
+  notes       String?
+  createdBy   String?
+  createdAt   DateTime  @default(now())
 
   @@index([purchaseId])
   @@index([vendorId])
@@ -637,19 +663,66 @@ model PurchaseReturn {
 }
 
 model PurchaseReturnItem {
-  id                String   @id @default(cuid())
-  businessId        String
-  business          Business @relation(fields: [businessId], references: [id])
-  purchaseReturnId  String
-  purchaseReturn    PurchaseReturn @relation(fields: [purchaseReturnId], references: [id], onDelete: Cascade)
-  purchaseItemId    String
-  productId         String?
-  productName       String
-  quantity          Int
-  unitCost          BigInt
-  lineTotal         BigInt
-  stockMovementId   String?
-  createdAt         DateTime @default(now())
+  id               String         @id @default(cuid())
+  businessId       String
+  business         Business       @relation(fields: [businessId], references: [id])
+  purchaseReturnId String
+  purchaseReturn   PurchaseReturn @relation(fields: [purchaseReturnId], references: [id], onDelete: Cascade)
+  purchaseItemId   String
+  productId        String?
+  productName      String
+  quantity         Int
+  unitCost         BigInt
+  lineTotal        BigInt
+  stockMovementId  String?
+  createdAt        DateTime       @default(now())
 
   @@index([purchaseReturnId])
+}
+
+// =================== Phase 7: Commission & Identity (Phase 1 Foundation Additions) ===================
+
+model CommissionEvent {
+  id                    String      @id @default(cuid())
+  businessId            String
+  business              Business    @relation(fields: [businessId], references: [id])
+  salesmanId            String?
+  salesman              Salesman?   @relation(fields: [salesmanId], references: [id], onDelete: SetNull)
+  invoiceId             String
+  invoice               Invoice     @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  invoiceItemId         String
+  invoiceItem           InvoiceItem @relation(fields: [invoiceItemId], references: [id], onDelete: Cascade)
+  originalInvoiceItemId String?
+  returnEventId         String?
+  eventType             String // earned, payable, paid, reversal
+  quantity              Int
+  ratePaisas            BigInt
+  grossAmount           BigInt
+  eligibleAmount        BigInt
+  payableAmount         BigInt
+  paidAmount            BigInt      @default(0)
+  status                String // calculated, payable, paid, reversed
+  allocationId          String?
+  idempotencyKey        String?     @unique
+  isOwnerOnly           Boolean     @default(false)
+  createdAt             DateTime    @default(now())
+  updatedAt             DateTime    @updatedAt
+
+  @@index([businessId, invoiceId])
+  @@index([salesmanId])
+  @@index([invoiceItemId])
+  @@index([idempotencyKey])
+}
+
+model IdentitySequence {
+  id         String   @id @default(cuid())
+  businessId String
+  business   Business @relation(fields: [businessId], references: [id])
+  prefix     String
+  lastSeq    Int      @default(0)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([businessId, prefix])
+  @@index([businessId])
 }
