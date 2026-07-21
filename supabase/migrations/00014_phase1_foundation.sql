@@ -10,16 +10,27 @@ begin;
 alter table if exists public.products
   add column if not exists commission_rate bigint;
 
-alter table if exists public.products
-  add constraint if not exists commission_rate_non_negative
-  check (commission_rate is null or commission_rate >= 0);
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'commission_rate_non_negative'
+      AND conrelid = 'public.products'::regclass
+  ) THEN
+    ALTER TABLE public.products
+      ADD CONSTRAINT commission_rate_non_negative
+      CHECK (commission_rate IS NULL OR commission_rate >= 0);
+  END IF;
+END
+$$;
 
 -- ============================================================
 -- Return-line linkage on invoice_items
 -- ============================================================
--- returned_qty is a CACHED AGGREGATE.  It must only be updated inside an
+-- returned_qty is a CACHED AGGREGATE. It must only be updated inside an
 -- atomic RPC/transaction using SELECT ... FOR UPDATE in Phase 2+ return
--- posting.  Do not trust it directly as the source-event ledger; use
+-- posting. Do not trust it directly as the source-event ledger; use
 -- sales_returns and linked return lines as the auditable source of truth.
 alter table if exists public.invoice_items
   add column if not exists returned_qty int not null default 0,
@@ -94,9 +105,20 @@ alter table if exists public.account_categories
 create index if not exists account_categories_parent_idx
   on public.account_categories(parent_id);
 
-alter table if exists public.account_categories
-  add constraint if not exists account_categories_no_self_parent
-  check (parent_id <> id);
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'account_categories_no_self_parent'
+      AND conrelid = 'public.account_categories'::regclass
+  ) THEN
+    ALTER TABLE public.account_categories
+      ADD CONSTRAINT account_categories_no_self_parent
+      CHECK (parent_id <> id);
+  END IF;
+END
+$$;
 
 -- ============================================================
 -- Rider delivery foundation
@@ -131,14 +153,14 @@ create unique index if not exists cod_submissions_idempotency_key_idx
 -- A system-controlled Rider Held COD account must be created lazily per
 -- real business when the first Online delivery is marked delivered (Phase 3).
 -- Use idempotent INSERT ... WHERE NOT EXISTS scoped to the authenticated
--- business.  Identify via a stable system code and protect from normal
+-- business. Identify via a stable system code and protect from normal
 -- edit/delete paths.
 
 alter table if exists public.accounts
   add column if not exists is_system boolean not null default false;
 
 -- ============================================================
--- RLS ( additive only; follow existing patterns where applicable )
+-- RLS (additive only; follow existing patterns where applicable)
 -- ============================================================
 alter table if exists public.commission_events enable row level security;
 alter table if exists public.identity_sequences enable row level security;
@@ -156,7 +178,7 @@ create policy identity_sequences_select_own on public.identity_sequences
   );
 
 -- delivery_status_events and rider_cod_submissions already have RLS from
--- migration 00007.  New idempotency columns are additive and require no
+-- migration 00007. New idempotency columns are additive and require no
 -- new policies.
 
 -- Service writes bypass RLS; application/API routes validate business + actor.
@@ -177,3 +199,13 @@ revoke all on public.identity_sequences from authenticated;
 grant all on public.identity_sequences to service_role;
 
 commit;
+</parameter2name>
+<task_progress>
+- [x] Create read-only inspection SQL
+- [x] Repair migration 00014 — replace ADD CONSTRAINT IF NOT EXISTS with DO $$ blocks
+- [ ] Update tests to reject unsupported PostgreSQL syntax
+- [ ] Run final checks
+- [ ] Commit and push
+- [ ] Present recovery instructions
+</parameter2name>
+</write_to_file>
