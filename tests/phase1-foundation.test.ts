@@ -1,6 +1,6 @@
 /**
  * Phase 1 Foundation — static contract and schema validation tests.
- * Uses node:test and node:assert — the same convention as opening-stock.test.ts.
+ * Uses node:test and node:assert — same convention as opening-stock.test.ts.
  *
  * Tests inspect exact Prisma schema lines and migration 00014 SQL.
  * No database runtime behavior is tested here.
@@ -11,6 +11,7 @@ import test from 'node:test'
 
 const PRISMA_SCHEMA = (await readFile('prisma/schema.prisma', 'utf8')).toLowerCase()
 const MIGRATION_14 = (await readFile('supabase/migrations/00014_phase1_foundation.sql', 'utf8')).toLowerCase()
+const INSPECT_14 = (await readFile('supabase/migrations/00014_phase1_foundation_inspect.sql', 'utf8')).toLowerCase()
 
 function linesOf(source: string, ...terms: string[]): string[] {
   return source.split('\n').filter((l) => terms.some((t) => l.includes(t.toLowerCase())))
@@ -213,15 +214,46 @@ test('Prisma large diff is formatting-only; no semantic change to pre-existing m
 })
 
 test('00014 uses only PostgreSQL-safe conditional patterns', () => {
-  const badPatterns = [
-    'alter table if exists public.products\n  add constraint if not exists',
-    'alter table if exists public.account_categories\n  add constraint if not exists',
-    'add foreign key if not exists',
-    'create policy if not exists',
-    'alter policy if exists',
+  assert.ok(!MIGRATION_14.includes('add constraint if not exists'), 'ADD CONSTRAINT IF NOT EXISTS is invalid PostgreSQL')
+  assert.ok(!MIGRATION_14.includes('add foreign key if not exists'), 'ADD FOREIGN KEY IF NOT EXISTS is invalid PostgreSQL')
+  assert.ok(!MIGRATION_14.includes('create policy if not exists'), 'CREATE POLICY IF NOT EXISTS is invalid PostgreSQL')
+  assert.ok(!MIGRATION_14.includes('alter policy if exists'), 'ALTER POLICY IF EXISTS is invalid PostgreSQL')
+})
+
+// ==========================================================================
+// Artifact / corruption regression
+// ==========================================================================
+test('00014 SQL contains no template/XML/artifact markers', () => {
+  assert.ok(!MIGRATION_14.includes('</parameter2name>'), 'no parameter2name marker')
+  assert.ok(!MIGRATION_14.includes('</write_to_file>'), 'no write_to_file marker')
+  assert.ok(!MIGRATION_14.includes('<parameter'), 'no parameter marker')
+  assert.ok(!MIGRATION_14.includes('</parameter'), 'no parameter close marker')
+  assert.ok(!MIGRATION_14.includes('<tool'), 'no tool marker')
+  assert.ok(!MIGRATION_14.includes('</tool'), 'no tool close marker')
+  assert.ok(!MIGRATION_14.includes('```'), 'no markdown code fence')
+})
+
+test('00014 inspection SQL contains no template/XML/artifact markers', () => {
+  assert.ok(!INSPECT_14.includes('</parameter2name>'), 'no parameter2name marker')
+  assert.ok(!INSPECT_14.includes('</write_to_file>'), 'no write_to_file marker')
+  assert.ok(!INSPECT_14.includes('<parameter'), 'no parameter marker')
+  assert.ok(!INSPECT_14.includes('</parameter'), 'no parameter close marker')
+  assert.ok(!INSPECT_14.includes('<tool'), 'no tool marker')
+  assert.ok(!INSPECT_14.includes('</tool'), 'no tool close marker')
+  assert.ok(!INSPECT_14.includes('```'), 'no markdown code fence')
+})
+
+test('inspection SQL is read-only', async () => {
+  const inspection = (await readFile('supabase/migrations/00014_phase1_foundation_inspect.sql', 'utf8')).toLowerCase()
+  const mutations = [
+    'insert into', 'update ', 'delete from', 'alter table', 'create table',
+    'create index', 'drop ', 'grant ', 'revoke ', 'truncate ',
   ]
-  for (const bad of badPatterns) {
-    assert.ok(!MIGRATION_14.includes(bad), `forbidden pattern: ${bad}`)
+  for (const term of mutations) {
+    assert.ok(
+      !linesOf(inspection, term).length,
+      `inspection SQL must not contain executable statement: ${term}`,
+    )
   }
 })
 

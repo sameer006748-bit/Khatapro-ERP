@@ -123,15 +123,3 @@ SELECT 'system accounts' AS object_name,
   COUNT(*) FILTER (WHERE is_system = true) AS system_account_count,
   COUNT(*) FILTER (WHERE is_system = true AND name = 'Rider Held COD') AS rider_held_cod_count
 FROM public.accounts;
-</parameter2name>
-<task_progress>
-- [x] Read failed migration
-- [x] Identify invalid syntax: ADD CONSTRAINT IF NOT EXISTS
-- [x] Create read-only inspection SQL
-- [ ] Repair migration 00014 with DO $$ blocks
-- [ ] Update tests for PostgreSQL compatibility
-- [ ] Run final checks
-- [ ] Commit, push
-- [ ] Present recovery instructions
-</parameter2name>
-</write_to_file>

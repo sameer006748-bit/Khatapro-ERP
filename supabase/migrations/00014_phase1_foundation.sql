@@ -199,13 +199,3 @@ revoke all on public.identity_sequences from authenticated;
 grant all on public.identity_sequences to service_role;
 
 commit;
-</parameter2name>
-<task_progress>
-- [x] Create read-only inspection SQL
-- [x] Repair migration 00014 — replace ADD CONSTRAINT IF NOT EXISTS with DO $$ blocks
-- [ ] Update tests to reject unsupported PostgreSQL syntax
-- [ ] Run final checks
-- [ ] Commit and push
-- [ ] Present recovery instructions
-</parameter2name>
-</write_to_file>
