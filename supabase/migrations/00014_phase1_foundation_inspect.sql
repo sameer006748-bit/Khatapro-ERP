@@ -1,131 +1,181 @@
--- Phase 1 Foundation inspection (read-only).
--- Safe against missing relations: uses to_regclass() instead of direct casts.
--- Run this FIRST on project: ebcebxwpddltiwrqybqc
-SELECT
-  'products.commission_rate' AS object_name,
-  EXISTS (
-    SELECT 1 FROM information_schema.columns
-    WHERE table_schema = 'public' AND table_name = 'products' AND column_name = 'commission_rate'
-  ) AS exists,
-  (SELECT data_type FROM information_schema.columns
-   WHERE table_schema = 'public' AND table_name = 'products' AND column_name = 'commission_rate') AS type;
-
-SELECT
-  'products.commission_rate_non_negative' AS object_name,
-  EXISTS (
-    SELECT 1 FROM pg_constraint
-    WHERE conname = 'commission_rate_non_negative'
-      AND conrelid = to_regclass('public.products')
-  ) AS exists,
-  CASE WHEN EXISTS (
-    SELECT 1 FROM pg_constraint
-    WHERE conname = 'commission_rate_non_negative'
-      AND conrelid = to_regclass('public.products')
-  ) THEN pg_get_constraintdef(
-    (SELECT oid FROM pg_constraint
-     WHERE conname = 'commission_rate_non_negative'
-       AND conrelid = to_regclass('public.products'))
-  ) ELSE NULL END AS definition;
-
-SELECT 'invoice_items.returned_qty' AS object_name,
-  EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'invoice_items' AND column_name = 'returned_qty') AS exists,
-  (SELECT data_type FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'invoice_items' AND column_name = 'returned_qty') AS type;
-
-SELECT 'invoice_items.original_invoice_item_id' AS object_name,
-  EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'invoice_items' AND column_name = 'original_invoice_item_id') AS exists,
-  (SELECT data_type FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'invoice_items' AND column_name = 'original_invoice_item_id') AS type;
-
-SELECT 'sales_returns.idempotency_key' AS object_name,
-  EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'sales_returns' AND column_name = 'idempotency_key') AS exists,
-  (SELECT data_type FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'sales_returns' AND column_name = 'idempotency_key') AS type;
-
-SELECT 'commission_events table' AS object_name,
-  EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'commission_events') AS exists;
-
-SELECT 'identity_sequences table' AS object_name,
-  EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'identity_sequences') AS exists;
-
-SELECT 'account_categories.parent_id' AS object_name,
-  EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'account_categories' AND column_name = 'parent_id') AS exists,
-  (SELECT data_type FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'account_categories' AND column_name = 'parent_id') AS type;
-
-SELECT 'account_categories_no_self_parent' AS object_name,
-  to_regclass('public.account_categories') IS NOT NULL AS exists,
-  CASE WHEN EXISTS (
-    SELECT 1 FROM pg_constraint
-    WHERE conname = 'account_categories_no_self_parent'
-      AND conrelid = to_regclass('public.account_categories')
-  ) THEN pg_get_constraintdef(
-    (SELECT oid FROM pg_constraint
-     WHERE conname = 'account_categories_no_self_parent'
-       AND conrelid = to_regclass('public.account_categories'))
-  ) ELSE NULL END AS definition;
-
-SELECT 'accounts.is_system' AS object_name,
-  EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'accounts' AND column_name = 'is_system') AS exists,
-  (SELECT data_type FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'accounts' AND column_name = 'is_system') AS type;
-
-SELECT 'delivery_orders.is_settled' AS object_name,
-  EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'delivery_orders' AND column_name = 'is_settled') AS exists,
-  (SELECT data_type FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'delivery_orders' AND column_name = 'is_settled') AS type;
-
-SELECT 'delivery_orders.ordered_qty' AS object_name,
-  EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'delivery_orders' AND column_name = 'ordered_qty') AS exists,
-  (SELECT data_type FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'delivery_orders' AND column_name = 'ordered_qty') AS type;
-
-SELECT 'delivery_orders.delivered_qty' AS object_name,
-  EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'delivery_orders' AND column_name = 'delivered_qty') AS exists,
-  (SELECT data_type FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'delivery_orders' AND column_name = 'delivered_qty') AS type;
-
-SELECT 'delivery_orders.returned_qty' AS object_name,
-  EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'delivery_orders' AND column_name = 'returned_qty') AS exists,
-  (SELECT data_type FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'delivery_orders' AND column_name = 'returned_qty') AS type;
-
-SELECT 'delivery_status_events.idempotency_key' AS object_name,
-  EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'delivery_status_events' AND column_name = 'idempotency_key') AS exists,
-  (SELECT data_type FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'delivery_status_events' AND column_name = 'idempotency_key') AS type;
-
-SELECT 'rider_cod_submissions.idempotency_key' AS object_name,
-  EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'rider_cod_submissions' AND column_name = 'idempotency_key') AS exists,
-  (SELECT data_type FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'rider_cod_submissions' AND column_name = 'idempotency_key') AS type;
-
-SELECT 'commission_events RLS' AS object_name,
-  EXISTS (SELECT 1 FROM pg_tables WHERE schemaname = 'public' AND tablename = 'commission_events' AND rowsecurity = true) AS exists;
-
-SELECT 'identity_sequences RLS' AS object_name,
-  EXISTS (SELECT 1 FROM pg_tables WHERE schemaname = 'public' AND tablename = 'identity_sequences' AND rowsecurity = true) AS exists;
-
-SELECT 'commission_events_select_own' AS object_name,
-  EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = 'commission_events' AND policyname = 'commission_events_select_own') AS exists;
-
-SELECT 'identity_sequences_select_own' AS object_name,
-  EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = 'identity_sequences' AND policyname = 'identity_sequences_select_own') AS exists;
-
-SELECT 'commission_events anon' AS object_name,
-  has_table_privilege('anon', 'public.commission_events', 'SELECT') AS anon_select,
-  has_table_privilege('anon', 'public.commission_events', 'INSERT') AS anon_insert;
-
-SELECT 'commission_events authenticated' AS object_name,
-  has_table_privilege('authenticated', 'public.commission_events', 'SELECT') AS authenticated_select,
-  has_table_privilege('authenticated', 'public.commission_events', 'INSERT') AS authenticated_insert;
-
-SELECT 'commission_events service_role' AS object_name,
-  has_table_privilege('service_role', 'public.commission_events', 'SELECT') AS service_role_select,
-  has_table_privilege('service_role', 'public.commission_events', 'INSERT') AS service_role_insert;
-
-SELECT 'identity_sequences anon' AS object_name,
-  has_table_privilege('anon', 'public.identity_sequences', 'SELECT') AS anon_select,
-  has_table_privilege('anon', 'public.identity_sequences', 'INSERT') AS anon_insert;
-
-SELECT 'identity_sequences authenticated' AS object_name,
-  has_table_privilege('authenticated', 'public.identity_sequences', 'SELECT') AS authenticated_select,
-  has_table_privilege('authenticated', 'public.identity_sequences', 'INSERT') AS authenticated_insert;
-
-SELECT 'identity_sequences service_role' AS object_name,
-  has_table_privilege('service_role', 'public.identity_sequences', 'SELECT') AS service_role_select,
-  has_table_privilege('service_role', 'public.identity_sequences', 'INSERT') AS service_role_insert;
-
-SELECT 'system accounts' AS object_name,
-  COUNT(*) FILTER (WHERE is_system = true) AS system_account_count,
-  COUNT(*) FILTER (WHERE is_system = true AND name = 'Rider Held COD') AS rider_held_cod_count
-FROM public.accounts;
+-- Phase 1 Foundation inspection (read-only, pre-migration safe).
+-- Uses to_regclass() and catalog views only.
+-- Never SELECTs from Phase 1 application tables.
+-- Run FIRST on project: ebcebxwpddltiwrqybqc
+SELECT 'products.commission_rate' AS area,
+       'products' AS object_name,
+       'column' AS object_type,
+       EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'products' AND column_name = 'commission_rate') AS exists,
+       (SELECT data_type FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'products' AND column_name = 'commission_rate') AS details
+UNION ALL
+SELECT 'products.commission_rate_non_negative', 'products', 'constraint',
+       EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'commission_rate_non_negative' AND conrelid = to_regclass('public.products')),
+       CASE WHEN EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'commission_rate_non_negative' AND conrelid = to_regclass('public.products'))
+            THEN pg_get_constraintdef((SELECT oid FROM pg_constraint WHERE conname = 'commission_rate_non_negative' AND conrelid = to_regclass('public.products')))
+            ELSE NULL END
+UNION ALL
+SELECT 'invoice_items.returned_qty', 'invoice_items', 'column',
+       EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'invoice_items' AND column_name = 'returned_qty'),
+       (SELECT data_type FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'invoice_items' AND column_name = 'returned_qty')
+UNION ALL
+SELECT 'invoice_items.original_invoice_item_id', 'invoice_items', 'column',
+       EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'invoice_items' AND column_name = 'original_invoice_item_id'),
+       (SELECT data_type FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'invoice_items' AND column_name = 'original_invoice_item_id')
+UNION ALL
+SELECT 'invoice_items_original_idx', 'invoice_items', 'index',
+       EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'invoice_items' AND indexname = 'invoice_items_original_idx'),
+       NULL
+UNION ALL
+SELECT 'sales_returns.idempotency_key', 'sales_returns', 'column',
+       EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'sales_returns' AND column_name = 'idempotency_key'),
+       (SELECT data_type FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'sales_returns' AND column_name = 'idempotency_key')
+UNION ALL
+SELECT 'sales_returns_idempotency_key_idx', 'sales_returns', 'index',
+       EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'sales_returns' AND indexname = 'sales_returns_idempotency_key_idx'),
+       NULL
+UNION ALL
+SELECT 'commission_events table', 'commission_events', 'table',
+       EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'commission_events'),
+       NULL
+UNION ALL
+SELECT 'commission_events idempotency index', 'commission_events', 'index',
+       EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'commission_events' AND indexname = 'commission_events_idempotency_key_idx'),
+       NULL
+UNION ALL
+SELECT 'commission_events biz-invoice index', 'commission_events', 'index',
+       EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'commission_events' AND indexname = 'commission_events_biz_invoice_idx'),
+       NULL
+UNION ALL
+SELECT 'commission_events salesman index', 'commission_events', 'index',
+       EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'commission_events' AND indexname = 'commission_events_salesman_idx'),
+       NULL
+UNION ALL
+SELECT 'commission_events invoice-item index', 'commission_events', 'index',
+       EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'commission_events' AND indexname = 'commission_events_invoice_item_idx'),
+       NULL
+UNION ALL
+SELECT 'commission_events RLS', 'commission_events', 'rls',
+       EXISTS (SELECT 1 FROM pg_tables WHERE schemaname = 'public' AND tablename = 'commission_events' AND rowsecurity = true),
+       NULL
+UNION ALL
+SELECT 'commission_events_select_own', 'commission_events', 'policy',
+       EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = 'commission_events' AND policyname = 'commission_events_select_own'),
+       NULL
+UNION ALL
+SELECT 'commission_events anon SELECT', 'commission_events', 'grant',
+       EXISTS (SELECT 1 FROM information_schema.role_table_grants WHERE table_schema = 'public' AND table_name = 'commission_events' AND grantee = 'anon' AND privilege_type = 'SELECT'),
+       NULL
+UNION ALL
+SELECT 'commission_events anon INSERT', 'commission_events', 'grant',
+       EXISTS (SELECT 1 FROM information_schema.role_table_grants WHERE table_schema = 'public' AND table_name = 'commission_events' AND grantee = 'anon' AND privilege_type = 'INSERT'),
+       NULL
+UNION ALL
+SELECT 'commission_events authenticated SELECT', 'commission_events', 'grant',
+       EXISTS (SELECT 1 FROM information_schema.role_table_grants WHERE table_schema = 'public' AND table_name = 'commission_events' AND grantee = 'authenticated' AND privilege_type = 'SELECT'),
+       NULL
+UNION ALL
+SELECT 'commission_events authenticated INSERT', 'commission_events', 'grant',
+       EXISTS (SELECT 1 FROM information_schema.role_table_grants WHERE table_schema = 'public' AND table_name = 'commission_events' AND grantee = 'authenticated' AND privilege_type = 'INSERT'),
+       NULL
+UNION ALL
+SELECT 'commission_events service_role SELECT', 'commission_events', 'grant',
+       EXISTS (SELECT 1 FROM information_schema.role_table_grants WHERE table_schema = 'public' AND table_name = 'commission_events' AND grantee = 'service_role' AND privilege_type = 'SELECT'),
+       NULL
+UNION ALL
+SELECT 'commission_events service_role INSERT', 'commission_events', 'grant',
+       EXISTS (SELECT 1 FROM information_schema.role_table_grants WHERE table_schema = 'public' AND table_name = 'commission_events' AND grantee = 'service_role' AND privilege_type = 'INSERT'),
+       NULL
+UNION ALL
+SELECT 'identity_sequences table', 'identity_sequences', 'table',
+       EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'identity_sequences'),
+       NULL
+UNION ALL
+SELECT 'identity_sequences RLS', 'identity_sequences', 'rls',
+       EXISTS (SELECT 1 FROM pg_tables WHERE schemaname = 'public' AND tablename = 'identity_sequences' AND rowsecurity = true),
+       NULL
+UNION ALL
+SELECT 'identity_sequences_select_own', 'identity_sequences', 'policy',
+       EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = 'identity_sequences' AND policyname = 'identity_sequences_select_own'),
+       NULL
+UNION ALL
+SELECT 'identity_sequences anon SELECT', 'identity_sequences', 'grant',
+       EXISTS (SELECT 1 FROM information_schema.role_table_grants WHERE table_schema = 'public' AND table_name = 'identity_sequences' AND grantee = 'anon' AND privilege_type = 'SELECT'),
+       NULL
+UNION ALL
+SELECT 'identity_sequences anon INSERT', 'identity_sequences', 'grant',
+       EXISTS (SELECT 1 FROM information_schema.role_table_grants WHERE table_schema = 'public' AND table_name = 'identity_sequences' AND grantee = 'anon' AND privilege_type = 'INSERT'),
+       NULL
+UNION ALL
+SELECT 'identity_sequences authenticated SELECT', 'identity_sequences', 'grant',
+       EXISTS (SELECT 1 FROM information_schema.role_table_grants WHERE table_schema = 'public' AND table_name = 'identity_sequences' AND grantee = 'authenticated' AND privilege_type = 'SELECT'),
+       NULL
+UNION ALL
+SELECT 'identity_sequences authenticated INSERT', 'identity_sequences', 'grant',
+       EXISTS (SELECT 1 FROM information_schema.role_table_grants WHERE table_schema = 'public' AND table_name = 'identity_sequences' AND grantee = 'authenticated' AND privilege_type = 'INSERT'),
+       NULL
+UNION ALL
+SELECT 'identity_sequences service_role SELECT', 'identity_sequences', 'grant',
+       EXISTS (SELECT 1 FROM information_schema.role_table_grants WHERE table_schema = 'public' AND table_name = 'identity_sequences' AND grantee = 'service_role' AND privilege_type = 'SELECT'),
+       NULL
+UNION ALL
+SELECT 'identity_sequences service_role INSERT', 'identity_sequences', 'grant',
+       EXISTS (SELECT 1 FROM information_schema.role_table_grants WHERE table_schema = 'public' AND table_name = 'identity_sequences' AND grantee = 'service_role' AND privilege_type = 'INSERT'),
+       NULL
+UNION ALL
+SELECT 'account_categories.parent_id', 'account_categories', 'column',
+       EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'account_categories' AND column_name = 'parent_id'),
+       (SELECT data_type FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'account_categories' AND column_name = 'parent_id')
+UNION ALL
+SELECT 'account_categories parent index', 'account_categories', 'index',
+       EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'account_categories' AND indexname = 'account_categories_parent_idx'),
+       NULL
+UNION ALL
+SELECT 'account_categories_no_self_parent', 'account_categories', 'constraint',
+       EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'account_categories_no_self_parent' AND conrelid = to_regclass('public.account_categories')),
+       CASE WHEN EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'account_categories_no_self_parent' AND conrelid = to_regclass('public.account_categories'))
+            THEN pg_get_constraintdef((SELECT oid FROM pg_constraint WHERE conname = 'account_categories_no_self_parent' AND conrelid = to_regclass('public.account_categories')))
+            ELSE NULL END
+UNION ALL
+SELECT 'accounts.is_system', 'accounts', 'column',
+       EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'accounts' AND column_name = 'is_system'),
+       (SELECT data_type FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'accounts' AND column_name = 'is_system')
+UNION ALL
+SELECT 'delivery_orders.is_settled', 'delivery_orders', 'column',
+       EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'delivery_orders' AND column_name = 'is_settled'),
+       (SELECT data_type FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'delivery_orders' AND column_name = 'is_settled')
+UNION ALL
+SELECT 'delivery_orders.ordered_qty', 'delivery_orders', 'column',
+       EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'delivery_orders' AND column_name = 'ordered_qty'),
+       (SELECT data_type FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'delivery_orders' AND column_name = 'ordered_qty')
+UNION ALL
+SELECT 'delivery_orders.delivered_qty', 'delivery_orders', 'column',
+       EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'delivery_orders' AND column_name = 'delivered_qty'),
+       (SELECT data_type FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'delivery_orders' AND column_name = 'delivered_qty')
+UNION ALL
+SELECT 'delivery_orders.returned_qty', 'delivery_orders', 'column',
+       EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'delivery_orders' AND column_name = 'returned_qty'),
+       (SELECT data_type FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'delivery_orders' AND column_name = 'returned_qty')
+UNION ALL
+SELECT 'delivery_orders_settled_idx', 'delivery_orders', 'index',
+       EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'delivery_orders' AND indexname = 'delivery_orders_settled_idx'),
+       NULL
+UNION ALL
+SELECT 'delivery_status_events.idempotency_key', 'delivery_status_events', 'column',
+       EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'delivery_status_events' AND column_name = 'idempotency_key'),
+       (SELECT data_type FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'delivery_status_events' AND column_name = 'idempotency_key')
+UNION ALL
+SELECT 'delivery_events_idempotency_key_idx', 'delivery_status_events', 'index',
+       EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'delivery_status_events' AND indexname = 'delivery_events_idempotency_key_idx'),
+       NULL
+UNION ALL
+SELECT 'rider_cod_submissions.idempotency_key', 'rider_cod_submissions', 'column',
+       EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'rider_cod_submissions' AND column_name = 'idempotency_key'),
+       (SELECT data_type FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'rider_cod_submissions' AND column_name = 'idempotency_key')
+UNION ALL
+SELECT 'cod_submissions_idempotency_key_idx', 'rider_cod_submissions', 'index',
+       EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'rider_cod_submissions' AND indexname = 'cod_submissions_idempotency_key_idx'),
+       NULL
+UNION ALL
+SELECT 'system accounts', 'accounts', 'data',
+       EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'accounts' AND column_name = 'is_system'),
+       NULL;

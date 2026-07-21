@@ -243,15 +243,14 @@ test('00014 inspection SQL contains no template/XML/artifact markers', () => {
   assert.ok(!INSPECT_14.includes('```'), 'no markdown code fence')
 })
 
-test('inspection SQL is read-only', async () => {
-  const inspection = (await readFile('supabase/migrations/00014_phase1_foundation_inspect.sql', 'utf8')).toLowerCase()
+test('inspection SQL is read-only', () => {
   const mutations = [
     'insert into', 'update ', 'delete from', 'alter table', 'create table',
     'create index', 'drop ', 'grant ', 'revoke ', 'truncate ',
   ]
   for (const term of mutations) {
     assert.ok(
-      !linesOf(inspection, term).length,
+      !linesOf(INSPECT_14, term).length,
       `inspection SQL must not contain executable statement: ${term}`,
     )
   }
@@ -264,6 +263,77 @@ test('inspection SQL uses safe to_regclass() instead of ::regclass', () => {
 
 test('migration 00014 avoids unsafe ::regclass in DO blocks', () => {
   assert.ok(!MIGRATION_14.includes('::regclass'), 'migration SQL must not use ::regclass')
+})
+
+test('inspection SQL never selects from Phase 1 application tables', () => {
+  const phase1Tables = [
+    'products',
+    'invoice_items',
+    'sales_returns',
+    'commission_events',
+    'identity_sequences',
+    'account_categories',
+    'accounts',
+    'delivery_orders',
+    'delivery_status_events',
+    'rider_cod_submissions',
+  ]
+  for (const t of phase1Tables) {
+    const bad = `from public.${t}`
+    assert.ok(!INSPECT_14.includes(bad), `inspection SQL must not SELECT from ${bad}`)
+    assert.ok(!INSPECT_14.includes(`join public.${t}`), `inspection SQL must not JOIN ${bad}`)
+  }
+})
+
+test('inspection SQL covers every Phase 1 object from migration 00014', () => {
+  const required = [
+    'products.commission_rate',
+    'products.commission_rate_non_negative',
+    'invoice_items.returned_qty',
+    'invoice_items.original_invoice_item_id',
+    'invoice_items_original_idx',
+    'sales_returns.idempotency_key',
+    'sales_returns_idempotency_key_idx',
+    'commission_events table',
+    'commission_events idempotency index',
+    'commission_events biz-invoice index',
+    'commission_events salesman index',
+    'commission_events invoice-item index',
+    'commission_events rls',
+    'commission_events_select_own',
+    'commission_events anon select',
+    'commission_events anon insert',
+    'commission_events authenticated select',
+    'commission_events authenticated insert',
+    'commission_events service_role select',
+    'commission_events service_role insert',
+    'identity_sequences table',
+    'identity_sequences rls',
+    'identity_sequences_select_own',
+    'identity_sequences anon select',
+    'identity_sequences anon insert',
+    'identity_sequences authenticated select',
+    'identity_sequences authenticated insert',
+    'identity_sequences service_role select',
+    'identity_sequences service_role insert',
+    'account_categories.parent_id',
+    'account_categories parent index',
+    'account_categories_no_self_parent',
+    'accounts.is_system',
+    'delivery_orders.is_settled',
+    'delivery_orders.ordered_qty',
+    'delivery_orders.delivered_qty',
+    'delivery_orders.returned_qty',
+    'delivery_orders_settled_idx',
+    'delivery_status_events.idempotency_key',
+    'delivery_events_idempotency_key_idx',
+    'rider_cod_submissions.idempotency_key',
+    'cod_submissions_idempotency_key_idx',
+    'system accounts',
+  ]
+  for (const r of required) {
+    assert.ok(INSPECT_14.includes(r), `inspection SQL must include row for ${r}`)
+  }
 })
 
 test('migration 00014 table names match verified production tables', () => {
