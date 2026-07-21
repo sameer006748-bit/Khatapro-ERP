@@ -12,6 +12,7 @@ import test from 'node:test'
 const PRISMA_SCHEMA = (await readFile('prisma/schema.prisma', 'utf8')).toLowerCase()
 const MIGRATION_14 = (await readFile('supabase/migrations/00014_phase1_foundation.sql', 'utf8')).toLowerCase()
 const INSPECT_14 = (await readFile('supabase/migrations/00014_phase1_foundation_inspect.sql', 'utf8')).toLowerCase()
+const DISCOVERY_14 = (await readFile('supabase/migrations/00014_production_schema_discovery.sql', 'utf8')).toLowerCase()
 
 function linesOf(source: string, ...terms: string[]): string[] {
   return source.split('\n').filter((l) => terms.some((t) => l.includes(t.toLowerCase())))
@@ -211,6 +212,11 @@ test('every ALTER target is explicitly verified before DDL', () => {
   assert.ok(!MIGRATION_14.includes('alter table if exists'), 'missing base tables must not be silently skipped')
 })
 
+test('00014 aborts rather than running against unverified missing base tables', () => {
+  assert.ok(MIGRATION_14.includes('phase 1 foundation migration requires existing base table'), 'migration must raise a clear schema-drift error')
+  assert.ok(MIGRATION_14.includes('v_missing is not null'), 'migration must stop when a required base table is absent')
+})
+
 test('no production-specific hardcoded IDs in 00014', () => {
   const lines = MIGRATION_14.split('\n')
   for (const line of lines) {
@@ -287,6 +293,31 @@ test('inspection SQL is read-only', () => {
 test('inspection SQL uses safe to_regclass() instead of ::regclass', () => {
   assert.ok(!INSPECT_14.includes('::regclass'), 'inspection SQL must not use ::regclass')
   assert.ok(INSPECT_14.includes('to_regclass'), 'inspection SQL must use to_regclass()')
+})
+
+test('production schema discovery is catalog-only and returns requested metadata', () => {
+  const required = [
+    'information_schema.tables', 'information_schema.columns',
+    'information_schema.table_constraints', 'information_schema.key_column_usage',
+    'information_schema.constraint_column_usage', 'table_name', 'column_name',
+    'data_type', 'is_nullable', 'column_default', 'likely_domain', 'foreign key',
+  ]
+  for (const item of required) assert.ok(DISCOVERY_14.includes(item), `discovery SQL must include ${item}`)
+  assert.ok(DISCOVERY_14.includes('business|company|tenant'), 'discovery must search business-domain terms')
+  assert.ok(DISCOVERY_14.includes('delivery|rider|cod|courier'), 'discovery must search delivery-domain terms')
+})
+
+test('production schema discovery is read-only and never reads application tables', () => {
+  const mutations = ['insert into', 'update ', 'delete from', 'alter table', 'create table', 'create index', 'drop ', 'grant ', 'revoke ', 'truncate ']
+  for (const term of mutations) assert.equal(linesOf(DISCOVERY_14, term).length, 0, `discovery SQL must not contain ${term}`)
+  assert.ok(!DISCOVERY_14.includes('from public.'), 'discovery SQL must not SELECT application rows')
+  assert.ok(!DISCOVERY_14.includes('join public.'), 'discovery SQL must not JOIN application rows')
+})
+
+test('production schema discovery introduces no guessed table-name aliases', () => {
+  for (const guessed of ['public.business', 'public.accounts', 'public.delivery_orders', 'account_master', 'chart_of_accounts', 'online_orders', 'delivery_assignments']) {
+    assert.ok(!DISCOVERY_14.includes(guessed), `discovery must not assume ${guessed}`)
+  }
 })
 
 test('migration 00014 avoids unsafe ::regclass in DO blocks', () => {
@@ -379,8 +410,8 @@ test('inspection SQL covers every Phase 1 object from migration 00014', () => {
   }
 })
 
-test('migration 00014 table names match verified production tables', () => {
-  const verified = [
+test('migration preserves unverified base tables as guarded contracts', () => {
+  const guarded = [
     'public.products',
     'public.invoice_items',
     'public.sale_return_documents',
@@ -393,9 +424,10 @@ test('migration 00014 table names match verified production tables', () => {
     'public.delivery_status_events',
     'public.rider_cod_submissions',
   ]
-  for (const t of verified) {
-    assert.ok(MIGRATION_14.includes(t), `migration must reference verified table: ${t}`)
+  for (const t of guarded) {
+    assert.ok(MIGRATION_14.includes(t), `migration must retain guarded table reference: ${t}`)
   }
+  assert.ok(MIGRATION_14.includes('aborting without changes'), 'unproven mappings must abort safely')
 })
 
 // ==========================================================================
