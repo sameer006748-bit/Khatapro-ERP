@@ -1,6 +1,6 @@
 -- Phase 1 Foundation inspection (read-only).
+-- Safe against missing relations: uses to_regclass() instead of direct casts.
 -- Run this FIRST on project: ebcebxwpddltiwrqybqc
--- It must not modify any data or schema.
 SELECT
   'products.commission_rate' AS object_name,
   EXISTS (
@@ -15,16 +15,16 @@ SELECT
   EXISTS (
     SELECT 1 FROM pg_constraint
     WHERE conname = 'commission_rate_non_negative'
-      AND conrelid = 'public.products'::regclass
+      AND conrelid = to_regclass('public.products')
   ) AS exists,
   CASE WHEN EXISTS (
     SELECT 1 FROM pg_constraint
     WHERE conname = 'commission_rate_non_negative'
-      AND conrelid = 'public.products'::regclass
+      AND conrelid = to_regclass('public.products')
   ) THEN pg_get_constraintdef(
     (SELECT oid FROM pg_constraint
      WHERE conname = 'commission_rate_non_negative'
-       AND conrelid = 'public.products'::regclass)
+       AND conrelid = to_regclass('public.products'))
   ) ELSE NULL END AS definition;
 
 SELECT 'invoice_items.returned_qty' AS object_name,
@@ -50,10 +50,16 @@ SELECT 'account_categories.parent_id' AS object_name,
   (SELECT data_type FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'account_categories' AND column_name = 'parent_id') AS type;
 
 SELECT 'account_categories_no_self_parent' AS object_name,
-  EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'account_categories_no_self_parent' AND conrelid = 'public.account_categories'::regclass) AS exists,
-  CASE WHEN EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'account_categories_no_self_parent' AND conrelid = 'public.account_categories'::regclass)
-       THEN pg_get_constraintdef((SELECT oid FROM pg_constraint WHERE conname = 'account_categories_no_self_parent' AND conrelid = 'public.account_categories'::regclass))
-       ELSE NULL END AS definition;
+  to_regclass('public.account_categories') IS NOT NULL AS exists,
+  CASE WHEN EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'account_categories_no_self_parent'
+      AND conrelid = to_regclass('public.account_categories')
+  ) THEN pg_get_constraintdef(
+    (SELECT oid FROM pg_constraint
+     WHERE conname = 'account_categories_no_self_parent'
+       AND conrelid = to_regclass('public.account_categories'))
+  ) ELSE NULL END AS definition;
 
 SELECT 'accounts.is_system' AS object_name,
   EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'accounts' AND column_name = 'is_system') AS exists,

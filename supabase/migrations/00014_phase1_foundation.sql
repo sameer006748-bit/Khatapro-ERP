@@ -16,7 +16,7 @@ BEGIN
     SELECT 1
     FROM pg_constraint
     WHERE conname = 'commission_rate_non_negative'
-      AND conrelid = 'public.products'::regclass
+      AND conrelid = to_regclass('public.products')
   ) THEN
     ALTER TABLE public.products
       ADD CONSTRAINT commission_rate_non_negative
@@ -111,7 +111,7 @@ BEGIN
     SELECT 1
     FROM pg_constraint
     WHERE conname = 'account_categories_no_self_parent'
-      AND conrelid = 'public.account_categories'::regclass
+      AND conrelid = to_regclass('public.account_categories')
   ) THEN
     ALTER TABLE public.account_categories
       ADD CONSTRAINT account_categories_no_self_parent

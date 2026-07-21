@@ -257,6 +257,33 @@ test('inspection SQL is read-only', async () => {
   }
 })
 
+test('inspection SQL uses safe to_regclass() instead of ::regclass', () => {
+  assert.ok(!INSPECT_14.includes('::regclass'), 'inspection SQL must not use ::regclass')
+  assert.ok(INSPECT_14.includes('to_regclass'), 'inspection SQL must use to_regclass()')
+})
+
+test('migration 00014 avoids unsafe ::regclass in DO blocks', () => {
+  assert.ok(!MIGRATION_14.includes('::regclass'), 'migration SQL must not use ::regclass')
+})
+
+test('migration 00014 table names match verified production tables', () => {
+  const verified = [
+    'public.products',
+    'public.invoice_items',
+    'public.sales_returns',
+    'public.commission_events',
+    'public.identity_sequences',
+    'public.account_categories',
+    'public.accounts',
+    'public.delivery_orders',
+    'public.delivery_status_events',
+    'public.rider_cod_submissions',
+  ]
+  for (const t of verified) {
+    assert.ok(MIGRATION_14.includes(t), `migration must reference verified table: ${t}`)
+  }
+})
+
 // ==========================================================================
 // RLS / server-only access — static contract tests
 // ==========================================================================
