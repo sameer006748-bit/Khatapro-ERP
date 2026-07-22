@@ -90,30 +90,40 @@ from pg_catalog.pg_indexes i
 where i.schemaname = 'public' and i.tablename in (select table_name from relevant_tables)
 order by i.tablename, i.indexname;
 
--- Result 5: relevant deployed public routines and their metadata/signatures.
-select n.nspname as schema_name, p.proname as function_name,
-       pg_catalog.pg_get_function_identity_arguments(p.oid) as identity_arguments,
-       pg_catalog.pg_get_function_arguments(p.oid) as argument_signature,
-       pg_catalog.pg_get_function_result(p.oid) as return_type,
-       l.lanname as language,
-       p.prosecdef as security_definer,
-       p.provolatile as volatility,
-       pg_catalog.pg_get_userbyid(p.proowner) as owner
-from pg_catalog.pg_proc p
-join pg_catalog.pg_namespace n on n.oid = p.pronamespace
-join pg_catalog.pg_language l on l.oid = p.prolang
-where n.nspname = 'public'
-  and (p.proname ~* '(post_sale|sale|invoice|voucher|journal|payment|receipt|customer|balance|stock|return|cancel|refund|commission)'
-       or pg_catalog.pg_get_functiondef(p.oid) ~* '(voucher|journal|ledger|account|payment|receipt|return|invoice|commission)')
-order by p.proname, pg_catalog.pg_get_function_identity_arguments(p.oid);
+-- Result 5: relevant deployed ordinary public functions and their metadata.
+-- The materialized source filter excludes aggregates (a) and window functions
+-- (w) before any pg_get_function* helper can be evaluated.
+with ordinary_public_functions as materialized (
+  select p.oid, n.nspname, p.proname, p.prosecdef, p.provolatile, p.proowner, l.lanname
+  from pg_catalog.pg_proc p
+  join pg_catalog.pg_namespace n on n.oid = p.pronamespace
+  join pg_catalog.pg_language l on l.oid = p.prolang
+  where n.nspname = 'public' and p.prokind = 'f'
+), relevant_functions as materialized (
+  select f.*
+  from ordinary_public_functions f
+  where f.proname ~* '(post_sale|sale|invoice|voucher|journal|payment|receipt|customer|balance|stock|return|cancel|refund|commission)'
+     or pg_catalog.pg_get_functiondef(f.oid) ~* '(voucher|journal|ledger|account|payment|receipt|return|invoice|commission)'
+)
+select f.nspname as schema_name, f.proname as function_name,
+       pg_catalog.pg_get_function_identity_arguments(f.oid) as identity_arguments,
+       pg_catalog.pg_get_function_arguments(f.oid) as argument_signature,
+       pg_catalog.pg_get_function_result(f.oid) as return_type,
+       f.lanname as language, f.prosecdef as security_definer,
+       f.provolatile as volatility, pg_catalog.pg_get_userbyid(f.proowner) as owner
+from relevant_functions f
+order by f.proname, pg_catalog.pg_get_function_identity_arguments(f.oid);
 
 -- Result 6: routine parameters and execute grants for the same routine set.
-with relevant_routines as (
-  select p.oid, n.nspname, p.proname, pg_catalog.pg_get_function_identity_arguments(p.oid) as identity_arguments
+with ordinary_public_functions as materialized (
+  select p.oid, n.nspname, p.proname
   from pg_catalog.pg_proc p join pg_catalog.pg_namespace n on n.oid = p.pronamespace
-  where n.nspname = 'public'
-    and (p.proname ~* '(post_sale|sale|invoice|voucher|journal|payment|receipt|customer|balance|stock|return|cancel|refund|commission)'
-         or pg_catalog.pg_get_functiondef(p.oid) ~* '(voucher|journal|ledger|account|payment|receipt|return|invoice|commission)')
+  where n.nspname = 'public' and p.prokind = 'f'
+), relevant_routines as materialized (
+  select f.oid, f.nspname, f.proname, pg_catalog.pg_get_function_identity_arguments(f.oid) as identity_arguments
+  from ordinary_public_functions f
+  where f.proname ~* '(post_sale|sale|invoice|voucher|journal|payment|receipt|customer|balance|stock|return|cancel|refund|commission)'
+     or pg_catalog.pg_get_functiondef(f.oid) ~* '(voucher|journal|ledger|account|payment|receipt|return|invoice|commission)'
 )
 select r.nspname as schema_name, r.proname as function_name, r.identity_arguments,
        prm.ordinal_position, prm.parameter_name, prm.data_type, prm.parameter_mode,

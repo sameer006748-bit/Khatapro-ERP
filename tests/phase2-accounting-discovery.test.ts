@@ -53,6 +53,23 @@ test('RPC discovery includes signatures, definitions, and execute grants', () =>
   assert.ok(RPC_DISCOVERY.includes('aclexplode'), 'execute grants must be returned from routine ACLs')
 })
 
+test('function helpers are sourced only from ordinary public functions', () => {
+  for (const file of [DISCOVERY, RPC_DISCOVERY]) {
+    const definitionCalls = file.match(/pg_catalog\.pg_get_functiondef/g) ?? []
+    const ordinarySources = file.match(/ordinary_public_functions as materialized/g) ?? []
+    const ordinaryFilters = file.match(/p\.prokind\s*=\s*'f'/g) ?? []
+    assert.ok(definitionCalls.length > 0, 'function definitions must remain discoverable')
+    assert.ok(ordinarySources.length >= 1, 'definition helpers require a materialized ordinary-function source')
+    assert.ok(ordinaryFilters.length >= ordinarySources.length, 'every ordinary-function source must filter p.prokind = f')
+    assert.ok(file.includes("n.nspname = 'public'"), 'routine discovery must be limited to the public schema')
+    assert.ok(!/p\.prokind\s*(?:=|in)\s*[^\n;]*'a'/.test(file), 'aggregate prokind a must never enter helper input')
+    assert.ok(!/p\.prokind\s*(?:=|in)\s*[^\n;]*'w'/.test(file), 'window prokind w must never enter helper input')
+    const sql = executableLines(file).join('\n')
+    assert.ok(sql.indexOf('pg_catalog.pg_get_functiondef') > sql.indexOf('ordinary_public_functions as materialized'), 'definition helper must appear after the verified ordinary-function source')
+    assert.ok(!sql.includes('array_agg'), 'array_agg cannot enter routine metadata processing')
+  }
+})
+
 test('discovery package has no secret or hardcoded business access', () => {
   const combined = `${DISCOVERY}\n${RPC_DISCOVERY}`
   for (const forbidden of ['service_role_key', 'supabase_service', 'process.env', 'authorization:', 'bearer ', 'from public.businesses']) {
