@@ -185,6 +185,68 @@ export async function markDelivered(businessId: string, orderId: string, collect
   return { voucherId: r.voucher_id }
 }
 
+// Phase 3 canonical COD mutations.  Invoice IDs are production text IDs; the
+// server never accepts a rider ID for delivery completion.
+export async function completeCodDelivery(input: {
+  businessId: string; invoiceId: string; cashCollected: bigint; idempotencyKey: string
+}): Promise<{ invoice_id: string; delivery_event_id: string; ledger_id: string | null; cash_collected: string; idempotent: boolean }> {
+  const admin = getAdminSupabase()
+  const { data, error } = await admin.rpc('complete_cod_delivery', {
+    p_business_id: input.businessId,
+    p_invoice_id: input.invoiceId,
+    p_cash_collected: input.cashCollected.toString(),
+    p_idempotency_key: input.idempotencyKey,
+  })
+  if (error) throw new Error(`complete_cod_delivery: ${error.message}`)
+  return data as any
+}
+
+export async function startCodDelivery(input: { businessId: string; invoiceId: string; idempotencyKey: string }): Promise<{ invoice_id: string; status: string; idempotent: boolean }> {
+  const admin = getAdminSupabase()
+  const { data, error } = await admin.rpc('mark_cod_out_for_delivery', { p_business_id: input.businessId, p_invoice_id: input.invoiceId, p_idempotency_key: input.idempotencyKey })
+  if (error) throw new Error(`mark_cod_out_for_delivery: ${error.message}`)
+  return data as any
+}
+
+export async function returnRiderDelivery(input: { businessId: string; invoiceId: string; reason?: string | null; idempotencyKey: string }): Promise<{ invoice_id: string; status: string; idempotent: boolean }> {
+  const admin = getAdminSupabase()
+  const { data, error } = await admin.rpc('return_rider_delivery', { p_business_id: input.businessId, p_invoice_id: input.invoiceId, p_reason: input.reason ?? null, p_idempotency_key: input.idempotencyKey })
+  if (error) throw new Error(`return_rider_delivery: ${error.message}`)
+  return data as any
+}
+
+export type RiderCodBalance = {
+  riderId: string; riderName: string; collectedCod: string; settledCod: string
+  outstandingCod: string; invoiceCount: number; oldestOutstandingDeliveryDate: string | null; latestSettlementDate: string | null
+}
+
+export async function riderCodBalances(businessId: string, riderId?: string | null): Promise<RiderCodBalance[]> {
+  const admin = getAdminSupabase()
+  const { data, error } = await admin.rpc('get_rider_cod_balances', {
+    p_business_id: businessId, p_rider_id: riderId ?? null,
+  })
+  if (error) throw new Error(`get_rider_cod_balances: ${error.message}`)
+  return (data ?? []).map((row: any) => ({
+    riderId: row.rider_id, riderName: row.rider_name,
+    collectedCod: String(row.collected_cod ?? '0'), settledCod: String(row.settled_cod ?? '0'),
+    outstandingCod: String(row.outstanding_cod ?? '0'), invoiceCount: Number(row.invoice_count ?? 0),
+    oldestOutstandingDeliveryDate: row.oldest_outstanding_delivery_date ?? null,
+    latestSettlementDate: row.latest_settlement_date ?? null,
+  }))
+}
+
+export async function settleRiderCod(input: {
+  businessId: string; riderId: string; amount: bigint; mode: string; note?: string | null; idempotencyKey: string
+}): Promise<{ batch_id: string; reference: string; amount: string; allocation_count: number; idempotent: boolean }> {
+  const admin = getAdminSupabase()
+  const { data, error } = await admin.rpc('settle_rider_cod', {
+    p_business_id: input.businessId, p_rider_id: input.riderId, p_amount: input.amount.toString(),
+    p_mode: input.mode, p_note: input.note ?? null, p_idempotency_key: input.idempotencyKey,
+  })
+  if (error) throw new Error(`settle_rider_cod: ${error.message}`)
+  return data as any
+}
+
 // ─── Mark Returned ───
 export async function markReturned(businessId: string, orderId: string, returnReason?: string | null, createdBy?: string | null): Promise<{ salesReturnId: string }> {
   const admin = getAdminSupabase()

@@ -66,7 +66,7 @@ export function DeliveryView({ user }: { user: MeUser }) {
 
       {tab === 'orders' && <OrdersTab user={user} />}
       {tab === 'riders' && <RidersTab user={user} />}
-      {tab === 'cod' && <CodTab user={user} />}
+      {tab === 'cod' && <Phase3CodTab user={user} />}
     </div>
   )
 }
@@ -339,6 +339,32 @@ function RiderLedgerModal({ rider, onClose }: { rider: Rider; onClose: () => voi
 }
 
 // ─── COD Settlement Tab ───
+function Phase3CodTab({ user }: { user: MeUser }) {
+  const qc = useQueryClient()
+  const [selected, setSelected] = useState<{ riderId: string; riderName: string; outstandingCod: string } | null>(null)
+  const q = useQuery<{ rows: Array<{ riderId: string; riderName: string; collectedCod: string; settledCod: string; outstandingCod: string; invoiceCount: number; oldestOutstandingDeliveryDate: string | null }> }>({
+    queryKey: ['rider-cod-balances'],
+    queryFn: async () => { const r = await fetch('/api/rider-cod/balances'); const j = await r.json(); if (!r.ok) throw new Error(j?.error ?? 'Failed'); return j },
+  })
+  const canSettle = ['Owner', 'Admin', 'Accountant'].includes(user.roleName) || user.permissions.includes('can_confirm_cod_submission')
+  return <div className="space-y-3">
+    <div><h2 className="text-sm font-semibold text-foreground">Rider COD Balances</h2><p className="text-xs text-muted-foreground">Delivered COD stays held by the rider until settlement. Allocation is oldest-first.</p></div>
+    {q.isLoading ? <div className="py-8 text-center text-sm text-muted-foreground">Loading COD balancesâ€¦</div> : (q.data?.rows ?? []).length === 0 ? <div className="py-8 text-center text-sm text-muted-foreground">No rider COD is outstanding.</div> : <div className="space-y-2">{(q.data?.rows ?? []).map(row => <div key={row.riderId} className="border border-border rounded-lg bg-card p-3"><div className="flex justify-between gap-3"><div><div className="font-medium text-sm">{row.riderName}</div><div className="text-[10px] text-muted-foreground">{row.invoiceCount} invoice{row.invoiceCount === 1 ? '' : 's'}{row.oldestOutstandingDeliveryDate ? ` · oldest ${bizDate(row.oldestOutstandingDeliveryDate)}` : ''}</div></div><div className="text-right"><div className="font-semibold text-amber-700" data-num>{formatMoney(BigInt(row.outstandingCod))}</div><div className="text-[10px] text-muted-foreground">held COD</div></div></div><div className="mt-2 flex justify-between items-center text-[10px] text-muted-foreground"><span>Collected <span data-num>{formatMoney(BigInt(row.collectedCod), false)}</span> · Settled <span data-num>{formatMoney(BigInt(row.settledCod), false)}</span></span>{canSettle && BigInt(row.outstandingCod) > 0n && <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setSelected(row)}>Settle</Button>}</div></div>)}</div>}
+    <AnimatePresence>{selected && <Phase3SettleModal rider={selected} onClose={() => setSelected(null)} onDone={() => void qc.invalidateQueries({ queryKey: ['rider-cod-balances'] })} />}</AnimatePresence>
+  </div>
+}
+
+function Phase3SettleModal({ rider, onClose, onDone }: { rider: { riderId: string; riderName: string; outstandingCod: string }; onClose: () => void; onDone: () => void }) {
+  const [amount, setAmount] = useState(formatMoney(BigInt(rider.outstandingCod), false))
+  const [mode, setMode] = useState('Cash')
+  const [note, setNote] = useState('')
+  const [reference, setReference] = useState<string | null>(null)
+  const mut = useMutation({ mutationFn: async () => { const r = await fetch('/api/rider-cod/settle', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ riderId: rider.riderId, amount, mode, note: note || undefined, idempotencyKey: crypto.randomUUID() }) }); const j = await r.json(); if (!r.ok) throw new Error(j?.error ?? 'Failed'); return j }, onSuccess: result => { setReference(result.reference); onDone(); toast.success(`COD settled: ${result.reference}`) }, onError: (error: Error) => toast.error(`Settlement failed: ${error.message}`) })
+  const parsed = parseMoney(amount) ?? 0n
+  if (reference) return <Shell title="COD Settlement Complete" onClose={onClose}><div className="py-4 text-center"><CheckCircle2 className="size-12 text-emerald-600 mx-auto mb-3" /><p className="text-xs text-muted-foreground">Settlement reference</p><p className="text-xl font-bold" data-num>{reference}</p><Button size="sm" variant="ghost" className="mt-4" onClick={onClose}>Close</Button></div></Shell>
+  return <Shell title={`Settle ${rider.riderName}`} onClose={onClose}><div className="space-y-3"><div className="text-sm">Outstanding: <span className="font-medium" data-num>{formatMoney(BigInt(rider.outstandingCod))}</span></div><div><Label className="text-xs text-muted-foreground">Amount (Rs)</Label><Input value={amount} onChange={e => setAmount(e.target.value)} className="h-9 bg-background" data-num /></div><div><Label className="text-xs text-muted-foreground">Mode</Label><Select value={mode} onValueChange={setMode}><SelectTrigger className="h-9 bg-background"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="Cash">Cash</SelectItem><SelectItem value="Bank">Bank</SelectItem><SelectItem value="Online">Online</SelectItem></SelectContent></Select></div><div><Label className="text-xs text-muted-foreground">Note</Label><Input value={note} onChange={e => setNote(e.target.value)} className="h-9 bg-background" maxLength={500} /></div><Button className="w-full" disabled={mut.isPending || parsed <= 0n || parsed > BigInt(rider.outstandingCod)} onClick={() => mut.mutate()}>{mut.isPending ? 'Settlingâ€¦' : 'Confirm Settlement'}</Button></div></Shell>
+}
+
 function CodTab({ user }: { user: MeUser }) {
   const qc = useQueryClient()
   const [selectedRider, setSelectedRider] = useState('')
@@ -394,12 +420,14 @@ function RiderHome({ user }: { user: MeUser }) {
   const [showDelivered, setShowDelivered] = useState(false)
   const [showLedger, setShowLedger] = useState(false)
   const dashQ = useQuery({ queryKey: ['rider-dashboard'], queryFn: () => fetch('/api/rider-dashboard').then(r => r.json()) })
+  const codQ = useQuery<{ rows: Array<{ outstandingCod: string; settledCod: string; latestSettlementDate: string | null }> }>({ queryKey: ['rider-cod-balances'], queryFn: () => fetch('/api/rider-cod/balances').then(r => r.json()) })
   const ordersQ = useQuery<{ rows: DeliveryOrder[] }>({ queryKey: ['delivery-orders'], queryFn: () => fetch('/api/delivery-orders').then(r => r.json()) })
   const summary = dashQ.data?.summary
   const riderId = dashQ.data?.riderId
   const orders = ordersQ.data?.rows ?? []
   const activeOrders = orders.filter(o => o.status === 'assigned' || o.status === 'out_for_delivery')
   const deliveredOrders = orders.filter(o => o.status === 'delivered')
+  const heldCod = codQ.data?.rows?.[0]
 
   return (
     <div className="space-y-4">
@@ -412,8 +440,11 @@ function RiderHome({ user }: { user: MeUser }) {
           <KPI label="Out for Delivery" value={String(summary.outForDelivery)} />
           <KPI label="Delivered Today" value={String(summary.deliveredToday)} />
           <KPI label="COD Pending" value={formatMoney(BigInt(summary.codPending), false)} />
+          <KPI label="COD Held" value={formatMoney(BigInt(heldCod?.outstandingCod ?? '0'), false)} />
         </>}
       </div>
+
+      {heldCod && <div className="border border-border rounded-lg bg-card p-3 text-xs"><div className="flex justify-between"><span className="text-muted-foreground">My settlement history</span><span>Settled <span data-num>{formatMoney(BigInt(heldCod.settledCod), false)}</span></span></div><div className="mt-1 text-muted-foreground">{heldCod.latestSettlementDate ? `Latest settlement: ${bizDate(heldCod.latestSettlementDate)}` : 'No settlements recorded yet.'}</div></div>}
 
       {/* Quick links */}
       <div className="flex flex-wrap gap-2">

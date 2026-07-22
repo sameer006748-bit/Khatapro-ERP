@@ -3,7 +3,7 @@ import { getServerSession } from 'next-auth'
 import { z } from 'zod'
 import { authOptions } from '@/lib/auth/authOptions'
 import { loadSessionUser, requirePermission, hasPermission } from '@/lib/auth/permissions'
-import { markDelivered, getDeliveryOrder, getRiderByUserId } from '@/lib/delivery/data-access'
+import { completeCodDelivery, getDeliveryOrder, getRiderByUserId } from '@/lib/delivery/data-access'
 import { parseMoney } from '@/lib/format'
 import { resolveRequestId, safeMutationError } from '@/lib/observability'
 
@@ -11,6 +11,7 @@ const Schema = z.object({
   collectedAmount: z.string().min(1),
   recipientName: z.string().optional(),
   deliveryNote: z.string().optional(),
+  idempotencyKey: z.string().uuid().optional(),
 })
 
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -27,12 +28,13 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const parsed = Schema.safeParse(body)
   if (!parsed.success) return NextResponse.json({ error: 'INVALID_INPUT' }, { status: 400 })
 
+  const order = await getDeliveryOrder(loaded.businessId, id)
+  if (!order) return NextResponse.json({ error: 'NOT_FOUND' }, { status: 404 })
   // For riders: verify they own this order
   if (loaded.roleName === 'Rider') {
     const rider = await getRiderByUserId(loaded.businessId, loaded.userId)
     if (!rider) return NextResponse.json({ error: 'FORBIDDEN' }, { status: 403 })
-    const order = await getDeliveryOrder(loaded.businessId, id)
-    if (!order || order.riderId !== rider.id) {
+    if (order.riderId !== rider.id) {
       return NextResponse.json({ error: 'FORBIDDEN' }, { status: 403 })
     }
   }
@@ -43,7 +45,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   }
 
   try {
-    const result = await markDelivered(loaded.businessId, id, collectedAmount, parsed.data.recipientName ?? null, parsed.data.deliveryNote ?? null, loaded.userId)
+    const result = await completeCodDelivery({ businessId: loaded.businessId, invoiceId: order.invoiceId, cashCollected: collectedAmount, idempotencyKey: parsed.data.idempotencyKey ?? crypto.randomUUID() })
     return NextResponse.json({ ok: true, ...result })
   } catch (error) {
     return safeMutationError({
