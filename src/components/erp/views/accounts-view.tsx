@@ -7,11 +7,12 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { toast } from 'sonner'
-import { Plus, Wallet, ArrowDownToLine, ArrowUpFromLine, Receipt as ReceiptIcon, ArrowLeftRight, Coffee, Settings2, TrendingUp, TrendingDown, BookOpen, ChevronRight, X, CheckCircle2, AlertCircle } from 'lucide-react'
+import { Plus, Wallet, ArrowDownToLine, ArrowUpFromLine, Receipt as ReceiptIcon, ArrowLeftRight, Coffee, Settings2, TrendingUp, TrendingDown, BookOpen, ChevronDown, ChevronRight, X, CheckCircle2, AlertCircle } from 'lucide-react'
 import { formatMoney, parseMoney } from '@/lib/format'
 import { bizDate, bizDateString } from '@/lib/dates'
 import { motion, AnimatePresence } from 'framer-motion'
 import type { MeUser } from '@/components/erp/erp-app'
+import { ACCOUNT_CATEGORY_DEFINITIONS, UNCATEGORIZED_CATEGORY, classifyMoneyActivity, matchesAccountSubcategory, summarizeAccountSubcategories, type MoneyActivity } from '@/lib/money/account-subcategories'
 
 type Account = { id: string; code: string; name: string; isBusinessAccount: boolean; isPartyAccount: boolean; partyType: string | null; categoryCode: string; categoryType: string }
 type Category = { id: string; code: string; name: string; type: string; accounts: Account[] }
@@ -185,6 +186,8 @@ export function AccountsView({ user }: { user: MeUser }) {
         </div>
       )}
 
+      <AccountSubcategoryPanel activities={postedVouchers} />
+
       {/* Primary actions */}
       <div className="flex flex-wrap gap-2">
         {canPostReceipt && <QuickAction icon={ArrowDownToLine} label="Receive Payment" onClick={() => setEntryModal('receive')} />}
@@ -283,6 +286,31 @@ export function AccountsView({ user }: { user: MeUser }) {
       </AnimatePresence>
     </div>
   )
+}
+
+function AccountSubcategoryPanel({ activities }: { activities: MoneyActivity[] }) {
+  const [expanded, setExpanded] = useState<string | null>('expenses')
+  const [filter, setFilter] = useState<{ parentId: string; subcategoryId?: string } | null>(null)
+  const classified = useMemo(() => activities.map(classifyMoneyActivity), [activities])
+  const summaries = useMemo(() => summarizeAccountSubcategories(activities), [activities])
+  const summary = (parentId: string, subcategoryId?: string) => summaries.find(item => item.parentId === parentId && item.subcategoryId === subcategoryId) ?? { parentId, subcategoryId, amount: 0n, activityCount: 0 }
+  const parents = [...ACCOUNT_CATEGORY_DEFINITIONS, UNCATEGORIZED_CATEGORY]
+  const filtered = filter ? classified.filter(item => matchesAccountSubcategory(item, filter.parentId, filter.subcategoryId)) : []
+
+  return <div className="border border-border rounded-lg bg-card overflow-hidden">
+    <div className="px-4 py-3 border-b border-border"><h2 className="text-sm font-semibold text-foreground">Simple Categories</h2><p className="text-[11px] text-muted-foreground">Recent activity classification only — it does not change balances or create entries.</p></div>
+    <div className="divide-y divide-border/50">
+      {parents.map(parent => {
+        const parentSummary = summary(parent.id)
+        const isExpanded = expanded === parent.id
+        return <div key={parent.id}>
+          <button onClick={() => setExpanded(isExpanded ? null : parent.id)} className="w-full px-4 py-2.5 flex items-center justify-between gap-3 text-left hover:bg-muted/20"><span className="text-sm font-medium text-foreground">{parent.label}</span><span className="flex items-center gap-2"><span className="text-xs text-muted-foreground" data-num>{formatMoney(parentSummary.amount, false)} · {parentSummary.activityCount}</span>{isExpanded ? <ChevronDown className="size-4 text-muted-foreground" /> : <ChevronRight className="size-4 text-muted-foreground" />}</span></button>
+          {isExpanded && <div className="px-4 pb-3 flex flex-wrap gap-2">{parent.subcategories.length === 0 ? <button onClick={() => setFilter({ parentId: parent.id })} className={`rounded-md border px-2.5 py-1.5 text-xs ${filter?.parentId === parent.id && !filter.subcategoryId ? 'border-primary bg-primary/10 text-primary' : 'border-border bg-background'}`}>Uncategorized</button> : parent.subcategories.map(subcategory => { const child = summary(parent.id, subcategory.id); const selected = filter?.parentId === parent.id && filter?.subcategoryId === subcategory.id; return <button key={subcategory.id} onClick={() => setFilter(selected ? null : { parentId: parent.id, subcategoryId: subcategory.id })} className={`rounded-md border px-2.5 py-1.5 text-xs ${selected ? 'border-primary bg-primary/10 text-primary' : 'border-border bg-background hover:bg-muted/20'}`}>{subcategory.label} <span data-num>({formatMoney(child.amount, false)})</span></button> })}</div>}
+        </div>
+      })}
+    </div>
+    {filter && <div className="border-t border-border"><div className="px-4 py-2 flex items-center justify-between"><span className="text-xs text-muted-foreground">Filtered recent activity ({filtered.length})</span><button onClick={() => setFilter(null)} className="text-xs text-primary hover:underline">Clear filter</button></div>{filtered.length === 0 ? <p className="px-4 pb-3 text-xs text-muted-foreground">No recent activity in this subcategory.</p> : <div className="divide-y divide-border/40">{filtered.slice(0, 6).map(item => <div key={item.activity.voucherId} className="px-4 py-2 flex items-center justify-between gap-2"><div className="min-w-0"><div className="text-sm truncate">{item.activity.memo || item.activity.sourceLabel || 'Activity'}</div><div className="text-[10px] text-muted-foreground" data-num>{item.activity.voucherDate ?? ''}</div></div><span className="text-sm font-medium shrink-0" data-num>{formatMoney(item.amount, false)}</span></div>)}</div>}</div>}
+  </div>
 }
 
 function SummaryCard({ icon: Icon, label, value, color }: { icon: React.ComponentType<{ className?: string }>; label: string; value: string; color: string }) {
