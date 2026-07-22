@@ -7,6 +7,8 @@ import { requireSameOrigin } from '@/lib/ai/ai-settings-auth'
 import { getAiApiKey } from '@/lib/ai/ai-settings-store'
 import { AI_LIMITS, AI_PROVIDER } from '@/lib/ai/config'
 import { buildAiContext } from '@/lib/ai/ai-context'
+import { AI_PERIOD_PRESETS, resolveAiPeriod } from '@/lib/ai/ai-period'
+import { financialAnswerIsSupported, type AllowedFinancialValue } from '@/lib/ai/financial-safety'
 import { generateGeminiAnswer, GeminiClientError } from '@/lib/ai/gemini-client'
 import { consumeAiRequest } from '@/lib/ai/rate-limit'
 import {
@@ -25,6 +27,7 @@ const requestSchema = z.object({
   language: z.enum(AI_LANGUAGES).default('roman-urdu'),
   mode: z.enum(AI_MODES).default('ask'),
   screen: z.enum(AI_SCREENS).default('home'),
+  period: z.object({ preset: z.enum(AI_PERIOD_PRESETS), from: z.string().optional(), to: z.string().optional() }).strict().optional(),
   field: z.unknown().optional(),
 }).strict()
 
@@ -53,6 +56,12 @@ async function post(req: NextRequest) {
   if (!parsed.success) return response('VALIDATION_ERROR', 'Please enter a shorter valid question.', 400, requestId)
 
   const field = parsed.data.mode === 'field-help' ? sanitizeFieldMetadata(parsed.data.field) : null
+  let period
+  try {
+    period = resolveAiPeriod(parsed.data.period)
+  } catch {
+    return response('INVALID_PERIOD', 'Please choose a valid business date range.', 400, requestId)
+  }
   if (parsed.data.mode === 'field-help' && (!field || field.currentScreen !== parsed.data.screen)) {
     return response('FIELD_CONTEXT_INVALID', 'Field help context is invalid.', 400, requestId)
   }
@@ -78,8 +87,9 @@ async function post(req: NextRequest) {
       mode: parsed.data.mode,
       prompt: parsed.data.prompt,
       field,
+      period,
     })
-    const answer = await generateGeminiAnswer({
+    const generated = await generateGeminiAnswer({
       apiKey,
       language: answerLanguage,
       prompt: parsed.data.prompt,
@@ -88,9 +98,17 @@ async function post(req: NextRequest) {
       mode: parsed.data.mode,
       requestId,
     })
+    const values = Array.isArray(context.allowedFinancialValues) ? context.allowedFinancialValues as AllowedFinancialValue[] : []
+    const answer = financialAnswerIsSupported(generated, values)
+      ? generated
+      : JSON.stringify({
+        simpleAnswer: answerLanguage === 'roman-urdu' ? 'Is period ke liye yeh figure available nahi hai.' : 'This figure is not available for the selected period.',
+        accountingEffect: '',
+        nextCheck: answerLanguage === 'roman-urdu' ? 'Period aur available business data check karein.' : 'Check the selected period and available business data.',
+      })
 
     return NextResponse.json(
-      { answer, language: answerLanguage, readOnly: true },
+      { answer, language: answerLanguage, readOnly: true, period },
       { headers: { 'Cache-Control': 'no-store', 'X-Request-Id': requestId } },
     )
   } catch (error) {

@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import type { MeUser } from '@/components/erp/erp-app'
+import type { AiPeriodInput } from '@/lib/ai/ai-period'
 import { AI_SCREENS, parseStructuredAnswer, type AiFieldMetadata, type AiLanguage, type AiMode, type AiScreen, type AiStructuredAnswer } from '@/lib/ai/safety-core'
 
 type OpenAiDetail = {
@@ -16,7 +17,7 @@ type OpenAiDetail = {
   submit?: boolean
 }
 
-type Message = { id: string; kind: 'question' | 'answer' | 'error'; text: string }
+type Message = { id: string; kind: 'question' | 'answer' | 'error'; text: string; periodLabel?: string }
 
 const SCREEN_SET = new Set<string>(AI_SCREENS)
 
@@ -39,6 +40,7 @@ async function askAi(payload: {
   mode: AiMode
   screen: AiScreen
   field?: AiFieldMetadata
+  period?: AiPeriodInput
 }) {
   const response = await fetch('/api/ai/ask', {
     method: 'POST',
@@ -52,7 +54,7 @@ async function askAi(payload: {
     error.code = json?.error
     throw error
   }
-  return String(json.answer ?? '')
+  return { answer: String(json.answer ?? ''), period: json.period as { label?: string } | undefined }
 }
 
 export function AiAssistant({ user, activeScreen }: { user: MeUser; activeScreen: string }) {
@@ -64,8 +66,20 @@ export function AiAssistant({ user, activeScreen }: { user: MeUser; activeScreen
   const [prompt, setPrompt] = useState('')
   const [messages, setMessages] = useState<Message[]>([])
   const [loading, setLoading] = useState(false)
+  const [period, setPeriod] = useState<AiPeriodInput>({ preset: 'this-month' })
+  const [periodLabel, setPeriodLabel] = useState('This Month')
   const [showRetryingState, setShowRetryingState] = useState(false)
-  const [lastRequest, setLastRequest] = useState<{ prompt: string; language: AiLanguage; mode: AiMode; screen: AiScreen; field?: AiFieldMetadata } | null>(null)
+  const [lastRequest, setLastRequest] = useState<{ prompt: string; language: AiLanguage; mode: AiMode; screen: AiScreen; field?: AiFieldMetadata; period: AiPeriodInput } | null>(null)
+
+  useEffect(() => {
+    const handlePeriod = (event: Event) => {
+      const detail = (event as CustomEvent<{ period?: AiPeriodInput; label?: string }>).detail
+      if (detail?.period) setPeriod(detail.period)
+      if (detail?.label) setPeriodLabel(detail.label)
+    }
+    window.addEventListener('khatapro-ai-period', handlePeriod)
+    return () => window.removeEventListener('khatapro-ai-period', handlePeriod)
+  }, [])
 
   useEffect(() => {
     setScreen(normalizeScreen(activeScreen))
@@ -95,24 +109,25 @@ export function AiAssistant({ user, activeScreen }: { user: MeUser; activeScreen
         mode: detail.mode ?? 'ask',
         screen: nextScreen,
         field: detail.field,
+        period,
       })
     }
     window.addEventListener('khatapro-ai-open', handle)
     return () => window.removeEventListener('khatapro-ai-open', handle)
-  }, [activeScreen, language])
+  }, [activeScreen, language, period])
 
   const suggestions = useMemo(() => SUGGESTIONS[user.roleName] ?? ['Explain this screen in simple terms.'], [user.roleName])
 
-  async function submit(request?: { prompt: string; language: AiLanguage; mode: AiMode; screen: AiScreen; field?: AiFieldMetadata }) {
-    const next = request ?? { prompt: prompt.trim(), language, mode, screen, field }
+  async function submit(request?: { prompt: string; language: AiLanguage; mode: AiMode; screen: AiScreen; field?: AiFieldMetadata; period: AiPeriodInput }) {
+    const next = request ?? { prompt: prompt.trim(), language, mode, screen, field, period }
     if (!next.prompt || loading) return
     setLoading(true)
     setLastRequest(next)
     setMessages((items) => [...items, { id: crypto.randomUUID(), kind: 'question', text: next.prompt }])
     setPrompt('')
     try {
-      const answer = await askAi(next)
-      setMessages((items) => [...items, { id: crypto.randomUUID(), kind: 'answer', text: answer }])
+      const result = await askAi(next)
+      setMessages((items) => [...items, { id: crypto.randomUUID(), kind: 'answer', text: result.answer, periodLabel: result.period?.label ?? periodLabel }])
     } catch (error) {
       setMessages((items) => [...items, { id: crypto.randomUUID(), kind: 'error', text: error instanceof Error ? error.message : 'KhataPro AI could not respond right now. Please try again.' }])
     } finally {
@@ -136,7 +151,7 @@ export function AiAssistant({ user, activeScreen }: { user: MeUser; activeScreen
         <SheetContent side="right" className="w-full sm:max-w-md p-0 gap-0">
           <SheetHeader className="border-b border-border pr-12">
             <SheetTitle className="flex items-center gap-2"><Bot className="size-5 text-primary" /> Ask KhataPro AI</SheetTitle>
-            <SheetDescription>Read-only business and accounting assistance.</SheetDescription>
+            <SheetDescription>Read-only business and accounting assistance. Period: {periodLabel} (Asia/Karachi).</SheetDescription>
           </SheetHeader>
 
           <div className="flex items-center justify-between gap-2 px-4 py-2 border-b border-border bg-muted/20">
@@ -172,6 +187,7 @@ export function AiAssistant({ user, activeScreen }: { user: MeUser; activeScreen
               const sections = parseStructuredAnswer(message.text)
               return (
                 <div key={message.id} className="rounded-xl border border-border bg-card p-3 text-sm space-y-3">
+                  {message.periodLabel && <div className="text-[11px] text-muted-foreground">Period: {message.periodLabel} (Asia/Karachi)</div>}
                   {sections.simpleAnswer && (
                     <div>
                       <div className="text-xs font-semibold text-muted-foreground mb-1">Summary</div>

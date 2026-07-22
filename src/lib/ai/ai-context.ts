@@ -1,7 +1,8 @@
 import 'server-only'
 import type { SessionUser } from '@/lib/auth/permissions'
 import type { AiFieldMetadata, AiMode, AiScreen } from '@/lib/ai/safety-core'
-import { bizDateString } from '@/lib/dates'
+import type { ResolvedAiPeriod } from '@/lib/ai/ai-period'
+import type { AllowedFinancialValue } from '@/lib/ai/financial-safety'
 import { getAdminSupabase } from '@/lib/supabase/admin'
 import {
   reportBalanceSheet,
@@ -22,6 +23,7 @@ type ContextArgs = {
   mode: AiMode
   prompt: string
   field: AiFieldMetadata | null
+  period: ResolvedAiPeriod
 }
 
 const SCREEN_GUIDES: Partial<Record<AiScreen, Record<string, string>>> = {
@@ -59,16 +61,11 @@ function sum(rows: any[], field: string): bigint {
   }, 0n)
 }
 
-function currentPeriod() {
-  const today = bizDateString(new Date())
-  return { fromDate: `${today.slice(0, 8)}01`, toDate: today }
-}
-
 function wantsPartyNames(prompt: string): boolean {
   return /\b(kis customer|which customer|customer se|kis supplier|which supplier|kis vendor|which vendor|kisko|whom)\b/i.test(prompt)
 }
 
-async function buildSalesmanContext(session: SessionUser, screen: AiScreen) {
+async function buildSalesmanContext(session: SessionUser, screen: AiScreen, period: ResolvedAiPeriod) {
   const admin = getAdminSupabase()
   const linkedUserId = session.supabaseUserUuid ?? session.userId
   const { data: salesman, error } = await admin
@@ -79,12 +76,11 @@ async function buildSalesmanContext(session: SessionUser, screen: AiScreen) {
     .maybeSingle()
 
   if (error || !salesman) return { scope: 'own_sales_only', linked: false, screen }
-  const { fromDate, toDate } = currentPeriod()
-  const summary = await reportMySalesSummary(session.businessId, salesman.id, fromDate, toDate)
-  return { scope: 'own_sales_only', linked: true, period: { fromDate, toDate }, summary }
+  const summary = await reportMySalesSummary(session.businessId, salesman.id, period.from, period.to)
+  return { scope: 'own_sales_only', linked: true, period, summary }
 }
 
-async function buildRiderContext(session: SessionUser) {
+async function buildRiderContext(session: SessionUser, period: ResolvedAiPeriod) {
   const admin = getAdminSupabase()
   const linkedUserId = session.supabaseUserUuid ?? session.userId
   const { data: rider, error } = await admin
@@ -94,7 +90,7 @@ async function buildRiderContext(session: SessionUser) {
     .eq('user_id', linkedUserId)
     .maybeSingle()
 
-  if (error || !rider) return { scope: 'assigned_deliveries_only', linked: false }
+  if (error || !rider) return { scope: 'assigned_deliveries_only', linked: false, period }
   const { data: rows, error: ordersError } = await admin
     .from('delivery_orders')
     .select('status,total_cod_amount,cod_collected_amount')
@@ -102,7 +98,7 @@ async function buildRiderContext(session: SessionUser) {
     .eq('rider_id', rider.id)
     .limit(250)
 
-  if (ordersError) return { scope: 'assigned_deliveries_only', linked: true, dataAvailable: false }
+  if (ordersError) return { scope: 'assigned_deliveries_only', linked: true, dataAvailable: false, period }
   const orders = rows ?? []
   const statusCounts: Record<string, number> = {}
   for (const row of orders) statusCounts[row.status ?? 'unknown'] = (statusCounts[row.status ?? 'unknown'] ?? 0) + 1
@@ -113,6 +109,7 @@ async function buildRiderContext(session: SessionUser) {
     statusCounts,
     codAssigned: sum(orders, 'total_cod_amount').toString(),
     codCollected: sum(orders, 'cod_collected_amount').toString(),
+    period,
   }
 }
 
@@ -135,9 +132,9 @@ function selectedLoaders(screen: AiScreen, prompt: string): Set<LoaderName> {
   return names
 }
 
-async function buildBusinessContext(session: SessionUser, screen: AiScreen, prompt: string) {
+async function buildBusinessContext(session: SessionUser, screen: AiScreen, prompt: string, period: ResolvedAiPeriod) {
   const permissions = session.permissions
-  const { fromDate, toDate } = currentPeriod()
+  const { from: fromDate, to: toDate } = period
   const selected = selectedLoaders(screen, prompt)
   const tasks: Array<[LoaderName, Promise<unknown>]> = []
 
@@ -170,7 +167,9 @@ async function buildBusinessContext(session: SessionUser, screen: AiScreen, prom
   }
 
   const settled = await Promise.allSettled(tasks.map(([, task]) => task))
-  const context: Record<string, unknown> = { period: { fromDate, toDate } }
+  const context: Record<string, unknown> = { period }
+  const financialValues: AllowedFinancialValue[] = []
+  const addValue = (label: string, value: bigint, classification: AllowedFinancialValue['classification']) => financialValues.push({ label, value: value.toString(), classification })
   const unavailable: string[] = []
 
   settled.forEach((result, index) => {
@@ -187,19 +186,22 @@ async function buildBusinessContext(session: SessionUser, screen: AiScreen, prom
       outstanding: sum(rows, 'total_outstanding').toString(),
       returns: Number(sum(rows, 'returned_count')),
     }
-    if (name === 'expenses') context.expenses = { total: sum(rows, 'total_amount').toString(), categories: rows.length }
+    if (name === 'sales') { addValue('Sales billed', sum(rows, 'total_subtotal'), 'period_activity'); addValue('Amount received', sum(rows, 'total_paid'), 'period_activity') }
+    if (name === 'expenses') { const total = sum(rows, 'total_amount'); context.expenses = { total: total.toString(), categories: rows.length }; addValue('Expenses', total, 'period_activity') }
     if (name === 'cash') context.cash = {
       opening: sum(rows, 'opening_balance').toString(),
       inflow: sum(rows, 'total_debit').toString(),
       outflow: sum(rows, 'total_credit').toString(),
       closing: sum(rows, 'closing_balance').toString(),
     }
+    if (name === 'cash') { addValue('Cash inflow', sum(rows, 'total_debit'), 'period_activity'); addValue('Cash outflow', sum(rows, 'total_credit'), 'period_activity') }
     if (name === 'profitLoss') {
       const revenue = rows.filter((row) => row.section === 'REVENUE')
       const expenses = rows.filter((row) => row.section === 'EXPENSE')
       const revenueTotal = sum(revenue, 'amount')
       const expenseTotal = sum(expenses, 'amount')
       context.profitLoss = { revenue: revenueTotal.toString(), expenses: expenseTotal.toString(), netProfit: (revenueTotal - expenseTotal).toString() }
+      addValue('Profit or loss', revenueTotal - expenseTotal, 'period_activity')
     }
     if (name === 'balanceSheet') {
       const assets = sum(rows.filter((row) => row.section === 'ASSET'), 'balance')
@@ -224,13 +226,16 @@ async function buildBusinessContext(session: SessionUser, screen: AiScreen, prom
       total: sum(rows, 'outstanding').toString(),
       ...(wantsPartyNames(prompt) ? { top: rows.slice(0, 5).map((row) => ({ name: String(row.customer_name ?? 'Customer'), outstanding: String(row.outstanding ?? 0) })) } : {}),
     }
+    if (name === 'receivables') addValue('Receivables', sum(rows, 'outstanding'), 'current_snapshot')
     if (name === 'payables') context.payables = {
       parties: rows.length,
       total: sum(rows, 'outstanding').toString(),
       ...(wantsPartyNames(prompt) ? { top: rows.slice(0, 5).map((row) => ({ name: String(row.vendor_name ?? 'Supplier'), outstanding: String(row.outstanding ?? 0) })) } : {}),
     }
+    if (name === 'payables') addValue('Payables', sum(rows, 'outstanding'), 'current_snapshot')
   })
 
+  context.allowedFinancialValues = financialValues
   if (unavailable.length) context.unavailableSections = unavailable
   return context
 }
@@ -241,6 +246,7 @@ export async function buildAiContext(args: ContextArgs): Promise<Record<string, 
     screen: args.screen,
     readOnly: true,
     currency: 'PKR paisas unless stated otherwise',
+    period: args.period,
     screenGuide: SCREEN_GUIDES[args.screen] ?? { purpose: 'Explain only the authorized screen and supplied context.' },
   }
 
@@ -249,11 +255,11 @@ export async function buildAiContext(args: ContextArgs): Promise<Record<string, 
   }
   if (args.session.roleName === 'Salesman') {
     if (!args.session.permissions.has('can_view_own_sales')) return { ...base, scope: 'general_sales_help_only', authorizedAggregates: false }
-    return { ...base, ...(await buildSalesmanContext(args.session, args.screen)) }
+    return { ...base, ...(await buildSalesmanContext(args.session, args.screen, args.period)) }
   }
   if (args.session.roleName === 'Rider') {
     if (!args.session.permissions.has('can_view_own_orders') && !args.session.permissions.has('can_view_delivery_orders')) return { ...base, scope: 'general_delivery_help_only', authorizedAggregates: false }
-    return { ...base, ...(await buildRiderContext(args.session)) }
+    return { ...base, ...(await buildRiderContext(args.session, args.period)) }
   }
-  return { ...base, ...(await buildBusinessContext(args.session, args.screen, args.prompt)) }
+  return { ...base, ...(await buildBusinessContext(args.session, args.screen, args.prompt, args.period)) }
 }

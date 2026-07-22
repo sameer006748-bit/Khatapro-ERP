@@ -1,6 +1,6 @@
 ﻿'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
 import { format } from 'date-fns'
 import {
@@ -60,6 +60,12 @@ export function OwnerDashboard({ user }: { user: any }) {
   const [rangeError, setRangeError] = useState('')
   const { data, isLoading, error, refetch } = useOwnerDashboard(range)
   const [showAdvanced, setShowAdvanced] = useState(false)
+
+  useEffect(() => {
+    const aiPeriod = preset === 'today' ? { preset: 'today' as const } : preset === 'month' ? { preset: 'this-month' as const } : { preset: 'custom' as const, from: range.from, to: range.to }
+    const label = preset === 'today' ? 'Today' : preset === 'month' ? 'This Month' : preset === 'week' ? 'Last 7 Days' : 'Custom Range'
+    window.dispatchEvent(new CustomEvent('khatapro-ai-period', { detail: { period: aiPeriod, label } }))
+  }, [preset, range])
 
   const setPresetRange = (next: 'today' | 'yesterday' | 'week' | 'month') => {
     const nextRange = bizPresetDateRange(next)
