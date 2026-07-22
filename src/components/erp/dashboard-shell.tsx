@@ -813,7 +813,19 @@ function ViewRouter({
       </div>
     )
   }
-  if (active === 'setup') return <SetupView user={user} />
+  if (active === 'setup') return <SetupView
+    user={user}
+    canOpen={(key) => {
+      const item = PAGE_REGISTRY.get(key)
+      return Boolean(item && isItemVisible(user, item))
+    }}
+    onNavigate={(key) => {
+      const item = PAGE_REGISTRY.get(key)
+      if (!item || !isItemVisible(user, item)) return
+      window.history.pushState({}, '', `/?page=${key}`)
+      window.dispatchEvent(new PopStateEvent('popstate'))
+    }}
+  />
   if (active === 'business-accounts') return <BusinessAccountsView user={user} />
   if (active === 'coa') return <CoaView />
   if (active === 'users') return <UsersView user={user} />

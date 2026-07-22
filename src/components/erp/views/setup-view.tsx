@@ -3,8 +3,15 @@
 import type { MeUser } from '@/components/erp/erp-app'
 import { Wallet, BookOpen, Users, Shield, ScrollText, FileText, ArrowRight, Lock } from 'lucide-react'
 
-export function SetupView({ user }: { user: MeUser }) {
-  const isOwner = user.roleName === 'Owner/Admin'
+export function SetupView({
+  user,
+  canOpen,
+  onNavigate,
+}: {
+  user: MeUser
+  canOpen: (key: string) => boolean
+  onNavigate: (key: string) => void
+}) {
 
   const cards = [
     {
@@ -61,12 +68,9 @@ export function SetupView({ user }: { user: MeUser }) {
       </div>
       <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
         {cards.map((c) => {
-          const locked = c.ownerOnly && !isOwner
-          return (
-            <div
-              key={c.title}
-              className={`card-3d ${locked ? '' : 'card-3d-hover'} p-5 flex flex-col`}
-            >
+          const locked = !canOpen(c.route)
+          const content = (
+            <>
               <div className="flex items-start justify-between mb-3">
                 <div className="grid place-items-center size-10 rounded-xl icon-3d">
                   <c.icon className="size-5 text-primary-foreground" />
@@ -96,7 +100,24 @@ export function SetupView({ user }: { user: MeUser }) {
                   {c.route}
                 </span>
               </div>
-            </div>
+            </>
+          )
+
+          return (
+            locked ? (
+              <div key={c.title} className="card-3d p-5 flex flex-col" aria-disabled="true">
+                {content}
+              </div>
+            ) : (
+              <button
+                key={c.title}
+                type="button"
+                onClick={() => onNavigate(c.route)}
+                className="card-3d card-3d-hover p-5 flex flex-col w-full min-h-44 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2"
+              >
+                {content}
+              </button>
+            )
           )
         })}
       </div>
