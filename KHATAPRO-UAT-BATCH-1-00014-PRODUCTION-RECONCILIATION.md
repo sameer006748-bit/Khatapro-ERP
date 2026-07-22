@@ -46,7 +46,8 @@
 ## Commit and push
 
 - Prior repair commit SHA: `6904dfe167c2777ba1ace7a0a10202ad297bb147`.
-- Corrected-map commit and push are performed only after the completed checks above; see the branch log for their final identifiers.
+- Corrected-map commit: `3f2b2c92240356242a42819a60d0705d7c214224` (`Correct Phase 1 production identifier map`).
+- Push result: blocked by external-remote policy; the validated commits remain local on `fix/backend-stock-recovery`.
 
 ## Next action
 
