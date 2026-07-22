@@ -5,7 +5,7 @@ import { loadSessionUser, requirePermission } from '@/lib/auth/permissions'
 import { getAdminSupabase } from '@/lib/supabase/admin'
 import { db } from '@/lib/db'
 import { getAccountByCode } from '@/lib/accounting/data-access'
-import { bizDateString } from '@/lib/dates'
+import { bizDateString, isBusinessDateRange } from '@/lib/dates'
 import { resolveRequestId, safeApiError, withObservability } from '@/lib/observability'
 
 const RECENT_LIMIT = 5
@@ -31,7 +31,9 @@ export const GET = withObservability('/api/dashboard/owner', async (req: Request
     }
 
     const url = new URL(req.url)
-    const today = url.searchParams.get('today') || bizDateString(new Date())
+    const today = bizDateString(new Date())
+    const range = { from: url.searchParams.get('from') || url.searchParams.get('today') || today, to: url.searchParams.get('to') || url.searchParams.get('from') || url.searchParams.get('today') || today }
+    if (!isBusinessDateRange(range)) return NextResponse.json({ error: 'INVALID_DATE_RANGE' }, { status: 400 })
     const bid = loaded.businessId
 
     // ── Concurrent: today sales aggregate, 5 recent invoices, 5 recent purchases,
@@ -39,6 +41,7 @@ export const GET = withObservability('/api/dashboard/owner', async (req: Request
     //     today collections and recent audit logs (all independent) ──
     const [
       todaySalesAgg,
+      periodPurchases,
       recentInvoices,
       recentPurchases,
       stockResult,
@@ -49,15 +52,16 @@ export const GET = withObservability('/api/dashboard/owner', async (req: Request
       collections,
       auditLogsResult,
     ] = await Promise.all([
-      getTodaySalesAggregate(bid, today),
-      getRecentInvoices(bid, RECENT_LIMIT),
-      getRecentPurchases(bid, RECENT_LIMIT),
+      getTodaySalesAggregate(bid, range.from, range.to),
+      getPeriodPurchases(bid, range.from, range.to),
+      getRecentInvoices(bid, RECENT_LIMIT, range.from, range.to),
+      getRecentPurchases(bid, RECENT_LIMIT, range.from, range.to),
       getStockAggregates(bid, STOCK_ALERT_LIMIT),
-      getTodayExpenses(bid, today),
+      getTodayExpenses(bid, range.from, range.to),
       getAccountByCode(bid, '4010'),
       getAccountByCode(bid, '1200'),
       getAccountByCode(bid, '2010'),
-      getTodayCollections(bid, today),
+      getTodayCollections(bid, range.from, range.to),
       getRecentAuditLogs(bid),
     ])
 
@@ -95,6 +99,10 @@ export const GET = withObservability('/api/dashboard/owner', async (req: Request
     const receivablesBalance = arAccount ? Number(arAccount.balanceCache) : 0
     const payablesBalance = apAccount ? Number(-apAccount.balanceCache) : 0
     const totalSalesBalance = salesAccount ? Number(-salesAccount.balanceCache) : 0
+    const [periodReceivablesMovement, periodPayablesMovement] = await Promise.all([
+      arAccount ? getPeriodAccountMovement(bid, arAccount.id, range.from, range.to, 'asset') : Promise.resolve(null),
+      apAccount ? getPeriodAccountMovement(bid, apAccount.id, range.from, range.to, 'liability') : Promise.resolve(null),
+    ])
 
     // ── Audit logs (20 most recent) — fetched concurrently above ──
     const auditLogs = auditLogsResult
@@ -102,6 +110,7 @@ export const GET = withObservability('/api/dashboard/owner', async (req: Request
     // ── Response (shape unchanged) ──
     return NextResponse.json({
       today,
+      range,
       kpis: {
         todaySales: todaySalesNumber,
         todaySalesPaisas,
@@ -109,6 +118,11 @@ export const GET = withObservability('/api/dashboard/owner', async (req: Request
         todayExpenses: todayExpensesNumber,
         todayExpensesPaisas: todayExpensesPaisas.toString(),
         todayNetCashFlow: todayNetCashFlowNumber,
+        todayPurchases: periodPurchases,
+        cashBalance: null,
+        bankBalance: null,
+        periodReceivablesMovement,
+        periodPayablesMovement,
         totalReceivables: receivablesBalance,
         totalPayables: payablesBalance,
         totalSales: totalSalesBalance,
@@ -183,7 +197,7 @@ type SalesAggregate = {
   ofcCount: number; ofcAmount: bigint
 }
 
-async function getTodaySalesAggregate(businessId: string, today: string): Promise<SalesAggregate> {
+async function getTodaySalesAggregate(businessId: string, from: string, to: string): Promise<SalesAggregate> {
   const empty = { total: 0n, counterCount: 0, counterAmount: 0n, onlineCount: 0, onlineAmount: 0n, ofcCount: 0, ofcAmount: 0n }
 
   try {
@@ -192,7 +206,8 @@ async function getTodaySalesAggregate(businessId: string, today: string): Promis
       .from('invoices')
       .select('invoice_type, total')
       .eq('business_id', businessId)
-      .eq('invoice_date', today)
+      .gte('invoice_date', from)
+      .lte('invoice_date', to)
       .eq('is_cancelled', false)
       .eq('is_returned', false)
 
@@ -211,8 +226,8 @@ async function getTodaySalesAggregate(businessId: string, today: string): Promis
     if (error) throw new Error(`getTodaySalesAggregate Supabase: ${error.message}`)
   } catch { /* fall through to Prisma */ }
 
-  const startOfDay = new Date(today)
-  const endOfDay = new Date(today + 'T23:59:59.999Z')
+  const startOfDay = new Date(`${from}T00:00:00+05:00`)
+  const endOfDay = new Date(`${to}T23:59:59.999+05:00`)
   const invoices = await db.invoice.findMany({
     where: {
       businessId,
@@ -235,13 +250,15 @@ async function getTodaySalesAggregate(businessId: string, today: string): Promis
 
 // ── Recent invoices (5 rows, latest non-cancelled/returned) ──
 
-async function getRecentInvoices(businessId: string, limit: number) {
+async function getRecentInvoices(businessId: string, limit: number, from: string, to: string) {
   try {
     const admin = getAdminSupabase()
     const { data, error } = await admin
       .from('invoices')
       .select('id, invoice_no, invoice_type, invoice_date, customer_name, total, paid_amount, salesmen(name)')
       .eq('business_id', businessId)
+      .gte('invoice_date', from)
+      .lte('invoice_date', to)
       .eq('is_cancelled', false)
       .eq('is_returned', false)
       .order('invoice_date', { ascending: false })
@@ -260,7 +277,7 @@ async function getRecentInvoices(businessId: string, limit: number) {
     }
   } catch { /* fall through to Prisma */ }
   const invoices = await db.invoice.findMany({
-    where: { businessId, isCancelled: false, isReturned: false },
+    where: { businessId, invoiceDate: { gte: new Date(`${from}T00:00:00+05:00`), lte: new Date(`${to}T23:59:59.999+05:00`) }, isCancelled: false, isReturned: false },
     include: { salesman: { select: { name: true } } },
     orderBy: { invoiceDate: 'desc' },
     take: limit,
@@ -279,13 +296,15 @@ async function getRecentInvoices(businessId: string, limit: number) {
 
 // ── Recent purchases (5 rows) ──
 
-async function getRecentPurchases(businessId: string, limit: number) {
+async function getRecentPurchases(businessId: string, limit: number, from: string, to: string) {
   try {
     const admin = getAdminSupabase()
     const { data, error } = await admin
       .from('purchases')
       .select('id, purchase_no, vendor_id, purchase_date, total, paid_amount, status, vendors(name)')
       .eq('business_id', businessId)
+      .gte('purchase_date', from)
+      .lte('purchase_date', to)
       .order('purchase_date', { ascending: false })
       .limit(limit)
     if (!error && data) {
@@ -301,7 +320,7 @@ async function getRecentPurchases(businessId: string, limit: number) {
     }
   } catch { /* fall through to Prisma */ }
   const purchases = await db.purchase.findMany({
-    where: { businessId },
+    where: { businessId, purchaseDate: { gte: new Date(`${from}T00:00:00+05:00`), lte: new Date(`${to}T23:59:59.999+05:00`) } },
     include: { vendor: { select: { name: true } } },
     orderBy: { purchaseDate: 'desc' },
     take: limit,
@@ -433,13 +452,57 @@ async function getStockAggregates(businessId: string, alertLimit: number): Promi
 
 // ── Today expenses ──
 
-async function getTodayExpenses(businessId: string, today: string) {
+async function getPeriodPurchases(businessId: string, from: string, to: string): Promise<number | null> {
+  try {
+    const admin = getAdminSupabase()
+    const { data, error } = await admin.from('purchases')
+      .select('total')
+      .eq('business_id', businessId)
+      .gte('purchase_date', from)
+      .lte('purchase_date', to)
+    if (!error && data) {
+      let total = 0n
+      for (const row of data as any[]) total += BigInt(row.total ?? 0)
+      return Number(total)
+    }
+  } catch { /* unavailable in this deployment */ }
+  return null
+}
+
+/** Ledger movement only; current balance snapshots are intentionally separate. */
+async function getPeriodAccountMovement(
+  businessId: string, accountId: string, from: string, to: string, kind: 'asset' | 'liability',
+): Promise<number | null> {
+  try {
+    const admin = getAdminSupabase()
+    const { data, error } = await admin.from('voucher_lines')
+      .select('debit, credit, vouchers!inner(voucher_date, is_cancelled)')
+      .eq('business_id', businessId)
+      .eq('account_id', accountId)
+      .gte('vouchers.voucher_date', from)
+      .lte('vouchers.voucher_date', to)
+      .eq('vouchers.is_cancelled', false)
+    if (!error && data) {
+      let movement = 0n
+      for (const row of data as any[]) {
+        const debit = BigInt(row.debit ?? 0)
+        const credit = BigInt(row.credit ?? 0)
+        movement += kind === 'asset' ? debit - credit : credit - debit
+      }
+      return Number(movement)
+    }
+  } catch { /* unavailable in this deployment */ }
+  return null
+}
+
+async function getTodayExpenses(businessId: string, from: string, to: string) {
   const admin = getAdminSupabase()
   const { data, error } = await admin
     .from('expenses')
     .select('id, total_amount, expense_date, status')
     .eq('business_id', businessId)
-    .eq('expense_date', today)
+    .gte('expense_date', from)
+    .lte('expense_date', to)
     .neq('status', 'cancelled')
   if (!error && data) {
     return (data as any[]).map(r => ({
@@ -456,7 +519,8 @@ async function getTodayExpenses(businessId: string, today: string) {
 
 async function getTodayCollections(
   businessId: string,
-  today: string,
+  from: string,
+  to: string,
 ): Promise<{ value: number | null; available: boolean }> {
   try {
     const admin = getAdminSupabase()
@@ -464,7 +528,8 @@ async function getTodayCollections(
       .from('receipts')
       .select('id, amount, voucher_id')
       .eq('business_id', businessId)
-      .eq('receipt_date', today)
+      .gte('receipt_date', from)
+      .lte('receipt_date', to)
       .eq('status', 'posted')
       .is('reversal_voucher_id', null)
 

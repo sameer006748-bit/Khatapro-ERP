@@ -27,6 +27,7 @@ import { useOwnerDashboard } from '@/hooks/use-owner-dashboard'
 import { GlassPanel, SectionHeader, EmptyState } from '@/components/erp/dashboard-components'
 import { formatWholeRupees } from '@/lib/format'
 import { useRouter } from 'next/navigation'
+import { bizPresetDateRange, isBusinessDateRange, type BusinessDateRange } from '@/lib/dates'
 
 function formatDateTime(iso: string): string {
   try { return format(new Date(iso), 'HH:mm') } catch { return iso }
@@ -52,13 +53,35 @@ function PendingCard({ icon: Icon, label, value, sub, accent }: { icon: React.Co
 
 export function OwnerDashboard({ user }: { user: any }) {
   const router = useRouter()
-  const { data, isLoading, error, refetch } = useOwnerDashboard()
+  const [range, setRange] = useState<BusinessDateRange>(() => bizPresetDateRange('today'))
+  const [preset, setPreset] = useState<'today' | 'yesterday' | 'week' | 'month' | 'custom'>('today')
+  const [customFrom, setCustomFrom] = useState(range.from)
+  const [customTo, setCustomTo] = useState(range.to)
+  const [rangeError, setRangeError] = useState('')
+  const { data, isLoading, error, refetch } = useOwnerDashboard(range)
   const [showAdvanced, setShowAdvanced] = useState(false)
+
+  const setPresetRange = (next: 'today' | 'yesterday' | 'week' | 'month') => {
+    const nextRange = bizPresetDateRange(next)
+    setPreset(next); setRangeError('')
+    if (range.from !== nextRange.from || range.to !== nextRange.to) setRange(nextRange)
+  }
+  const applyCustomRange = () => {
+    const nextRange = { from: customFrom, to: customTo }
+    if (!isBusinessDateRange(nextRange)) { setRangeError('End date must be on or after start date.'); return }
+    setPreset('custom'); setRangeError('')
+    if (range.from !== nextRange.from || range.to !== nextRange.to) setRange(nextRange)
+  }
+  const resetRange = () => {
+    const nextRange = bizPresetDateRange('today')
+    setPreset('today'); setCustomFrom(nextRange.from); setCustomTo(nextRange.to); setRangeError('')
+    if (range.from !== nextRange.from || range.to !== nextRange.to) setRange(nextRange)
+  }
 
   const container = { hidden: { opacity: 0 }, show: { opacity: 1, transition: { staggerChildren: 0.05 } } }
   const item = { hidden: { opacity: 0, y: 10 }, show: { opacity: 1, y: 0 } }
 
-  if (isLoading) {
+  if (isLoading || (data && (data.range.from !== range.from || data.range.to !== range.to))) {
     return (
       <div className="space-y-6">
         <GlassPanel padding="p-8">
@@ -103,18 +126,23 @@ export function OwnerDashboard({ user }: { user: any }) {
   const totalPayables = data.kpis.totalPayables ?? 0
   const cashBalance = data.kpis.cashBalance
   const bankBalance = data.kpis.bankBalance
+  const receivablesMovement = data.kpis.periodReceivablesMovement
+  const payablesMovement = data.kpis.periodPayablesMovement
   const approxProfit = todaySales - todayExpenses
+  const activeRangeLabel = preset === 'today' ? 'Today' : preset === 'yesterday' ? 'Yesterday' : preset === 'week' ? 'This Week' : preset === 'month' ? 'This Month' : `${range.from} to ${range.to}`
 
   const primaryCards: Array<{ label: string; value: string; sub: string; icon: React.ComponentType<{ className?: string }>; accent: string; show: boolean }> = [
-    { label: "Today's Sales", value: formatWholeRupees(todaySales), sub: `${data.salesByType.counter.count} counter \u00B7 ${data.salesByType.online.count} online \u00B7 ${data.salesByType.ofc.count} OFC`, icon: ShoppingCart, accent: 'bg-emerald-500/10 text-emerald-600', show: true },
-    { label: 'Amount Received', value: todayCollections != null ? formatWholeRupees(todayCollections) : '—', sub: todayCollections != null ? 'Cash received today' : 'Not available', icon: ArrowDownToLine, accent: 'bg-green-500/10 text-green-600', show: true },
-    { label: 'Expenses', value: formatWholeRupees(todayExpenses), sub: "Today's expenses", icon: ArrowUpFromLine, accent: 'bg-red-500/10 text-red-600', show: true },
-    { label: 'Purchases', value: todayPurchases != null ? formatWholeRupees(todayPurchases) : '—', sub: todayPurchases != null ? "Today's purchases" : 'Not available', icon: Receipt, accent: 'bg-amber-500/10 text-amber-600', show: todayPurchases != null },
-    { label: 'Cash Available', value: cashBalance != null ? formatWholeRupees(cashBalance) : '—', sub: 'Cash in hand', icon: Banknote, accent: 'bg-teal-500/10 text-teal-600', show: cashBalance != null },
-    { label: 'Bank Available', value: bankBalance != null ? formatWholeRupees(bankBalance) : '—', sub: 'Bank balance', icon: Building2, accent: 'bg-sky-500/10 text-sky-600', show: bankBalance != null },
-    { label: 'Receivables', value: formatWholeRupees(totalReceivables), sub: 'Outstanding receivables', icon: Users, accent: 'bg-violet-500/10 text-violet-600', show: true },
-    { label: 'Payables', value: formatWholeRupees(totalPayables), sub: 'Outstanding payables', icon: Wallet, accent: 'bg-amber-500/10 text-amber-600', show: true },
-    { label: 'Estimated Profit', value: formatWholeRupees(approxProfit), sub: 'Sales − Expenses (estimated)', icon: TrendingUp, accent: approxProfit >= 0 ? 'bg-blue-500/10 text-blue-600' : 'bg-orange-500/10 text-orange-600', show: true },
+    { label: 'Sales', value: formatWholeRupees(todaySales), sub: `${data.salesByType.counter.count} counter · ${data.salesByType.online.count} online · ${data.salesByType.ofc.count} OFC`, icon: ShoppingCart, accent: 'bg-emerald-500/10 text-emerald-600', show: true },
+    { label: 'Amount Received', value: todayCollections != null ? formatWholeRupees(todayCollections) : '—', sub: todayCollections != null ? `Received · ${activeRangeLabel}` : 'Not available', icon: ArrowDownToLine, accent: 'bg-green-500/10 text-green-600', show: true },
+    { label: 'Expenses', value: formatWholeRupees(todayExpenses), sub: `Expenses · ${activeRangeLabel}`, icon: ArrowUpFromLine, accent: 'bg-red-500/10 text-red-600', show: true },
+    { label: 'Purchases', value: todayPurchases != null ? formatWholeRupees(todayPurchases) : '—', sub: todayPurchases != null ? `Purchases · ${activeRangeLabel}` : 'Not available', icon: Receipt, accent: 'bg-amber-500/10 text-amber-600', show: todayPurchases != null },
+    { label: 'Current Cash', value: cashBalance != null ? formatWholeRupees(cashBalance) : '—', sub: 'Current balance', icon: Banknote, accent: 'bg-teal-500/10 text-teal-600', show: cashBalance != null },
+    { label: 'Current Bank', value: bankBalance != null ? formatWholeRupees(bankBalance) : '—', sub: 'Current balance', icon: Building2, accent: 'bg-sky-500/10 text-sky-600', show: bankBalance != null },
+    { label: 'Current Receivables', value: formatWholeRupees(totalReceivables), sub: 'Current balance', icon: Users, accent: 'bg-violet-500/10 text-violet-600', show: true },
+    { label: 'Current Payables', value: formatWholeRupees(totalPayables), sub: 'Current balance', icon: Wallet, accent: 'bg-amber-500/10 text-amber-600', show: true },
+    { label: 'Receivables Movement', value: receivablesMovement != null ? formatWholeRupees(receivablesMovement) : '—', sub: `Period movement · ${activeRangeLabel}`, icon: TrendingUp, accent: 'bg-violet-500/10 text-violet-600', show: receivablesMovement != null },
+    { label: 'Payables Movement', value: payablesMovement != null ? formatWholeRupees(payablesMovement) : '—', sub: `Period movement · ${activeRangeLabel}`, icon: TrendingDown, accent: 'bg-amber-500/10 text-amber-600', show: payablesMovement != null },
+    { label: 'Approximate Profit', value: formatWholeRupees(approxProfit), sub: `Sales − Expenses · ${activeRangeLabel}`, icon: TrendingUp, accent: approxProfit >= 0 ? 'bg-blue-500/10 text-blue-600' : 'bg-orange-500/10 text-orange-600', show: true },
   ]
 
   const visibleCards = primaryCards.filter(c => c.show)
@@ -137,8 +165,19 @@ export function OwnerDashboard({ user }: { user: any }) {
                 Business Summary
               </h1>
               <p className="text-sm text-muted-foreground max-w-2xl">
-                Today's sales, collections, expenses and outstanding payments overview.
+                {activeRangeLabel} sales, collections, expenses and payment movement overview.
               </p>
+              <div className="mt-4 space-y-2">
+                <div className="flex gap-1 overflow-x-auto pb-1 -mx-1 px-1" aria-label="Business summary date range">
+                  {([['today', 'Today'], ['yesterday', 'Yesterday'], ['week', 'This Week'], ['month', 'This Month']] as const).map(([key, label]) => (
+                    <button key={key} onClick={() => setPresetRange(key)} className={`shrink-0 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors ${preset === key ? 'border-primary bg-primary text-primary-foreground' : 'border-border bg-card hover:bg-muted/30'}`}>{label}</button>
+                  ))}
+                  <button onClick={() => setPreset('custom')} className={`shrink-0 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors ${preset === 'custom' ? 'border-primary bg-primary text-primary-foreground' : 'border-border bg-card hover:bg-muted/30'}`}>Custom Range</button>
+                </div>
+                {preset === 'custom' && <div className="grid grid-cols-1 sm:grid-cols-[1fr_1fr_auto_auto] gap-2 max-w-xl"><input aria-label="Start date" type="date" value={customFrom} onChange={e => setCustomFrom(e.target.value)} className="h-9 min-w-0 rounded-md border border-input bg-background px-2 text-xs" /><input aria-label="End date" type="date" value={customTo} onChange={e => setCustomTo(e.target.value)} className="h-9 min-w-0 rounded-md border border-input bg-background px-2 text-xs" /><button onClick={applyCustomRange} className="h-9 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground">Apply</button><button onClick={resetRange} className="h-9 rounded-md border border-border bg-card px-3 text-xs font-medium">Reset</button></div>}
+                {rangeError && <p className="text-xs text-destructive">{rangeError}</p>}
+                <p className="text-[11px] text-muted-foreground">Active range: <span className="font-medium text-foreground">{activeRangeLabel}</span> ({range.from} to {range.to})</p>
+              </div>
             </div>
             <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white/50 border border-white/10">
               <Sparkles className="size-4 text-primary" />
@@ -167,7 +206,7 @@ export function OwnerDashboard({ user }: { user: any }) {
       {/* Sources of Funds */}
       <motion.div variants={item}>
         <GlassPanel padding="p-5 sm:p-6">
-          <SectionHeader title="Sources of Funds" subtitle="Today's income sources" />
+          <SectionHeader title="Paisa Kahan Se Aya" subtitle={`Income sources · ${activeRangeLabel}`} />
           <div className="flex flex-wrap gap-2 mb-4">
             <Chip icon={ShoppingCart} label="View Sales" onClick={() => router.push('/?page=sales-list')} />
             <Chip icon={ArrowDownToLine} label="Receive Payment" onClick={() => router.push('/?page=accounts')} />
@@ -181,7 +220,7 @@ export function OwnerDashboard({ user }: { user: any }) {
             <div className="rounded-xl border border-border bg-muted/20 p-4">
               <div className="flex items-center gap-2 mb-1"><ArrowDownToLine className="size-4 text-green-600" /><span className="text-sm font-medium text-foreground">Customer Payments</span></div>
               <div className="text-lg font-bold text-foreground" data-num>{todayCollections != null ? formatWholeRupees(todayCollections) : '—'}</div>
-              <div className="text-[11px] text-muted-foreground mt-0.5">{todayCollections != null ? "Today's receipts" : 'Data not available'}</div>
+              <div className="text-[11px] text-muted-foreground mt-0.5">{todayCollections != null ? `Receipts · ${activeRangeLabel}` : 'Data not available'}</div>
             </div>
           </div>
         </GlassPanel>
@@ -190,7 +229,7 @@ export function OwnerDashboard({ user }: { user: any }) {
       {/* Uses of Funds */}
       <motion.div variants={item}>
         <GlassPanel padding="p-5 sm:p-6">
-          <SectionHeader title="Uses of Funds" subtitle="Today's outflows" />
+          <SectionHeader title="Paisa Kahan Gaya" subtitle={`Outflows · ${activeRangeLabel}`} />
           <div className="flex flex-wrap gap-2 mb-4">
             <Chip icon={Receipt} label="View Purchases" onClick={() => router.push('/?page=purchases')} />
             <Chip icon={ArrowUpFromLine} label="Add Expense" onClick={() => router.push('/?page=expense-batch')} />
@@ -200,17 +239,17 @@ export function OwnerDashboard({ user }: { user: any }) {
             <div className="rounded-xl border border-border bg-muted/20 p-4">
               <div className="flex items-center gap-2 mb-1"><Receipt className="size-4 text-amber-600" /><span className="text-sm font-medium text-foreground">Purchases</span></div>
               <div className="text-lg font-bold text-foreground" data-num>{todayPurchases != null ? formatWholeRupees(todayPurchases) : '—'}</div>
-              <div className="text-[11px] text-muted-foreground mt-0.5">{todayPurchases != null ? "Today's purchases" : 'Not available'}</div>
+              <div className="text-[11px] text-muted-foreground mt-0.5">{todayPurchases != null ? `Purchases · ${activeRangeLabel}` : 'Not available'}</div>
             </div>
             <div className="rounded-xl border border-border bg-muted/20 p-4">
               <div className="flex items-center gap-2 mb-1"><ArrowUpFromLine className="size-4 text-red-600" /><span className="text-sm font-medium text-foreground">Expenses</span></div>
               <div className="text-lg font-bold text-foreground" data-num>{formatWholeRupees(todayExpenses)}</div>
-              <div className="text-[11px] text-muted-foreground mt-0.5">Today's expenses</div>
+              <div className="text-[11px] text-muted-foreground mt-0.5">Expenses · {activeRangeLabel}</div>
             </div>
             <div className="rounded-xl border border-border bg-muted/20 p-4">
-              <div className="flex items-center gap-2 mb-1"><Wallet className="size-4 text-amber-600" /><span className="text-sm font-medium text-foreground">Payables</span></div>
+              <div className="flex items-center gap-2 mb-1"><Wallet className="size-4 text-amber-600" /><span className="text-sm font-medium text-foreground">Current Payables</span></div>
               <div className="text-lg font-bold text-foreground" data-num>{formatWholeRupees(totalPayables)}</div>
-              <div className="text-[11px] text-muted-foreground mt-0.5">Total payables</div>
+              <div className="text-[11px] text-muted-foreground mt-0.5">Current balance</div>
             </div>
           </div>
         </GlassPanel>
@@ -219,7 +258,7 @@ export function OwnerDashboard({ user }: { user: any }) {
       {/* Outstanding Obligations */}
       <motion.div variants={item}>
         <GlassPanel padding="p-5 sm:p-6">
-          <SectionHeader title="Outstanding Obligations" subtitle="Receivables, payables and stock alerts" />
+          <SectionHeader title="Outstanding Obligations" subtitle="Current receivables, payables and stock alerts" />
           <div className="flex flex-wrap gap-2 mb-4">
             <Chip icon={ArrowDownToLine} label="Receive Payment" onClick={() => router.push('/?page=accounts')} />
             <Chip icon={Wallet} label="Pay Vendor" onClick={() => router.push('/?page=vendors')} />
@@ -227,10 +266,10 @@ export function OwnerDashboard({ user }: { user: any }) {
             <Chip icon={ShoppingCart} label="View Orders" onClick={() => router.push('/?page=sales-list')} />
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-            <PendingCard icon={Users} label="Receivables" value={formatWholeRupees(totalReceivables)} sub="Outstanding receivables" accent="text-violet-600" />
-            <PendingCard icon={Wallet} label="Payables" value={formatWholeRupees(totalPayables)} sub="Outstanding payables" accent="text-amber-600" />
-            <PendingCard icon={AlertTriangle} label="Low / Negative Stock" value={`${data.kpis.lowStockCount + data.kpis.negativeStockCount} items`} sub={`${data.kpis.negativeStockCount} negative`} accent={(data.kpis.lowStockCount + data.kpis.negativeStockCount) > 0 ? 'text-red-600' : 'text-green-600'} />
-            <PendingCard icon={ShoppingCart} label="Pending Online Orders" value={`${data.salesByType.online.count} today`} sub="Online orders placed today" accent="text-sky-600" />
+            <PendingCard icon={Users} label="Current Receivables" value={formatWholeRupees(totalReceivables)} sub="Current balance" accent="text-violet-600" />
+            <PendingCard icon={Wallet} label="Current Payables" value={formatWholeRupees(totalPayables)} sub="Current balance" accent="text-amber-600" />
+            <PendingCard icon={AlertTriangle} label="Current Low / Negative Stock" value={`${data.kpis.lowStockCount + data.kpis.negativeStockCount} items`} sub={`${data.kpis.negativeStockCount} negative`} accent={(data.kpis.lowStockCount + data.kpis.negativeStockCount) > 0 ? 'text-red-600' : 'text-green-600'} />
+            <PendingCard icon={ShoppingCart} label="Online Orders" value={`${data.salesByType.online.count} in period`} sub={`Online orders · ${activeRangeLabel}`} accent="text-sky-600" />
           </div>
         </GlassPanel>
       </motion.div>

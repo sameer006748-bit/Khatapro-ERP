@@ -17,6 +17,35 @@ export const BUSINESS_TZ = 'Asia/Karachi'
 /** Asia/Karachi is permanently UTC+5 (no DST). */
 const KHI_OFFSET_MINUTES = 5 * 60
 
+export type BusinessDateRange = { from: string; to: string }
+
+function addBusinessDays(label: string, days: number): string {
+  const [year, month, day] = label.split('-').map(Number)
+  const date = new Date(Date.UTC(year, month - 1, day + days))
+  return date.toISOString().slice(0, 10)
+}
+
+/** Preset date-only ranges in the business timezone; safe for URL/API use. */
+export function bizPresetDateRange(preset: 'today' | 'yesterday' | 'week' | 'month', now: Date = new Date()): BusinessDateRange {
+  const today = bizDateString(now)
+  if (preset === 'today') return { from: today, to: today }
+  if (preset === 'yesterday') {
+    const yesterday = addBusinessDays(today, -1)
+    return { from: yesterday, to: yesterday }
+  }
+  if (preset === 'month') return { from: `${today.slice(0, 8)}01`, to: today }
+  const weekday = new Date(`${today}T00:00:00Z`).getUTCDay()
+  return { from: addBusinessDays(today, -((weekday + 6) % 7)), to: today }
+}
+
+export function isBusinessDateRange(value: BusinessDateRange): boolean {
+  const isDate = (label: string) => /^\d{4}-\d{2}-\d{2}$/.test(label)
+    && new Date(`${label}T00:00:00+05:00`).toISOString().slice(0, 10) === label
+  return isDate(value.from)
+    && isDate(value.to)
+    && value.from <= value.to
+}
+
 /** Format a Date as yyyy-MM-dd in Asia/Karachi. */
 export function bizDateString(date: Date | string | number): string {
   const d = typeof date === 'string' || typeof date === 'number' ? new Date(date) : date

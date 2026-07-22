@@ -1,7 +1,9 @@
 import { useQuery } from '@tanstack/react-query'
+import { bizPresetDateRange, type BusinessDateRange } from '@/lib/dates'
 
 export interface OwnerDashboardData {
   today: string
+  range: BusinessDateRange
   kpis: {
     todaySales: number
     todaySalesPaisas: string
@@ -17,6 +19,8 @@ export interface OwnerDashboardData {
     todayPurchases: number | null
     cashBalance: number | null
     bankBalance: number | null
+    periodReceivablesMovement: number | null
+    periodPayablesMovement: number | null
   }
   availability: {
     todaySales: boolean
@@ -73,8 +77,9 @@ export interface OwnerDashboardData {
   }>
 }
 
-async function fetchOwnerDashboard(): Promise<OwnerDashboardData> {
-  const r = await fetch('/api/dashboard/owner', { cache: 'no-store' })
+async function fetchOwnerDashboard(range: BusinessDateRange): Promise<OwnerDashboardData> {
+  const params = new URLSearchParams({ from: range.from, to: range.to })
+  const r = await fetch(`/api/dashboard/owner?${params.toString()}`, { cache: 'no-store' })
   if (!r.ok) {
     if (r.status === 401 || r.status === 403) {
       throw new Error('Unauthorized')
@@ -84,10 +89,10 @@ async function fetchOwnerDashboard(): Promise<OwnerDashboardData> {
   return r.json()
 }
 
-export function useOwnerDashboard() {
+export function useOwnerDashboard(range: BusinessDateRange = bizPresetDateRange('today')) {
   return useQuery({
-    queryKey: ['owner-dashboard'],
-    queryFn: fetchOwnerDashboard,
+    queryKey: ['owner-dashboard', range.from, range.to],
+    queryFn: () => fetchOwnerDashboard(range),
     staleTime: 30_000,
     refetchInterval: 60_000,
     retry: (failureCount, error) => {
