@@ -154,9 +154,10 @@ export function SalesListView() {
             )}
             <PrintInvoiceButton
               invoiceIds={selected}
-              label={`Print ${selected.length} Invoice${selected.length === 1 ? '' : 's'}`}
+              label="Print Two Invoices on A4"
               size="sm"
               icon={Printer}
+              disabled={selected.length !== 2}
             />
           </div>
         </div>

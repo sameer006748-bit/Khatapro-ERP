@@ -20,6 +20,7 @@ export function PrintInvoiceButton({
   size = 'sm',
   className = '',
   icon: Icon,
+  disabled = false,
 }: {
   invoiceId?: string
   invoiceIds?: string[]
@@ -28,6 +29,7 @@ export function PrintInvoiceButton({
   size?: 'sm' | 'default'
   className?: string
   icon?: React.ComponentType<{ className?: string }>
+  disabled?: boolean
 }) {
   const [open, setOpen] = useState(false)
   const [invoices, setInvoices] = useState<PrintableInvoice[]>([])
@@ -103,7 +105,7 @@ export function PrintInvoiceButton({
     <>
       <button
         onClick={handleOpen}
-        disabled={loading || ids.length === 0}
+        disabled={disabled || loading || ids.length === 0}
         className={`${variantClass} ${sizeClass} rounded-md font-medium press-sm flex items-center gap-1.5 disabled:opacity-50 ${className}`}
       >
         {Icon && <Icon className={size === 'sm' ? 'size-3.5' : 'size-4'} />}

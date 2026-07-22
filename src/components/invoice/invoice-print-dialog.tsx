@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { X, Printer } from 'lucide-react'
 import { formatMoney } from '@/lib/format'
@@ -65,6 +65,15 @@ const MODE_LABELS: Record<InvoicePrintMode, string> = {
 }
 
 const STORAGE_KEY = 'khatapro-invoice-print-mode'
+const PRINT_MODE_OPTIONS: InvoicePrintMode[] = ['single', 'two-up', 'full-a4']
+
+const PRINT_ACTION_LABELS: Record<InvoicePrintMode, string> = {
+  'single': 'Print Half A4',
+  'two-up': 'Print Two Invoices on A4',
+  'top-half': 'Print Half A4',
+  'bottom-half': 'Print Half A4',
+  'full-a4': 'Print Full A4',
+}
 
 export function InvoicePrintDialog({
   open,
@@ -82,7 +91,7 @@ export function InvoicePrintDialog({
   const [mode, setMode] = useState<InvoicePrintMode>(() => {
     if (typeof window === 'undefined') return 'single'
     const saved = localStorage.getItem(STORAGE_KEY) as InvoicePrintMode | null
-    if (saved && ['single', 'two-up', 'top-half', 'bottom-half', 'full-a4'].includes(saved)) return saved
+    if (saved && PRINT_MODE_OPTIONS.includes(saved)) return saved
     return 'single'
   })
 
@@ -117,10 +126,11 @@ export function InvoicePrintDialog({
   if (!open) return null
 
   const maxItems = Math.max(...invoices.map(inv => inv.items.length), 0)
-  const tooManyItems = mode !== 'full-a4' && maxItems > 12
   const overflowWarning = mode !== 'full-a4' && (maxItems > 10 || overflowDetected)
+  const twoUpInvalid = mode === 'two-up' && invoices.length !== 2
 
   function handlePrint() {
+    if (twoUpInvalid || (overflowDetected && mode !== 'full-a4')) return
     // Add body class for reliable print isolation (no :has() dependency).
     document.body.classList.add('printing-invoice')
     // Inject mode-specific @page style for true physical page sizing.
@@ -128,10 +138,9 @@ export function InvoicePrintDialog({
     const pageStyle = document.createElement('style')
     pageStyle.id = 'invoice-print-page-size'
     if (mode === 'single') {
-      // Physical Half-A4 sheet
-      pageStyle.textContent = '@page { size: 210mm 148.5mm; margin: 0; }'
+      // One invoice still prints on a full A4 portrait sheet, top half only.
+      pageStyle.textContent = '@page { size: A4 portrait; margin: 0; }'
     } else {
-      // Full A4 for two-up, top-half, bottom-half, full-a4
       pageStyle.textContent = '@page { size: A4 portrait; margin: 0; }'
     }
     document.head.appendChild(pageStyle)
@@ -179,17 +188,18 @@ export function InvoicePrintDialog({
                 <div>
                   <label className="text-xs font-medium text-muted-foreground mb-2 block">Print Mode</label>
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                    {(Object.keys(MODE_LABELS) as InvoicePrintMode[]).map((m) => (
+                    {PRINT_MODE_OPTIONS.map((m) => (
                       <button
                         key={m}
                         onClick={() => setMode(m)}
+                        title={MODE_LABELS[m]}
                         className={`px-3 py-2.5 rounded-lg border text-xs font-medium press-sm text-left ${
                           mode === m
                             ? 'border-primary bg-primary/5 text-primary'
                             : 'border-border bg-background text-muted-foreground hover:bg-muted/50'
                         }`}
                       >
-                        {MODE_LABELS[m]}
+                          {PRINT_ACTION_LABELS[m]}
                       </button>
                     ))}
                   </div>
@@ -244,7 +254,7 @@ export function InvoicePrintDialog({
                   </div>
                 )}
 
-                {mode === 'two-up' && invoices.length !== 2 && (
+                {twoUpInvalid && (
                   <div className="p-3 rounded-lg border border-sky-200 bg-sky-50">
                     <p className="text-xs text-sky-800">
                       Two-Up mode works best with 2 invoices. Currently {invoices.length} selected — the second half will be blank.
@@ -266,10 +276,10 @@ export function InvoicePrintDialog({
                   <button onClick={onClose} className="px-4 py-2 rounded-md text-sm font-medium border border-border press-sm">Cancel</button>
                   <button
                     onClick={handlePrint}
-                    disabled={overflowDetected && mode !== 'full-a4'}
+                    disabled={twoUpInvalid || (overflowDetected && mode !== 'full-a4')}
                     className="px-4 py-2 rounded-md text-sm font-medium bg-primary text-primary-foreground press-sm flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    <Printer className="size-4" /> Print
+                    <Printer className="size-4" /> {PRINT_ACTION_LABELS[mode]}
                   </button>
                 </div>
               </div>
@@ -282,6 +292,7 @@ export function InvoicePrintDialog({
             {invoices[0] && <MeasurementInvoice inv={invoices[0]} businessName={businessName} />}
           </div>
           {/* Actual print root for printing */}
+          <InvoicePrintStyles />
           <InvoicePrintRoot mode={mode} invoices={invoices} businessName={businessName} businessContact={businessContact} />
         </>
       )}
@@ -290,10 +301,9 @@ export function InvoicePrintDialog({
 }
 
 function InvoicePreview({ mode, invoices, businessName }: { mode: InvoicePrintMode; invoices: PrintableInvoice[]; businessName: string }) {
-  const isHalf = mode === 'single'
   const isFullA4 = mode === 'full-a4'
   const showTop = mode === 'single' || mode === 'two-up' || mode === 'top-half'
-  const showBottom = mode === 'single' || mode === 'two-up' || mode === 'bottom-half'
+  const showBottom = mode === 'two-up' || mode === 'bottom-half'
 
   if (isFullA4) {
     return (
@@ -307,22 +317,18 @@ function InvoicePreview({ mode, invoices, businessName }: { mode: InvoicePrintMo
 
   return (
     <div className="p-4 flex justify-center">
-      <div className="bg-white border border-border shadow-sm" style={{ width: 140, height: isHalf ? 198 : 198 }}>
-        {isHalf ? (
-          <div className="h-full p-2"><MiniInvoice inv={invoices[0]} businessName={businessName} /></div>
-        ) : (
-          <div className="h-full flex flex-col">
-            <div className={`flex-1 p-2 ${showTop ? '' : 'opacity-20'}`}>
-              {showTop && invoices[0] && <MiniInvoice inv={invoices[0]} businessName={businessName} />}
-            </div>
-            <div className="border-t border-dashed border-foreground/40 relative">
-              <span className="absolute -top-2 left-1/2 -translate-x-1/2 text-[7px] bg-muted px-1 text-muted-foreground">cut</span>
-            </div>
-            <div className={`flex-1 p-2 ${showBottom ? '' : 'opacity-20'}`}>
-              {showBottom && <MiniInvoice inv={invoices[1] || invoices[0]} businessName={businessName} />}
-            </div>
+        <div className="bg-white border border-border shadow-sm" style={{ width: 140, height: 198 }}>
+        <div className="h-full flex flex-col">
+          <div className={`flex-1 p-2 ${showTop ? '' : 'opacity-20'}`}>
+            {showTop && invoices[0] && <MiniInvoice inv={invoices[0]} businessName={businessName} />}
           </div>
-        )}
+          <div className="border-t border-dashed border-foreground/40 relative">
+            <span className="absolute -top-2 left-1/2 -translate-x-1/2 text-[7px] bg-muted px-1 text-muted-foreground">cut</span>
+          </div>
+          <div className={`flex-1 p-2 ${showBottom ? '' : 'opacity-20'}`}>
+            {showBottom && invoices[1] && <MiniInvoice inv={invoices[1]} businessName={businessName} />}
+          </div>
+        </div>
       </div>
     </div>
   )
@@ -451,7 +457,7 @@ function InvoicePrintRoot({ mode, invoices, businessName, businessContact }: { m
   const isHalf = mode === 'single'
   const isFullA4 = mode === 'full-a4'
   const showTop = mode === 'single' || mode === 'two-up' || mode === 'top-half'
-  const showBottom = mode === 'single' || mode === 'two-up' || mode === 'bottom-half'
+  const showBottom = mode === 'two-up' || mode === 'bottom-half'
 
   if (isFullA4) {
     // Full A4 — single invoice uses entire page
@@ -467,7 +473,10 @@ function InvoicePrintRoot({ mode, invoices, businessName, businessContact }: { m
   return (
     <div className="invoice-print-root hidden print:block">
       {isHalf ? (
-        <HalfA4Invoice inv={invoices[0]} businessName={businessName} businessContact={businessContact} />
+        <div className="a4-page">
+          <div className="a4-half a4-half-top"><HalfA4Invoice inv={invoices[0]} businessName={businessName} businessContact={businessContact} /></div>
+          <div className="a4-half a4-half-bottom a4-half-blank" />
+        </div>
       ) : (
         <div className="a4-page">
           {showTop ? (
@@ -477,13 +486,19 @@ function InvoicePrintRoot({ mode, invoices, businessName, businessContact }: { m
           ) : <div className="a4-half a4-half-top a4-half-blank" />}
           {showBottom ? (
             <div className="a4-half a4-half-bottom">
-              <HalfA4Invoice inv={invoices[1] || invoices[0]} businessName={businessName} businessContact={businessContact} />
+              {invoices[1] && <HalfA4Invoice inv={invoices[1]} businessName={businessName} businessContact={businessContact} />}
             </div>
           ) : <div className="a4-half a4-half-bottom a4-half-blank" />}
         </div>
       )}
     </div>
   )
+}
+
+function invoiceDocumentTitle(type: PrintableInvoice['invoiceType']) {
+  if (type === 'ONLINE') return 'ONLINE ORDER'
+  if (type === 'OFC') return 'OFC INVOICE'
+  return 'SALE INVOICE'
 }
 
 function HalfA4Invoice({ inv, businessName, businessContact }: { inv: PrintableInvoice; businessName: string; businessContact?: { phone?: string; address?: string; email?: string } | null }) {
@@ -499,9 +514,10 @@ function HalfA4Invoice({ inv, businessName, businessContact }: { inv: PrintableI
           <div className="inv-business-name">{businessName}</div>
           {businessContact?.phone && <div className="inv-business-contact">{businessContact.phone}</div>}
           {businessContact?.address && <div className="inv-business-contact">{businessContact.address}</div>}
+          {businessContact?.email && <div className="inv-business-contact">{businessContact.email}</div>}
         </div>
         <div className="inv-title-block">
-          <div className="inv-title">INVOICE</div>
+          <div className="inv-title">{invoiceDocumentTitle(inv.invoiceType)}</div>
           <div className="inv-no" data-num>{inv.invoiceNo}</div>
           <div className="inv-type-badge">{inv.invoiceType}</div>
         </div>
@@ -595,7 +611,7 @@ function FullA4Invoice({ inv, businessName, businessContact }: { inv: PrintableI
           {businessContact?.email && <div className="inv-business-contact">{businessContact.email}</div>}
         </div>
         <div className="inv-title-block">
-          <div className="inv-title">INVOICE</div>
+          <div className="inv-title">{invoiceDocumentTitle(inv.invoiceType)}</div>
           <div className="inv-no" data-num>{inv.invoiceNo}</div>
           <div className="inv-type-badge">{inv.invoiceType}</div>
         </div>
@@ -671,4 +687,50 @@ function FullA4Invoice({ inv, businessName, businessContact }: { inv: PrintableI
       </div>
     </div>
   )
+}
+
+function InvoicePrintStyles() {
+  return <style>{`
+    @media print {
+      html, body { width: 210mm; min-height: 297mm; margin: 0 !important; padding: 0 !important; background: #fff !important; }
+      body.printing-invoice #__next > * { visibility: hidden !important; }
+      body.printing-invoice .invoice-print-root,
+      body.printing-invoice .invoice-print-root * { visibility: visible !important; }
+      body.printing-invoice .invoice-print-root { display: block !important; position: fixed; inset: 0 auto auto 0; width: 210mm; color: #000; background: #fff; }
+      .invoice-print-root .a4-page { position: relative; width: 210mm; height: 297mm; box-sizing: border-box; overflow: hidden; break-after: page; page-break-after: always; background: #fff; }
+      .invoice-print-root .a4-half { position: relative; width: 210mm; height: 148.5mm; box-sizing: border-box; overflow: hidden; break-inside: avoid; page-break-inside: avoid; }
+      .invoice-print-root .a4-half-top { border-bottom: 0.3mm dashed #777; }
+      .invoice-print-root .a4-half-top::after { content: 'CUT HERE'; position: absolute; bottom: -2.4mm; left: 50%; transform: translateX(-50%); padding: 0 2mm; font: 6pt Arial, sans-serif; color: #555; background: #fff; }
+      .invoice-print-root .a4-half-blank { background: #fff; }
+      .invoice-print-root .invoice-half { height: 148.5mm; box-sizing: border-box; overflow: hidden; padding: 6mm 8mm 5mm; font: 8.5pt/1.25 Arial, sans-serif; color: #000; }
+      .invoice-print-root .invoice-full-a4 { min-height: 297mm; box-sizing: border-box; padding: 12mm 14mm; font: 10pt/1.35 Arial, sans-serif; color: #000; }
+      .invoice-print-root .inv-header { display: flex; justify-content: space-between; gap: 6mm; border-bottom: 0.5mm solid #000; padding-bottom: 2mm; margin-bottom: 2mm; }
+      .invoice-print-root .inv-business-name { font-size: 13pt; font-weight: 700; }
+      .invoice-print-root .inv-business-contact { font-size: 7.5pt; color: #333; }
+      .invoice-print-root .inv-title-block { text-align: right; }
+      .invoice-print-root .inv-title { font-size: 10pt; font-weight: 700; letter-spacing: .2mm; }
+      .invoice-print-root .inv-no { font-size: 9pt; font-weight: 700; }
+      .invoice-print-root .inv-type-badge { display: inline-block; margin-top: .5mm; border: .3mm solid #000; padding: .4mm 1.5mm; font-size: 6.5pt; font-weight: 700; }
+      .invoice-print-root .inv-meta { display: grid; grid-template-columns: 1fr 1fr; gap: 5mm; margin-bottom: 2mm; font-size: 7.5pt; }
+      .invoice-print-root .inv-meta-col:last-child { text-align: right; }
+      .invoice-print-root .inv-meta-row { margin-bottom: .4mm; }
+      .invoice-print-root .inv-meta-label { font-weight: 700; margin-right: 1mm; }
+      .invoice-print-root .inv-items-table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 7.5pt; break-inside: avoid; page-break-inside: avoid; }
+      .invoice-print-root .inv-items-table th { border: .3mm solid #000; padding: 1mm; text-align: left; font-size: 7pt; }
+      .invoice-print-root .inv-items-table td { border: .2mm solid #888; padding: .8mm 1mm; vertical-align: top; overflow-wrap: anywhere; }
+      .invoice-print-root .inv-col-item { width: 52%; text-align: left; }
+      .invoice-print-root .inv-col-qty { width: 11%; text-align: right !important; }
+      .invoice-print-root .inv-col-rate, .invoice-print-root .inv-col-total { width: 18.5%; text-align: right !important; }
+      .invoice-print-root .inv-sku { color: #555; font-size: 6.5pt; }
+      .invoice-print-root .inv-totals { width: 58%; margin: 2mm 0 1.5mm auto; font-size: 7.5pt; break-inside: avoid; page-break-inside: avoid; }
+      .invoice-print-root .inv-totals-row, .invoice-print-root .inv-payment-row { display: flex; justify-content: space-between; gap: 4mm; padding: .35mm 0; }
+      .invoice-print-root .inv-totals-grand { border-top: .4mm solid #000; border-bottom: .4mm solid #000; padding: .8mm 0; font-size: 9pt; font-weight: 700; }
+      .invoice-print-root .inv-totals-discount, .invoice-print-root .inv-totals-outstanding { font-weight: 700; }
+      .invoice-print-root .inv-payments { border: .2mm solid #888; padding: 1mm; font-size: 6.8pt; break-inside: avoid; page-break-inside: avoid; }
+      .invoice-print-root .inv-payments-title { font-weight: 700; margin-bottom: .5mm; }
+      .invoice-print-root .inv-status-banner { margin-top: 1.5mm; border: .3mm solid #000; padding: .7mm; text-align: center; font-size: 7pt; font-weight: 700; }
+      .invoice-print-root .inv-footer { display: flex; justify-content: space-between; gap: 4mm; border-top: .2mm solid #888; margin-top: 1.5mm; padding-top: 1mm; font-size: 6.5pt; color: #333; break-inside: avoid; page-break-inside: avoid; }
+      .invoice-print-root .inv-footer-message { font-style: italic; }
+    }
+  `}</style>
 }
