@@ -6,7 +6,7 @@
 -- account_categories, delivery_orders, delivery_status_events,
 -- rider_cod_submissions) are referenced.
 --
--- All foreign keys use uuid types matching the proven production schema.
+-- UUID identities remain UUID; invoice and invoice-item identities are text.
 -- Foreign keys referencing invoices use the composite key (business_id, id)
 -- because production invoices has PRIMARY KEY (business_id, id).
 
@@ -40,6 +40,47 @@ begin
     raise exception
       'Phase 1 foundation migration requires existing base table(s): %. Aborting without changes.',
       v_missing;
+  end if;
+end
+$$;
+
+-- Guard the verified production identifier map before dependent DDL runs.
+do $$
+declare
+  v_invalid text;
+begin
+  with expected(table_name, column_name, expected_type) as (
+    values
+      ('businesses', 'id', 'uuid'), ('products', 'id', 'uuid'),
+      ('invoices', 'business_id', 'uuid'), ('invoices', 'id', 'text'),
+      ('invoice_items', 'business_id', 'uuid'), ('invoice_items', 'id', 'text'),
+      ('profiles', 'id', 'uuid'), ('riders', 'id', 'uuid'),
+      ('delivery_events', 'id', 'uuid'), ('rider_cash_ledger', 'id', 'uuid')
+  )
+  select string_agg(format('%s.%s expected %s, found %s', e.table_name,
+                           e.column_name, e.expected_type,
+                           coalesce(format_type(a.atttypid, a.atttypmod), 'missing')),
+                    '; ' order by e.table_name, e.column_name)
+    into v_invalid
+  from expected e
+  left join pg_attribute a
+    on a.attrelid = to_regclass('public.' || e.table_name)
+   and a.attname = e.column_name and a.attnum > 0 and not a.attisdropped
+  where coalesce(format_type(a.atttypid, a.atttypmod), 'missing') <> e.expected_type;
+
+  if v_invalid is not null
+     or not exists (
+       select 1 from pg_constraint c
+       where c.conrelid = to_regclass('public.invoices') and c.contype = 'p'
+         and pg_get_constraintdef(c.oid) = 'PRIMARY KEY (business_id, id)'
+     )
+     or not exists (
+       select 1 from pg_constraint c
+       where c.conrelid = to_regclass('public.invoice_items') and c.contype in ('p', 'u')
+         and pg_get_constraintdef(c.oid) in ('PRIMARY KEY (id)', 'UNIQUE (id)')
+     ) then
+    raise exception 'Phase 1 foundation identifier precondition failed: %',
+      coalesce(v_invalid, 'invoices must have PRIMARY KEY (business_id, id) and invoice_items.id must be individually primary or unique');
   end if;
 end
 $$;
@@ -88,8 +129,8 @@ alter table public.invoice_items
 
 create table if not exists public.sale_return_documents (
   id                  uuid primary key default gen_random_uuid(),
-  business_id         uuid not null,
-  original_invoice_id uuid not null,
+  business_id         uuid not null references public.businesses(id) on delete restrict,
+  original_invoice_id text not null,
   return_voucher_id   text,
   return_date         timestamptz not null default now(),
   total               numeric(20,0) not null default 0,
@@ -120,7 +161,7 @@ create table if not exists public.sale_return_lines (
   id                       uuid primary key default gen_random_uuid(),
   business_id              uuid not null references public.businesses(id) on delete restrict,
   sale_return_id           uuid not null references public.sale_return_documents(id) on delete restrict,
-  original_invoice_item_id uuid not null references public.invoice_items(id) on delete restrict,
+  original_invoice_item_id text not null references public.invoice_items(id) on delete restrict,
   returned_qty             int not null,
   reason                   text,
   created_at               timestamptz not null default now(),
@@ -138,18 +179,18 @@ create index if not exists sale_return_lines_original_invoice_item_idx
 -- ============================================================
 -- 4. COMMISSION EVENTS LEDGER
 -- ============================================================
--- invoice_id and invoice_item_id are stored as uuid values but do NOT have
+-- invoice_id and invoice_item_id use production text identifiers but do NOT have
 -- foreign key constraints in this migration. Production invoices has a
 -- composite PK (business_id, id), and invoice_items may also have a composite
--- PK. Adding verified composite FKs requires confirming the exact PK of
--- invoice_items in production. Deferred to avoid unverified constraints.
+-- PK. These remain trace fields without foreign keys; no unverified relation
+-- is introduced beyond the verified return-line invoice-item FK.
 create table if not exists public.commission_events (
   id                       uuid primary key default gen_random_uuid(),
-  business_id              uuid not null,
-  salesman_id              uuid,
-  invoice_id               uuid not null,
-  invoice_item_id          uuid not null,
-  original_invoice_item_id uuid,
+  business_id              uuid not null references public.businesses(id) on delete restrict,
+  salesman_id              text,
+  invoice_id               text not null,
+  invoice_item_id          text not null,
+  original_invoice_item_id text,
   return_event_id          text,
   event_type               text not null,
   quantity                 int not null,

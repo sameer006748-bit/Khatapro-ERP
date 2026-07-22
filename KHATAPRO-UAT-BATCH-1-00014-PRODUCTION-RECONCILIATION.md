@@ -1,96 +1,52 @@
 # KhataPro ERP — UAT Batch 1: Migration 00014 Production Reconciliation
 
-## Confirmed Production Mappings
+## Starting point and interrupted work
 
-| Production Table | Type Convention | Used in 00014? |
-|---|---|---|
-| `public.businesses` | uuid PK | Yes — base precondition |
-| `public.products` | uuid PK, numeric(20,0) money | Yes — commission_rate added |
-| `public.invoices` | uuid PK, numeric(20,0) money | Yes — FK reference |
-| `public.invoice_items` | uuid PK, int qty | Yes — returned_qty added |
-| `public.profiles` | uuid PK, uuid business_id | Yes — base precondition |
-| `public.riders` | uuid PK, uuid business_id | Yes — base precondition |
-| `public.delivery_events` | uuid PK, uuid business_id | Yes — idempotency_key added |
-| `public.rider_cash_ledger` | uuid PK, uuid business_id | Yes — idempotency_key + settlement_batch_id |
+- Starting HEAD: `a3e4714c292884cbf5ee0abf199d987c036388e6`
+- Branch: `fix/backend-stock-recovery`
+- Interrupted work: only `00014_phase1_foundation.sql` was modified. Its valid invoice-ID correction was incomplete, incorrectly changed UUID business/document IDs to text, and included a pasted `REPLACE` artifact. No unrelated temporary files were present.
 
-## Prisma/Local vs Supabase Split
+## Verified production identifier map
 
-| Model/Table | Prisma (SQLite/local) | Supabase Production |
-|---|---|---|
-| AccountCategory | Full model with parentId | No production table — exists only in Prisma/old migrations |
-| Account | Full model with isSystem | No production table — exists only in Prisma/old migrations |
-| CommissionEvent | business+idempotencyKey unique | Business-scoped unique index |
-| IdentitySequence | @@unique([businessId, prefix]) | Composite PK matching |
-| SalesReturn/SaleReturnLine | @@map to sale_return_documents/lines | Same names, uuid types |
+| Table / column | Type | Evidence used |
+| --- | --- | --- |
+| `businesses.id` | `uuid` | Verified production fact |
+| `invoices.business_id` | `uuid` | Verified production fact |
+| `invoices.id` | `text` | Verified production fact |
+| `invoice_items.business_id` | `uuid` | Production schema map |
+| `invoice_items.id` | `text`, single-column PK | Historical invoice-item definition plus production PK fact |
+| `products.id`, `profiles.id`, `riders.id` | `uuid` | Production schema map |
+| `delivery_events.id`, `rider_cash_ledger.id` | `uuid` | Production schema map |
 
-## Removed Invalid Assumptions
+## Repairs
 
-1. **`public.business` (singular)** — replaced with `public.businesses`
-2. **`public.accounts`** — removed entirely (no production table)
-3. **`public.account_categories`** — removed entirely (no production table)
-4. **`public.delivery_orders`** — removed (no production table; uses delivery_events instead)
-5. **`public.delivery_status_events`** — removed (no production table)
-6. **`public.rider_cod_submissions`** — removed (no production table)
-7. **`redacted` `original_invoice_item_id` on `invoice_items`** — removed redundant self-relation
-8. **`is_system` on `accounts`** — removed (no accounts table)
-9. **`parent_id` on `account_categories`** — removed (no account_categories table)
-10. **`delivery_orders` qty/is_settled fields** — removed
-11. **CommissionEvent global idempotency index** — replaced with business-scoped unique index
-12. **SELECT policies on new tables** — removed; server-only containment (RPCs only)
-13. **Rider Held COD account** — removed (no accounts table in production)
+- `sale_return_documents` keeps UUID `id` and `business_id`; `original_invoice_id` is `text`.
+- Its deterministic `sale_return_documents_invoice_fkey` is exactly `(business_id, original_invoice_id) -> invoices(business_id, id) ON DELETE RESTRICT`; no single-column invoice FK exists.
+- `sale_return_lines.original_invoice_item_id` is `text` and retains its verified single-column FK to `invoice_items(id)`.
+- `commission_events.business_id` is UUID; its salesman, invoice, invoice-item, and original-invoice-item trace IDs are text. Only the verified business FK is added.
+- The migration now preflights the production map and required invoice/invoice-item key shapes before DDL. Inspection SQL is read-only and verifies types, key definitions, exact composite FK definition, and FK type compatibility.
 
-## Exact Migration Objects Retained
+## Files changed
 
-- `public.products.commission_rate` (numeric(20,0))
-- `public.invoice_items.returned_qty` (int, cached aggregate)
-- `public.sale_return_documents` (uuid PK, business_id uuid, idempotency_key)
-- `public.sale_return_lines` (uuid PK, business_id uuid, original_invoice_item_id uuid FK)
-- `public.commission_events` (uuid PK, business_id uuid, business-scoped idempotency)
-- `public.identity_sequences` (business_id uuid, composite PK)
-- `public.delivery_events.idempotency_key` + unique index
-- `public.rider_cash_ledger.idempotency_key` + settlement_batch_id
+- `supabase/migrations/00014_phase1_foundation.sql`
+- `supabase/migrations/00014_phase1_foundation_inspect.sql`
+- `tests/phase1-foundation.test.ts`
+- This reconciliation report
 
-## Exact Objects Deferred (Phase 2+)
+`prisma/schema.prisma` was reviewed but not changed: the Phase 1 identifier fields are already represented as `String`, matching both UUID and text database values at the Prisma layer; its invoice-related fields therefore need no semantic change.
 
-- AccountCategory.parent_id — deferred to accounting phase when real chart of accounts is designed
-- Account.is_system — deferred
-- Rider Held COD account — deferred to accounting/voucher integration (Phase 3)
-- delivery_orders — not created (no production need)
-- CompensationEvent accounting integration — deferred
+## Validation
 
-## Type Corrections
+- Focused Phase 1 test: `npx tsx --test tests/phase1-foundation.test.ts` passed (52 assertions/tests).
+- `npx prisma format`, `npx prisma validate`, `npx prisma generate`, and `npx tsc --noEmit`: passed.
+- `git diff --check`: passed.
+- Migration was **not applied** and no production data was changed.
 
-- All PKs: `uuid` (was `text`)
-- All `business_id` FKs: `uuid not null references public.businesses(id)` (was `text references public.business(id)`)
-- Commission money fields: `numeric(20,0)` (was `bigint` for SQL, `BigInt` in Prisma)
-- `return_no` and `idempotency_key` on sale_return_documents: `text not null` (was `text not null default gen_random_uuid()::text`)
+## Commit and push
 
-## RLS Strategy
+- Commit SHA: pending commit.
+- Push result: pending push.
 
-- All new tables: RLS enabled
-- `anon` and `authenticated`: all privileges revoked
-- `service_role`: all privileges granted
-- No SELECT policies created — client access through RPCs only (server-only containment)
+## Next action
 
-## Tests/Results
-
-- **50 tests run, 50 passed, 0 failed**
-- Verified: production base tables required, Prisma-only tables absent, UUID types, business-scoped idempotency, no stale Prisma-only DDL, server-only RLS containment
-
-## Prisma/TypeScript Result
-
-- `npx prisma format` — passed
-- `npx prisma validate` — passed
-- `npx tsc --noEmit` — passed (0 errors)
-
-## Migration Readiness Verdict
-
-**READY** — corrected migration is additive, transactional, and references only proven production tables.
-
-## Confirmation: Migration NOT Applied
-
-Migration `00014` has NOT been applied to the Supabase project. The corrected SQL is ready for review and inspection-run first.
-
-## Next Action
-
-Run the corrected inspection SQL on project `ebcebxwpddltiwrqybqc` to verify production schema alignment before approval.
+After review, run the corrected migration once in Supabase project `ebcebxwpddltiwrqybqc`.
