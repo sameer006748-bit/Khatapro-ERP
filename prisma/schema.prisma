@@ -458,31 +458,28 @@ model Invoice {
 }
 
 model InvoiceItem {
-  id                    String            @id @default(cuid())
-  businessId            String
-  business              Business          @relation(fields: [businessId], references: [id])
-  invoiceId             String
-  invoice               Invoice           @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
-  productId             String?
-  product               Product?          @relation(fields: [productId], references: [id], onDelete: SetNull)
-  productName           String
-  qty                   Int
-  unitPrice             BigInt
-  lineTotal             BigInt
-  isTemporary           Boolean           @default(false)
-  stockMovementId       String?
+  id               String            @id @default(cuid())
+  businessId       String
+  business         Business          @relation(fields: [businessId], references: [id])
+  invoiceId        String
+  invoice          Invoice           @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  productId        String?
+  product          Product?          @relation(fields: [productId], references: [id], onDelete: SetNull)
+  productName      String
+  qty              Int
+  unitPrice        BigInt
+  lineTotal        BigInt
+  isTemporary      Boolean           @default(false)
+  stockMovementId  String?
   // Phase 1 foundation for linked return lines.
-  returnedQty           Int               @default(0)
-  originalInvoiceItemId String?
-  originalInvoiceItem   InvoiceItem?      @relation("InvoiceItemReturnLink", fields: [originalInvoiceItemId], references: [id])
-  returnLines           InvoiceItem[]     @relation("InvoiceItemReturnLink")
-  salesReturnLines      SaleReturnLine[]
-  commissionEvents      CommissionEvent[]
-  createdAt             DateTime          @default(now())
+  // returnedQty is a CACHED AGGREGATE; sale_return_lines is the auditable source.
+  returnedQty      Int               @default(0)
+  salesReturnLines SaleReturnLine[]
+  commissionEvents CommissionEvent[]
+  createdAt        DateTime          @default(now())
 
   @@index([invoiceId])
   @@index([productId])
-  @@index([originalInvoiceItemId])
 }
 
 model PaymentAllocation {
@@ -731,15 +728,17 @@ model CommissionEvent {
   paidAmount            BigInt      @default(0)
   status                String // calculated, payable, paid, reversed
   allocationId          String?
-  idempotencyKey        String?     @unique
+  // In Supabase production, uniqueness is scoped by (business_id, idempotency_key)
+  // via a partial unique index. For local SQLite, global unique is used.
+  idempotencyKey        String?
   isOwnerOnly           Boolean     @default(false)
   createdAt             DateTime    @default(now())
   updatedAt             DateTime    @updatedAt
 
+  @@unique([businessId, idempotencyKey])
   @@index([businessId, invoiceId])
   @@index([salesmanId])
   @@index([invoiceItemId])
-  @@index([idempotencyKey])
 }
 
 model IdentitySequence {

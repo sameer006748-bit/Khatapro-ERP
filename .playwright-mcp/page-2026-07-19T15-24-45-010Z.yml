@@ -1,0 +1,10 @@
+- generic [active] [ref=f3e1]:
+  - generic [ref=f3e2]: LOADING…
+  - region "Notifications alt+T"
+  - alert [ref=f3e4]
+  - generic [ref=f3e6]:
+    - generic [ref=f3e10]:
+      - paragraph [ref=f3e11]: Install KhataPro ERP
+      - paragraph [ref=f3e12]: Add to home screen for quick access.
+    - button "Dismiss" [ref=f3e13]: ✕
+    - button "Install" [ref=f3e14]

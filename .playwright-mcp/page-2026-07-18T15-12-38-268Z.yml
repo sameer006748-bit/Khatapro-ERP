@@ -1,0 +1,41 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e85]:
+    - generic [ref=e92]:
+      - generic [ref=e93]: KhataPro ERP
+      - generic [ref=e94]: Accounting-first
+    - generic [ref=e95]:
+      - button "Back to sign in" [ref=e96]
+      - heading "Register first Owner/Admin" [level=2] [ref=e99]
+      - paragraph [ref=e100]: This account becomes the business Owner. After this, public registration is closed.
+      - alert [ref=e101]:
+        - generic [ref=e105]: You are bootstrapping the system. Choose a strong password — it controls full business access.
+      - generic [ref=e106]:
+        - generic [ref=e107]:
+          - generic [ref=e108]: Business name
+          - textbox "e.g. Karachi Garments" [ref=e109]
+        - generic [ref=e110]:
+          - generic [ref=e111]: Your name
+          - textbox [ref=e112]
+        - generic [ref=e113]:
+          - generic [ref=e114]: Email
+          - textbox [ref=e115]
+        - generic [ref=e116]:
+          - generic [ref=e117]: Password
+          - textbox [ref=e118]
+          - paragraph [ref=e119]: Minimum 6 characters.
+        - generic [ref=e120]:
+          - generic [ref=e121]: Phone (optional)
+          - textbox [ref=e122]
+        - button "Create Owner & business" [ref=e123]
+    - paragraph [ref=e124]: © 2026 KhataPro ERP
+  - region "Notifications alt+T"
+  - generic [ref=e60] [cursor=pointer]:
+    - button "Open Next.js Dev Tools" [ref=e70]
+    - generic [ref=e74]:
+      - button "Open issues overlay" [ref=e75]:
+        - generic [ref=e76]:
+          - generic [ref=e77]: "0"
+          - generic [ref=e78]: "1"
+        - generic [ref=e79]: Issue
+      - button "Collapse issues badge" [ref=e80]
+  - alert [ref=e69]

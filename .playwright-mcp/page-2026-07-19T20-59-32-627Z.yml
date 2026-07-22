@@ -1,0 +1,160 @@
+- generic:
+  - generic:
+    - banner:
+      - generic: KhataPro ERP
+      - generic:
+        - generic: Supabase live
+        - generic: 20/07/2026, 01:58:25
+        - button: Sign out
+    - generic:
+      - complementary:
+        - navigation:
+          - generic:
+            - button:
+              - generic: Home
+            - generic:
+              - button:
+                - generic: Daily Work
+              - generic:
+                - generic:
+                  - button:
+                    - generic: Counter Sale
+                  - button:
+                    - generic: Online Sale
+                  - button:
+                    - generic: OFC Sale
+                  - button:
+                    - generic: Sales List
+                  - button:
+                    - generic: Delivery / Riders
+                  - button:
+                    - generic: Purchase Bills
+                  - button:
+                    - generic: Vendors
+                  - button:
+                    - generic: Add Expense
+                  - button:
+                    - generic: Salesman Reports
+            - generic:
+              - button:
+                - generic: Money
+            - button:
+              - generic: Inventory
+            - generic:
+              - button:
+                - generic: Advanced Accounting
+            - generic:
+              - button:
+                - generic: Settings
+        - generic:
+          - generic:
+            - generic:
+              - generic: B
+              - generic:
+                - generic: Bilal Khan
+                - generic: owner@test.local
+      - main:
+        - generic:
+          - generic:
+            - generic:
+              - heading [level=1]: Online Sale
+              - generic:
+                - heading [level=2]: Customer
+                - generic:
+                  - textbox:
+                    - /placeholder: Name *
+                    - text: QA RETEST CUSTOMER
+                  - textbox:
+                    - /placeholder: Phone *
+                    - text: "03000000000"
+                  - textbox:
+                    - /placeholder: Address *
+                    - text: QA RETEST ADDRESS
+                  - textbox:
+                    - /placeholder: City
+                - generic:
+                  - generic:
+                    - generic: Source
+                    - combobox:
+                      - generic: WhatsApp
+                - generic:
+                  - generic: Discount (Rs, optional)
+                  - textbox:
+                    - /placeholder: "0"
+              - generic:
+                - generic:
+                  - heading [level=2]: Items
+                  - button: Add
+                - generic:
+                  - generic:
+                    - generic:
+                      - combobox [expanded]:
+                        - generic: Product…
+                    - spinbutton: "1"
+                    - generic:
+                      - textbox:
+                        - /placeholder: Rs
+                      - button
+              - generic:
+                - heading [level=2]: Delivery
+                - generic:
+                  - generic:
+                    - generic: Delivery Fee (Rs)
+                    - textbox:
+                      - /placeholder: "0"
+                  - generic:
+                    - generic: Rider Earning (Rs)
+                    - textbox:
+                      - /placeholder: "0"
+                  - generic:
+                    - generic: Company Income (Rs)
+                    - textbox:
+                      - /placeholder: "0"
+              - generic:
+                - heading [level=2]: Advance Payment
+                - generic:
+                  - generic:
+                    - generic: Advance Received (Rs)
+                    - textbox:
+                      - /placeholder: "0"
+                  - generic:
+                    - generic: Payment Account
+                    - combobox
+              - generic:
+                - heading [level=2]: Reconciled Totals
+                - generic:
+                  - generic: Product Subtotal
+                  - generic: "0"
+                - generic:
+                  - generic: Net Product Total
+                  - generic: "0"
+                - generic:
+                  - generic: Customer Grand Total
+                  - generic: Rs 0
+                - generic:
+                  - generic: Advance Received
+                  - generic: "0"
+                - generic:
+                  - generic: Net Advance
+                  - generic: "0"
+                - generic:
+                  - generic: Outstanding
+                  - generic: "0"
+                - generic:
+                  - generic: COD Expected
+                  - generic: Rs 0
+              - button [disabled]: Post Online Sale
+  - region "Notifications alt+T"
+  - alert
+  - generic:
+    - generic:
+      - generic:
+        - paragraph: Install KhataPro ERP
+        - paragraph: Add to home screen for quick access.
+      - button: ✕
+      - button: Install
+  - listbox [ref=f1e219]:
+    - option "QA TEST FABRIC 01" [active] [ref=f1e220]
+    - option "QA TEST FABRIC 01" [ref=f1e223]
+    - option "QA TEST NEGATIVE STOCK 01" [ref=f1e226]
+    - option "QA TEST TEMP ITEM 01" [ref=f1e229]

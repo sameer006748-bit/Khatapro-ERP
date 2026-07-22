@@ -4,6 +4,15 @@
  *
  * Tests inspect exact Prisma schema lines and migration 00014 SQL.
  * No database runtime behavior is tested here.
+ *
+ * CORRECTED FOR PRODUCTION SCHEMA:
+ * - Uses businesses (not business)
+ * - No Prisma-only tables (accounts, account_categories, delivery_orders,
+ *   delivery_status_events, rider_cod_submissions)
+ * - UUID types for PKs and FKs
+ * - Business-scoped idempotency
+ * - Server-only RLS containment (no SELECT policies)
+ * - Rider foundation uses delivery_events and rider_cash_ledger
  */
 import { strict as assert } from 'node:assert'
 import { readFile } from 'node:fs/promises'
@@ -26,43 +35,37 @@ test('product model has commissionrate as nullable bigint', () => {
 })
 
 test('migration adds commission_rate with non-negative CHECK', () => {
-  assert.ok(MIGRATION_14.includes('commission_rate bigint'), 'column must be bigint')
+  assert.ok(MIGRATION_14.includes('commission_rate numeric(20,0)'), 'column must be numeric(20,0)')
   assert.ok(MIGRATION_14.includes('commission_rate_non_negative'), 'CHECK constraint name must exist')
   assert.ok(MIGRATION_14.includes('commission_rate is null or commission_rate >= 0'), 'CHECK must allow NULL or >= 0')
 })
 
 test('commission rate is whole-unit money, not floating-point', () => {
   assert.ok(!PRISMA_SCHEMA.includes('commissionrate float'), 'must not be Float')
-  assert.ok(!MIGRATION_14.includes('commission_rate numeric'), 'must not be numeric/decimal')
   assert.ok(!MIGRATION_14.includes('commission_rate real'), 'must not be real/float8')
 })
 
 // ==========================================================================
-// System account foundation
+// System account foundation — REMOVED (no accounts table in production)
 // ==========================================================================
-test('no hardcoded system business_id in migration', () => {
-  assert.ok(!MIGRATION_14.includes("business_id = 'system'"), 'no literal system business_id')
+test('no accounts table references in migration 00014', () => {
+  assert.ok(!MIGRATION_14.includes('public.accounts'), 'migration must not reference accounts table')
+  assert.ok(!MIGRATION_14.includes('is_system'), 'migration must not add is_system column')
+  assert.ok(!MIGRATION_14.includes('insert into public.accounts'), 'no INSERT into accounts')
 })
 
-test('Rider Held COD account is NOT created by 00014', () => {
-  assert.ok(!MIGRATION_14.includes('insert into public.accounts'), 'no INSERT into accounts — seed removed')
-})
-
-test('accounts table receives is_system boolean column', () => {
-  assert.ok(MIGRATION_14.includes('is_system boolean') || MIGRATION_14.includes('is_system bool'), 'migration must add is_system to accounts')
-  assert.ok(PRISMA_SCHEMA.includes('issystem'), 'Prisma model must have isSystem field')
-})
-
-test('existing accounts default to non-system', () => {
-  assert.ok(MIGRATION_14.includes('is_system') && MIGRATION_14.includes('default false'), 'default must be false so existing accounts are unaffected')
+test('no account_categories references in migration 00014', () => {
+  assert.ok(!MIGRATION_14.includes('public.account_categories'), 'migration must not reference account_categories')
+  assert.ok(!MIGRATION_14.includes('parent_id'), 'migration must not add parent_id to account_categories')
 })
 
 // ==========================================================================
 // Return foundation
 // ==========================================================================
-test('return lineage: originalInvoiceItemId on InvoiceItem', () => {
-  assert.ok(PRISMA_SCHEMA.includes('originalinvoiceitemid'), 'Prisma must include originalInvoiceItemId')
-  assert.ok(MIGRATION_14.includes('original_invoice_item_id'), 'migration must add original_invoice_item_id')
+test('return lineage: originalInvoiceItemId on SaleReturnLine, NOT on InvoiceItem', () => {
+  assert.ok(PRISMA_SCHEMA.includes('model salereturnline') && PRISMA_SCHEMA.includes('originalinvoiceitemid'), 'SaleReturnLine must include originalInvoiceItemId')
+  const invItemBlock = PRISMA_SCHEMA.slice(PRISMA_SCHEMA.indexOf('model invoiceitem'), PRISMA_SCHEMA.indexOf('model paymentallocation'))
+  assert.ok(!invItemBlock.includes('originalinvoiceitemid'), 'InvoiceItem must NOT have originalInvoiceItemId — sale_return_lines has the relation')
 })
 
 test('returnedQty is documented as cached aggregate', () => {
@@ -84,6 +87,7 @@ test('return document idempotency is unique within a business', () => {
 })
 
 test('return lines have immutable original-invoice relationships and quantities', () => {
+  assert.ok(MIGRATION_14.includes('references public.businesses(id) on delete restrict'), 'return document must reference businesses')
   assert.ok(MIGRATION_14.includes('references public.invoices(id) on delete restrict'), 'return document must retain original invoice')
   assert.ok(MIGRATION_14.includes('references public.invoice_items(id) on delete restrict'), 'return line must retain original invoice item')
   assert.ok(MIGRATION_14.includes('sale_return_lines_returned_qty_positive'), 'return quantities must be positive')
@@ -113,9 +117,10 @@ test('CommissionEvent money fields are all BigInt', () => {
   }
 })
 
-test('CommissionEvent has unique idempotencyKey', () => {
-  assert.ok(PRISMA_SCHEMA.includes('idempotencykey') && PRISMA_SCHEMA.includes('@unique'), 'idempotencyKey must be @unique')
-  assert.ok(MIGRATION_14.includes('commission_events_idempotency_key_idx'), 'migration must create unique index')
+test('CommissionEvent has business-scoped idempotency', () => {
+  assert.ok(PRISMA_SCHEMA.includes('@@unique([businessid, idempotencykey])'), 'idempotencyKey must be business-scoped unique')
+  assert.ok(MIGRATION_14.includes('commission_events_business_idempotency_key_idx'), 'migration must create business-scoped unique index')
+  assert.ok(!MIGRATION_14.includes('commission_events_idempotency_key_idx'), 'old global idempotency index must be removed')
 })
 
 test('CommissionEvent has required indexes', () => {
@@ -137,6 +142,10 @@ test('identity_sequences table has composite PK in migration', () => {
   assert.ok(MIGRATION_14.includes('primary key (business_id, prefix)'), 'migration PK must match Prisma unique')
 })
 
+test('identity_sequences references businesses with uuid FK', () => {
+  assert.ok(MIGRATION_14.includes('references public.businesses(id)'), 'FK must reference businesses')
+})
+
 test('existing shared sale invoice sequence is untouched', () => {
   const invModel = PRISMA_SCHEMA.slice(PRISMA_SCHEMA.indexOf('model invoice {'), PRISMA_SCHEMA.indexOf('model invoiceitem'))
   assert.ok(invModel.includes('invoiceno'), 'invoiceNo field must remain')
@@ -144,33 +153,31 @@ test('existing shared sale invoice sequence is untouched', () => {
 })
 
 // ==========================================================================
-// Account category parent
+// Account category parent — REMOVED (no account_categories in production)
 // ==========================================================================
-test('account_categories has parent_id with self-parent CHECK', () => {
-  assert.ok(MIGRATION_14.includes('parent_id text'), 'migration must add parent_id')
-  assert.ok(MIGRATION_14.includes('account_categories_no_self_parent'), 'self-parent constraint must exist')
-})
-
-test('AccountCategory in Prisma has parentId with hierarchy relation', () => {
-  assert.ok(PRISMA_SCHEMA.includes('parentid'), 'Prisma must have parentId')
-  assert.ok(PRISMA_SCHEMA.includes('accountcategoryhierarchy'), 'self-referencing relation must exist')
+test('no account_categories.parent_id in migration 00014', () => {
+  assert.ok(!MIGRATION_14.includes('account_categories.parent_id'), 'migration must not add parent_id to account_categories')
+  assert.ok(!MIGRATION_14.includes('account_categories_no_self_parent'), 'self-parent constraint must not exist')
 })
 
 // ==========================================================================
-// Rider foundation
+// Rider foundation — uses real production tables
 // ==========================================================================
-test('delivery_orders has qty fields for partial delivery/return', () => {
-  assert.ok(MIGRATION_14.includes('ordered_qty'), 'ordered_qty must exist')
-  assert.ok(MIGRATION_14.includes('delivered_qty'), 'delivered_qty must exist')
-  assert.ok(MIGRATION_14.includes('returned_qty'), 'returned_qty on delivery_orders must exist')
+test('rider foundation uses delivery_events and rider_cash_ledger, not delivery_orders', () => {
+  assert.ok(MIGRATION_14.includes('public.delivery_events'), 'migration must reference delivery_events')
+  assert.ok(MIGRATION_14.includes('public.rider_cash_ledger'), 'migration must reference rider_cash_ledger')
+  assert.ok(!MIGRATION_14.includes('public.delivery_orders'), 'migration must NOT reference delivery_orders')
+  assert.ok(!MIGRATION_14.includes('public.delivery_status_events'), 'migration must NOT reference delivery_status_events')
+  assert.ok(!MIGRATION_14.includes('public.rider_cod_submissions'), 'migration must NOT reference rider_cod_submissions')
 })
 
-test('delivery_status_events has idempotency_key', () => {
+test('delivery_events has idempotency_key', () => {
   assert.ok(MIGRATION_14.includes('delivery_events_idempotency_key_idx'), 'delivery event idempotency index must exist')
 })
 
-test('rider_cod_submissions has idempotency_key', () => {
-  assert.ok(MIGRATION_14.includes('cod_submissions_idempotency_key_idx'), 'settlement idempotency index must exist')
+test('rider_cash_ledger has idempotency_key and settlement_batch_id', () => {
+  assert.ok(MIGRATION_14.includes('rider_cash_ledger_idempotency_key_idx'), 'rider cash ledger idempotency index must exist')
+  assert.ok(MIGRATION_14.includes('rider_cash_ledger_settlement_batch_idx'), 'rider cash ledger settlement batch index must exist')
 })
 
 // ==========================================================================
@@ -201,9 +208,8 @@ test('00014 is wrapped in transaction', () => {
 
 test('every ALTER target is explicitly verified before DDL', () => {
   const verifiedTargets = [
-    'public.products', 'public.invoice_items', 'public.account_categories',
-    'public.accounts', 'public.delivery_orders', 'public.delivery_status_events',
-    'public.rider_cod_submissions',
+    'public.products', 'public.invoice_items',
+    'public.delivery_events', 'public.rider_cash_ledger',
   ]
   for (const target of verifiedTargets) {
     assert.ok(MIGRATION_14.includes(`to_regclass('${target}')`), `${target} must be a required base table`)
@@ -326,17 +332,8 @@ test('migration 00014 avoids unsafe ::regclass in DO blocks', () => {
 
 test('inspection SQL never selects from Phase 1 application tables', () => {
   const phase1Tables = [
-    'products',
-    'invoice_items',
-    'sale_return_documents',
-    'sale_return_lines',
-    'commission_events',
-    'identity_sequences',
-    'account_categories',
-    'accounts',
-    'delivery_orders',
-    'delivery_status_events',
-    'rider_cod_submissions',
+    'products', 'invoice_items', 'sale_return_documents', 'sale_return_lines',
+    'commission_events', 'identity_sequences', 'delivery_events', 'rider_cash_ledger',
   ]
   for (const t of phase1Tables) {
     const bad = `from public.${t}`
@@ -347,85 +344,51 @@ test('inspection SQL never selects from Phase 1 application tables', () => {
 
 test('inspection SQL covers every Phase 1 object from migration 00014', () => {
   const required = [
-    'products.commission_rate',
-    'products.commission_rate_non_negative',
+    'products.commission_rate', 'products.commission_rate_non_negative',
     'invoice_items.returned_qty',
-    'invoice_items.original_invoice_item_id',
-    'invoice_items_original_idx',
-    'base table: products',
-    'base table: invoice_items',
-    'base table: business',
-    'base table: invoices',
-    'sale_return_documents table',
-    'sale_return_documents original invoice relation',
+    'base table: businesses', 'base table: products', 'base table: invoices',
+    'base table: invoice_items', 'base table: profiles', 'base table: riders',
+    'base table: delivery_events', 'base table: rider_cash_ledger',
+    'sale_return_documents table', 'sale_return_documents original invoice fk',
     'sale_return_documents idempotency constraint',
-    'sale_return_documents original invoice index',
-    'sale_return_documents rls',
+    'sale_return_documents original invoice index', 'sale_return_documents rls',
     'sale_return_documents service_role insert',
-    'sale_return_lines table',
-    'sale_return_lines original invoice item relation',
-    'sale_return_lines returned quantity',
-    'sale_return_lines document relation',
-    'sale_return_lines rls',
+    'sale_return_lines table', 'sale_return_lines original invoice item fk',
+    'sale_return_lines returned_qty positive constraint', 'sale_return_lines rls',
     'sale_return_lines service_role insert',
-    'commission_events table',
-    'commission_events idempotency index',
-    'commission_events biz-invoice index',
-    'commission_events salesman index',
-    'commission_events invoice-item index',
-    'commission_events rls',
-    'commission_events_select_own',
-    'commission_events anon select',
-    'commission_events anon insert',
-    'commission_events authenticated select',
-    'commission_events authenticated insert',
-    'commission_events service_role select',
+    'commission_events table', 'commission_events business-scoped idempotency index',
+    'commission_events biz-invoice index', 'commission_events salesman index',
+    'commission_events invoice-item index', 'commission_events rls',
+    'commission_events anon select', 'commission_events anon insert',
+    'commission_events authenticated select', 'commission_events authenticated insert',
     'commission_events service_role insert',
-    'identity_sequences table',
-    'identity_sequences rls',
-    'identity_sequences_select_own',
-    'identity_sequences anon select',
-    'identity_sequences anon insert',
-    'identity_sequences authenticated select',
-    'identity_sequences authenticated insert',
-    'identity_sequences service_role select',
-    'identity_sequences service_role insert',
-    'account_categories.parent_id',
-    'account_categories parent index',
-    'account_categories_no_self_parent',
-    'accounts.is_system',
-    'delivery_orders.is_settled',
-    'delivery_orders.ordered_qty',
-    'delivery_orders.delivered_qty',
-    'delivery_orders.returned_qty',
-    'delivery_orders_settled_idx',
-    'delivery_status_events.idempotency_key',
-    'delivery_events_idempotency_key_idx',
-    'rider_cod_submissions.idempotency_key',
-    'cod_submissions_idempotency_key_idx',
-    'system accounts',
+    'identity_sequences table', 'identity_sequences composite pk',
+    'identity_sequences rls', 'identity_sequences anon select',
+    'identity_sequences anon insert', 'identity_sequences authenticated select',
+    'identity_sequences authenticated insert', 'identity_sequences service_role insert',
+    'delivery_events.idempotency_key', 'delivery_events_idempotency_key_idx',
+    'rider_cash_ledger.idempotency_key', 'rider_cash_ledger_idempotency_key_idx',
+    'rider_cash_ledger.settlement_batch_id', 'rider_cash_ledger_settlement_batch_idx',
   ]
   for (const r of required) {
     assert.ok(INSPECT_14.includes(r), `inspection SQL must include row for ${r}`)
   }
 })
 
-test('migration preserves unverified base tables as guarded contracts', () => {
-  const guarded = [
-    'public.products',
-    'public.invoice_items',
-    'public.sale_return_documents',
-    'public.sale_return_lines',
-    'public.commission_events',
-    'public.identity_sequences',
-    'public.account_categories',
-    'public.accounts',
-    'public.delivery_orders',
-    'public.delivery_status_events',
-    'public.rider_cod_submissions',
+test('migration requires only production base tables', () => {
+  const required = [
+    'public.businesses', 'public.products', 'public.invoices',
+    'public.invoice_items', 'public.profiles', 'public.riders',
+    'public.delivery_events', 'public.rider_cash_ledger',
   ]
-  for (const t of guarded) {
-    assert.ok(MIGRATION_14.includes(t), `migration must retain guarded table reference: ${t}`)
+  for (const t of required) {
+    assert.ok(MIGRATION_14.includes(t), `migration must require production table: ${t}`)
+  }
+  // Must NOT require Prisma-only tables
+  assert.ok(!MIGRATION_14.match(/to_regclass\('public\.business'\)/), 'migration must not require public.business')
+  assert.ok(MIGRATION_14.match(/to_regclass\('public\.businesses'\)/), 'migration must require public.businesses')
+  for (const t of ['public.accounts', 'public.account_categories', 'public.delivery_orders', 'public.delivery_status_events', 'public.rider_cod_submissions']) {
+    assert.ok(!MIGRATION_14.includes(t), `migration must NOT require Prisma-only table: ${t}`)
   }
   assert.ok(MIGRATION_14.includes('aborting without changes'), 'unproven mappings must abort safely')
 })
@@ -442,18 +405,11 @@ test('new Phase 1 tables follow server-only containment pattern', () => {
   assert.ok(MIGRATION_14.includes('grant all on public.identity_sequences to service_role'), 'identity_sequences must grant service_role')
 })
 
-test('commission_events has business-scoped SELECT policy', () => {
-  assert.ok(MIGRATION_14.includes('commission_events_select_own on public.commission_events'), 'SELECT policy must exist')
-  assert.ok(MIGRATION_14.includes("business_id = current_setting('app.current_business_id', true)"), 'business_id must match current_business_id')
-})
-
-test('identity_sequences has business-scoped SELECT policy', () => {
-  assert.ok(MIGRATION_14.includes('identity_sequences_select_own on public.identity_sequences'), 'SELECT policy must exist')
-  assert.ok(MIGRATION_14.includes("business_id = current_setting('app.current_business_id', true)"), 'business_id must match current_business_id')
-})
-
-test('delivery_status_events and rider_cod_submissions remain RLS-covered by 00007', () => {
-  assert.ok(MIGRATION_14.includes('delivery_status_events and rider_cod_submissions already have rls from'), 'documentation must note existing RLS')
+test('no SELECT policies on new Phase 1 tables — server-only containment', () => {
+  assert.ok(!MIGRATION_14.includes('commission_events_select_own'), 'no SELECT policy on commission_events')
+  assert.ok(!MIGRATION_14.includes('identity_sequences_select_own'), 'no SELECT policy on identity_sequences')
+  assert.ok(!MIGRATION_14.includes('sale_return_documents_select_own'), 'no SELECT policy on sale_return_documents')
+  assert.ok(!MIGRATION_14.includes('sale_return_lines_select_own'), 'no SELECT policy on sale_return_lines')
 })
 
 test('no unrestricted direct write grants to anon or authenticated on new tables', () => {
@@ -471,4 +427,49 @@ test('no unrestricted direct write grants to anon or authenticated on new tables
   for (const bad of badPatterns) {
     assert.ok(!lines.includes(bad), `forbidden grant found: ${bad}`)
   }
+})
+
+// ==========================================================================
+// UUID type alignment
+// ==========================================================================
+test('new tables use uuid PK type', () => {
+  // The actual SQL has commas after the default clause, so check partial match
+  const pkPattern = /id\s+uuid\s+primary\s+key\s+default\s+gen_random_uuid/gi
+  const matches = MIGRATION_14.match(pkPattern)
+  assert.ok(matches && matches.length >= 3, 'sale_return_documents, sale_return_lines, and commission_events must use uuid PK')
+})
+
+test('new tables use uuid for business_id foreign keys', () => {
+  const fkPattern = /business_id\s+uuid\s+not\s+null\s+references\s+public\.businesses/gi
+  const matches = MIGRATION_14.match(fkPattern)
+  assert.ok(matches && matches.length >= 3, 'business_id must be uuid referencing businesses in at least 3 places')
+})
+
+test('identity_sequences uses uuid business_id', () => {
+  assert.ok(MIGRATION_14.includes('business_id uuid not null references public.businesses(id)'), 'identity_sequences business_id must be uuid')
+})
+
+// ==========================================================================
+// UUID type verification in inspection SQL
+// ==========================================================================
+test('inspection SQL checks uuid types on new tables', () => {
+  assert.ok(INSPECT_14.includes('sale_return_documents uuid pk type'), 'inspection must check uuid PK on sale_return_documents')
+  assert.ok(INSPECT_14.includes('sale_return_documents business_id uuid type'), 'inspection must check uuid business_id on sale_return_documents')
+  assert.ok(INSPECT_14.includes('sale_return_lines uuid pk type'), 'inspection must check uuid PK on sale_return_lines')
+  assert.ok(INSPECT_14.includes('sale_return_lines business_id uuid type'), 'inspection must check uuid business_id on sale_return_lines')
+  assert.ok(INSPECT_14.includes('commission_events uuid pk type'), 'inspection must check uuid PK on commission_events')
+  assert.ok(INSPECT_14.includes('commission_events business_id uuid type'), 'inspection must check uuid business_id on commission_events')
+  assert.ok(INSPECT_14.includes('identity_sequences business_id uuid type'), 'inspection must check uuid business_id on identity_sequences')
+})
+
+// ==========================================================================
+// Prisma-only table absence verification
+// ==========================================================================
+test('inspection SQL verifies Prisma-only tables are absent in production', () => {
+  assert.ok(INSPECT_14.includes('prisma-only table absent: accounts'), 'inspection must check accounts absence')
+  assert.ok(INSPECT_14.includes('prisma-only table absent: account_categories'), 'inspection must check account_categories absence')
+  assert.ok(INSPECT_14.includes('prisma-only table absent: business'), 'inspection must check business absence')
+  assert.ok(INSPECT_14.includes('prisma-only table absent: delivery_orders'), 'inspection must check delivery_orders absence')
+  assert.ok(INSPECT_14.includes('prisma-only table absent: delivery_status_events'), 'inspection must check delivery_status_events absence')
+  assert.ok(INSPECT_14.includes('prisma-only table absent: rider_cod_submissions'), 'inspection must check rider_cod_submissions absence')
 })

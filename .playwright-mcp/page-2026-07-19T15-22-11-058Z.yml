@@ -1,0 +1,104 @@
+- generic:
+  - generic:
+    - banner:
+      - generic: KhataPro ERP
+      - generic:
+        - generic: Supabase live
+        - generic: 19/07/2026, 20:21:46
+        - button: Sign out
+    - generic:
+      - complementary:
+        - navigation:
+          - generic:
+            - button:
+              - generic: Home
+            - generic:
+              - button:
+                - generic: Daily Work
+              - generic:
+                - generic:
+                  - button:
+                    - generic: Counter Sale
+                  - button:
+                    - generic: Online Sale
+                  - button:
+                    - generic: OFC Sale
+                  - button:
+                    - generic: Sales List
+                  - button:
+                    - generic: Delivery / Riders
+                  - button:
+                    - generic: Purchase Bills
+                  - button:
+                    - generic: Vendors
+                  - button:
+                    - generic: Add Expense
+                  - button:
+                    - generic: Salesman Reports
+            - generic:
+              - button:
+                - generic: Money
+            - button:
+              - generic: Inventory
+            - generic:
+              - button:
+                - generic: Advanced Accounting
+            - generic:
+              - button:
+                - generic: Settings
+        - generic:
+          - generic:
+            - generic:
+              - generic: B
+              - generic:
+                - generic: Bilal Khan
+                - generic: owner@test.local
+      - main:
+        - generic:
+          - generic:
+            - generic:
+              - generic:
+                - heading [level=1]: Counter Sale
+                - generic:
+                  - combobox [expanded]:
+                    - generic: Salesman…
+                  - button: Customer
+              - generic:
+                - generic:
+                  - generic:
+                    - generic:
+                      - textbox:
+                        - /placeholder: Search products…
+                    - generic:
+                      - button:
+                        - generic:
+                          - generic: QA TEST FABRIC 01
+                          - generic: "Rs 150 · stock: 2"
+                      - button:
+                        - generic:
+                          - generic: QA TEST FABRIC 01
+                          - generic: "Rs 0 · stock: 0"
+                      - button:
+                        - generic:
+                          - generic: QA TEST NEGATIVE STOCK 01
+                          - generic: "Rs 80 · stock: 0"
+                      - button:
+                        - generic:
+                          - generic: QA TEST TEMP ITEM 01
+                          - generic: "Rs 25 · stock: 1"
+                    - button: + Add temporary item
+                - generic:
+                  - generic:
+                    - generic: Cart (0)
+                    - generic: Click a product to add to cart
+  - region "Notifications alt+T"
+  - alert
+  - generic:
+    - generic:
+      - generic:
+        - paragraph: Install KhataPro ERP
+        - paragraph: Add to home screen for quick access.
+      - button: ✕
+      - button: Install
+  - listbox [ref=e442]:
+    - option "Ali (Salesman)" [active] [ref=e443]

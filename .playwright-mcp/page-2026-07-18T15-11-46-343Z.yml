@@ -1,0 +1,54 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e4]:
+    - complementary [ref=e5]:
+      - generic [ref=e11]:
+        - generic [ref=e12]: KhataPro ERP
+        - generic [ref=e13]: Accounting-first
+      - generic [ref=e14]:
+        - heading "Accounting-first ERP for Pakistani garments & SMB." [level=1] [ref=e15]
+        - paragraph [ref=e16]: Counter, Online, and OFC sales in one shared invoice sequence. Double-entry vouchers posted invisibly behind every business form. PKR · Asia/Karachi. Built for Vercel.
+        - generic [ref=e17]:
+          - generic [ref=e18]:
+            - generic [ref=e19]: Double-entry
+            - generic [ref=e20]: Server-enforced balanced vouchers
+          - generic [ref=e21]:
+            - generic [ref=e22]: Role-based
+            - generic [ref=e23]: Owner · Accountant · Salesman · Rider
+          - generic [ref=e24]:
+            - generic [ref=e25]: Negative stock
+            - generic [ref=e26]: Allowed — sales never blocked
+          - generic [ref=e27]:
+            - generic [ref=e28]: Audit trail
+            - generic [ref=e29]: Every mutation logged
+      - generic [ref=e30]: Phase 1 · Foundation — auth, roles, CoA, business accounts, audit
+    - main [ref=e34]:
+      - generic [ref=e35]:
+        - generic [ref=e36]:
+          - generic [ref=e37]:
+            - heading "Sign in" [level=2] [ref=e38]
+            - paragraph [ref=e39]: Welcome back. Use your KhataPro ERP credentials.
+          - alert [ref=e40]:
+            - generic [ref=e43]:
+              - generic [ref=e44]: "First-run mode:"
+              - text: no Owner exists yet. Sign in if you already have an account, or register as the first Owner/Admin.
+          - generic [ref=e45]:
+            - generic [ref=e46]:
+              - generic [ref=e47]: Email
+              - textbox "Email" [ref=e48]: owner@test.local
+            - generic [ref=e49]:
+              - generic [ref=e50]: Password
+              - textbox "Password" [ref=e51]: password123
+            - button "Signing in…" [disabled]
+          - button "Register as first Owner/Admin" [ref=e54]
+        - paragraph [ref=e55]: © 2026 KhataPro ERP · PKR · Asia/Karachi
+  - region "Notifications alt+T"
+  - generic [ref=e60] [cursor=pointer]:
+    - button "Open Next.js Dev Tools" [ref=e70]
+    - generic [ref=e74]:
+      - button "Open issues overlay" [ref=e75]:
+        - generic [ref=e76]:
+          - generic [ref=e77]: "0"
+          - generic [ref=e78]: "1"
+        - generic [ref=e79]: Issue
+      - button "Collapse issues badge" [ref=e80]
+  - alert [ref=e69]
