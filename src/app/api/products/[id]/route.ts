@@ -20,6 +20,7 @@ const UpdateSchema = z.object({
   isActive: z.boolean().optional(),
   markedForMerge: z.boolean().optional(),
   lowStockThreshold: z.number().int().optional(),
+  commissionRatePaisas: z.string().regex(/^\d+$/).nullable().optional(),
 })
 
 export async function PATCH(
@@ -41,7 +42,7 @@ export async function PATCH(
   }
 
   try {
-    await updateProduct(su.businessId, id, parsed.data)
+    await updateProduct(su.businessId, id, { ...parsed.data, commissionRatePaisas: parsed.data.commissionRatePaisas === undefined ? undefined : parsed.data.commissionRatePaisas === null ? null : BigInt(parsed.data.commissionRatePaisas) })
     return NextResponse.json({ ok: true })
   } catch (error) {
     return safeMutationError({ route: '/api/products/[id]', requestId, errorCode: 'PRODUCT_UPDATE_FAILED', userMessage: 'The product could not be updated.', error })

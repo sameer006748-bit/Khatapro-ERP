@@ -8,10 +8,13 @@ import { getServerSession } from 'next-auth'
 import { z } from 'zod'
 import { authOptions } from '@/lib/auth/authOptions'
 import { loadSessionUser, requirePermission } from '@/lib/auth/permissions'
-import { postSalesReturn } from '@/lib/sales/data-access'
+import { postLinkedSaleReturn } from '@/lib/sales/data-access'
 
 const ReturnSchema = z.object({
+  items: z.array(z.object({ invoiceItemId: z.string().uuid(), qty: z.number().int().positive() })).min(1),
+  refundMode: z.enum(['CREDIT', 'CASH', 'BANK']),
   reason: z.string().max(200).optional(),
+  idempotencyKey: z.string().uuid(),
 })
 
 export async function POST(
@@ -32,17 +35,15 @@ export async function POST(
   }
 
   try {
-    const result = await postSalesReturn(
-      su.businessId,
-      id,
-      new Date(),
-      parsed.data.reason,
-      su.userId,
-    )
-    return NextResponse.json({ ok: true, returnId: result.returnId, voucherId: result.voucherId })
+    const result = await postLinkedSaleReturn({
+      businessId: su.businessId, invoiceId: id, items: parsed.data.items,
+      refundMode: parsed.data.refundMode, reason: parsed.data.reason,
+      idempotencyKey: parsed.data.idempotencyKey,
+    })
+    return NextResponse.json({ ok: true, ...result })
   } catch (e) {
     const msg = (e as Error).message
-    const status = msg.includes('not found') || msg.includes('already returned') ? 400 : 500
+    const status = msg.includes('not found') || msg.includes('exceeds') || msg.includes('cannot') ? 400 : 500
     return NextResponse.json({ error: msg }, { status })
   }
 }

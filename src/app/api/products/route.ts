@@ -33,6 +33,7 @@ const CreateSchema = z.object({
   openingStock: z.number().int().min(0).optional(),
   isTemporary: z.boolean().optional(),
   lowStockThreshold: z.number().int().optional(),
+  commissionRatePaisas: z.string().regex(/^\d+$/).optional(),
   idempotencyKey: z.string().max(128).optional(),
 })
 
@@ -54,6 +55,7 @@ export async function POST(req: Request) {
     const result = await createProduct(su.businessId, {
       ...parsed.data,
       idempotencyKey: parsed.data.idempotencyKey ?? undefined,
+      commissionRatePaisas: parsed.data.commissionRatePaisas === undefined ? undefined : BigInt(parsed.data.commissionRatePaisas),
       createdBy: su.userId,
     })
     return NextResponse.json(

@@ -25,11 +25,12 @@ type Invoice = {
   discount?: string
   total: string
   paidAmount: string
+  status?: string
   isCancelled: boolean
   isReturned: boolean
   memo: string | null
-  items?: Array<{ id: string; productId: string | null; productName: string; qty: number; unitPrice: string; lineTotal: string; isTemporary: boolean }>
-  payments?: Array<{ id: string; accountId: string; accountCode: string; accountName: string; amount: string; isChange: boolean }>
+  items?: Array<{ id: string; productId: string | null; productName: string; qty: number; returnedQty?: number; unitPrice: string; lineTotal: string; isTemporary: boolean }>
+  payments?: Array<{ id: string; accountId?: string; accountCode?: string; accountName: string; amount: string; isChange?: boolean; direction?: string | null; paymentMode?: string | null }>
 }
 
 const TYPE_BADGE: Record<string, string> = {
@@ -43,6 +44,11 @@ export function InvoiceDetailView({ invoiceId }: { invoiceId: string }) {
   const qc = useQueryClient()
   const [returnOpen, setReturnOpen] = useState(false)
   const [returnReason, setReturnReason] = useState('')
+  const [refundMode, setRefundMode] = useState<'CREDIT' | 'CASH' | 'BANK'>('CREDIT')
+  const [returnQty, setReturnQty] = useState<Record<string, number>>({})
+  const [paymentOpen, setPaymentOpen] = useState(false)
+  const [paymentAmount, setPaymentAmount] = useState('')
+  const [paymentMode, setPaymentMode] = useState('CASH')
   const [printOpen, setPrintOpen] = useState(false)
 
   const q = useQuery<{ invoice: Invoice }>({
@@ -57,22 +63,37 @@ export function InvoiceDetailView({ invoiceId }: { invoiceId: string }) {
     mutationFn: async () => {
       const r = await fetch(`/api/sales/${invoiceId}/return`, {
         method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ reason: returnReason || undefined }),
+        body: JSON.stringify({
+          items: Object.entries(returnQty).filter(([, qty]) => qty > 0).map(([invoiceItemId, qty]) => ({ invoiceItemId, qty })),
+          refundMode, reason: returnReason || undefined, idempotencyKey: crypto.randomUUID(),
+        }),
       })
       const j = await r.json()
       if (!r.ok) throw new Error(j?.error ?? 'RETURN_FAILED')
       return j
     },
-    onSuccess: () => {
-      toast.success('Sales return posted. Stock restored. Reversing voucher posted.')
+    onSuccess: (result) => {
+      toast.success(`Return ${result.returnNo ?? ''} posted. Stock restored once.`)
       void qc.invalidateQueries({ queryKey: ['invoice', invoiceId] })
       void qc.invalidateQueries({ queryKey: ['invoices'] })
       void qc.invalidateQueries({ queryKey: ['trial-balance'] })
       void qc.invalidateQueries({ queryKey: ['products'] })
       setReturnOpen(false)
       setReturnReason('')
+      setReturnQty({})
     },
     onError: (e: Error) => toast.error(`Return failed: ${e.message}`),
+  })
+
+  const paymentMut = useMutation({
+    mutationFn: async () => {
+      const r = await fetch(`/api/sales/${invoiceId}/payment`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ amount: paymentAmount, mode: paymentMode, idempotencyKey: crypto.randomUUID() }) })
+      const j = await r.json()
+      if (!r.ok) throw new Error(j?.error ?? 'PAYMENT_FAILED')
+      return j
+    },
+    onSuccess: () => { toast.success('Invoice collection posted.'); void qc.invalidateQueries({ queryKey: ['invoice', invoiceId] }); void qc.invalidateQueries({ queryKey: ['invoices'] }); setPaymentOpen(false); setPaymentAmount('') },
+    onError: (e: Error) => toast.error(`Collection failed: ${e.message}`),
   })
 
   if (!invoiceId) return null
@@ -120,6 +141,7 @@ export function InvoiceDetailView({ invoiceId }: { invoiceId: string }) {
           </div>
           <div className="flex gap-2">
             <PrintInvoiceButton invoiceId={inv.id} label="Print" size="sm" icon={Printer} />
+            {outstanding > 0n && !inv.isCancelled && !inv.isReturned && <Button variant="outline" size="sm" className="press-sm" onClick={() => setPaymentOpen(true)}>Collect payment</Button>}
             {!inv.isReturned && !inv.isCancelled && (
               <Button variant="outline" size="sm" className="press-sm text-amber-700" onClick={() => setReturnOpen(true)}><RotateCcw className="size-3.5" /> Return</Button>
             )}
@@ -143,13 +165,15 @@ export function InvoiceDetailView({ invoiceId }: { invoiceId: string }) {
         <div className="px-5 py-3.5 border-b border-border"><h2 className="text-sm font-semibold text-foreground">Items</h2></div>
         <table className="w-full text-sm">
           <thead><tr className="border-b border-border text-[11px] uppercase tracking-wider text-muted-foreground bg-muted/40">
-            <th className="text-left p-3.5 font-medium">Item</th><th className="text-right p-3.5 font-medium">Qty</th><th className="text-right p-3.5 font-medium">Unit Price</th><th className="text-right p-3.5 font-medium">Total</th>
+            <th className="text-left p-3.5 font-medium">Item</th><th className="text-right p-3.5 font-medium">Sold</th><th className="text-right p-3.5 font-medium">Returned</th><th className="text-right p-3.5 font-medium">Remaining</th><th className="text-right p-3.5 font-medium">Unit Price</th><th className="text-right p-3.5 font-medium">Total</th>
           </tr></thead>
           <tbody>
             {inv.items?.map(it => (
               <tr key={it.id} className="border-b border-border/60 last:border-0">
                 <td className="p-3.5 text-foreground">{it.productName}{it.isTemporary && <span className="ml-2 text-[10px] uppercase bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded">Temp</span>}</td>
                 <td className="p-3.5 text-right" data-num>{it.qty}</td>
+                <td className="p-3.5 text-right" data-num>{it.returnedQty ?? 0}</td>
+                <td className="p-3.5 text-right" data-num>{it.qty - (it.returnedQty ?? 0)}</td>
                 <td className="p-3.5 text-right" data-num>{formatMoney(BigInt(it.unitPrice), false)}</td>
                 <td className="p-3.5 text-right font-medium" data-num>{formatMoney(BigInt(it.lineTotal), false)}</td>
               </tr>
@@ -177,8 +201,8 @@ export function InvoiceDetailView({ invoiceId }: { invoiceId: string }) {
             <tbody>
               {inv.payments.map(p => (
                 <tr key={p.id} className="border-b border-border/60 last:border-0">
-                  <td className="p-3.5 text-foreground">{p.accountName} <span className="text-xs text-muted-foreground" data-num>({p.accountCode})</span></td>
-                  <td className="p-3.5">{p.isChange ? <span className="text-[10px] uppercase bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded">Change</span> : <span className="text-[10px] uppercase bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded">Payment</span>}</td>
+                  <td className="p-3.5 text-foreground">{p.accountName} {p.accountCode && <span className="text-xs text-muted-foreground" data-num>({p.accountCode})</span>}</td>
+                  <td className="p-3.5">{p.direction === 'Paid' ? <span className="text-[10px] uppercase bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded">Refund</span> : <span className="text-[10px] uppercase bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded">Collection</span>}</td>
                   <td className="p-3.5 text-right font-medium" data-num>{formatMoney(BigInt(p.amount))}</td>
                 </tr>
               ))}
@@ -196,13 +220,36 @@ export function InvoiceDetailView({ invoiceId }: { invoiceId: string }) {
       {returnOpen && (
         <div className="fixed inset-0 z-50 bg-foreground/30 backdrop-blur-sm flex items-end sm:items-center justify-center p-4" onClick={() => setReturnOpen(false)}>
           <div className="card-3d p-6 w-full max-w-md sheet-enter" onClick={e => e.stopPropagation()}>
-            <h3 className="text-base font-semibold text-foreground mb-2">Post sales return?</h3>
-            <p className="text-xs text-muted-foreground mb-4">This will post a reversing voucher, restore stock, and mark the invoice as returned. Already-accrued commission will NOT be reversed.</p>
+            <h3 className="text-base font-semibold text-foreground mb-2">Create linked return</h3>
+            <p className="text-xs text-muted-foreground mb-4">Select remaining quantities by original invoice item. This creates a partial or full return and adjusts collection-based commission.</p>
+            <div className="space-y-2 mb-4 max-h-52 overflow-auto">
+              {inv.items?.map(item => {
+                const remaining = item.qty - (item.returnedQty ?? 0)
+                return <div key={item.id} className="grid grid-cols-[1fr_72px] gap-3 items-center text-xs">
+                  <div><div className="text-foreground">{item.productName}</div><div className="text-muted-foreground">Sold {item.qty} · returned {item.returnedQty ?? 0} · remaining {remaining}</div></div>
+                  <input type="number" min="0" max={remaining} value={returnQty[item.id] ?? 0} onChange={e => setReturnQty(q => ({ ...q, [item.id]: Math.max(0, Math.min(remaining, Number.parseInt(e.target.value || '0', 10) || 0)) }))} className="bg-background border border-border rounded px-2 py-1.5 text-sm" />
+                </div>
+              })}
+            </div>
+            <label className="block text-xs text-muted-foreground mb-1">Refund mode</label>
+            <select value={refundMode} onChange={e => setRefundMode(e.target.value as typeof refundMode)} className="w-full bg-background border border-border rounded-lg p-2 text-sm mb-3"><option value="CREDIT">Customer credit (no cash movement)</option><option value="CASH">Cash refund</option><option value="BANK">Bank refund</option></select>
             <textarea value={returnReason} onChange={e => setReturnReason(e.target.value)} placeholder="Reason (optional)" className="w-full bg-background border border-border rounded-lg p-3 text-sm mb-4 min-h-[60px]" />
             <div className="flex justify-end gap-2">
               <Button variant="outline" className="press-sm" onClick={() => setReturnOpen(false)}>Cancel</Button>
-              <Button className="press-md shadow-sm" disabled={returnMut.isPending} onClick={() => returnMut.mutate()}>{returnMut.isPending ? 'Posting…' : 'Confirm return'}</Button>
+              <Button className="press-md shadow-sm" disabled={returnMut.isPending || !Object.values(returnQty).some(q => q > 0)} onClick={() => returnMut.mutate()}>{returnMut.isPending ? 'Posting…' : 'Confirm return'}</Button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {paymentOpen && (
+        <div className="fixed inset-0 z-50 bg-foreground/30 backdrop-blur-sm flex items-end sm:items-center justify-center p-4" onClick={() => setPaymentOpen(false)}>
+          <div className="card-3d p-6 w-full max-w-md" onClick={e => e.stopPropagation()}>
+            <h3 className="text-base font-semibold text-foreground mb-2">Collect against this invoice</h3>
+            <p className="text-xs text-muted-foreground mb-4">Outstanding: {formatMoney(outstanding)}. This allocation is the only receipt path that earns invoice commission.</p>
+            <input inputMode="numeric" value={paymentAmount} onChange={e => setPaymentAmount(e.target.value.replace(/\D/g, ''))} placeholder="Amount in paisas" className="w-full bg-background border border-border rounded-lg p-3 text-sm mb-3" />
+            <select value={paymentMode} onChange={e => setPaymentMode(e.target.value)} className="w-full bg-background border border-border rounded-lg p-2 text-sm mb-4"><option value="CASH">Cash</option><option value="BANK">Bank</option><option value="CARD">Card</option><option value="OTHER">Other</option></select>
+            <div className="flex justify-end gap-2"><Button variant="outline" onClick={() => setPaymentOpen(false)}>Cancel</Button><Button disabled={paymentMut.isPending || !/^\d+$/.test(paymentAmount) || paymentAmount === '0'} onClick={() => paymentMut.mutate()}>{paymentMut.isPending ? 'Posting…' : 'Post collection'}</Button></div>
           </div>
         </div>
       )}

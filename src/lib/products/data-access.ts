@@ -53,6 +53,7 @@ export type ProductRow = {
   isActive: boolean
   markedForMerge: boolean
   lowStockThreshold: number
+  commissionRatePaisas: string | null
   createdAt: string
 }
 
@@ -148,7 +149,7 @@ export async function listProducts(
     const admin = getAdminSupabase()
     // Try with low_stock_threshold column; if it fails (migration not applied
     // yet), retry without it and use default 5.
-    const selectWithThreshold = 'id, name, category_id, unit, sale_price, purchase_price, current_stock, is_temporary, is_active, marked_for_merge, low_stock_threshold, created_at, product_categories(name)'
+    const selectWithThreshold = 'id, name, category_id, unit, sale_price, purchase_price, current_stock, is_temporary, is_active, marked_for_merge, low_stock_threshold, commission_rate, created_at, product_categories(name)'
     const selectWithoutThreshold = 'id, name, category_id, unit, sale_price, purchase_price, current_stock, is_temporary, is_active, marked_for_merge, created_at, product_categories(name)'
     let query = admin.from('products').select(selectWithThreshold as any).eq('business_id', businessId).order('name')
     if (opts?.temporaryOnly) { query = query.eq('is_temporary', true) }
@@ -178,6 +179,7 @@ export async function listProducts(
       isActive: r.is_active,
       markedForMerge: r.marked_for_merge,
       lowStockThreshold: r.low_stock_threshold ?? 5,
+      commissionRatePaisas: r.commission_rate === null || r.commission_rate === undefined ? null : String(r.commission_rate),
       createdAt: r.created_at,
     }))
   }
@@ -203,6 +205,7 @@ export async function listProducts(
     isActive: p.isActive,
     markedForMerge: p.markedForMerge,
     lowStockThreshold: p.lowStockThreshold,
+    commissionRatePaisas: p.commissionRate === null ? null : p.commissionRate.toString(),
     createdAt: p.createdAt.toISOString(),
   }))
 }
@@ -256,6 +259,7 @@ export async function createProduct(
     openingStock?: number
     isTemporary?: boolean
     lowStockThreshold?: number
+    commissionRatePaisas?: bigint | null
     idempotencyKey?: string
     createdBy?: string | null
   },
@@ -311,6 +315,7 @@ export async function createProduct(
         purchase_price: input.purchasePrice ?? 0,
         current_stock: 0,
         is_temporary: input.isTemporary ?? false,
+        commission_rate: input.commissionRatePaisas?.toString() ?? null,
       })
       .select('id')
       .single()
@@ -479,6 +484,7 @@ export async function updateProduct(
     isActive?: boolean
     markedForMerge?: boolean
     lowStockThreshold?: number
+    commissionRatePaisas?: bigint | null
   },
 ): Promise<void> {
   if (await isPhase3Live()) {
@@ -488,6 +494,7 @@ export async function updateProduct(
     if (updates.categoryId !== undefined) patch.category_id = updates.categoryId
     if (updates.salePrice !== undefined) patch.sale_price = updates.salePrice
     if (updates.purchasePrice !== undefined) patch.purchase_price = updates.purchasePrice
+    if (updates.commissionRatePaisas !== undefined) patch.commission_rate = updates.commissionRatePaisas?.toString() ?? null
     if (updates.isTemporary !== undefined) patch.is_temporary = updates.isTemporary
     // low_stock_threshold may not exist in Supabase yet — try anyway, ignore error
     if (updates.lowStockThreshold !== undefined) {

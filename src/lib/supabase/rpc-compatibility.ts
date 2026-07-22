@@ -4,11 +4,11 @@
  * Phase 9 is intentionally not applied. Keep RPC argument construction here so a
  * future schema upgrade requires an explicit, reviewed source change.
  */
-export const CURRENT_DATABASE_PHASE = 8 as const
+export const CURRENT_DATABASE_PHASE = 16 as const
 
 export const CURRENT_DATABASE_CAPABILITIES = {
   salesDiscounts: false,
-  salesIdempotency: false,
+  salesIdempotency: true,
   receiptAllocations: false,
   receiptIdempotency: false,
 } as const
