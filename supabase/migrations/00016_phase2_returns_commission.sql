@@ -11,19 +11,17 @@ declare v_missing text;
 begin
   select string_agg(required_name, ', ' order by required_name) into v_missing
   from (values
+    ('public.businesses', to_regclass('public.businesses')),
+    ('public.profiles', to_regclass('public.profiles')),
+    ('public.products', to_regclass('public.products')),
     ('public.invoices', to_regclass('public.invoices')),
     ('public.invoice_items', to_regclass('public.invoice_items')),
-    ('public.products', to_regclass('public.products')),
     ('public.customers', to_regclass('public.customers')),
     ('public.payments', to_regclass('public.payments')),
-    ('public.profiles', to_regclass('public.profiles')),
-    ('public.salesmen', to_regclass('public.salesmen')),
-    ('public.roles', to_regclass('public.roles')),
-    ('public.permissions', to_regclass('public.permissions')),
-    ('public.role_permissions', to_regclass('public.role_permissions')),
     ('public.sale_return_documents', to_regclass('public.sale_return_documents')),
     ('public.sale_return_lines', to_regclass('public.sale_return_lines')),
-    ('public.commission_events', to_regclass('public.commission_events'))
+    ('public.commission_events', to_regclass('public.commission_events')),
+    ('public.identity_sequences', to_regclass('public.identity_sequences'))
   ) required(required_name, relation_name)
   where relation_name is null;
   if v_missing is not null then
@@ -45,8 +43,8 @@ create unique index if not exists payments_business_idempotency_key_idx
 create index if not exists payments_business_invoice_idx
   on public.payments(business_id, invoice_id) where invoice_id is not null;
 
--- The API invokes RPCs through the service role.  Direct authenticated callers
--- are also checked against the active profile and role-permission map below.
+-- The API invokes RPCs through the service role. Direct authenticated callers
+-- are checked solely through the verified active-profile and helper model.
 -- auth.uid() is NULL for the service-role path, which is intentionally allowed;
 -- that role has no client credential and the HTTP routes perform the same check.
 create or replace function public.phase2_assert_actor(
@@ -56,20 +54,20 @@ create or replace function public.phase2_assert_actor(
 language plpgsql security definer
 set search_path = public, pg_temp
 as $$
+declare v_profile public.profiles%rowtype;
 begin
   if auth.uid() is null then return; end if;
-  if not exists (
-    select 1
-    from public.profiles pr
-    join public.roles r on r.id = pr.role_id and r.business_id = pr.business_id
-    left join public.role_permissions rp on rp.role_id = r.id
-    left join public.permissions pe on pe.id = rp.permission_id
-    where pr.user_id = auth.uid()
-      and pr.business_id = p_business_id
-      and pr.is_active
-      and (r.name = 'Owner/Admin' or pe.code = p_permission)
-  ) then
+  select pr.* into v_profile from public.profiles pr
+   where pr.id = auth.uid() and pr.business_id = p_business_id and pr.status = 'Active';
+  if not found then
     raise exception 'Phase 2 authorization denied for business %', p_business_id using errcode = '42501';
+  end if;
+  if v_profile.role <> 'Owner' then
+    perform public.assert_can_write_business(p_business_id, array[p_permission]);
+    if not public.auth_has_any(array[p_permission])
+       or not (coalesce(v_profile.perms, '{}'::text[]) && array[p_permission]) then
+      raise exception 'Phase 2 permission denied for business %', p_business_id using errcode = '42501';
+    end if;
   end if;
 end $$;
 
@@ -98,11 +96,9 @@ begin
   end if;
   v_eligible := coalesce(v_rate, 0) * new.qty;
   v_owner_only := exists (
-    select 1 from public.salesmen s
-    join public.profiles pr on pr.user_id = s.user_id
-    join public.roles r on r.id = pr.role_id
-    where s.business_id = new.business_id and s.id = v_invoice.salesman_id
-      and r.name = 'Owner/Admin'
+    select 1 from public.profiles pr
+    where pr.id = v_invoice.salesman_id and pr.business_id = new.business_id
+      and pr.status = 'Active' and pr.role = 'Owner'
   );
   insert into public.commission_events (
     business_id, salesman_id, invoice_id, invoice_item_id, event_type, quantity,
@@ -302,7 +298,7 @@ end $$;
 
 -- One production-facing sale entry point for Counter, Online and OFC.  It
 -- delegates the proven stock/negative-stock policy to the existing text-ID
--- post_sale core, while adding server-side attribution checks and a durable
+-- post_sale core, while adding server-side profile attribution checks and a durable
 -- retry mapping.  The invoice-item trigger above snapshots commission rates
 -- and records any initial collection earned by that core.
 create table if not exists public.phase2_sale_idempotency (
@@ -325,7 +321,7 @@ create or replace function public.post_sale_phase2(
 language plpgsql security definer
 set search_path = public, pg_temp
 as $$
-declare v_invoice_id text;
+declare v_invoice_id text; v_seller_profile_id uuid;
 begin
   perform public.phase2_assert_actor(p_business_id, 'can_create_sales');
   if p_idempotency_key is null or length(trim(p_idempotency_key)) = 0 then
@@ -334,13 +330,17 @@ begin
   select invoice_id into v_invoice_id from public.phase2_sale_idempotency
    where business_id = p_business_id and idempotency_key = p_idempotency_key;
   if found then return v_invoice_id; end if;
-  if not exists (
-    select 1 from public.salesmen s
-     where s.business_id = p_business_id and s.id = p_salesman_id and s.is_active
-  ) then raise exception 'Server-attributed salesman is not active in this business'; end if;
+  -- Ignore the client-supplied salesperson argument.  Direct authenticated
+  -- calls use auth.uid(); the service-role HTTP boundary supplies p_created_by,
+  -- which is validated as the same active profile in this business.
+  v_seller_profile_id := coalesce(auth.uid(), p_created_by);
+  if v_seller_profile_id is null or not exists (
+    select 1 from public.profiles pr
+     where pr.id = v_seller_profile_id and pr.business_id = p_business_id and pr.status = 'Active'
+  ) then raise exception 'Server-attributed seller is not an active profile in this business' using errcode = '42501'; end if;
   v_invoice_id := public.post_sale(
     p_business_id, p_invoice_type, p_invoice_date, p_items, p_payments,
-    p_salesman_id, p_customer_id, p_customer_name, p_customer_phone,
+    v_seller_profile_id, p_customer_id, p_customer_name, p_customer_phone,
     p_customer_address, p_customer_city, p_memo, p_created_by
   );
   insert into public.phase2_sale_idempotency (business_id, idempotency_key, invoice_id)

@@ -7,6 +7,14 @@ returns and invoice-specific collection commission on the verified production
 model: invoices, customers, payments, products, invoice_items,
 sale_return_documents, sale_return_lines, and commission_events.
 
+## Authorization model
+
+Phase 2 uses only `profiles`: `auth.uid()` maps to `profiles.id`; the profile
+must be `Active` and belong to the requested business. Owners are reporting-only
+for commission. Other mutations use the deployed `auth_has_any` and
+`assert_can_write_business` helpers. No role, permission, or seller lookup
+tables are required.
+
 ## UAT sequence
 
 1. Post a partial return using invoice-item IDs; verify the document reference,

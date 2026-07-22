@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { readFile } from 'node:fs/promises'
+import { execFileSync } from 'node:child_process'
 
 const migration = await readFile('supabase/migrations/00016_phase2_returns_commission.sql', 'utf8')
 const returnRoute = await readFile('src/app/api/sales/[id]/return/route.ts', 'utf8')
@@ -46,10 +47,38 @@ test('collection commission is snapshot, proportional, rounded, and owner report
 test('cross-business and unauthorized mutation paths are denied and PUBLIC/anon are revoked', () => {
   assert.match(migration, /phase2_assert_actor/)
   assert.match(migration, /pr\.business_id = p_business_id/)
-  assert.match(migration, /pe\.code = p_permission/)
+  assert.match(migration, /pr\.id = auth\.uid\(\)/)
+  assert.match(migration, /pr\.status = 'Active'/)
+  assert.match(migration, /assert_can_write_business\(p_business_id, array\[p_permission\]\)/)
+  assert.match(migration, /auth_has_any\(array\[p_permission\]\)/)
   assert.match(migration, /revoke all on function public\.post_sale_return[\s\S]*from public, anon/i)
   assert.match(migration, /revoke all on function public\.receive_invoice_payment[\s\S]*from public, anon/i)
   assert.match(migration, /grant execute on function public\.post_sale_return[\s\S]*to authenticated, service_role/i)
+})
+
+test('authorization uses only the verified profiles role, permission, and seller model', () => {
+  for (const absent of ['public.permissions', 'public.role_permissions', 'public.roles', 'public.salesmen']) {
+    assert.ok(!migration.includes(absent), `must not reference absent ${absent}`)
+  }
+  assert.match(migration, /v_profile\.role <> 'Owner'/)
+  assert.match(migration, /v_profile\.perms/)
+  assert.match(migration, /v_seller_profile_id := coalesce\(auth\.uid\(\), p_created_by\)/)
+  assert.match(migration, /pr\.id = v_seller_profile_id/)
+  assert.match(migration, /pr\.role = 'Owner'/)
+  assert.match(migration, /v_owner_only/)
+  assert.match(migration, /v_seller_profile_id, p_customer_id/)
+})
+
+test('Phase 2 preconditions contain only verified production tables', () => {
+  const preconditions = migration.slice(migration.indexOf('from (values'), migration.indexOf(') required(required_name'))
+  const expected = ['businesses', 'profiles', 'products', 'invoices', 'invoice_items', 'customers', 'payments', 'sale_return_documents', 'sale_return_lines', 'commission_events', 'identity_sequences']
+  for (const table of expected) assert.ok(preconditions.includes(`public.${table}`), `must require ${table}`)
+  assert.equal((preconditions.match(/to_regclass\('public\./g) ?? []).length, expected.length)
+})
+
+test('the authorization repair does not change migrations 00009 through 00015', () => {
+  const changed = execFileSync('git', ['diff', '--name-only', '62855c80183554677e9a754d268852b67bee115e'], { encoding: 'utf8' })
+  assert.doesNotMatch(changed, /supabase\/migrations\/000(?:09|10|11|12|13|14|15)/)
 })
 
 test('only proven stale UUID overloads are removed after text-safe replacements', () => {
