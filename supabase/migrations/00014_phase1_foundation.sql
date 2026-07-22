@@ -6,7 +6,8 @@
 -- account_categories, delivery_orders, delivery_status_events,
 -- rider_cod_submissions) are referenced.
 --
--- UUID identities remain UUID; invoice and invoice-item identities are text.
+-- UUID business, profile, rider, and invoice-item identities remain UUID;
+-- invoice and product identities are text.
 -- Foreign keys referencing invoices use the composite key (business_id, id)
 -- because production invoices has PRIMARY KEY (business_id, id).
 
@@ -51,11 +52,11 @@ declare
 begin
   with expected(table_name, column_name, expected_type) as (
     values
-      ('businesses', 'id', 'uuid'), ('products', 'id', 'uuid'),
+      ('businesses', 'id', 'uuid'),
+      ('products', 'business_id', 'uuid'), ('products', 'id', 'text'),
       ('invoices', 'business_id', 'uuid'), ('invoices', 'id', 'text'),
-      ('invoice_items', 'business_id', 'uuid'), ('invoice_items', 'id', 'text'),
-      ('profiles', 'id', 'uuid'), ('riders', 'id', 'uuid'),
-      ('delivery_events', 'id', 'uuid'), ('rider_cash_ledger', 'id', 'uuid')
+      ('invoice_items', 'business_id', 'uuid'), ('invoice_items', 'id', 'uuid'),
+      ('profiles', 'id', 'uuid'), ('riders', 'id', 'uuid')
   )
   select string_agg(format('%s.%s expected %s, found %s', e.table_name,
                            e.column_name, e.expected_type,
@@ -161,7 +162,7 @@ create table if not exists public.sale_return_lines (
   id                       uuid primary key default gen_random_uuid(),
   business_id              uuid not null references public.businesses(id) on delete restrict,
   sale_return_id           uuid not null references public.sale_return_documents(id) on delete restrict,
-  original_invoice_item_id text not null references public.invoice_items(id) on delete restrict,
+  original_invoice_item_id uuid not null references public.invoice_items(id) on delete restrict,
   returned_qty             int not null,
   reason                   text,
   created_at               timestamptz not null default now(),
@@ -179,7 +180,7 @@ create index if not exists sale_return_lines_original_invoice_item_idx
 -- ============================================================
 -- 4. COMMISSION EVENTS LEDGER
 -- ============================================================
--- invoice_id and invoice_item_id use production text identifiers but do NOT have
+-- invoice_id uses the production text identity; invoice_item_id uses UUID. They do NOT have
 -- foreign key constraints in this migration. Production invoices has a
 -- composite PK (business_id, id), and invoice_items may also have a composite
 -- PK. These remain trace fields without foreign keys; no unverified relation
@@ -187,10 +188,11 @@ create index if not exists sale_return_lines_original_invoice_item_idx
 create table if not exists public.commission_events (
   id                       uuid primary key default gen_random_uuid(),
   business_id              uuid not null references public.businesses(id) on delete restrict,
-  salesman_id              text,
+  salesman_id              uuid,
   invoice_id               text not null,
-  invoice_item_id          text not null,
-  original_invoice_item_id text,
+  invoice_item_id          uuid not null,
+  original_invoice_item_id uuid,
+  -- Trace token only: no verified production return-event target is referenced.
   return_event_id          text,
   event_type               text not null,
   quantity                 int not null,

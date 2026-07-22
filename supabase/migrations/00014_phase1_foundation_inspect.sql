@@ -40,17 +40,15 @@ union all select 'production identifier map', 'invoices.id', 'column',
 union all select 'production identifier map', 'invoice_items.business_id', 'column',
        exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'invoice_items' and column_name = 'business_id' and data_type = 'uuid'), 'uuid'
 union all select 'production identifier map', 'invoice_items.id', 'column',
-       exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'invoice_items' and column_name = 'id' and data_type = 'text'), 'text'
+       exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'invoice_items' and column_name = 'id' and data_type = 'uuid'), 'uuid'
+union all select 'production identifier map', 'products.business_id', 'column',
+       exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'products' and column_name = 'business_id' and data_type = 'uuid'), 'uuid'
 union all select 'production identifier map', 'products.id', 'column',
-       exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'products' and column_name = 'id' and data_type = 'uuid'), 'uuid'
+       exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'products' and column_name = 'id' and data_type = 'text'), 'text'
 union all select 'production identifier map', 'profiles.id', 'column',
        exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'profiles' and column_name = 'id' and data_type = 'uuid'), 'uuid'
 union all select 'production identifier map', 'riders.id', 'column',
        exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'riders' and column_name = 'id' and data_type = 'uuid'), 'uuid'
-union all select 'production identifier map', 'delivery_events.id', 'column',
-       exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'delivery_events' and column_name = 'id' and data_type = 'uuid'), 'uuid'
-union all select 'production identifier map', 'rider_cash_ledger.id', 'column',
-       exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'rider_cash_ledger' and column_name = 'id' and data_type = 'uuid'), 'uuid'
 union all
 select 'products.commission_rate', 'products', 'column',
        exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'products' and column_name = 'commission_rate'),
@@ -113,8 +111,8 @@ select 'sale_return_lines original invoice item FK (single-column, invoice_items
                and pg_get_constraintdef(oid) = 'FOREIGN KEY (original_invoice_item_id) REFERENCES invoice_items(id) ON DELETE RESTRICT'),
        null
 union all
-select 'sale_return_lines original_invoice_item_id text type', 'sale_return_lines', 'column',
-       exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'sale_return_lines' and column_name = 'original_invoice_item_id' and data_type = 'text'), null
+select 'sale_return_lines original_invoice_item_id uuid type', 'sale_return_lines', 'column',
+       exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'sale_return_lines' and column_name = 'original_invoice_item_id' and data_type = 'uuid'), null
 union all
 select 'sale_return_lines uuid PK type', 'sale_return_lines', 'column',
        exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'sale_return_lines' and column_name = 'id' and data_type = 'uuid'),
@@ -157,10 +155,12 @@ select 'commission_events business_id uuid type', 'commission_events', 'column',
 union all
 select 'commission_events invoice_id text type', 'commission_events', 'column',
        exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'commission_events' and column_name = 'invoice_id' and data_type = 'text'), null
-union all select 'commission_events invoice_item_id text type', 'commission_events', 'column',
-       exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'commission_events' and column_name = 'invoice_item_id' and data_type = 'text'), null
-union all select 'commission_events original_invoice_item_id text type', 'commission_events', 'column',
-       exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'commission_events' and column_name = 'original_invoice_item_id' and data_type = 'text'), null
+union all select 'commission_events salesman_id uuid type', 'commission_events', 'column',
+       exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'commission_events' and column_name = 'salesman_id' and data_type = 'uuid'), null
+union all select 'commission_events invoice_item_id uuid type', 'commission_events', 'column',
+       exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'commission_events' and column_name = 'invoice_item_id' and data_type = 'uuid'), null
+union all select 'commission_events original_invoice_item_id uuid type', 'commission_events', 'column',
+       exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'commission_events' and column_name = 'original_invoice_item_id' and data_type = 'uuid'), null
 union all
 select 'commission_events RLS', 'commission_events', 'rls',
        exists (select 1 from pg_tables where schemaname = 'public' and tablename = 'commission_events' and rowsecurity), null

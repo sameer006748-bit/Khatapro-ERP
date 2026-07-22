@@ -98,7 +98,7 @@ test('return lines have immutable original-invoice relationships and quantities'
   const fkDefStart = MIGRATION_14.indexOf('sale_return_documents (')
   const fkDefs = fkDefEnd > 0 ? MIGRATION_14.slice(fkDefStart, fkDefEnd) : ''
   assert.ok(!fkDefs.match(/references public\.invoices\(id\)/), 'must not have single-column FK to invoices(id)')
-  assert.ok(MIGRATION_14.includes('original_invoice_item_id text not null references public.invoice_items(id) on delete restrict'), 'return line must retain a text invoice item ID')
+  assert.ok(MIGRATION_14.includes('original_invoice_item_id uuid not null references public.invoice_items(id) on delete restrict'), 'return line must retain a UUID invoice item ID')
   assert.ok(MIGRATION_14.includes('sale_return_lines_returned_qty_positive'), 'return quantities must be positive')
   assert.ok(PRISMA_SCHEMA.includes('originalinvoiceitemid') && PRISMA_SCHEMA.includes('returnedqty'), 'Prisma must model return-line lineage and quantity')
 })
@@ -141,8 +141,8 @@ test('CommissionEvent has required indexes', () => {
 test('CommissionEvent preserves production invoice and invoice-item identifier types', () => {
   const ce = MIGRATION_14.slice(MIGRATION_14.indexOf('create table if not exists public.commission_events'), MIGRATION_14.indexOf('-- business-scoped idempotency'))
   assert.ok(ce.includes('business_id              uuid not null references public.businesses(id)'), 'business ID must remain UUID')
-  for (const field of ['salesman_id              text', 'invoice_id               text not null', 'invoice_item_id          text not null', 'original_invoice_item_id text']) {
-    assert.ok(ce.includes(field), `${field.trim()} must use a compatible text identifier`)
+  for (const field of ['salesman_id              uuid', 'invoice_id               text not null', 'invoice_item_id          uuid not null', 'original_invoice_item_id uuid']) {
+    assert.ok(ce.includes(field), `${field.trim()} must use the verified production identifier type`)
   }
   assert.ok(!ce.includes('references public.invoices'), 'unverified invoice trace fields must not receive an FK')
   assert.ok(!ce.includes('references public.invoice_items'), 'unverified invoice-item trace fields must not receive an FK')
@@ -158,7 +158,7 @@ test('every new Phase 1 identifier field uses its verified type', () => {
     'created_by          uuid',
     'id                       uuid primary key',
     'sale_return_id           uuid not null references public.sale_return_documents(id)',
-    'original_invoice_item_id text not null references public.invoice_items(id)',
+    'original_invoice_item_id uuid not null references public.invoice_items(id)',
   ]) assert.ok(returns.includes(field), `return identifier field must be compatible: ${field.trim()}`)
 
   const ce = MIGRATION_14.slice(MIGRATION_14.indexOf('create table if not exists public.commission_events'), MIGRATION_14.indexOf('-- business-scoped idempotency'))
@@ -493,7 +493,19 @@ test('new tables use UUID for business identifiers and text for invoice identifi
   // commission_events has no FK at all (deferred)
   assert.ok(matches && matches.length >= 3, 'business_id must be UUID referencing businesses in at least 3 places')
   assert.ok(MIGRATION_14.includes('original_invoice_id text not null'), 'sale return invoice ID must match invoices.id text')
-  assert.ok(MIGRATION_14.includes('original_invoice_item_id text not null references public.invoice_items(id)'), 'return-line item ID must match invoice_items.id text')
+  assert.ok(MIGRATION_14.includes('original_invoice_item_id uuid not null references public.invoice_items(id)'), 'return-line item ID must match invoice_items.id UUID')
+})
+
+test('identifier precondition uses the proven mixed production type map', () => {
+  for (const expected of [
+    "('businesses', 'id', 'uuid')",
+    "('invoices', 'business_id', 'uuid')", "('invoices', 'id', 'text')",
+    "('invoice_items', 'business_id', 'uuid')", "('invoice_items', 'id', 'uuid')",
+    "('products', 'business_id', 'uuid')", "('products', 'id', 'text')",
+    "('profiles', 'id', 'uuid')", "('riders', 'id', 'uuid')",
+  ]) assert.ok(MIGRATION_14.includes(expected), `missing production type precondition: ${expected}`)
+  assert.ok(!MIGRATION_14.includes("('invoice_items', 'id', 'text')"), 'invoice_items.id must not retain a text expectation')
+  assert.ok(!MIGRATION_14.includes("('products', 'id', 'uuid')"), 'products.id must not retain a UUID expectation')
 })
 
 test('identity_sequences uses uuid business_id', () => {
@@ -512,10 +524,10 @@ test('inspection SQL checks UUID and text types on new and production tables', (
   assert.ok(INSPECT_14.includes('commission_events business_id uuid type'), 'inspection must check uuid business_id on commission_events')
   assert.ok(INSPECT_14.includes('identity_sequences business_id uuid type'), 'inspection must check uuid business_id on identity_sequences')
   for (const typeCheck of [
-    'invoices.business_id', 'invoices.id', 'invoice_items.business_id', 'invoice_items.id',
+    'invoices.business_id', 'invoices.id', 'invoice_items.business_id', 'invoice_items.id', 'products.business_id', 'products.id',
     'sale_return_documents original_invoice_id text type',
-    'sale_return_lines original_invoice_item_id text type',
-    'commission_events invoice_id text type', 'commission_events invoice_item_id text type',
+    'sale_return_lines original_invoice_item_id uuid type',
+    'commission_events invoice_id text type', 'commission_events invoice_item_id uuid type',
     'phase 1 foreign keys have compatible column types',
   ]) assert.ok(INSPECT_14.includes(typeCheck), `inspection must check ${typeCheck}`)
 })
