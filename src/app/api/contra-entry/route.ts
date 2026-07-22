@@ -3,18 +3,17 @@ import { getServerSession } from 'next-auth'
 import { z } from 'zod'
 import { authOptions } from '@/lib/auth/authOptions'
 import { loadSessionUser, requirePermission } from '@/lib/auth/permissions'
-import { postContraEntry } from '@/lib/vouchers/data-access'
+import { postOperationalContra } from '@/lib/money/operational-money'
 import { parseMoney } from '@/lib/format'
 import { resolveRequestId, safeMutationError } from '@/lib/observability'
 
-const isUuid = (s: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s)
 const Schema = z.object({
-  contraDate: z.string(),
-  fromAccountId: z.string().min(1),
-  toAccountId: z.string().min(1),
+  contraDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  fromAccountId: z.string().uuid(),
+  toAccountId: z.string().uuid(),
   amount: z.string().min(1),
-  reference: z.string().optional(),
-  notes: z.string().optional(),
+  notes: z.string().max(500).optional(),
+  idempotencyKey: z.string().uuid(),
 })
 
 export async function POST(req: Request) {
@@ -27,21 +26,19 @@ export async function POST(req: Request) {
   const body = await req.json().catch(() => null)
   const parsed = Schema.safeParse(body)
   if (!parsed.success) return NextResponse.json({ error: 'INVALID_INPUT', details: parsed.error.flatten() }, { status: 400 })
-  if (!isUuid(parsed.data.fromAccountId)) return NextResponse.json({ error: 'Invalid from account ID' }, { status: 400 })
-  if (!isUuid(parsed.data.toAccountId)) return NextResponse.json({ error: 'Invalid to account ID' }, { status: 400 })
   if (parsed.data.fromAccountId === parsed.data.toAccountId) return NextResponse.json({ error: 'From and To accounts must differ' }, { status: 400 })
   const amountPaisas = parseMoney(parsed.data.amount)
   if (amountPaisas === null || amountPaisas <= 0n) return NextResponse.json({ error: 'Invalid amount' }, { status: 400 })
   try {
-    const result = await postContraEntry({
+    const result = await postOperationalContra({
       businessId: su.businessId,
-      contraDate: new Date(parsed.data.contraDate),
-      fromAccountId: parsed.data.fromAccountId,
-      toAccountId: parsed.data.toAccountId,
+      actorProfileId: su.profileId,
+      date: parsed.data.contraDate,
+      sourceAccountId: parsed.data.fromAccountId,
+      destinationAccountId: parsed.data.toAccountId,
       amountPaisas,
-      reference: parsed.data.reference ?? null,
-      notes: parsed.data.notes ?? null,
-      createdBy: su.userId,
+      note: parsed.data.notes ?? null,
+      idempotencyKey: parsed.data.idempotencyKey,
     })
     return NextResponse.json({ ok: true, ...result })
   } catch (error) {

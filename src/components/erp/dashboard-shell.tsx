@@ -58,7 +58,7 @@ import { TrialBalanceView } from '@/components/erp/views/trial-balance-view'
 import { LedgerDrilldownView } from '@/components/erp/views/ledger-drilldown-view'
 import { OpeningBalanceView } from '@/components/erp/views/opening-balance-view'
 import { DayBookView } from '@/components/erp/views/day-book-view'
-import { PaymentVoucherView, ReceiptVoucherView, ContraEntryView } from '@/components/erp/views/voucher-forms-view'
+import { PaymentVoucherView, ReceiptVoucherView, ContraEntryView, OwnerCapitalView } from '@/components/erp/views/voucher-forms-view'
 import { ExpenseBatchView } from '@/components/erp/views/expense-batch-view'
 import { PettyCashView } from '@/components/erp/views/petty-cash-view'
 import { VoucherDetailView } from '@/components/erp/views/voucher-detail-view'
@@ -150,6 +150,7 @@ const NAV_CATEGORIES: NavCategory[] = [
     items: [
       { key: 'accounts', label: 'Accounts & Balances', short: 'Accounts', icon: DollarSign, perm: 'can_view_account_balances' },
       { key: 'petty-cash', label: 'Petty Cash', short: 'Petty', icon: Wallet, perm: 'can_manage_petty_cash' },
+      { key: 'owner-capital', label: 'Capital & Drawings', short: 'Capital', icon: Banknote, ownerOnly: true },
     ],
   },
   {
@@ -821,6 +822,7 @@ function ViewRouter({
   if (active === 'receipt-voucher') return <ReceiptVoucherView user={user} />
   if (active === 'payment-voucher') return <PaymentVoucherView user={user} />
   if (active === 'contra-entry') return <ContraEntryView user={user} />
+  if (active === 'owner-capital') return <OwnerCapitalView user={user} />
   if (active === 'petty-cash') return <PettyCashView user={user} />
   if (active === 'expense-batch') return <ExpenseBatchView user={user} />
   if (active === 'day-book') return <DayBookView user={user} onSelectVoucher={(id) => { window.history.pushState({}, '', `/?voucher=${id}`); window.dispatchEvent(new PopStateEvent('popstate')) }} />
