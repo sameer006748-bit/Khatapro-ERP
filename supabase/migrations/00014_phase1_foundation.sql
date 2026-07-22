@@ -7,6 +7,8 @@
 -- rider_cod_submissions) are referenced.
 --
 -- All foreign keys use uuid types matching the proven production schema.
+-- Foreign keys referencing invoices use the composite key (business_id, id)
+-- because production invoices has PRIMARY KEY (business_id, id).
 
 begin;
 
@@ -75,14 +77,19 @@ $$;
 -- NOTE: original_invoice_item_id is NOT added to invoice_items. The
 -- sale_return_lines table already contains the original invoice item relation,
 -- making a self-referencing FK on invoice_items redundant.
+--
+-- IMPORTANT: Production invoices has PRIMARY KEY (business_id, id), not a
+-- single-column PK. Therefore, the FK from sale_return_documents to invoices
+-- must use the composite key (business_id, original_invoice_id) referencing
+-- invoices(business_id, id).
 
 alter table public.invoice_items
   add column if not exists returned_qty int not null default 0;
 
 create table if not exists public.sale_return_documents (
   id                  uuid primary key default gen_random_uuid(),
-  business_id         uuid not null references public.businesses(id) on delete restrict,
-  original_invoice_id uuid not null references public.invoices(id) on delete restrict,
+  business_id         uuid not null,
+  original_invoice_id uuid not null,
   return_voucher_id   text,
   return_date         timestamptz not null default now(),
   total               numeric(20,0) not null default 0,
@@ -98,7 +105,12 @@ create table if not exists public.sale_return_documents (
   constraint sale_return_documents_business_return_no_key
     unique (business_id, return_no),
   constraint sale_return_documents_business_idempotency_key_key
-    unique (business_id, idempotency_key)
+    unique (business_id, idempotency_key),
+  -- Composite FK matching invoices composite PK (business_id, id)
+  constraint sale_return_documents_invoice_fkey
+    foreign key (business_id, original_invoice_id)
+    references public.invoices(business_id, id)
+    on delete restrict
 );
 
 create index if not exists sale_return_documents_original_invoice_idx
@@ -126,6 +138,11 @@ create index if not exists sale_return_lines_original_invoice_item_idx
 -- ============================================================
 -- 4. COMMISSION EVENTS LEDGER
 -- ============================================================
+-- invoice_id and invoice_item_id are stored as uuid values but do NOT have
+-- foreign key constraints in this migration. Production invoices has a
+-- composite PK (business_id, id), and invoice_items may also have a composite
+-- PK. Adding verified composite FKs requires confirming the exact PK of
+-- invoice_items in production. Deferred to avoid unverified constraints.
 create table if not exists public.commission_events (
   id                       uuid primary key default gen_random_uuid(),
   business_id              uuid not null,

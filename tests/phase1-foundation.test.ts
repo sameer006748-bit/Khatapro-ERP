@@ -88,7 +88,15 @@ test('return document idempotency is unique within a business', () => {
 
 test('return lines have immutable original-invoice relationships and quantities', () => {
   assert.ok(MIGRATION_14.includes('references public.businesses(id) on delete restrict'), 'return document must reference businesses')
-  assert.ok(MIGRATION_14.includes('references public.invoices(id) on delete restrict'), 'return document must retain original invoice')
+  // Sale return documents use composite FK matching invoices composite PK (business_id, id)
+  assert.ok(MIGRATION_14.includes('sale_return_documents_invoice_fkey'), 'composite invoice FK constraint must exist')
+  assert.ok(MIGRATION_14.includes('foreign key (business_id, original_invoice_id)'), 'composite FK must use business_id + original_invoice_id')
+  assert.ok(MIGRATION_14.includes('references public.invoices(business_id, id)'), 'composite FK must reference invoices(business_id, id')
+  // Must NOT have a single-column FK to invoices(id)
+  const fkDefEnd = MIGRATION_14.indexOf('create index if not exists sale_return_documents_original_invoice_idx')
+  const fkDefStart = MIGRATION_14.indexOf('sale_return_documents (')
+  const fkDefs = fkDefEnd > 0 ? MIGRATION_14.slice(fkDefStart, fkDefEnd) : ''
+  assert.ok(!fkDefs.match(/references public\.invoices\(id\)/), 'must not have single-column FK to invoices(id)')
   assert.ok(MIGRATION_14.includes('references public.invoice_items(id) on delete restrict'), 'return line must retain original invoice item')
   assert.ok(MIGRATION_14.includes('sale_return_lines_returned_qty_positive'), 'return quantities must be positive')
   assert.ok(PRISMA_SCHEMA.includes('originalinvoiceitemid') && PRISMA_SCHEMA.includes('returnedqty'), 'Prisma must model return-line lineage and quantity')
@@ -349,11 +357,15 @@ test('inspection SQL covers every Phase 1 object from migration 00014', () => {
     'base table: businesses', 'base table: products', 'base table: invoices',
     'base table: invoice_items', 'base table: profiles', 'base table: riders',
     'base table: delivery_events', 'base table: rider_cash_ledger',
-    'sale_return_documents table', 'sale_return_documents original invoice fk',
+    'invoices pk is composite', 'invoice_items pk is single-column',
+    'sale_return_documents table',
+    'sale_return_documents composite invoice fk',
+    'sale_return_documents no single-column invoice fk',
     'sale_return_documents idempotency constraint',
     'sale_return_documents original invoice index', 'sale_return_documents rls',
     'sale_return_documents service_role insert',
-    'sale_return_lines table', 'sale_return_lines original invoice item fk',
+    'sale_return_lines table',
+    'sale_return_lines original invoice item fk',
     'sale_return_lines returned_qty positive constraint', 'sale_return_lines rls',
     'sale_return_lines service_role insert',
     'commission_events table', 'commission_events business-scoped idempotency index',
@@ -442,7 +454,10 @@ test('new tables use uuid PK type', () => {
 test('new tables use uuid for business_id foreign keys', () => {
   const fkPattern = /business_id\s+uuid\s+not\s+null\s+references\s+public\.businesses/gi
   const matches = MIGRATION_14.match(fkPattern)
-  assert.ok(matches && matches.length >= 3, 'business_id must be uuid referencing businesses in at least 3 places')
+  // sale_return_lines + identity_sequences have direct FK to businesses
+  // sale_return_documents uses composite FK via invoices(business_id, id)
+  // commission_events has no FK at all (deferred)
+  assert.ok(matches && matches.length >= 2, 'business_id must be uuid referencing businesses in at least 2 places')
 })
 
 test('identity_sequences uses uuid business_id', () => {
