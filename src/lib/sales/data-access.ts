@@ -212,14 +212,19 @@ async function postSaleViaPrisma(input: PostSaleInput): Promise<{ invoiceId: str
     }
 
     // ── Legacy percentage-based commission (kept for backward compatibility) ──
-    let salesman: { id: string; commissionPct: number } | null = null
-    if (input.salesmanId) salesman = await tx.salesman.findUnique({ where: { id: input.salesmanId }, select: { id: true, commissionPct: true } })
-    for (const p of input.payments) {
-      if (!p.isChange) {
-        const alloc = await tx.paymentAllocation.create({ data: { businessId: input.businessId, invoiceId: invoice.id, accountId: p.accountId, amount: p.amount, isChange: false, voucherId: vch.id, createdBy: input.createdBy ?? null } })
-        if (salesman && p.amount > 0n) {
-          const commAmount = (p.amount * BigInt(Math.round(salesman.commissionPct * 100))) / 10000n
-          await tx.salesmanCommission.upsert({ where: { allocationId_salesmanId: { allocationId: alloc.id, salesmanId: salesman.id } }, create: { businessId: input.businessId, salesmanId: salesman.id, invoiceId: invoice.id, allocationId: alloc.id, collectedAmount: p.amount, commissionPct: salesman.commissionPct, commissionAmount: commAmount }, update: {} })
+    // Only creates legacy SalesmanCommission if NO per-piece eligibility exists.
+    // This prevents double commission when both per-piece and percentage run.
+    const hasPerPieceEligibility = eligibilityResults.some((e) => e.eligibleAmount > 0n)
+    if (!hasPerPieceEligibility) {
+      let salesman: { id: string; commissionPct: number } | null = null
+      if (input.salesmanId) salesman = await tx.salesman.findUnique({ where: { id: input.salesmanId }, select: { id: true, commissionPct: true } })
+      for (const p of input.payments) {
+        if (!p.isChange) {
+          const alloc = await tx.paymentAllocation.create({ data: { businessId: input.businessId, invoiceId: invoice.id, accountId: p.accountId, amount: p.amount, isChange: false, voucherId: vch.id, createdBy: input.createdBy ?? null } })
+          if (salesman && p.amount > 0n) {
+            const commAmount = (p.amount * BigInt(Math.round(salesman.commissionPct * 100))) / 10000n
+            await tx.salesmanCommission.upsert({ where: { allocationId_salesmanId: { allocationId: alloc.id, salesmanId: salesman.id } }, create: { businessId: input.businessId, salesmanId: salesman.id, invoiceId: invoice.id, allocationId: alloc.id, collectedAmount: p.amount, commissionPct: salesman.commissionPct, commissionAmount: commAmount }, update: {} })
+          }
         }
       }
     }
