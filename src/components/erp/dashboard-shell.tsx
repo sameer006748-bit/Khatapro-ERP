@@ -73,6 +73,7 @@ import { VendorsView } from '@/components/erp/views/vendors-view'
 import { CounterSaleView } from '@/components/erp/views/counter-sale-view'
 import { OnlineSaleView } from '@/components/erp/views/online-sale-view'
 import { OfcSaleView } from '@/components/erp/views/ofc-sale-view'
+import { OtherSaleView } from '@/components/erp/views/other-sale-view'
 import { SalesListView } from '@/components/erp/views/sales-list-view'
 import { InvoiceDetailView } from '@/components/erp/views/invoice-detail-view'
 import { DeliveryView } from '@/components/erp/views/delivery-view'
@@ -135,6 +136,7 @@ const NAV_CATEGORIES: NavCategory[] = [
       { key: 'counter-sale', label: 'Counter Sale', short: 'Counter', icon: ShoppingCart, perm: 'can_create_sales' },
       { key: 'online-sale', label: 'Online Sale', short: 'Online', icon: ShoppingCart, perm: 'can_create_sales' },
       { key: 'ofc-sale', label: 'OFC Sale', short: 'OFC', icon: ShoppingCart, perm: 'can_create_sales' },
+      { key: 'other-sale', label: 'Other Sale', short: 'Other', icon: ShoppingCart, perm: 'can_create_sales' },
       { key: 'sales-list', label: 'Sales List', short: 'List', icon: ClipboardList, perm: 'can_view_sales' },
       { key: 'delivery', label: 'Delivery / Riders', short: 'Delivery', icon: Bike, perm: 'can_view_delivery_orders' },
       { key: 'purchases', label: 'Purchase Bills', short: 'Purchases', icon: Receipt, perm: 'can_view_purchases' },
@@ -854,6 +856,7 @@ function ViewRouter({
   if (active === 'counter-sale') return <CounterSaleView user={user} />
   if (active === 'online-sale') return <OnlineSaleView user={user} />
   if (active === 'ofc-sale') return <OfcSaleView user={user} />
+  if (active === 'other-sale') return <OtherSaleView user={user} />
   if (active === 'sales-list') return <SalesListView />
 
   if (active === 'purchases') return <PurchasesView user={user} />
