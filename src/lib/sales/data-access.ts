@@ -17,6 +17,7 @@ import {
 } from '@/lib/supabase/rpc-compatibility'
 import { probeTable } from '@/lib/supabase/phase-probe'
 import { resolveSupabaseUuid } from '@/lib/accounting/voucher-supabase'
+import { calculateCommissionEligibility } from '@/lib/sales/commission'
 
 const _p4cache = { lastChecked: 0, lastResult: false }
 
@@ -138,13 +139,13 @@ async function postSaleViaPrisma(input: PostSaleInput): Promise<{ invoiceId: str
   const outstanding = total - paidAmount + changeTotal
   if (outstanding > 0n && arAccount) voucherLines.push({ accountId: arAccount.id, debit: outstanding, credit: 0n, memo: 'Outstanding' })
 
-const result = await db.$transaction(async (tx) => {
-      const seq = await tx.identitySequence.upsert({
-        where: { businessId_prefix: { businessId: input.businessId, prefix: 'INV' } },
-        create: { businessId: input.businessId, prefix: 'INV', lastSeq: 1 },
-        update: { lastSeq: { increment: 1 } },
-      })
-      const invoiceNo = `INV-${String(seq.lastSeq).padStart(4, '0')}`
+  const result = await db.$transaction(async (tx) => {
+    const seq = await tx.identitySequence.upsert({
+      where: { businessId_prefix: { businessId: input.businessId, prefix: 'INV' } },
+      create: { businessId: input.businessId, prefix: 'INV', lastSeq: 1 },
+      update: { lastSeq: { increment: 1 } },
+    })
+    const invoiceNo = `INV-${String(seq.lastSeq).padStart(4, '0')}`
 
     const vch = await tx.voucher.create({
       data: { businessId: input.businessId, voucherType: 'SI', voucherDate: input.invoiceDate, memo: input.memo ?? `Sale ${invoiceNo}`, postedBy: input.createdBy ?? null, totalDebit: total, totalCredit: total },
@@ -161,6 +162,7 @@ const result = await db.$transaction(async (tx) => {
       data: { businessId: input.businessId, invoiceNo, invoiceType: input.invoiceType, invoiceDate: input.invoiceDate, customerId: input.customerId ?? null, salesmanId: input.salesmanId ?? null, customerName: input.customerName ?? null, customerPhone: input.customerPhone ?? null, customerAddress: input.customerAddress ?? null, customerCity: input.customerCity ?? null, subtotal, discount, total, paidAmount, voucherId: vch.id, memo: input.memo ?? null, createdBy: input.createdBy ?? null },
     })
 
+    const invoiceItemsCreated: Array<{ id: string; productId: string | null; qty: number }> = []
     for (const item of input.items) {
       let smId: string | undefined
       if (item.productId) {
@@ -171,9 +173,45 @@ const result = await db.$transaction(async (tx) => {
         smId = sm.id
         await tx.product.update({ where: { id: item.productId }, data: { currentStock: { decrement: item.qty } } })
       }
-      await tx.invoiceItem.create({ data: { businessId: input.businessId, invoiceId: invoice.id, productId: item.productId ?? null, productName: item.productName, qty: item.qty, unitPrice: item.unitPrice, lineTotal: item.unitPrice * BigInt(item.qty), isTemporary: item.isTemporary ?? false, stockMovementId: smId ?? null } })
+      const invItem = await tx.invoiceItem.create({ data: { businessId: input.businessId, invoiceId: invoice.id, productId: item.productId ?? null, productName: item.productName, qty: item.qty, unitPrice: item.unitPrice, lineTotal: item.unitPrice * BigInt(item.qty), isTemporary: item.isTemporary ?? false, stockMovementId: smId ?? null } })
+      invoiceItemsCreated.push({ id: invItem.id, productId: item.productId ?? null, qty: item.qty })
     }
 
+    // ── Product-wise per-piece commission eligibility ──
+    // Create CommissionEvent records with eventType 'calculated' for each invoice item.
+    // These are server-authoritative source data for later payment-based earning.
+    const eligibilityItems = invoiceItemsCreated.map((ii) => ({ productId: ii.productId, qty: ii.qty }))
+    const eligibilityResults = await calculateCommissionEligibility(input.businessId, eligibilityItems)
+    for (let i = 0; i < invoiceItemsCreated.length; i++) {
+      const ii = invoiceItemsCreated[i]
+      const elig = eligibilityResults[i]
+      const idempotencyKey = `elig-${invoice.id}-${ii.id}`
+      const existingElig = await tx.commissionEvent.findFirst({
+        where: { businessId: input.businessId, idempotencyKey },
+      })
+      if (!existingElig) {
+        await tx.commissionEvent.create({
+          data: {
+            businessId: input.businessId,
+            salesmanId: input.salesmanId ?? null,
+            invoiceId: invoice.id,
+            invoiceItemId: ii.id,
+            eventType: 'calculated',
+            quantity: ii.qty,
+            ratePaisas: elig.ratePaisas,
+            grossAmount: elig.eligibleAmount,
+            eligibleAmount: elig.eligibleAmount,
+            payableAmount: 0n,
+            paidAmount: 0n,
+            status: 'calculated',
+            idempotencyKey,
+            isOwnerOnly: input.salesmanId ? false : true,
+          },
+        })
+      }
+    }
+
+    // ── Legacy percentage-based commission (kept for backward compatibility) ──
     let salesman: { id: string; commissionPct: number } | null = null
     if (input.salesmanId) salesman = await tx.salesman.findUnique({ where: { id: input.salesmanId }, select: { id: true, commissionPct: true } })
     for (const p of input.payments) {
