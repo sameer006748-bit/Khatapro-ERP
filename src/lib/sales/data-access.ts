@@ -30,7 +30,7 @@ export type InvoiceItemRow = { id: string; productId: string | null; productName
 export type PaymentAllocationRow = { id: string; accountId?: string; accountCode?: string; accountName: string; amount: string; isChange?: boolean; direction?: string | null; paymentMode?: string | null }
 
 export type PostSaleInput = {
-  businessId: string; invoiceType: 'COUNTER' | 'ONLINE' | 'OFC'; invoiceDate: Date
+  businessId: string; invoiceType: string; invoiceDate: Date
   items: Array<{ productId?: string | null; productName: string; qty: number; unitPrice: bigint; isTemporary?: boolean }>
   payments: Array<{ accountId: string; amount: bigint; isChange?: boolean }>
   salesmanId?: string | null; customerId?: string | null
@@ -138,11 +138,13 @@ async function postSaleViaPrisma(input: PostSaleInput): Promise<{ invoiceId: str
   const outstanding = total - paidAmount + changeTotal
   if (outstanding > 0n && arAccount) voucherLines.push({ accountId: arAccount.id, debit: outstanding, credit: 0n, memo: 'Outstanding' })
 
-  const result = await db.$transaction(async (tx) => {
-    const last = await tx.invoice.findFirst({ where: { businessId: input.businessId }, orderBy: { invoiceNo: 'desc' } })
-    let nextNum = 1
-    if (last) { const m = last.invoiceNo.match(/^INV-(\d+)$/); if (m) nextNum = parseInt(m[1], 10) + 1 }
-    const invoiceNo = `INV-${String(nextNum).padStart(4, '0')}`
+const result = await db.$transaction(async (tx) => {
+      const seq = await tx.identitySequence.upsert({
+        where: { businessId_prefix: { businessId: input.businessId, prefix: 'INV' } },
+        create: { businessId: input.businessId, prefix: 'INV', lastSeq: 1 },
+        update: { lastSeq: { increment: 1 } },
+      })
+      const invoiceNo = `INV-${String(seq.lastSeq).padStart(4, '0')}`
 
     const vch = await tx.voucher.create({
       data: { businessId: input.businessId, voucherType: 'SI', voucherDate: input.invoiceDate, memo: input.memo ?? `Sale ${invoiceNo}`, postedBy: input.createdBy ?? null, totalDebit: total, totalCredit: total },
