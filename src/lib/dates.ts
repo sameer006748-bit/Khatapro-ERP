@@ -26,16 +26,17 @@ function addBusinessDays(label: string, days: number): string {
 }
 
 /** Preset date-only ranges in the business timezone; safe for URL/API use. */
-export function bizPresetDateRange(preset: 'today' | 'yesterday' | 'week' | 'month', now: Date = new Date()): BusinessDateRange {
+export function bizPresetDateRange(preset: 'today' | 'last3' | 'last7' | 'month', now: Date = new Date()): BusinessDateRange {
   const today = bizDateString(now)
   if (preset === 'today') return { from: today, to: today }
-  if (preset === 'yesterday') {
-    const yesterday = addBusinessDays(today, -1)
-    return { from: yesterday, to: yesterday }
-  }
+  if (preset === 'last3') return { from: calendarDaysBefore(today, 2), to: today }
+  if (preset === 'last7') return { from: calendarDaysBefore(today, 6), to: today }
   if (preset === 'month') return { from: `${today.slice(0, 8)}01`, to: today }
-  const weekday = new Date(`${today}T00:00:00Z`).getUTCDay()
-  return { from: addBusinessDays(today, -((weekday + 6) % 7)), to: today }
+  throw new Error(`Unknown preset: ${preset}`)
+}
+
+function calendarDaysBefore(dateStr: string, count: number): string {
+  return addBusinessDays(dateStr, -count)
 }
 
 export function isBusinessDateRange(value: BusinessDateRange): boolean {

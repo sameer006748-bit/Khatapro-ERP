@@ -8,18 +8,39 @@ const hook = await readFile('src/hooks/use-owner-dashboard.ts', 'utf8')
 const page = await readFile('src/components/erp/views/owner-dashboard.tsx', 'utf8')
 const route = await readFile('src/app/api/dashboard/owner/route.ts', 'utf8')
 
-test('Today is the default and every preset uses Karachi business dates', () => {
+test('Today, Last 3 Days, Last 7 Days, This Month presets use Karachi business dates', () => {
   assert.match(page, /bizPresetDateRange\('today'\)/)
   assert.match(dates, /BUSINESS_TZ = 'Asia\/Karachi'/)
-  assert.match(dates, /preset === 'yesterday'/)
-  assert.match(dates, /\| 'week'/)
+  assert.match(dates, /preset === 'last3'/)
+  assert.match(dates, /preset === 'last7'/)
   assert.match(dates, /preset === 'month'/)
 })
 
-test('yesterday, week, and month boundaries use date-only arithmetic', () => {
-  assert.match(dates, /addBusinessDays\(today, -1\)/)
-  assert.match(dates, /\(weekday \+ 6\) % 7/)
-  assert.match(dates, /\$\{today\.slice\(0, 8\)\}01/)
+test('Last 3 Days and Last 7 Days use calendar-day counting including weekends', () => {
+  assert.match(dates, /function calendarDaysBefore/)
+  assert.match(dates, /return addBusinessDays\(dateStr, -count\)/)
+  assert.doesNotMatch(dates, /dow !== 0 && dow !== 6/)
+})
+
+test('Monday Last 3 Days spans Saturday through Monday (calendar dates)', async () => {
+  const { bizPresetDateRange } = await import('../src/lib/dates.ts')
+  const monday = new Date(Date.UTC(2026, 6, 27))
+  const range = bizPresetDateRange('last3', monday)
+  assert.strictEqual(range.from, '2026-07-25')
+  assert.strictEqual(range.to, '2026-07-27')
+})
+
+test('Monday Last 7 Days spans the prior 6 full calendar dates through Monday', async () => {
+  const { bizPresetDateRange } = await import('../src/lib/dates.ts')
+  const monday = new Date(Date.UTC(2026, 6, 27))
+  const range = bizPresetDateRange('last7', monday)
+  assert.strictEqual(range.from, '2026-07-21')
+  assert.strictEqual(range.to, '2026-07-27')
+})
+
+test('Karachi midnight boundaries use +05:00 fixed offset', () => {
+  assert.match(dates, /T00:00:00\+05:00/)
+  assert.match(dates, /T23:59:59\.999\+05:00/)
 })
 
 test('custom range validates start/end before applying', () => {
@@ -61,6 +82,11 @@ test('Home authorization and accounting presentation logic remain intact', () =>
   assert.match(route, /requirePermission\(loaded, 'can_view_trial_balance'\)/)
   assert.match(page, /const approxProfit = todaySales - todayExpenses/)
   assert.doesNotMatch(page, /parseFloat|Math\.round|toFixed/)
+})
+
+test('no stale Yesterday or This Week primary labels remain', () => {
+  assert.doesNotMatch(page, /Yesterday/)
+  assert.doesNotMatch(page, /This Week/)
 })
 
 test('no migration files changed', () => {

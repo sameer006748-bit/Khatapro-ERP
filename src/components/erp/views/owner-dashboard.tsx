@@ -54,7 +54,7 @@ function PendingCard({ icon: Icon, label, value, sub, accent }: { icon: React.Co
 export function OwnerDashboard({ user }: { user: any }) {
   const router = useRouter()
   const [range, setRange] = useState<BusinessDateRange>(() => bizPresetDateRange('today'))
-  const [preset, setPreset] = useState<'today' | 'yesterday' | 'week' | 'month' | 'custom'>('today')
+  const [preset, setPreset] = useState<'today' | 'last3' | 'last7' | 'month' | 'custom'>('today')
   const [customFrom, setCustomFrom] = useState(range.from)
   const [customTo, setCustomTo] = useState(range.to)
   const [rangeError, setRangeError] = useState('')
@@ -62,12 +62,12 @@ export function OwnerDashboard({ user }: { user: any }) {
   const [showAdvanced, setShowAdvanced] = useState(false)
 
   useEffect(() => {
-    const aiPeriod = preset === 'today' ? { preset: 'today' as const } : preset === 'month' ? { preset: 'this-month' as const } : { preset: 'custom' as const, from: range.from, to: range.to }
-    const label = preset === 'today' ? 'Today' : preset === 'month' ? 'This Month' : preset === 'week' ? 'Last 7 Days' : 'Custom Range'
+    const aiPeriod = preset === 'today' ? { preset: 'today' as const } : preset === 'month' ? { preset: 'this-month' as const } : preset === 'last3' ? { preset: 'last3' as const } : preset === 'last7' ? { preset: 'last7' as const } : { preset: 'custom' as const, from: range.from, to: range.to }
+    const label = preset === 'today' ? 'Today' : preset === 'month' ? 'This Month' : preset === 'last3' ? 'Last 3 Days' : preset === 'last7' ? 'Last 7 Days' : 'Custom Range'
     window.dispatchEvent(new CustomEvent('khatapro-ai-period', { detail: { period: aiPeriod, label } }))
   }, [preset, range])
 
-  const setPresetRange = (next: 'today' | 'yesterday' | 'week' | 'month') => {
+  const setPresetRange = (next: 'today' | 'last3' | 'last7' | 'month') => {
     const nextRange = bizPresetDateRange(next)
     setPreset(next); setRangeError('')
     if (range.from !== nextRange.from || range.to !== nextRange.to) setRange(nextRange)
@@ -135,7 +135,7 @@ export function OwnerDashboard({ user }: { user: any }) {
   const receivablesMovement = data.kpis.periodReceivablesMovement
   const payablesMovement = data.kpis.periodPayablesMovement
   const approxProfit = todaySales - todayExpenses
-  const activeRangeLabel = preset === 'today' ? 'Today' : preset === 'yesterday' ? 'Yesterday' : preset === 'week' ? 'This Week' : preset === 'month' ? 'This Month' : `${range.from} to ${range.to}`
+  const activeRangeLabel = preset === 'today' ? 'Today' : preset === 'last3' ? 'Last 3 Days' : preset === 'last7' ? 'Last 7 Days' : preset === 'month' ? 'This Month' : `${range.from} to ${range.to}`
 
   const primaryCards: Array<{ label: string; value: string; sub: string; icon: React.ComponentType<{ className?: string }>; accent: string; show: boolean }> = [
     { label: 'Sales', value: formatWholeRupees(todaySales), sub: `${data.salesByType.counter.count} counter · ${data.salesByType.online.count} online · ${data.salesByType.ofc.count} OFC`, icon: ShoppingCart, accent: 'bg-emerald-500/10 text-emerald-600', show: true },
@@ -175,7 +175,7 @@ export function OwnerDashboard({ user }: { user: any }) {
               </p>
               <div className="mt-4 space-y-2">
                 <div className="flex gap-1 overflow-x-auto pb-1 -mx-1 px-1" aria-label="Business summary date range">
-                  {([['today', 'Today'], ['yesterday', 'Yesterday'], ['week', 'This Week'], ['month', 'This Month']] as const).map(([key, label]) => (
+                  {([['today', 'Today'], ['last3', 'Last 3 Days'], ['last7', 'Last 7 Days'], ['month', 'This Month']] as const).map(([key, label]) => (
                     <button key={key} onClick={() => setPresetRange(key)} className={`shrink-0 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors ${preset === key ? 'border-primary bg-primary text-primary-foreground' : 'border-border bg-card hover:bg-muted/30'}`}>{label}</button>
                   ))}
                   <button onClick={() => setPreset('custom')} className={`shrink-0 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors ${preset === 'custom' ? 'border-primary bg-primary text-primary-foreground' : 'border-border bg-card hover:bg-muted/30'}`}>Custom Range</button>
