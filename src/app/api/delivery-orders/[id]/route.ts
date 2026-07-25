@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth/authOptions'
 import { loadSessionUser, hasPermission } from '@/lib/auth/permissions'
-import { getDeliveryOrder, getRiderByUserId } from '@/lib/delivery/data-access'
+import { getDeliveryOrder, getDeliveryOrderItems, getRiderByUserId } from '@/lib/delivery/data-access'
 import { withObservability } from '@/lib/observability'
 
 const getDeliveryOrderById = async (_req: Request, { params }: { params: Promise<{ id: string }> }) => {
@@ -25,7 +25,8 @@ const getDeliveryOrderById = async (_req: Request, { params }: { params: Promise
     }
   }
 
-  return NextResponse.json({ order })
+  const items = await getDeliveryOrderItems(loaded.businessId, order.invoiceId)
+  return NextResponse.json({ order, items })
 }
 
 export const GET = withObservability('/api/delivery-orders/[id]', getDeliveryOrderById)

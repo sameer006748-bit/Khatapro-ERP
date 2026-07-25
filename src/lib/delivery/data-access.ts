@@ -69,6 +69,55 @@ export type DeliveryOrderRow = {
   customerName: string | null; customerPhone: string | null; customerAddress: string | null; customerCity: string | null
 }
 
+export type DeliveryOrderItemRow = {
+  invoiceItemId: string
+  productName: string
+  unitPrice: string
+  orderedQty: number
+  deliveredQty: number
+  returnedQty: number
+  remainingQty: number
+}
+
+export async function getDeliveryOrderItems(
+  businessId: string,
+  invoiceId: string,
+): Promise<DeliveryOrderItemRow[]> {
+  const admin = getAdminSupabase()
+  const { data: items, error } = await admin.from('invoice_items')
+    .select('id, product_name, unit_price, qty')
+    .eq('business_id', businessId)
+    .eq('invoice_id', invoiceId)
+    .order('created_at')
+  if (error) throw new Error(`List delivery items: ${error.message}`)
+
+  const { data: progress, error: progressError } = await admin
+    .from('delivery_line_progress')
+    .select('invoice_item_id, delivered_qty, returned_qty')
+    .eq('business_id', businessId)
+    .eq('invoice_id', invoiceId)
+
+  // Deployment compatibility: before migration 00019 is manually applied,
+  // invoice lines remain readable and show zero operational progress.
+  const progressRows = progressError ? [] : (progress ?? [])
+  const byItem = new Map(progressRows.map((row: any) => [row.invoice_item_id, row]))
+  return (items ?? []).map((row: any) => {
+    const line = byItem.get(row.id) as any
+    const orderedQty = Number(row.qty)
+    const deliveredQty = Number(line?.delivered_qty ?? 0)
+    const returnedQty = Number(line?.returned_qty ?? 0)
+    return {
+      invoiceItemId: row.id,
+      productName: row.product_name,
+      unitPrice: String(row.unit_price ?? '0'),
+      orderedQty,
+      deliveredQty,
+      returnedQty,
+      remainingQty: Math.max(orderedQty - deliveredQty - returnedQty, 0),
+    }
+  })
+}
+
 export async function listDeliveryOrders(businessId: string, riderId?: string | null): Promise<DeliveryOrderRow[]> {
   const admin = getAdminSupabase()
   let query = admin.from('delivery_orders')
@@ -198,6 +247,46 @@ export async function completeCodDelivery(input: {
     p_idempotency_key: input.idempotencyKey,
   })
   if (error) throw new Error(`complete_cod_delivery: ${error.message}`)
+  return data as any
+}
+
+export async function recordDeliveryOutcome(input: {
+  businessId: string
+  invoiceId: string
+  items: Array<{ invoiceItemId: string; deliveredQty: number; returnedQty: number }>
+  cashCollected: bigint
+  reason?: string | null
+  idempotencyKey: string
+  actorId: string
+}): Promise<{
+  batch_id: string
+  outcome_no: string
+  invoice_id: string
+  status: string
+  delivered_qty: number
+  returned_qty: number
+  remaining_qty: number
+  cash_collected: string
+  sale_return_id: string | null
+  idempotent: boolean
+}> {
+  const admin = getAdminSupabase()
+  const actorId = await resolveSupabaseUuid(input.actorId)
+  if (!actorId) throw new Error('Server-attributed delivery actor is unavailable')
+  const { data, error } = await admin.rpc('record_delivery_outcome', {
+    p_business_id: input.businessId,
+    p_invoice_id: input.invoiceId,
+    p_items: input.items.map(item => ({
+      invoice_item_id: item.invoiceItemId,
+      delivered_qty: item.deliveredQty,
+      returned_qty: item.returnedQty,
+    })),
+    p_cash_collected: input.cashCollected.toString(),
+    p_reason: input.reason ?? null,
+    p_idempotency_key: input.idempotencyKey,
+    p_actor_id: actorId,
+  })
+  if (error) throw new Error(`record_delivery_outcome: ${error.message}`)
   return data as any
 }
 

@@ -23,6 +23,10 @@ type DeliveryOrder = {
   customerName: string | null; customerPhone: string | null; customerAddress: string | null; customerCity: string | null
 }
 type Rider = { id: string; name: string; phone: string | null; zone: string | null; isActive: boolean }
+type DeliveryItem = {
+  invoiceItemId: string; productName: string; unitPrice: string; orderedQty: number
+  deliveredQty: number; returnedQty: number; remainingQty: number
+}
 type CodSubmission = {
   id: string; submissionNo: string; riderId: string; riderName: string | null
   submittedDate: string; requestedAmount: string; confirmedCashAmount: string
@@ -33,8 +37,11 @@ const STATUS_BADGE: Record<string, string> = {
   pending: 'bg-muted text-muted-foreground',
   assigned: 'bg-sky-50 text-sky-700 border-sky-200',
   out_for_delivery: 'bg-amber-50 text-amber-700 border-amber-200',
+  'Partially Delivered': 'bg-violet-50 text-violet-700 border-violet-200',
   delivered: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+  Delivered: 'bg-emerald-50 text-emerald-700 border-emerald-200',
   returned: 'bg-rose-50 text-rose-700 border-rose-200',
+  'Returned / Failed': 'bg-rose-50 text-rose-700 border-rose-200',
 }
 
 export function DeliveryView({ user }: { user: MeUser }) {
@@ -90,9 +97,9 @@ function OrdersTab({ user }: { user: MeUser }) {
     pending: orders.filter(o => o.status === 'pending').length,
     assigned: orders.filter(o => o.status === 'assigned').length,
     outForDelivery: orders.filter(o => o.status === 'out_for_delivery').length,
-    delivered: orders.filter(o => o.status === 'delivered').length,
-    returned: orders.filter(o => o.status === 'returned').length,
-    codPending: orders.filter(o => o.status === 'delivered').reduce((s, o) => s + BigInt(o.totalCodAmount) - BigInt(o.codCollectedAmount), 0n),
+    delivered: orders.filter(o => o.status === 'delivered' || o.status === 'Delivered' || o.status === 'Partially Delivered').length,
+    returned: orders.filter(o => o.status === 'returned' || o.status === 'Returned / Failed').length,
+    codPending: orders.filter(o => o.status === 'delivered' || o.status === 'Delivered' || o.status === 'Partially Delivered').reduce((s, o) => s + BigInt(o.totalCodAmount) - BigInt(o.codCollectedAmount), 0n),
   }), [orders])
 
   const canAssign = user.permissions.includes('can_assign_rider')
@@ -135,8 +142,8 @@ function OrdersTab({ user }: { user: MeUser }) {
                 <td className="px-3 py-2"><span className={`text-[9px] uppercase px-1.5 py-0.5 rounded border font-medium ${STATUS_BADGE[o.status] ?? 'bg-muted'}`}>{o.status.replace(/_/g, ' ')}</span></td>
                 <td className="px-3 py-2"><div className="flex items-center justify-center gap-1">
                   {canAssign && (o.status === 'pending' || o.status === 'assigned') && <button onClick={() => setModal({ type: 'assign', order: o })} className="text-xs text-primary hover:underline">Assign</button>}
-                  {canMarkDelivered && o.status === 'out_for_delivery' && <button onClick={() => setModal({ type: 'delivered', order: o })} className="text-xs text-emerald-600 hover:underline">Deliver</button>}
-                  {canMarkReturned && o.status === 'out_for_delivery' && <button onClick={() => setModal({ type: 'returned', order: o })} className="text-xs text-rose-600 hover:underline">Return</button>}
+                  {canMarkDelivered && (o.status === 'out_for_delivery' || o.status === 'Partially Delivered') && <button onClick={() => setModal({ type: 'delivered', order: o })} className="text-xs text-emerald-600 hover:underline">Outcome</button>}
+                  {canMarkReturned && (o.status === 'out_for_delivery' || o.status === 'Partially Delivered') && <button onClick={() => setModal({ type: 'returned', order: o })} className="text-xs text-rose-600 hover:underline">Return</button>}
                   <button onClick={() => setModal({ type: 'label', order: o })} className="text-xs text-muted-foreground hover:underline"><Printer className="size-3 inline" /></button>
                 </div></td>
               </tr>)}
@@ -148,8 +155,8 @@ function OrdersTab({ user }: { user: MeUser }) {
               <div className="flex items-start justify-between gap-2 mb-1"><div><div className="font-medium text-foreground text-sm" data-num>{o.invoiceNo ?? '—'}</div><div className="text-[10px] text-muted-foreground">{o.customerName ?? '—'} · {o.customerPhone ?? ''}</div></div><span className={`text-[9px] uppercase px-1.5 py-0.5 rounded border font-medium ${STATUS_BADGE[o.status] ?? 'bg-muted'}`}>{o.status.replace(/_/g, ' ')}</span></div>
               <div className="flex items-end justify-between"><div className="text-[10px] text-muted-foreground">COD: <span data-num>{formatMoney(BigInt(o.totalCodAmount))}</span>{o.riderName ? ` · ${o.riderName}` : ''}</div><div className="flex gap-1">
                 {canAssign && (o.status === 'pending' || o.status === 'assigned') && <button onClick={() => setModal({ type: 'assign', order: o })} className="text-xs text-primary">Assign</button>}
-                {canMarkDelivered && o.status === 'out_for_delivery' && <button onClick={() => setModal({ type: 'delivered', order: o })} className="text-xs text-emerald-600">Deliver</button>}
-                {canMarkReturned && o.status === 'out_for_delivery' && <button onClick={() => setModal({ type: 'returned', order: o })} className="text-xs text-rose-600">Return</button>}
+                {canMarkDelivered && (o.status === 'out_for_delivery' || o.status === 'Partially Delivered') && <button onClick={() => setModal({ type: 'delivered', order: o })} className="text-xs text-emerald-600">Outcome</button>}
+                {canMarkReturned && (o.status === 'out_for_delivery' || o.status === 'Partially Delivered') && <button onClick={() => setModal({ type: 'returned', order: o })} className="text-xs text-rose-600">Return</button>}
                 <button onClick={() => setModal({ type: 'label', order: o })} className="text-xs text-muted-foreground"><Printer className="size-3" /></button>
               </div></div>
             </div>
@@ -197,46 +204,94 @@ function AssignModal({ order, onClose }: { order: DeliveryOrder; onClose: () => 
 
 function DeliveredModal({ order, onClose }: { order: DeliveryOrder; onClose: () => void }) {
   const qc = useQueryClient()
-  const [collectedAmount, setCollectedAmount] = useState(formatMoney(BigInt(order.totalCodAmount), false))
+  const itemsQ = useQuery<{ items: DeliveryItem[] }>({
+    queryKey: ['delivery-order', order.id],
+    queryFn: () => fetch(`/api/delivery-orders/${order.id}`).then(r => r.json()),
+  })
+  const [quantities, setQuantities] = useState<Record<string, { deliveredQty: number; returnedQty: number }>>({})
+  const [collectedAmount, setCollectedAmount] = useState('0')
   const [recipientName, setRecipientName] = useState('')
   const [deliveryNote, setDeliveryNote] = useState('')
+  const submittedItems = (itemsQ.data?.items ?? []).map(item => ({
+    invoiceItemId: item.invoiceItemId,
+    deliveredQty: quantities[item.invoiceItemId]?.deliveredQty ?? item.remainingQty,
+    returnedQty: quantities[item.invoiceItemId]?.returnedQty ?? 0,
+  })).filter(item => item.deliveredQty + item.returnedQty > 0)
+  const deliveredValue = submittedItems.reduce((sum, item) => {
+    const detail = itemsQ.data?.items.find(line => line.invoiceItemId === item.invoiceItemId)
+    return sum + BigInt(detail?.unitPrice ?? '0') * BigInt(item.deliveredQty)
+  }, 0n)
+  const expected = deliveredValue > 0n
+    ? [BigInt(order.totalCodAmount), deliveredValue + BigInt(order.customerDeliveryCharge)]
+      .reduce((a, b) => a < b ? a : b)
+    : 0n
   const amt = parseMoney(collectedAmount) ?? 0n
-  const expected = BigInt(order.totalCodAmount)
-  const mismatch = amt !== expected
+  const mismatch = amt < 0n || amt > expected
   const mut = useMutation({
-    mutationFn: async () => { const r = await fetch(`/api/delivery-orders/${order.id}/delivered`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ collectedAmount, recipientName: recipientName || undefined, deliveryNote: deliveryNote || undefined }) }); const j = await r.json(); if (!r.ok) throw new Error(j?.error ?? 'Failed'); return j },
-    onSuccess: () => { toast.success('Order delivered.'); void qc.invalidateQueries({ queryKey: ['delivery-orders'] }); void qc.invalidateQueries({ queryKey: ['trial-balance'] }); onClose() },
+    mutationFn: async () => { const r = await fetch(`/api/delivery-orders/${order.id}/delivered`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ collectedAmount, recipientName: recipientName || undefined, deliveryNote: deliveryNote || undefined, items: submittedItems }) }); const j = await r.json(); if (!r.ok) throw new Error(j?.error ?? 'Failed'); return j },
+    onSuccess: (result) => { toast.success(`Delivery outcome recorded: ${result.outcome_no ?? result.status}`); void qc.invalidateQueries({ queryKey: ['delivery-orders'] }); void qc.invalidateQueries({ queryKey: ['delivery-order', order.id] }); void qc.invalidateQueries({ queryKey: ['trial-balance'] }); onClose() },
     onError: (e: Error) => toast.error(`Failed: ${e.message}`),
   })
-  return <Shell title="Mark Delivered" onClose={onClose}><div className="space-y-3">
+  return <Shell title="Record Delivery Outcome" onClose={onClose} wide><div className="space-y-3">
     <div className="text-sm"><span className="text-muted-foreground">Order:</span> <span className="font-medium" data-num>{order.invoiceNo}</span></div>
     <div className="grid grid-cols-2 gap-2 text-xs">
       <div><span className="text-muted-foreground">Product:</span> <span data-num>{formatMoney(BigInt(order.productAmount), false)}</span></div>
       <div><span className="text-muted-foreground">Delivery:</span> <span data-num>{formatMoney(BigInt(order.customerDeliveryCharge), false)}</span></div>
       <div><span className="text-muted-foreground">Rider Earn:</span> <span data-num>{formatMoney(BigInt(order.riderEarningAmount), false)}</span></div>
-      <div><span className="text-muted-foreground">Expected COD:</span> <span data-num>{formatMoney(expected, false)}</span></div>
+      <div><span className="text-muted-foreground">Maximum COD:</span> <span data-num>{formatMoney(expected, false)}</span></div>
+    </div>
+    <div className="border border-border rounded-lg overflow-hidden">
+      {(itemsQ.data?.items ?? []).map(item => {
+        const value = quantities[item.invoiceItemId] ?? { deliveredQty: item.remainingQty, returnedQty: 0 }
+        const update = (key: 'deliveredQty' | 'returnedQty', next: number) => setQuantities(current => ({
+          ...current,
+          [item.invoiceItemId]: {
+            ...value,
+            [key]: Math.max(0, Math.min(next, item.remainingQty - (key === 'deliveredQty' ? value.returnedQty : value.deliveredQty))),
+          },
+        }))
+        return <div key={item.invoiceItemId} className="grid grid-cols-[1fr_80px_80px] gap-2 p-2 border-b border-border last:border-0 items-end">
+          <div><div className="text-xs font-medium">{item.productName}</div><div className="text-[10px] text-muted-foreground">Ordered {item.orderedQty} · delivered {item.deliveredQty} · returned {item.returnedQty} · remaining {item.remainingQty}</div></div>
+          <div><Label className="text-[10px]">Delivered</Label><Input type="number" min={0} max={item.remainingQty - value.returnedQty} value={value.deliveredQty} onChange={e => update('deliveredQty', Number(e.target.value))} className="h-8" /></div>
+          <div><Label className="text-[10px]">Returned</Label><Input type="number" min={0} max={item.remainingQty - value.deliveredQty} value={value.returnedQty} onChange={e => update('returnedQty', Number(e.target.value))} className="h-8" /></div>
+        </div>
+      })}
     </div>
     <div><Label className="text-xs text-muted-foreground">Collected Amount (Rs)</Label><Input type="text" value={collectedAmount} onChange={e => setCollectedAmount(e.target.value)} className="h-9 bg-background" data-num /></div>
-    {mismatch && <div className="text-xs text-destructive flex items-center gap-1"><AlertCircle className="size-3" /> Collected amount must match expected COD</div>}
+    {mismatch && <div className="text-xs text-destructive flex items-center gap-1"><AlertCircle className="size-3" /> Collected amount cannot exceed delivered collectible value</div>}
     <div><Label className="text-xs text-muted-foreground">Recipient Name (optional)</Label><Input value={recipientName} onChange={e => setRecipientName(e.target.value)} className="h-9 bg-background" /></div>
     <div><Label className="text-xs text-muted-foreground">Delivery Note (optional)</Label><Input value={deliveryNote} onChange={e => setDeliveryNote(e.target.value)} className="h-9 bg-background" /></div>
-    <Button className="w-full" disabled={mismatch || mut.isPending} onClick={() => mut.mutate()}>{mut.isPending ? 'Posting…' : 'Confirm Delivery'}</Button>
+    <Button className="w-full" disabled={submittedItems.length === 0 || mismatch || mut.isPending} onClick={() => mut.mutate()}>{mut.isPending ? 'Posting…' : 'Confirm Outcome'}</Button>
   </div></Shell>
 }
 
 function ReturnedModal({ order, onClose }: { order: DeliveryOrder; onClose: () => void }) {
   const qc = useQueryClient()
   const [reason, setReason] = useState('')
+  const itemsQ = useQuery<{ items: DeliveryItem[] }>({
+    queryKey: ['delivery-order', order.id],
+    queryFn: () => fetch(`/api/delivery-orders/${order.id}`).then(r => r.json()),
+  })
+  const [returned, setReturned] = useState<Record<string, number>>({})
+  const items = (itemsQ.data?.items ?? []).map(item => ({
+    invoiceItemId: item.invoiceItemId,
+    deliveredQty: 0,
+    returnedQty: returned[item.invoiceItemId] ?? item.remainingQty,
+  })).filter(item => item.returnedQty > 0)
   const mut = useMutation({
-    mutationFn: async () => { const r = await fetch(`/api/delivery-orders/${order.id}/returned`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ returnReason: reason || undefined }) }); const j = await r.json(); if (!r.ok) throw new Error(j?.error ?? 'Failed'); return j },
+    mutationFn: async () => { const r = await fetch(`/api/delivery-orders/${order.id}/returned`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ returnReason: reason || undefined, items }) }); const j = await r.json(); if (!r.ok) throw new Error(j?.error ?? 'Failed'); return j },
     onSuccess: () => { toast.success('Order returned. Stock restored.'); void qc.invalidateQueries({ queryKey: ['delivery-orders'] }); void qc.invalidateQueries({ queryKey: ['products'] }); void qc.invalidateQueries({ queryKey: ['trial-balance'] }); onClose() },
     onError: (e: Error) => toast.error(`Failed: ${e.message}`),
   })
   return <Shell title="Mark Returned" onClose={onClose}><div className="space-y-3">
     <div className="text-sm"><span className="text-muted-foreground">Order:</span> <span className="font-medium" data-num>{order.invoiceNo}</span></div>
     <div className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded p-2">This will post a sales return, restore stock, and reverse the original sale. No rider COD or earning will be posted.</div>
+    <div className="space-y-2">{(itemsQ.data?.items ?? []).map(item => <div key={item.invoiceItemId} className="grid grid-cols-[1fr_90px] gap-2 items-end">
+      <div><div className="text-xs font-medium">{item.productName}</div><div className="text-[10px] text-muted-foreground">Remaining {item.remainingQty}</div></div>
+      <div><Label className="text-[10px]">Return qty</Label><Input type="number" min={0} max={item.remainingQty} value={returned[item.invoiceItemId] ?? item.remainingQty} onChange={e => setReturned(current => ({ ...current, [item.invoiceItemId]: Math.max(0, Math.min(Number(e.target.value), item.remainingQty)) }))} className="h-8" /></div>
+    </div>)}</div>
     <div><Label className="text-xs text-muted-foreground">Return Reason</Label><Input value={reason} onChange={e => setReason(e.target.value)} placeholder="Why was it returned?" className="h-9 bg-background" /></div>
-    <Button className="w-full" disabled={mut.isPending} onClick={() => mut.mutate()}>{mut.isPending ? 'Posting…' : 'Confirm Return'}</Button>
+    <Button className="w-full" disabled={items.length === 0 || mut.isPending} onClick={() => mut.mutate()}>{mut.isPending ? 'Posting…' : 'Confirm Return'}</Button>
   </div></Shell>
 }
 
@@ -425,8 +480,8 @@ function RiderHome({ user }: { user: MeUser }) {
   const summary = dashQ.data?.summary
   const riderId = dashQ.data?.riderId
   const orders = ordersQ.data?.rows ?? []
-  const activeOrders = orders.filter(o => o.status === 'assigned' || o.status === 'out_for_delivery')
-  const deliveredOrders = orders.filter(o => o.status === 'delivered')
+  const activeOrders = orders.filter(o => o.status === 'assigned' || o.status === 'out_for_delivery' || o.status === 'Partially Delivered')
+  const deliveredOrders = orders.filter(o => o.status === 'delivered' || o.status === 'Delivered')
   const heldCod = codQ.data?.rows?.[0]
 
   return (
@@ -466,7 +521,7 @@ function RiderHome({ user }: { user: MeUser }) {
               </div></div>
               <div className="flex gap-2">
                 {o.status === 'assigned' && <Button size="sm" className="h-8 flex-1" onClick={async () => { try { const r = await fetch(`/api/delivery-orders/${o.id}/status`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ newStatus: 'out_for_delivery' }) }); if (!r.ok) throw new Error('Failed'); toast.success('Started delivery'); void qc.invalidateQueries({ queryKey: ['delivery-orders'] }); void qc.invalidateQueries({ queryKey: ['rider-dashboard'] }) } catch (e) { toast.error('Failed') } }}>Start Delivery</Button>}
-                {o.status === 'out_for_delivery' && <><Button size="sm" className="h-8 flex-1 bg-emerald-600 hover:bg-emerald-700" onClick={() => setModal({ type: 'delivered', order: o })}><CheckCircle2 className="size-3.5" /> Delivered</Button><Button size="sm" variant="outline" className="h-8 flex-1 text-rose-600" onClick={() => setModal({ type: 'returned', order: o })}><X className="size-3.5" /> Return</Button></>}
+                {(o.status === 'out_for_delivery' || o.status === 'Partially Delivered') && <><Button size="sm" className="h-8 flex-1 bg-emerald-600 hover:bg-emerald-700" onClick={() => setModal({ type: 'delivered', order: o })}><CheckCircle2 className="size-3.5" /> Outcome</Button><Button size="sm" variant="outline" className="h-8 flex-1 text-rose-600" onClick={() => setModal({ type: 'returned', order: o })}><X className="size-3.5" /> Return</Button></>}
               </div>
             </div>
           ))}</div>

@@ -2,8 +2,8 @@ import { NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { z } from 'zod'
 import { authOptions } from '@/lib/auth/authOptions'
-import { loadSessionUser, requirePermission, hasPermission } from '@/lib/auth/permissions'
-import { completeCodDelivery, getDeliveryOrder, getRiderByUserId } from '@/lib/delivery/data-access'
+import { loadSessionUser, hasPermission } from '@/lib/auth/permissions'
+import { getDeliveryOrder, getDeliveryOrderItems, getRiderByUserId, recordDeliveryOutcome } from '@/lib/delivery/data-access'
 import { parseMoney } from '@/lib/format'
 import { resolveRequestId, safeMutationError } from '@/lib/observability'
 
@@ -12,6 +12,11 @@ const Schema = z.object({
   recipientName: z.string().optional(),
   deliveryNote: z.string().optional(),
   idempotencyKey: z.string().uuid().optional(),
+  items: z.array(z.object({
+    invoiceItemId: z.string().uuid(),
+    deliveredQty: z.number().int().nonnegative(),
+    returnedQty: z.number().int().nonnegative().default(0),
+  })).min(1).optional(),
 })
 
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -45,7 +50,23 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   }
 
   try {
-    const result = await completeCodDelivery({ businessId: loaded.businessId, invoiceId: order.invoiceId, cashCollected: collectedAmount, idempotencyKey: parsed.data.idempotencyKey ?? crypto.randomUUID() })
+    const currentItems = await getDeliveryOrderItems(loaded.businessId, order.invoiceId)
+    const items = parsed.data.items ?? currentItems
+      .filter(item => item.remainingQty > 0)
+      .map(item => ({
+        invoiceItemId: item.invoiceItemId,
+        deliveredQty: item.remainingQty,
+        returnedQty: 0,
+      }))
+    const result = await recordDeliveryOutcome({
+      businessId: loaded.businessId,
+      invoiceId: order.invoiceId,
+      items,
+      cashCollected: collectedAmount,
+      reason: parsed.data.deliveryNote ?? null,
+      idempotencyKey: parsed.data.idempotencyKey ?? crypto.randomUUID(),
+      actorId: loaded.userId,
+    })
     return NextResponse.json({ ok: true, ...result })
   } catch (error) {
     return safeMutationError({
