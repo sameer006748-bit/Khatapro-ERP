@@ -108,3 +108,12 @@ The audit cannot attribute the reported figures to a live request without a brow
 ## Required runtime evidence before any COMPLETE status
 
 Use disposable labelled data and authenticated Owner, Rider and restricted-role sessions. For each claimed workflow record screen, route, request ID/identity, saved/reloaded result, stock/balance/voucher/report impact, and denied access result. For print, capture browser/PDF preview at A4 portrait 100% scaling. Stop on unexplained accounting, authorization or AI result.
+
+## Addendum — 2026-07-26 complex accounting gaps closeout
+
+A separate read-only audit on 2026-07-26 (branch `fix/backend-stock-recovery`, starting HEAD `3227a50`) verified exact status of six complex backend areas: Rider partial delivery/COD, Readable transaction identities, Account subcategories, Contra/Capital/Drawings, Purchase Return, and Core accounting reports. Full findings and the resulting fix work are in `COMPLEX-ACCOUNTING-GAPS-CLOSEOUT.md`. Summary of what changed since the addendum above:
+
+- **Fixed and committed:** rider assignment authorization wiring (item 9/10 above), rider COD balance partial-settlement reconciliation (item 12), Purchase/Purchase Return Prisma-fallback identity hardening and Contra/Capital/Drawing identity-allocator rewiring (item 13/15/16), Purchase Return idempotency (item 30).
+- **Still BLOCKED, not attempted:** wiring Contra/Capital/Drawings into the double-entry `accounts`/`vouchers`/`voucher_lines` system (item 15/16), and wiring Account Subcategories classification into Trial Balance/P&L/Balance Sheet (item 14/22/24/25). Both are blocked on the same unresolved question: whether `public.accounts` and `public.vouchers` exist in the current production schema. Migration `00014`'s own comment states they do not exist in production, but migration `00008i` (later) fixes bugs in `report_profit_loss()`/`report_balance_sheet()`, both of which query `public.accounts` directly with no fallback path. This contradiction was not resolved and no schema-dependent accounting bridge work was implemented on a guess.
+- **Correction:** migration `00013` is applied. Only Opening Stock production verification (item 29) remains pending, not migration 00013 itself.
+- **Correction:** no Commission Settlement workflow exists (referenced nowhere in the requirement matrix above under this name) — confirmed absent, not built speculatively.
