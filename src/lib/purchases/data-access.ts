@@ -106,24 +106,27 @@ async function postPurchaseViaPrisma(input: typeof postPurchase extends (x: infe
   const paid = input.payments.filter(p => p.paymentType !== 'credit').reduce((s, p) => s + p.amountPaisas, 0n)
   const outstanding = total - paid
 
-  const last = await db.purchase.findFirst({ where: { businessId: input.businessId }, orderBy: { purchaseNo: 'desc' } })
-  let nextNum = 1; if (last) { const m = last.purchaseNo.match(/^PUR-(\d+)$/); if (m) nextNum = parseInt(m[1], 10) + 1 }
-  const purchaseNo = `PUR-${String(nextNum).padStart(4, '0')}`
-
   const purchasesAcct = await getAccountByCode(input.businessId, '5010')
   if (!purchasesAcct) throw new Error('Purchases account (5010) not found')
   const payableAcct = await getAccountByCode(input.businessId, '2010')
   if (!payableAcct) throw new Error('Vendors Payable account (2010) not found')
 
-  const voucherLines: Array<{ accountId: string; debit: bigint; credit: bigint; memo?: string }> = [
-    { accountId: purchasesAcct.id, debit: total, credit: 0n, memo: `Purchase ${purchaseNo}` }
-  ]
-  for (const p of input.payments) {
-    if (p.paymentType !== 'credit') { voucherLines.push({ accountId: p.accountId, debit: 0n, credit: p.amountPaisas, memo: `Payment ${purchaseNo}` }) }
-  }
-  if (outstanding > 0n) { voucherLines.push({ accountId: payableAcct.id, debit: 0n, credit: outstanding, memo: `Payable ${purchaseNo}` }) }
-
   const result = await db.$transaction(async (tx) => {
+    const seq = await tx.identitySequence.upsert({
+      where: { businessId_prefix: { businessId: input.businessId, prefix: 'PUR' } },
+      create: { businessId: input.businessId, prefix: 'PUR', lastSeq: 1 },
+      update: { lastSeq: { increment: 1 } },
+    })
+    const purchaseNo = `PUR-${String(seq.lastSeq).padStart(4, '0')}`
+
+    const voucherLines: Array<{ accountId: string; debit: bigint; credit: bigint; memo?: string }> = [
+      { accountId: purchasesAcct.id, debit: total, credit: 0n, memo: `Purchase ${purchaseNo}` }
+    ]
+    for (const p of input.payments) {
+      if (p.paymentType !== 'credit') { voucherLines.push({ accountId: p.accountId, debit: 0n, credit: p.amountPaisas, memo: `Payment ${purchaseNo}` }) }
+    }
+    if (outstanding > 0n) { voucherLines.push({ accountId: payableAcct.id, debit: 0n, credit: outstanding, memo: `Payable ${purchaseNo}` }) }
+
     const vch = await tx.voucher.create({
       data: { businessId: input.businessId, voucherType: 'PU', voucherDate: input.purchaseDate, memo: `Purchase ${purchaseNo}`, postedBy: input.createdBy ?? null, totalDebit: total, totalCredit: total },
     })
@@ -233,12 +236,13 @@ export async function postPurchaseReturn(input: {
   businessId: string; purchaseId: string
   returnItems: Array<{ purchaseItemId: string; productId?: string | null; productName: string; quantity: number; unitCostPaisas: bigint }>
   settlementType: string; settlementAccountId?: string | null; returnDate?: Date; notes?: string | null; createdBy?: string | null
+  idempotencyKey: string
 }): Promise<{ returnId: string; returnNo: string }> {
   if (await isPhase5Live()) {
     const admin = getAdminSupabase()
     const supabaseCreatedBy = await resolveSupabaseUuid(input.createdBy)
     const itemsJson = input.returnItems.map(i => ({ purchase_item_id: i.purchaseItemId, product_id: i.productId ?? null, product_name: i.productName, quantity: i.quantity, unit_cost_paisas: i.unitCostPaisas.toString() }))
-    const { data, error } = await admin.rpc('post_purchase_return', { p_business_id: input.businessId, p_purchase_id: input.purchaseId, p_return_items: itemsJson, p_settlement_type: input.settlementType, p_settlement_account_id: input.settlementAccountId ?? null, p_return_date: input.returnDate ? bizDateString(input.returnDate) : null, p_notes: input.notes ?? null, p_created_by: supabaseCreatedBy })
+    const { data, error } = await admin.rpc('post_purchase_return', { p_business_id: input.businessId, p_purchase_id: input.purchaseId, p_return_items: itemsJson, p_settlement_type: input.settlementType, p_settlement_account_id: input.settlementAccountId ?? null, p_return_date: input.returnDate ? bizDateString(input.returnDate) : null, p_notes: input.notes ?? null, p_created_by: supabaseCreatedBy, p_idempotency_key: input.idempotencyKey })
     if (error) throw new Error(`Supabase: ${error.message}`)
     const returnId = data as string
     const { data: ret } = await admin.from('purchase_returns').select('return_no').eq('id', returnId).single()
@@ -251,9 +255,6 @@ export async function postPurchaseReturn(input: {
   const payableAcct = await getAccountByCode(input.businessId, '2010')
   if (!payableAcct) throw new Error('Vendors Payable account (2010) not found')
   const total = input.returnItems.reduce((s, i) => s + i.unitCostPaisas * BigInt(i.quantity), 0n)
-  const last = await db.purchaseReturn.findFirst({ where: { businessId: input.businessId }, orderBy: { returnNo: 'desc' } })
-  let nextNum = 1; if (last) { const m = last.returnNo.match(/^PRN-(\d+)$/); if (m) nextNum = parseInt(m[1], 10) + 1 }
-  const returnNo = `PRN-${String(nextNum).padStart(4, '0')}`
 
   // Build voucher lines for return reversal
   const voucherLines: Array<{ accountId: string; debit: bigint; credit: bigint }> = [
@@ -266,6 +267,13 @@ export async function postPurchaseReturn(input: {
   }
 
   const result = await db.$transaction(async (tx) => {
+    const seq = await tx.identitySequence.upsert({
+      where: { businessId_prefix: { businessId: input.businessId, prefix: 'PRN' } },
+      create: { businessId: input.businessId, prefix: 'PRN', lastSeq: 1 },
+      update: { lastSeq: { increment: 1 } },
+    })
+    const returnNo = `PRN-${String(seq.lastSeq).padStart(4, '0')}`
+
     // 1. Create reversal voucher
     const vch = await tx.voucher.create({
       data: {

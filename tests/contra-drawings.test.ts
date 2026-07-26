@@ -96,3 +96,12 @@ test('migrations 00009 through 00017 remain unchanged', async () => {
   const { stdout } = await execFileAsync('git', ['diff', '--name-only'])
   assert.ok(!stdout.split('\n').some((path) => /^supabase\/migrations\/000(?:09|10|11|12|13|14|15|16|17)_/.test(path)), 'historical migrations must stay unchanged')
 })
+
+test('Contra, Capital and Drawing references use the shared concurrency-safe allocator, not random UUID fragments', () => {
+  assert.ok(sql.includes("public.allocate_transaction_identity(p_business_id, 'contra_batch')"))
+  assert.ok(sql.includes("public.allocate_transaction_identity(p_business_id, 'capital_introduced')"))
+  assert.ok(sql.includes("public.allocate_transaction_identity(p_business_id, 'owner_drawing')"))
+  assert.ok(!sql.includes("'ctr-' || upper"))
+  assert.ok(!sql.includes("'cap-' || upper"))
+  assert.ok(!sql.includes("'drw-' || upper"))
+})

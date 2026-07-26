@@ -172,7 +172,7 @@ begin
   if v_source_balance < p_amount then raise exception 'Insufficient source account balance'; end if;
   update public.business_money_accounts set balance_paisas = balance_paisas - p_amount, updated_at = now() where id = p_source_account_id and business_id = p_business_id;
   update public.business_money_accounts set balance_paisas = balance_paisas + p_amount, updated_at = now() where id = p_destination_account_id and business_id = p_business_id;
-  v_ref := 'CTR-' || upper(substr(replace(gen_random_uuid()::text, '-', ''), 1, 12));
+  v_ref := public.allocate_transaction_identity(p_business_id, 'CONTRA_BATCH');
   insert into public.business_money_transactions (business_id, transaction_kind, source_account_id, destination_account_id, amount_paisas, transaction_date, note, reference, idempotency_key, request_fingerprint, posted_by)
   values (p_business_id, 'contra', p_source_account_id, p_destination_account_id, p_amount, p_date, nullif(trim(coalesce(p_note, '')), ''), v_ref, p_idempotency_key, v_fingerprint, v_profile.id)
   returning id into v_transaction_id;
@@ -200,7 +200,7 @@ begin
   perform 1 from public.business_money_accounts where id = p_destination_account_id and business_id = p_business_id and is_active for update;
   if not found then raise exception 'Active destination business money account is required'; end if;
   update public.business_money_accounts set balance_paisas = balance_paisas + p_amount, updated_at = now() where id = p_destination_account_id and business_id = p_business_id;
-  v_ref := 'CAP-' || upper(substr(replace(gen_random_uuid()::text, '-', ''), 1, 12));
+  v_ref := public.allocate_transaction_identity(p_business_id, 'CAPITAL_INTRODUCED');
   insert into public.business_money_transactions (business_id, transaction_kind, destination_account_id, amount_paisas, equity_delta_paisas, transaction_date, note, reference, idempotency_key, request_fingerprint, posted_by)
   values (p_business_id, 'capital', p_destination_account_id, p_amount, p_amount, p_date, nullif(trim(coalesce(p_note, '')), ''), v_ref, p_idempotency_key, v_fingerprint, v_profile.id) returning id into v_transaction_id;
   v_result := jsonb_build_object('transaction_id', v_transaction_id, 'reference', v_ref, 'amount_paisas', p_amount, 'idempotent', false);
@@ -228,7 +228,7 @@ begin
   if not found then raise exception 'Active source business money account is required'; end if;
   if v_source_balance < p_amount then raise exception 'Insufficient source account balance'; end if;
   update public.business_money_accounts set balance_paisas = balance_paisas - p_amount, updated_at = now() where id = p_source_account_id and business_id = p_business_id;
-  v_ref := 'DRW-' || upper(substr(replace(gen_random_uuid()::text, '-', ''), 1, 12));
+  v_ref := public.allocate_transaction_identity(p_business_id, 'OWNER_DRAWING');
   insert into public.business_money_transactions (business_id, transaction_kind, source_account_id, amount_paisas, equity_delta_paisas, transaction_date, note, reference, idempotency_key, request_fingerprint, posted_by)
   values (p_business_id, 'drawings', p_source_account_id, p_amount, -p_amount, p_date, nullif(trim(coalesce(p_note, '')), ''), v_ref, p_idempotency_key, v_fingerprint, v_profile.id) returning id into v_transaction_id;
   v_result := jsonb_build_object('transaction_id', v_transaction_id, 'reference', v_ref, 'amount_paisas', p_amount, 'idempotent', false);
