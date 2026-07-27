@@ -19,6 +19,8 @@ const KHI_OFFSET_MINUTES = 5 * 60
 
 export type BusinessDateRange = { from: string; to: string }
 
+type DateSearchParams = { get(name: string): string | null }
+
 function addBusinessDays(label: string, days: number): string {
   const [year, month, day] = label.split('-').map(Number)
   const date = new Date(Date.UTC(year, month - 1, day + days))
@@ -39,24 +41,64 @@ function calendarDaysBefore(dateStr: string, count: number): string {
   return addBusinessDays(dateStr, -count)
 }
 
+export function isBusinessDateLabel(label: string): boolean {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(label)
+  if (!match) return false
+  const year = Number(match[1])
+  const month = Number(match[2])
+  const day = Number(match[3])
+  const calendarDate = new Date(Date.UTC(year, month - 1, day))
+  return calendarDate.getUTCFullYear() === year
+    && calendarDate.getUTCMonth() === month - 1
+    && calendarDate.getUTCDate() === day
+}
+
 export function isBusinessDateRange(value: BusinessDateRange): boolean {
-  const isDate = (label: string) => /^\d{4}-\d{2}-\d{2}$/.test(label)
-    && new Date(`${label}T00:00:00+05:00`).toISOString().slice(0, 10) === label
-  return isDate(value.from)
-    && isDate(value.to)
+  return isBusinessDateLabel(value.from)
+    && isBusinessDateLabel(value.to)
     && value.from <= value.to
+}
+
+/** Serialize the one supported dashboard URL contract: from/to date-only labels. */
+export function dashboardDateRangeQuery(range: BusinessDateRange): string {
+  if (!isBusinessDateRange(range)) throw new Error('INVALID_DATE_RANGE')
+  return new URLSearchParams({ from: range.from, to: range.to }).toString()
+}
+
+/**
+ * Parse the dashboard URL contract. Missing/blank dates default to Karachi
+ * Today; either single supplied date becomes an inclusive one-day range.
+ * `today` remains a read-only compatibility alias for old bookmarked URLs.
+ */
+export function resolveDashboardDateRange(
+  params: DateSearchParams,
+  now: Date = new Date(),
+): BusinessDateRange | null {
+  const defaultDate = bizDateString(now)
+  const from = params.get('from')?.trim() || ''
+  const to = params.get('to')?.trim() || ''
+  const legacyToday = params.get('today')?.trim() || ''
+  const single = from || to || legacyToday || defaultDate
+  const range = {
+    from: from || (to ? to : single),
+    to: to || (from ? from : single),
+  }
+  return isBusinessDateRange(range) ? range : null
 }
 
 /** Format a Date as yyyy-MM-dd in Asia/Karachi. */
 export function bizDateString(date: Date | string | number): string {
   const d = typeof date === 'string' || typeof date === 'number' ? new Date(date) : date
-  // toLocaleString with en-CA gives yyyy-MM-dd format.
-  return d.toLocaleString('en-CA', {
+  if (Number.isNaN(d.getTime())) throw new Error('Invalid Date')
+  const parts = new Intl.DateTimeFormat('en-US', {
     timeZone: BUSINESS_TZ,
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
-  })
+  }).formatToParts(d)
+  const part = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find(item => item.type === type)?.value
+  return `${part('year')}-${part('month')}-${part('day')}`
 }
 
 /** Format a Date as yyyy-MM in Asia/Karachi. */

@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { bizPresetDateRange, type BusinessDateRange } from '@/lib/dates'
+import { bizPresetDateRange, dashboardDateRangeQuery, type BusinessDateRange } from '@/lib/dates'
 import { shouldRetryDashboardRequest } from '@/lib/dashboard/compatibility'
 
 export interface OwnerDashboardData {
@@ -109,8 +109,8 @@ class DashboardFetchError extends Error {
 }
 
 async function fetchOwnerDashboard(range: BusinessDateRange, signal?: AbortSignal): Promise<OwnerDashboardData> {
-  const params = new URLSearchParams({ from: range.from, to: range.to })
-  const r = await fetch(`/api/dashboard/owner?${params.toString()}`, { cache: 'no-store', signal })
+  const query = dashboardDateRangeQuery(range)
+  const r = await fetch(`/api/dashboard/owner?${query}`, { cache: 'no-store', signal })
   if (!r.ok) {
     throw new DashboardFetchError(r.status)
   }

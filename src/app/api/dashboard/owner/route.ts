@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth/authOptions'
 import { loadSessionUser, requirePermission } from '@/lib/auth/permissions'
-import { bizDateString, isBusinessDateRange } from '@/lib/dates'
+import { bizDateString, resolveDashboardDateRange } from '@/lib/dates'
 import { buildOwnerDashboardPayload } from '@/lib/dashboard/owner-summary'
 import { resolveRequestId, safeApiError, withObservability } from '@/lib/observability'
 
@@ -27,12 +27,10 @@ export const GET = withObservability('/api/dashboard/owner', async (req: Request
     }
 
     const url = new URL(req.url)
-    const today = bizDateString(new Date())
-    const range = {
-      from: url.searchParams.get('from') || url.searchParams.get('today') || today,
-      to: url.searchParams.get('to') || url.searchParams.get('from') || url.searchParams.get('today') || today,
-    }
-    if (!isBusinessDateRange(range)) {
+    const now = new Date()
+    const today = bizDateString(now)
+    const range = resolveDashboardDateRange(url.searchParams, now)
+    if (!range) {
       return NextResponse.json({ error: 'INVALID_DATE_RANGE' }, { status: 400 })
     }
 

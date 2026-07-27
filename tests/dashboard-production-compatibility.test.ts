@@ -133,6 +133,6 @@ test('retry is bounded and stale date-range requests are aborted', () => {
 test('Today, a custom single date, and a custom range share the selected Karachi range', () => {
   assert.match(summary, /boundary\(range\.from\)/)
   assert.match(summary, /boundary\(range\.to, true\)/)
-  assert.match(hook, /URLSearchParams\(\{ from: range\.from, to: range\.to \}\)/)
+  assert.match(hook, /dashboardDateRangeQuery\(range\)/)
   assert.match(hook, /queryKey: \['owner-dashboard', range\.from, range\.to\]/)
 })

@@ -28,12 +28,66 @@ test('custom range validates start/end before applying', () => {
 })
 
 test('one range reaches one owner API query key and is cancelled when stale', () => {
-  assert.match(hook, /URLSearchParams\(\{ from: range\.from, to: range\.to \}\)/)
+  assert.match(hook, /dashboardDateRangeQuery\(range\)/)
   assert.match(hook, /queryKey: \['owner-dashboard', range\.from, range\.to\]/)
   assert.match(hook, /queryFn: \(\{ signal \}\) => fetchOwnerDashboard\(range, signal\)/)
-  assert.match(route, /url\.searchParams\.get\('from'\)/)
-  assert.match(route, /url\.searchParams\.get\('to'\)/)
+  assert.match(route, /resolveDashboardDateRange\(url\.searchParams, now\)/)
   assert.match(page, /data\.range\.from !== range\.from \|\| data\.range\.to !== range\.to/)
+})
+
+test('valid Karachi date labels are not shifted to the previous UTC date', async () => {
+  const { isBusinessDateRange } = await import('../src/lib/dates.ts')
+  assert.equal(
+    new Date('2026-07-27T00:00:00+05:00').toISOString().slice(0, 10),
+    '2026-07-26',
+    'reproduces the old production validator mismatch',
+  )
+  assert.equal(isBusinessDateRange({ from: '2026-07-27', to: '2026-07-27' }), true)
+})
+
+test('dashboard emits exact YYYY-MM-DD queries for every preset and custom shape', async () => {
+  const { bizPresetDateRange, dashboardDateRangeQuery } = await import('../src/lib/dates.ts')
+  const now = new Date('2026-07-27T07:00:00.000Z')
+  const cases = [
+    ['Today', bizPresetDateRange('today', now), 'from=2026-07-27&to=2026-07-27'],
+    ['Last 3 Days', bizPresetDateRange('last3', now), 'from=2026-07-25&to=2026-07-27'],
+    ['Last 7 Days', bizPresetDateRange('last7', now), 'from=2026-07-21&to=2026-07-27'],
+    ['This Month', bizPresetDateRange('month', now), 'from=2026-07-01&to=2026-07-27'],
+    ['Custom single date', { from: '2026-07-12', to: '2026-07-12' }, 'from=2026-07-12&to=2026-07-12'],
+    ['Custom range', { from: '2026-06-29', to: '2026-07-03' }, 'from=2026-06-29&to=2026-07-03'],
+  ] as const
+  for (const [label, range, expected] of cases) {
+    assert.equal(dashboardDateRangeQuery(range), expected, label)
+    assert.doesNotMatch(expected, /undefined|Invalid|%2F|%2C/)
+  }
+})
+
+test('API defaults missing dates and expands either single date to one inclusive day', async () => {
+  const { resolveDashboardDateRange } = await import('../src/lib/dates.ts')
+  const now = new Date('2026-07-27T07:00:00.000Z')
+  assert.deepEqual(resolveDashboardDateRange(new URLSearchParams(), now), {
+    from: '2026-07-27', to: '2026-07-27',
+  })
+  assert.deepEqual(resolveDashboardDateRange(new URLSearchParams('from=2026-07-12'), now), {
+    from: '2026-07-12', to: '2026-07-12',
+  })
+  assert.deepEqual(resolveDashboardDateRange(new URLSearchParams('to=2026-07-13'), now), {
+    from: '2026-07-13', to: '2026-07-13',
+  })
+  assert.deepEqual(resolveDashboardDateRange(new URLSearchParams('from=&to='), now), {
+    from: '2026-07-27', to: '2026-07-27',
+  })
+})
+
+test('only malformed, impossible, or reversed date ranges are rejected', async () => {
+  const { dashboardDateRangeQuery, resolveDashboardDateRange } = await import('../src/lib/dates.ts')
+  for (const query of [
+    'from=07%2F27%2F2026&to=07%2F27%2F2026',
+    'from=Invalid+Date&to=2026-07-27',
+    'from=2026-02-30&to=2026-03-01',
+    'from=2026-07-28&to=2026-07-27',
+  ]) assert.equal(resolveDashboardDateRange(new URLSearchParams(query)), null, query)
+  assert.throws(() => dashboardDateRangeQuery({ from: '', to: '2026-07-27' }))
 })
 
 test('all operational period metrics use the same validated range', () => {
