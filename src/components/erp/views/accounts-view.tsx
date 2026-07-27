@@ -186,7 +186,7 @@ export function AccountsView({ user }: { user: MeUser }) {
         </div>
       )}
 
-      <AccountSubcategoryPanel activities={postedVouchers} />
+      <AccountSubcategoryPanel activities={postedVouchers} accounts={accounts} user={user} />
 
       {/* Primary actions */}
       <div className="flex flex-wrap gap-2">
@@ -288,9 +288,46 @@ export function AccountsView({ user }: { user: MeUser }) {
   )
 }
 
-function AccountSubcategoryPanel({ activities }: { activities: MoneyActivity[] }) {
+function AccountSubcategoryPanel({ activities, accounts, user }: { activities: MoneyActivity[]; accounts: Account[]; user: MeUser }) {
   const [expanded, setExpanded] = useState<string | null>('expenses')
   const [filter, setFilter] = useState<{ parentId: string; subcategoryId?: string } | null>(null)
+  const [parentCode, setParentCode] = useState('expenses')
+  const [newName, setNewName] = useState('')
+  const [accountId, setAccountId] = useState('')
+  const [subcategoryId, setSubcategoryId] = useState('uncategorized')
+  const categoryQ = useQuery<{
+    categories: Array<{ id: string; parentCode: string; name: string; reportClass: string; isActive: boolean; archivedAt: string | null }>
+    assignments: Array<{ accountId: string; parentCode: string; subcategoryId: string | null }>
+  }>({
+    queryKey: ['account-subcategories'],
+    queryFn: async () => {
+      const response = await fetch('/api/account-subcategories', { cache: 'no-store' })
+      if (!response.ok) throw new Error('Category persistence requires migration 00021')
+      return response.json()
+    },
+    retry: false,
+  })
+  const canManage = user.roleName === 'Owner' || user.roleName === 'Admin'
+    || user.permissions.includes('can_manage_account_categories')
+    || user.permissions.includes('can_manage_chart_of_accounts')
+  const categoryMutation = useMutation({
+    mutationFn: async (body: Record<string, unknown>) => {
+      const response = await fetch('/api/account-subcategories', {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
+      })
+      const result = await response.json()
+      if (!response.ok) throw new Error(result?.error ?? 'Category change failed')
+      return result
+    },
+    onSuccess: () => {
+      toast.success('Account classification saved.')
+      void categoryQ.refetch()
+      setNewName('')
+    },
+    onError: (error: Error) => toast.error(error.message),
+  })
+  const activeCategories = (categoryQ.data?.categories ?? []).filter(category => category.isActive)
+  const selectedParentCategories = activeCategories.filter(category => category.parentCode === parentCode)
   const classified = useMemo(() => activities.map(classifyMoneyActivity), [activities])
   const summaries = useMemo(() => summarizeAccountSubcategories(activities), [activities])
   const summary = (parentId: string, subcategoryId?: string) => summaries.find(item => item.parentId === parentId && item.subcategoryId === subcategoryId) ?? { parentId, subcategoryId, amount: 0n, activityCount: 0 }
@@ -298,7 +335,22 @@ function AccountSubcategoryPanel({ activities }: { activities: MoneyActivity[] }
   const filtered = filter ? classified.filter(item => matchesAccountSubcategory(item, filter.parentId, filter.subcategoryId)) : []
 
   return <div className="border border-border rounded-lg bg-card overflow-hidden">
-    <div className="px-4 py-3 border-b border-border"><h2 className="text-sm font-semibold text-foreground">Simple Categories</h2><p className="text-[11px] text-muted-foreground">Recent activity classification only — it does not change balances or create entries.</p></div>
+    <div className="px-4 py-3 border-b border-border"><h2 className="text-sm font-semibold text-foreground">Account Categories</h2><p className="text-[11px] text-muted-foreground">One-level reporting classification. Moving an account never changes its balance or historical entries.</p></div>
+    {canManage && <div className="p-3 border-b border-border space-y-3 bg-muted/10">
+      <div className="grid grid-cols-1 sm:grid-cols-[180px_1fr_auto] gap-2 items-end">
+        <div><Label className="text-[10px]">Approved parent</Label><Select value={parentCode} onValueChange={value => { setParentCode(value); setSubcategoryId('uncategorized') }}><SelectTrigger className="h-8 bg-background"><SelectValue /></SelectTrigger><SelectContent>{ACCOUNT_CATEGORY_DEFINITIONS.map(parent => <SelectItem key={parent.id} value={parent.id}>{parent.label}</SelectItem>)}</SelectContent></Select></div>
+        <div><Label className="text-[10px]">New subcategory</Label><Input value={newName} onChange={event => setNewName(event.target.value)} className="h-8 bg-background" placeholder="One level only" /></div>
+        <Button size="sm" className="h-8" disabled={!newName.trim() || categoryMutation.isPending} onClick={() => categoryMutation.mutate({ action: 'create', parentCode, name: newName })}>Create</Button>
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-[1fr_180px_180px_auto] gap-2 items-end">
+        <div><Label className="text-[10px]">Account</Label><Select value={accountId} onValueChange={setAccountId}><SelectTrigger className="h-8 bg-background"><SelectValue placeholder="Select account" /></SelectTrigger><SelectContent>{accounts.map(account => <SelectItem key={account.id} value={account.id}>{account.code} · {account.name}</SelectItem>)}</SelectContent></Select></div>
+        <div><Label className="text-[10px]">Parent</Label><Select value={parentCode} onValueChange={value => { setParentCode(value); setSubcategoryId('uncategorized') }}><SelectTrigger className="h-8 bg-background"><SelectValue /></SelectTrigger><SelectContent>{ACCOUNT_CATEGORY_DEFINITIONS.map(parent => <SelectItem key={parent.id} value={parent.id}>{parent.label}</SelectItem>)}</SelectContent></Select></div>
+        <div><Label className="text-[10px]">Subcategory</Label><Select value={subcategoryId} onValueChange={setSubcategoryId}><SelectTrigger className="h-8 bg-background"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="uncategorized">Uncategorized</SelectItem>{selectedParentCategories.map(category => <SelectItem key={category.id} value={category.id}>{category.name}</SelectItem>)}</SelectContent></Select></div>
+        <Button size="sm" className="h-8" disabled={!accountId || categoryMutation.isPending} onClick={() => categoryMutation.mutate({ action: subcategoryId === 'uncategorized' ? 'uncategorize' : 'move', parentCode, accountId, subcategoryId: subcategoryId === 'uncategorized' ? null : subcategoryId })}>Assign</Button>
+      </div>
+      {categoryQ.isError && <p className="text-[10px] text-amber-700">Persistence is unavailable until migration 00021 is inspected and applied.</p>}
+      {categoryQ.data && <div className="flex flex-wrap gap-1.5">{categoryQ.data.categories.map(category => <span key={category.id} className={`inline-flex items-center gap-1 rounded border px-2 py-1 text-[10px] ${category.isActive ? 'border-border bg-background' : 'border-border text-muted-foreground line-through'}`}>{ACCOUNT_CATEGORY_DEFINITIONS.find(parent => parent.id === category.parentCode)?.label}: {category.name}{category.isActive && <><button className="text-primary hover:underline" onClick={() => { const name = window.prompt('Rename subcategory', category.name); if (name?.trim()) categoryMutation.mutate({ action: 'rename', subcategoryId: category.id, name }) }}>Rename</button><button className="text-destructive hover:underline" onClick={() => categoryMutation.mutate({ action: 'archive', subcategoryId: category.id })}>Archive</button></>}</span>)}</div>}
+    </div>}
     <div className="divide-y divide-border/50">
       {parents.map(parent => {
         const parentSummary = summary(parent.id)
@@ -362,12 +414,12 @@ function MoneyReceivedModal({ accounts, businessAccounts, onClose }: { accounts:
   const [reference, setReference] = useState('')
   const [notes, setNotes] = useState('')
   const [result, setResult] = useState<{ ok: boolean; receiptNo?: string; error?: string } | null>(null)
+  const [idempotencyKey, setIdempotencyKey] = useState(() => crypto.randomUUID())
 
   const mut = useMutation({
     mutationFn: async () => {
       const creditAccount = accounts.find(a => a.code === purposeCode)
       if (!creditAccount) throw new Error('Invalid purpose')
-      const idempotencyKey = `ar-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
       const r = await fetch('/api/receipt-voucher', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ receiptDate: date, receivedIntoAccountId: receivedIntoId, creditAccountId: creditAccount.id, amount, reference: reference || undefined, notes: notes || undefined, idempotencyKey }) })
       const j = await r.json(); if (!r.ok) throw new Error(j?.error ?? 'Failed'); return j
     },
@@ -378,7 +430,7 @@ function MoneyReceivedModal({ accounts, businessAccounts, onClose }: { accounts:
   const canPost = receivedIntoId && amt > 0n
   const creditAccount = accounts.find(a => a.code === purposeCode)
 
-  if (result?.ok) return <Shell title="Money Received" onClose={onClose}><div className="text-center py-4"><CheckCircle2 className="size-12 text-primary mx-auto mb-3" /><p className="text-xs text-muted-foreground mb-1">Receipt posted</p><p className="text-2xl font-bold text-primary" data-num>{result.receiptNo}</p><Button variant="ghost" size="sm" className="mt-4" onClick={() => { setResult(null); setAmount(''); setReference(''); setNotes('') }}>New Receipt</Button></div></Shell>
+  if (result?.ok) return <Shell title="Money Received" onClose={onClose}><div className="text-center py-4"><CheckCircle2 className="size-12 text-primary mx-auto mb-3" /><p className="text-xs text-muted-foreground mb-1">Receipt posted</p><p className="text-2xl font-bold text-primary" data-num>{result.receiptNo}</p><Button variant="ghost" size="sm" className="mt-4" onClick={() => { setResult(null); setAmount(''); setReference(''); setNotes(''); setIdempotencyKey(crypto.randomUUID()) }}>New Receipt</Button></div></Shell>
 
   return <Shell title="Money Received" subtitle="Record cash, bank or wallet money received" onClose={onClose}>
     <div className="space-y-3">
@@ -407,12 +459,13 @@ function MoneyPaidModal({ accounts, businessAccounts, onClose }: { accounts: Acc
   const [reference, setReference] = useState('')
   const [notes, setNotes] = useState('')
   const [result, setResult] = useState<{ ok: boolean; paymentNo?: string; error?: string } | null>(null)
+  const [idempotencyKey, setIdempotencyKey] = useState(() => crypto.randomUUID())
 
   const mut = useMutation({
     mutationFn: async () => {
       const debitAccount = accounts.find(a => a.code === purposeCode)
       if (!debitAccount) throw new Error('Invalid purpose')
-      const r = await fetch('/api/payment-voucher', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ paymentDate: date, paidFromAccountId: paidFromId, debitAccountId: debitAccount.id, amount, reference: reference || undefined, notes: notes || undefined }) })
+      const r = await fetch('/api/payment-voucher', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ paymentDate: date, paidFromAccountId: paidFromId, debitAccountId: debitAccount.id, amount, reference: reference || undefined, notes: notes || undefined, idempotencyKey }) })
       const j = await r.json(); if (!r.ok) throw new Error(j?.error ?? 'Failed'); return j
     },
     onSuccess: (j) => { toast.success(`Money paid: ${j.paymentNo}`); setResult({ ok: true, paymentNo: j.paymentNo }); void qc.invalidateQueries({ queryKey: ['day-book'] }); void qc.invalidateQueries({ queryKey: ['trial-balance'] }) },
@@ -422,7 +475,7 @@ function MoneyPaidModal({ accounts, businessAccounts, onClose }: { accounts: Acc
   const canPost = paidFromId && amt > 0n
   const debitAccount = accounts.find(a => a.code === purposeCode)
 
-  if (result?.ok) return <Shell title="Money Paid" onClose={onClose}><div className="text-center py-4"><CheckCircle2 className="size-12 text-primary mx-auto mb-3" /><p className="text-xs text-muted-foreground mb-1">Payment posted</p><p className="text-2xl font-bold text-primary" data-num>{result.paymentNo}</p><Button variant="ghost" size="sm" className="mt-4" onClick={() => { setResult(null); setAmount(''); setReference(''); setNotes('') }}>New Payment</Button></div></Shell>
+  if (result?.ok) return <Shell title="Money Paid" onClose={onClose}><div className="text-center py-4"><CheckCircle2 className="size-12 text-primary mx-auto mb-3" /><p className="text-xs text-muted-foreground mb-1">Payment posted</p><p className="text-2xl font-bold text-primary" data-num>{result.paymentNo}</p><Button variant="ghost" size="sm" className="mt-4" onClick={() => { setResult(null); setAmount(''); setReference(''); setNotes(''); setIdempotencyKey(crypto.randomUUID()) }}>New Payment</Button></div></Shell>
 
   return <Shell title="Money Paid" subtitle="Record a payment made from a business account" onClose={onClose}>
     <div className="space-y-3">
@@ -450,6 +503,7 @@ function ExpenseModal({ expenseAccounts, businessAccounts, presetPaidFrom, onClo
   const [reference, setReference] = useState('')
   const [notes, setNotes] = useState('')
   const [result, setResult] = useState<{ ok: boolean; expenseNo?: string; error?: string } | null>(null)
+  const [idempotencyKey, setIdempotencyKey] = useState(() => crypto.randomUUID())
 
   const total = lines.reduce((s, l) => s + (parseMoney(l.amount) ?? 0n), 0n)
   const QUICK_CATEGORIES = ['Rent', 'Packing', 'Tea', 'Fuel', 'Loading', 'Delivery', 'Utilities', 'Salary/Wages', 'Repairs', 'Miscellaneous']
@@ -461,7 +515,7 @@ function ExpenseModal({ expenseAccounts, businessAccounts, presetPaidFrom, onClo
   const mut = useMutation({
     mutationFn: async () => {
       const validLines = lines.filter(l => l.expenseAccountId && ((parseMoney(l.amount) ?? 0n) > 0n))
-      const r = await fetch('/api/expense-batch', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ expenseDate: date, paymentAccountId: paidFromId, lines: validLines.map(l => ({ expenseAccountId: l.expenseAccountId, description: l.description || undefined, amount: l.amount })), reference: reference || undefined, notes: notes || undefined }) })
+      const r = await fetch('/api/expense-batch', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ expenseDate: date, paymentAccountId: paidFromId, lines: validLines.map(l => ({ expenseAccountId: l.expenseAccountId, description: l.description || undefined, amount: l.amount })), reference: reference || undefined, notes: notes || undefined, idempotencyKey }) })
       const j = await r.json(); if (!r.ok) throw new Error(j?.error ?? 'Failed'); return j
     },
     onSuccess: (j) => { toast.success(`Expenses posted: ${j.expenseNo}`); setResult({ ok: true, expenseNo: j.expenseNo }); void qc.invalidateQueries({ queryKey: ['day-book'] }); void qc.invalidateQueries({ queryKey: ['trial-balance'] }) },
@@ -469,7 +523,7 @@ function ExpenseModal({ expenseAccounts, businessAccounts, presetPaidFrom, onClo
   })
   const canPost = paidFromId && lines.length >= 1 && lines.every(l => l.expenseAccountId && (parseMoney(l.amount) ?? 0n) > 0n) && total > 0n
 
-  if (result?.ok) return <Shell title="Record Expenses" onClose={onClose}><div className="text-center py-4"><CheckCircle2 className="size-12 text-primary mx-auto mb-3" /><p className="text-xs text-muted-foreground mb-1">Expense batch posted</p><p className="text-2xl font-bold text-primary" data-num>{result.expenseNo}</p><Button variant="ghost" size="sm" className="mt-4" onClick={() => { setResult(null); setLines([{ key: '1', expenseAccountId: '', description: '', amount: '' }]); setReference(''); setNotes('') }}>New Batch</Button></div></Shell>
+  if (result?.ok) return <Shell title="Record Expenses" onClose={onClose}><div className="text-center py-4"><CheckCircle2 className="size-12 text-primary mx-auto mb-3" /><p className="text-xs text-muted-foreground mb-1">Expense batch posted</p><p className="text-2xl font-bold text-primary" data-num>{result.expenseNo}</p><Button variant="ghost" size="sm" className="mt-4" onClick={() => { setResult(null); setLines([{ key: '1', expenseAccountId: '', description: '', amount: '' }]); setReference(''); setNotes(''); setIdempotencyKey(crypto.randomUUID()) }}>New Batch</Button></div></Shell>
 
   return <Shell title="Record Expenses" subtitle="One or multiple expenses paid from one account" onClose={onClose} wide>
     <div className="space-y-3">
@@ -508,10 +562,11 @@ function TransferModal({ businessAccounts, presetTo, onClose }: { businessAccoun
   const [reference, setReference] = useState('')
   const [notes, setNotes] = useState('')
   const [result, setResult] = useState<{ ok: boolean; contraNo?: string; error?: string } | null>(null)
+  const [idempotencyKey, setIdempotencyKey] = useState(() => crypto.randomUUID())
 
   const mut = useMutation({
     mutationFn: async () => {
-      const r = await fetch('/api/contra-entry', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ contraDate: date, fromAccountId: fromId, toAccountId: toId, amount, reference: reference || undefined, notes: notes || undefined }) })
+      const r = await fetch('/api/contra-entry', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ contraDate: date, fromAccountId: fromId, toAccountId: toId, amount, reference: reference || undefined, notes: notes || undefined, idempotencyKey }) })
       const j = await r.json(); if (!r.ok) throw new Error(j?.error ?? 'Failed'); return j
     },
     onSuccess: (j) => { toast.success(`Transfer posted: ${j.contraNo}`); setResult({ ok: true, contraNo: j.contraNo }); void qc.invalidateQueries({ queryKey: ['day-book'] }); void qc.invalidateQueries({ queryKey: ['trial-balance'] }) },
@@ -520,7 +575,7 @@ function TransferModal({ businessAccounts, presetTo, onClose }: { businessAccoun
   const amt = parseMoney(amount) ?? 0n
   const canPost = fromId && toId && amt > 0n && fromId !== toId
 
-  if (result?.ok) return <Shell title="Transfer Money" onClose={onClose}><div className="text-center py-4"><CheckCircle2 className="size-12 text-primary mx-auto mb-3" /><p className="text-xs text-muted-foreground mb-1">Transfer posted</p><p className="text-2xl font-bold text-primary" data-num>{result.contraNo}</p><Button variant="ghost" size="sm" className="mt-4" onClick={() => { setResult(null); setAmount(''); setReference(''); setNotes('') }}>New Transfer</Button></div></Shell>
+  if (result?.ok) return <Shell title="Transfer Money" onClose={onClose}><div className="text-center py-4"><CheckCircle2 className="size-12 text-primary mx-auto mb-3" /><p className="text-xs text-muted-foreground mb-1">Transfer posted</p><p className="text-2xl font-bold text-primary" data-num>{result.contraNo}</p><Button variant="ghost" size="sm" className="mt-4" onClick={() => { setResult(null); setAmount(''); setReference(''); setNotes(''); setIdempotencyKey(crypto.randomUUID()) }}>New Transfer</Button></div></Shell>
 
   return <Shell title="Transfer Money" subtitle="Move funds between Cash, Bank or Wallet accounts" onClose={onClose}>
     <div className="space-y-3">
@@ -547,6 +602,7 @@ function AdjustmentModal({ accounts, onClose }: { accounts: Account[]; onClose: 
   const [amount, setAmount] = useState('')
   const [reason, setReason] = useState('')
   const [result, setResult] = useState<{ ok: boolean; voucherNo?: string; error?: string } | null>(null)
+  const [idempotencyKey, setIdempotencyKey] = useState(() => crypto.randomUUID())
 
   const mut = useMutation({
     mutationFn: async () => {
@@ -562,7 +618,7 @@ function AdjustmentModal({ accounts, onClose }: { accounts: Account[]; onClose: 
       const lines = direction === 'increase'
         ? [{ accountId: targetAccount.id, debit: amt.toString(), credit: '0', memo: `Increase ${targetAccount.name}` }, { accountId: equityAccount.id, debit: '0', credit: amt.toString(), memo: 'Adjustment offset' }]
         : [{ accountId: equityAccount.id, debit: amt.toString(), credit: '0', memo: 'Adjustment offset' }, { accountId: targetAccount.id, debit: '0', credit: amt.toString(), memo: `Decrease ${targetAccount.name}` }]
-      const r = await fetch('/api/journal-voucher', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jvDate: date, memo: reason || `Adjustment: ${direction} ${targetAccount.name}`, lines }) })
+      const r = await fetch('/api/journal-voucher', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jvDate: date, memo: reason || `Adjustment: ${direction} ${targetAccount.name}`, lines, idempotencyKey }) })
       const j = await r.json(); if (!r.ok) throw new Error(j?.error ?? 'Failed'); return j
     },
     onSuccess: (j) => { toast.success(`Adjustment posted: ${j.voucherNo}`); setResult({ ok: true, voucherNo: j.voucherNo }); void qc.invalidateQueries({ queryKey: ['day-book'] }); void qc.invalidateQueries({ queryKey: ['trial-balance'] }) },
@@ -571,7 +627,7 @@ function AdjustmentModal({ accounts, onClose }: { accounts: Account[]; onClose: 
   const amt = parseMoney(amount) ?? 0n
   const canPost = accountId && amt > 0n && reason
 
-  if (result?.ok) return <Shell title="Adjustment" onClose={onClose}><div className="text-center py-4"><CheckCircle2 className="size-12 text-primary mx-auto mb-3" /><p className="text-xs text-muted-foreground mb-1">Adjustment posted</p><p className="text-2xl font-bold text-primary" data-num>{result.voucherNo}</p><Button variant="ghost" size="sm" className="mt-4" onClick={() => { setResult(null); setAmount(''); setReason('') }}>New Adjustment</Button></div></Shell>
+  if (result?.ok) return <Shell title="Adjustment" onClose={onClose}><div className="text-center py-4"><CheckCircle2 className="size-12 text-primary mx-auto mb-3" /><p className="text-xs text-muted-foreground mb-1">Adjustment posted</p><p className="text-2xl font-bold text-primary" data-num>{result.voucherNo}</p><Button variant="ghost" size="sm" className="mt-4" onClick={() => { setResult(null); setAmount(''); setReason(''); setIdempotencyKey(crypto.randomUUID()) }}>New Adjustment</Button></div></Shell>
 
   return <Shell title="Adjustment" subtitle="Advanced correction for accountant use" onClose={onClose}>
     <div className="space-y-3">

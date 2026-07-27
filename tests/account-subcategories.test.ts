@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { readFile } from 'node:fs/promises'
-import { execFileSync } from 'node:child_process'
 
 const classification = await readFile('src/lib/money/account-subcategories.ts', 'utf8')
 const moneyView = await readFile('src/components/erp/views/accounts-view.tsx', 'utf8')
@@ -28,14 +27,15 @@ test('parent totals include classified children and filtering is subcategory-spe
   assert.match(moneyView, /matchesAccountSubcategory\(item, filter\.parentId, filter\.subcategoryId\)/)
 })
 
-test('classification is presentation-only and does not alter balances or post accounting records', () => {
+test('classification UI persists management without changing account balances', () => {
   assert.match(classification, /never writes accounting records/)
-  assert.doesNotMatch(classification, /fetch\(|\.insert\(|\.update\(|from\('/i)
-  assert.match(moneyView, /does not change balances or create entries/)
+  assert.match(moneyView, /\/api\/account-subcategories/)
+  assert.match(moneyView, /never changes its balance or historical entries/)
+  assert.match(moneyView, /Uncategorized/)
 })
 
 test('Money UI uses compact expandable mobile-safe grouping and clear empty state', () => {
-  assert.match(moneyView, /Simple Categories/)
+  assert.match(moneyView, /Account Categories/)
   assert.match(moneyView, /setExpanded/)
   assert.match(moneyView, /flex flex-wrap gap-2/)
   assert.match(moneyView, /No recent activity in this subcategory/)
@@ -48,7 +48,7 @@ test('existing Money and Advanced Accounting permission navigation is unchanged'
   assert.doesNotMatch(moneyView, /permissions\.push|can_view_account_balances/)
 })
 
-test('production-absent accounts tables are not introduced by this classification layer', () => {
+test('production-absent accounts tables are not assumed by the classification layer', () => {
   assert.doesNotMatch(classification, /account_categories|public\.accounts|from\('accounts'\)/)
   assert.match(foundationTest, /prisma-only table absent: accounts/)
   assert.match(foundationTest, /prisma-only table absent: account_categories/)
@@ -59,7 +59,9 @@ test('Home date-range query behavior remains shared and untouched', () => {
   assert.match(homeHook, /URLSearchParams\(\{ from: range\.from, to: range\.to \}\)/)
 })
 
-test('no migration changed', () => {
-  const changed = execFileSync('git', ['diff', '--name-only', '9295e78d3d375c3eaa9d553cf83908b92a5d8164'], { encoding: 'utf8' })
-  assert.doesNotMatch(changed, /^supabase\/migrations\//m)
+test('management controls include create, assign, rename and archive', () => {
+  assert.match(moneyView, /action: 'create'/)
+  assert.match(moneyView, /action: 'rename'/)
+  assert.match(moneyView, /action: 'archive'/)
+  assert.match(moneyView, /subcategoryId === 'uncategorized' \? 'uncategorize' : 'move'/)
 })
