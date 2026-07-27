@@ -116,4 +116,17 @@ A separate read-only audit on 2026-07-26 (branch `fix/backend-stock-recovery`, s
 - **Fixed and committed:** rider assignment authorization wiring (item 9/10 above), rider COD balance partial-settlement reconciliation (item 12), Purchase/Purchase Return Prisma-fallback identity hardening and Contra/Capital/Drawing identity-allocator rewiring (item 13/15/16), Purchase Return idempotency (item 30).
 - **Still BLOCKED, not attempted:** wiring Contra/Capital/Drawings into the double-entry `accounts`/`vouchers`/`voucher_lines` system (item 15/16), and wiring Account Subcategories classification into Trial Balance/P&L/Balance Sheet (item 14/22/24/25). Both are blocked on the same unresolved question: whether `public.accounts` and `public.vouchers` exist in the current production schema. Migration `00014`'s own comment states they do not exist in production, but migration `00008i` (later) fixes bugs in `report_profit_loss()`/`report_balance_sheet()`, both of which query `public.accounts` directly with no fallback path. This contradiction was not resolved and no schema-dependent accounting bridge work was implemented on a guess.
 - **Correction:** migration `00013` is applied. Only Opening Stock production verification (item 29) remains pending, not migration 00013 itself.
+
+## Addendum — 2026-07-27 production UUID ledger implementation
+
+Read-only production inspection resolved the blocker recorded in the 2026-07-26 addendum: `public.accounts`, `public.vouchers`, and `public.voucher_lines` are absent, while `businesses.id` is UUID. The implementation now targets a new additive UUID-scoped `ledger_*` model.
+
+Static implementation status changed as follows:
+
+- R10/R13/R15/R16: canonical, concurrency-safe voucher identities and true Contra/Capital/Drawings double entries are implemented in migrations `00025`–`00028`.
+- R11/R17: account subcategories now link by business-scoped ledger-account UUID and the Trial Balance, General Ledger, P&L, Balance Sheet, balances, and Day Book consume the canonical ledger in migrations `00029`–`00030`.
+- R04/R05/R08/R09/R18: verified sale, linked return, invoice collection, rider delivery/COD settlement, and opening-stock paths have atomic operational-plus-ledger wrappers in migration `00031`.
+- Historical conversion remains deliberately unexecuted. Migration `00032` provides aggregate-only dry-run reconciliation; manual backfill fails closed without separately reviewed approval.
+
+These are implementation changes, not deployed/runtime acceptance evidence. The corresponding matrix rows remain blocked from COMPLETE until migrations `00014`–`00032` are executed in order on a controlled production-shaped database, every inspection is green, reconciliation is reviewed, and authenticated UAT confirms exact balances and denied-role behavior. Purchase, Purchase Return, and general stock-adjustment ledger wrappers remain blocked because their current production row shapes were not sufficiently proven for safe double posting.
 - **Correction:** no Commission Settlement workflow exists (referenced nowhere in the requirement matrix above under this name) — confirmed absent, not built speculatively.

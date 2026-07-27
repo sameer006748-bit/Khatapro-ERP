@@ -105,3 +105,9 @@ Everything in this closeout is **static, source-level evidence**: SQL text asser
 ## Push status
 
 **NOT PUSHED.**
+
+## Superseding addendum — 2026-07-27
+
+The Phase 4/Phase 6 blocker above is resolved. Read-only production inspection confirmed that the legacy `accounts`, `vouchers`, and `voucher_lines` tables are absent and that UUID `businesses.id` is authoritative. Migrations `00025`–`00032` now implement the replacement UUID ledger, atomic posting/reversal, system chart, owner-money bridge, UUID account classification, canonical reports, verified workflow bridges, and fail-closed reconciliation.
+
+This supersedes the earlier statement that Contra/Capital/Drawings and Account Subcategories reporting integration were not implemented. It does not change the runtime status: none of these migrations was applied, no historical rows were backfilled, and controlled database/UAT evidence remains outstanding. See `PRODUCTION-UUID-LEDGER-CLOSEOUT.md` for the implementation decisions, residual blocks, verification evidence, and exact migration order.

@@ -52,3 +52,19 @@ Other Sale must use the shared sale invoice sequence and the same linked-return,
 ## Requirement index decision
 
 No separate maintained requirements index exists in the graph-linked project files. This document is therefore the authoritative index. The two July files remain unchanged as historical evidence so their prior wording and omission can be audited.
+
+## Production UUID accounting decision — 2026-07-27
+
+Read-only production inspection resolved the legacy-schema ambiguity. `businesses.id` is the authoritative UUID tenant key; the legacy `accounts`, `account_categories`, `vouchers`, and `voucher_lines` tables are absent. The production accounting target is therefore the additive `ledger_*` model introduced by migrations `00025` through `00032`, not a recreation of the legacy model.
+
+The canonical invariants are:
+
+- whole paisas only; one-sided voucher lines; total debit equals total credit;
+- one business-scoped UUID foreign-key chain from business to category, account, voucher, and line;
+- service-only atomic posting and reversal RPCs; posted rows are immutable;
+- a stable idempotency key and canonical request fingerprint for every financial mutation;
+- operational workflow state and ledger voucher post in the same database transaction;
+- reports, balances, account classification, and day book read the same canonical lines;
+- historical rows are dry-run reconciled first and are never silently auto-posted.
+
+No migration has been applied and no runtime requirement is marked COMPLETE by this decision. Controlled production-shaped database execution, reconciliation review, and authenticated UAT remain required.
