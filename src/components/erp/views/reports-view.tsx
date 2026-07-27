@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { formatMoney } from '@/lib/format'
-import { bizDate } from '@/lib/dates'
+import { bizDate, bizDateString } from '@/lib/dates'
 import { BarChart3, FileText, Scale, Wallet, Package, Users, Bike, ScrollText, TrendingUp, TrendingDown, Download, Printer, ChevronRight, AlertTriangle, CheckCircle2, ShieldAlert } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import type { MeUser } from '@/components/erp/erp-app'
@@ -52,19 +52,23 @@ const CATEGORIES: Array<{ id: Category; label: string; icon: any; reports: Array
 export function ReportsView({ user }: { user: MeUser }) {
   const [category, setCategory] = useState<Category>('overview')
   const [reportType, setReportType] = useState<ReportType>('overview')
-  const [fromDate, setFromDate] = useState(() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01` })
-  const [toDate, setToDate] = useState(new Date().toISOString().slice(0, 10))
+  const [fromDate, setFromDate] = useState(() => `${bizDateString(new Date()).slice(0, 8)}01`)
+  const [toDate, setToDate] = useState(() => bizDateString(new Date()))
 
   const visibleCategories = CATEGORIES.filter(c => c.reports.some(r => user.permissions.includes(r.perm)) || c.id === 'overview' || c.id === 'audit')
 
   function setPreset(preset: string) {
-    const today = new Date()
-    const toDateStr = today.toISOString().slice(0, 10)
+    const toDateStr = bizDateString(new Date())
+    const year = Number(toDateStr.slice(0, 4))
+    const month = Number(toDateStr.slice(5, 7))
     let fromStr = toDateStr
     if (preset === 'today') fromStr = toDateStr
-    else if (preset === 'thisMonth') fromStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-01`
-    else if (preset === 'lastMonth') { const d = new Date(today.getFullYear(), today.getMonth() - 1, 1); fromStr = d.toISOString().slice(0, 10) }
-    else if (preset === 'thisYear') fromStr = `${today.getFullYear()}-01-01`
+    else if (preset === 'thisMonth') fromStr = `${toDateStr.slice(0, 8)}01`
+    else if (preset === 'lastMonth') {
+      const previousYear = month === 1 ? year - 1 : year
+      const previousMonth = month === 1 ? 12 : month - 1
+      fromStr = `${previousYear}-${String(previousMonth).padStart(2, '0')}-01`
+    } else if (preset === 'thisYear') fromStr = `${year}-01-01`
     setFromDate(fromStr); setToDate(toDateStr)
   }
 

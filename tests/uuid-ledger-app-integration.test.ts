@@ -57,6 +57,15 @@ test('P&L and Balance Sheet have no active app-side accounting patches', () => {
   assert.doesNotMatch(ownerDashboardRoute, /getAccountByCode\(bid, '4010'\)/)
 })
 
+test('financial report defaults use the Asia/Karachi business date', () => {
+  assert.match(reportsView, /bizDateString\(new Date\(\)\)/)
+  assert.match(reportsRoute, /const businessToday = bizDateString\(new Date\(\)\)/)
+  assert.doesNotMatch(
+    reportsView.slice(0, reportsView.indexOf('function exportCsv')),
+    /toISOString\(\)\.slice\(0, 10\)/,
+  )
+})
+
 test('manual payment, receipt, journal, Contra, and expense entry use one voucher source', () => {
   assert.match(vouchers, /async function postCanonicalVoucher/)
   assert.match(vouchers, /post_ledger_voucher/)

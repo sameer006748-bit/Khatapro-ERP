@@ -130,3 +130,9 @@ Static implementation status changed as follows:
 
 These are implementation changes, not deployed/runtime acceptance evidence. The corresponding matrix rows remain blocked from COMPLETE until migrations `00014`–`00032` are executed in order on a controlled production-shaped database, every inspection is green, reconciliation is reviewed, and authenticated UAT confirms exact balances and denied-role behavior. Purchase, Purchase Return, and general stock-adjustment ledger wrappers remain blocked because their current production row shapes were not sufficiently proven for safe double posting.
 - **Correction:** no Commission Settlement workflow exists (referenced nowhere in the requirement matrix above under this name) — confirmed absent, not built speculatively.
+
+### UUID-ledger pre-push verification addendum — 2026-07-27
+
+Migration `00031` now fails closed on exact pending operational RPC signatures and return types, and Rider COD settlement now posts any settlement-earned commission to Commission Expense and Commission Payable in the same canonical voucher. Financial-report default and preset dates now use the Asia/Karachi business date instead of UTC.
+
+This closes proven source defects only. Migration `00031` remains **BLOCKED FROM RUNTIME VERIFICATION**: its pending Phase 2/3 RPC bodies, row shapes, locks, idempotency, and rollback behavior have not been executed together on a controlled production-shaped database. Source implementation and static verification are complete for the bounded UUID-ledger scope; database execution, authenticated browser UAT, and production deployment remain pending.

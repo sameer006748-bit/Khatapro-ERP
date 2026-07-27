@@ -4,16 +4,56 @@
 begin;
 
 do $$
+declare
+  v_missing_signatures text;
+  v_wrong_returns text;
 begin
   if to_regclass('public.invoices') is null
      or to_regclass('public.invoice_items') is null
      or to_regclass('public.sale_return_documents') is null
      or to_regclass('public.payments') is null
      or to_regclass('public.rider_cash_ledger') is null
+     or to_regclass('public.products') is null
+     or to_regclass('public.stock_movements') is null
+     or to_regclass('public.commission_events') is null
      or to_regprocedure(
        'public.post_ledger_voucher(uuid,text,date,text,jsonb,text,text,text,uuid,text,text,uuid)'
      ) is null then
     raise exception 'Verified workflow integration requires production Phase 1-3 tables and migrations 00025-00030';
+  end if;
+
+  select string_agg(signature, ', ' order by signature)
+    into v_missing_signatures
+  from (values
+    ('public.post_sale_phase2(uuid,text,date,jsonb,jsonb,uuid,text,text,text,text,text,text,uuid,text)', 'text'),
+    ('public.post_sale_return(uuid,text,jsonb,text,text,text)', 'jsonb'),
+    ('public.receive_invoice_payment(uuid,text,numeric,text,text)', 'jsonb'),
+    ('public.record_delivery_outcome(uuid,text,jsonb,numeric,text,text,uuid)', 'jsonb'),
+    ('public.settle_rider_cod(uuid,uuid,numeric,text,text,text)', 'jsonb'),
+    ('public.create_stock_movement(text,text,text,integer,text,date,uuid,numeric)', 'text')
+  ) expected(signature, return_type)
+  where to_regprocedure(signature) is null;
+  if v_missing_signatures is not null then
+    raise exception 'Verified workflow RPC signatures are missing: %', v_missing_signatures;
+  end if;
+
+  select string_agg(
+           signature || ' expected ' || return_type || ' but found '
+             || pg_get_function_result(to_regprocedure(signature)),
+           ', ' order by signature
+         )
+    into v_wrong_returns
+  from (values
+    ('public.post_sale_phase2(uuid,text,date,jsonb,jsonb,uuid,text,text,text,text,text,text,uuid,text)', 'text'),
+    ('public.post_sale_return(uuid,text,jsonb,text,text,text)', 'jsonb'),
+    ('public.receive_invoice_payment(uuid,text,numeric,text,text)', 'jsonb'),
+    ('public.record_delivery_outcome(uuid,text,jsonb,numeric,text,text,uuid)', 'jsonb'),
+    ('public.settle_rider_cod(uuid,uuid,numeric,text,text,text)', 'jsonb'),
+    ('public.create_stock_movement(text,text,text,integer,text,date,uuid,numeric)', 'text')
+  ) expected(signature, return_type)
+  where pg_get_function_result(to_regprocedure(signature)) <> return_type;
+  if v_wrong_returns is not null then
+    raise exception 'Verified workflow RPC return types do not match: %', v_wrong_returns;
   end if;
 end $$;
 
@@ -411,7 +451,11 @@ language plpgsql
 security definer
 set search_path = public, pg_temp
 as $$
-declare v_result jsonb; v_lines jsonb; v_account_code text;
+declare
+  v_result jsonb;
+  v_lines jsonb;
+  v_account_code text;
+  v_commission numeric(20,0);
 begin
   if not exists (
     select 1 from public.profiles
@@ -440,6 +484,29 @@ begin
       'line_narration', 'Rider-held COD cleared'
     )
   );
+  select coalesce(sum(e.payable_amount), 0)
+    into v_commission
+  from public.commission_events e
+  join public.payments p
+    on p.business_id = e.business_id and p.id::text = e.allocation_id
+  where e.business_id = p_business_id
+    and e.event_type = 'collection'
+    and p.idempotency_key like
+        'phase3:payment:' || (v_result->>'batch_id') || ':%';
+  if v_commission > 0 then
+    v_lines := v_lines || jsonb_build_array(
+      jsonb_build_object(
+        'account_id', public.ledger_account_id_by_code(p_business_id, '6010'),
+        'debit_paisas', v_commission, 'credit_paisas', 0,
+        'line_narration', 'COD settlement-earned commission'
+      ),
+      jsonb_build_object(
+        'account_id', public.ledger_account_id_by_code(p_business_id, '2030'),
+        'debit_paisas', 0, 'credit_paisas', v_commission,
+        'line_narration', 'Commission payable'
+      )
+    );
+  end if;
   perform public.post_ledger_voucher(
     p_business_id, 'COD', (now() at time zone 'Asia/Karachi')::date,
     'Rider COD settlement ' || coalesce(v_result->>'reference', ''),

@@ -121,6 +121,23 @@ test('verified workflow wrappers preserve atomic operational and ledger posting'
   assert.match(workflows, /Approved COD collection; no business cash receipt/)
   assert.match(workflows, /Actual COD settlement received/)
   assert.match(workflows, /Collection-earned commission/)
+  for (const signature of [
+    'post_sale_phase2(uuid,text,date,jsonb,jsonb,uuid,text,text,text,text,text,text,uuid,text)',
+    'post_sale_return(uuid,text,jsonb,text,text,text)',
+    'receive_invoice_payment(uuid,text,numeric,text,text)',
+    'record_delivery_outcome(uuid,text,jsonb,numeric,text,text,uuid)',
+    'settle_rider_cod(uuid,uuid,numeric,text,text,text)',
+    'create_stock_movement(text,text,text,integer,text,date,uuid,numeric)',
+  ]) {
+    assert.ok(workflows.includes(signature), `missing fail-closed RPC signature ${signature}`)
+  }
+  const settlement = workflows.slice(
+    workflows.indexOf('create or replace function public.settle_rider_cod_ledger'),
+    workflows.indexOf('create or replace function public.post_opening_stock_ledger'),
+  )
+  assert.match(settlement, /phase3:payment:/)
+  assert.match(settlement, /'6010'[\s\S]*'debit_paisas', v_commission/)
+  assert.match(settlement, /'2030'[\s\S]*'credit_paisas', v_commission/)
 })
 
 test('Opening Stock remains Inventory debit and Opening Balance Equity credit', () => {

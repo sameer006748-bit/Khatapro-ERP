@@ -1,4 +1,19 @@
 -- Static/catalog checks. Runtime fixture tests remain mandatory.
+with expected(signature, return_type) as (values
+  ('public.post_sale_phase2(uuid,text,date,jsonb,jsonb,uuid,text,text,text,text,text,text,uuid,text)', 'text'),
+  ('public.post_sale_return(uuid,text,jsonb,text,text,text)', 'jsonb'),
+  ('public.receive_invoice_payment(uuid,text,numeric,text,text)', 'jsonb'),
+  ('public.record_delivery_outcome(uuid,text,jsonb,numeric,text,text,uuid)', 'jsonb'),
+  ('public.settle_rider_cod(uuid,uuid,numeric,text,text,text)', 'jsonb'),
+  ('public.create_stock_movement(text,text,text,integer,text,date,uuid,numeric)', 'text')
+)
+select signature,
+       to_regprocedure(signature) is not null as exact_signature_exists,
+       pg_get_function_result(to_regprocedure(signature)) = return_type
+         as return_type_matches
+from expected
+order by signature;
+
 select p.proname,
        p.prosecdef as security_definer,
        has_function_privilege('service_role', p.oid, 'EXECUTE') as service_execute,

@@ -36,6 +36,8 @@ No migration was applied during the UUID-ledger implementation. Use a disposable
 
 Migration `00021` remains in sequence because it creates the classification metadata, but its text `account_ref` linkage is not canonical. Migration `00029` supersedes that linkage with a business-scoped UUID foreign key to `ledger_accounts`; do not expose account-subcategory mutations between those two migrations.
 
+Migration `00031` is a mandatory runtime stop gate. Its preflight requires the exact Phase 2/3 and stock-movement RPC signatures and return types before creating wrappers. A green catalog inspection proves only that the expected objects were installed; it does not prove their bodies, operational row shapes, locks, idempotency, or shared rollback behavior. Do not promote `00031` until the controlled transaction tests in its inspection file pass. Current status: source-complete and statically verified; controlled database execution, authenticated browser UAT, and production deployment are pending.
+
 Stop immediately if an inspect query is not wholly green, if an unproven legacy accounting table appears, if an unresolved subcategory reference remains, or if reconciliation totals do not explain. Do not run `supabase/reconciliation/UUID_LEDGER_MANUAL_BACKFILL_TEMPLATE.sql`: it intentionally raises before mutation and requires a separately reviewed, manually approved copy.
 
 ## Status correction

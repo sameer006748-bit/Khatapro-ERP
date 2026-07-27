@@ -69,7 +69,7 @@ Seeding is idempotent for every existing business and inserts no financial amoun
 | Purchase / Purchase Return | — | — | Blocked: production row/cost/settlement shapes were not sufficiently proven for a safe atomic bridge |
 | General stock adjustment | — | — | Blocked: approved gain/loss source semantics and exact operational mutation shape remain unverified |
 
-All connected operational wrappers execute the existing operational RPC and the canonical ledger post in the same PostgreSQL transaction. UI mutation keys remain stable across retry and rotate only for a new action.
+At source level, every connected operational wrapper invokes the operational RPC and canonical ledger post inside one PostgreSQL function call, so an exception rolls back both sides. Migration `00031` now fails closed unless every pending Phase 2/3 dependency has the exact expected signature and return type. This is static transaction-boundary evidence only: migration `00031` remains **BLOCKED FROM RUNTIME VERIFICATION** until the pending migrations are executed together on a controlled production-shaped database. UI mutation keys remain stable across retry and rotate only for a new action.
 
 ## Reports rebuilt
 
@@ -99,8 +99,8 @@ Migration `00021` preserves the original user-work intent but stores an unsafe t
 
 ## Static validation
 
-- Focused UUID-ledger, subcategory, owner-money, opening-stock, sales/return, and rider suites: **68/69 pass**; the one failure is a historical Phase 2 SQL-text regex, not a ledger behavior regression.
-- Full suite: **312/319 pass**. The seven failures are the two expected “no migrations changed” guards, the same stale Phase 2 SQL-text regex, and four pre-existing Phase 8 compatibility assertions against the repository’s Phase 16 boundary.
+- Focused UUID-ledger, subcategory, owner-money, opening-stock, sales/return, rider, and Karachi report-date suites: **69/70 pass**. The remaining failure is the historical test `only proven stale UUID overloads are removed after text-safe replacements`: it expects the truncated SQL text `(^|, )uuid`, while the migration correctly uses the stricter token-boundary expression `(^|, )uuid(,|$)`. It is a stale historical assertion, not an implementation, environment, or migration-guard failure.
+- Full suite: **313/320 pass**. The seven failures are the two expected “no migrations changed” guards, the same stale Phase 2 SQL-text assertion, and four pre-existing Phase 8 compatibility assertions against the repository’s Phase 16 boundary.
 - Targeted ESLint on changed application files: pass.
 - TypeScript: the four allowed, unchanged historical errors remain (three `TS2741` product mappings and one `TS2367` phase literal).
 - `git diff --check` excluding preserved `.env`, `task_progress.md`, and `graphify-out/`: pass.
@@ -123,14 +123,19 @@ Follow `CLIENT-REQUIREMENTS-MIGRATION-INSTRUCTIONS.md` exactly. In a disposable 
 
 ## Residual risks
 
-The highest remaining accounting risk is runtime compatibility of the operational RPCs wrapped by migration `00031`, especially the not-yet-applied Phase 2 sale/return functions. Static schema evidence is strong, but only controlled PostgreSQL execution can prove their signatures, row shapes, locks, and rollback behavior together.
+The highest remaining accounting risk is runtime compatibility of the operational RPCs wrapped by migration `00031`, especially the not-yet-applied Phase 2 sale/return functions. Exact signature and return-type preconditions now fail closed, but only controlled PostgreSQL execution can prove their bodies, row shapes, locks, idempotent retry results, and rollback behavior together. Migration `00031` is source-complete and statically verified, but runtime-blocked.
 
 Purchase, Purchase Return, and general stock-adjustment ledger integration remain intentionally blocked rather than guessed. Commission Settlement remains absent and was not invented. Runtime status must not be marked COMPLETE until controlled database and authenticated UAT evidence exists.
 
 ## Delivery status
 
-- Safe for controlled dev migration testing: **YES, sequentially with inspection and stop conditions.**
+- Source implementation: **COMPLETE for the bounded UUID-ledger scope.**
+- Static verification: **COMPLETE with the classified historical test failures above.**
+- Safe for controlled dev migration testing: **YES, sequentially with inspection and stop conditions; this is the required proof gate for migration `00031`, not approval for promotion.**
+- Database execution: **PENDING.**
+- Authenticated browser UAT: **PENDING.**
 - Safe for production application now: **NO; runtime migration/UAT evidence is pending.**
+- Production deployment: **PENDING / NOT PERFORMED.**
 - Historical backfill executed: **NO.**
 - Pushed: **NO.**
 - Deployed: **NO.**

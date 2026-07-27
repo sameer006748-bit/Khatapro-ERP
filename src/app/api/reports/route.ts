@@ -4,6 +4,7 @@ import { authOptions } from '@/lib/auth/authOptions'
 import { loadSessionUser, hasPermission } from '@/lib/auth/permissions'
 import { reportProfitLoss, reportBalanceSheet, reportSalesSummary, reportInventoryValuation, reportCashFlow, reportExpenseSummary, reportCustomerOutstanding, reportVendorOutstanding, reportSalesDetail, reportPurchaseDetail, reportStockMovements, reportDeliverySummary, reportCodSettlements, reportProductProfitability, reportTrialBalance, reportExceptions } from '@/lib/reports/data-access'
 import { resolveRequestId, safeApiError, withObservability } from '@/lib/observability'
+import { bizDateString } from '@/lib/dates'
 
 export const GET = withObservability('/api/reports', async (req: Request) => {
   const requestId = resolveRequestId(req)
@@ -14,8 +15,9 @@ export const GET = withObservability('/api/reports', async (req: Request) => {
 
   const url = new URL(req.url)
   const type = url.searchParams.get('type') || 'overview'
-  const fromDate = url.searchParams.get('fromDate') || new Date().toISOString().slice(0, 8) + '01'
-  const toDate = url.searchParams.get('toDate') || new Date().toISOString().slice(0, 10)
+  const businessToday = bizDateString(new Date())
+  const fromDate = url.searchParams.get('fromDate') || businessToday.slice(0, 8) + '01'
+  const toDate = url.searchParams.get('toDate') || businessToday
 
   // Permission checks based on report type
   const permMap: Record<string, string> = {
