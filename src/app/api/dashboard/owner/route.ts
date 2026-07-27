@@ -37,8 +37,8 @@ export const GET = withObservability('/api/dashboard/owner', async (req: Request
     const bid = loaded.businessId
 
     // ── Concurrent: today sales aggregate, 5 recent invoices, 5 recent purchases,
-    //     stock aggregates + alert details, today expenses, 3 account lookups,
-    //     today collections and recent audit logs (all independent) ──
+    //     stock aggregates + alert details, today expenses, account lookups,
+    //     today collections, returns, COGS and recent audit logs (all independent) ──
     const [
       todaySalesAgg,
       periodPurchases,
@@ -49,7 +49,12 @@ export const GET = withObservability('/api/dashboard/owner', async (req: Request
       salesAccount,
       arAccount,
       apAccount,
+      cashAccount,
+      bankAccount,
       collections,
+      periodSalesReturns,
+      periodPurchaseReturns,
+      periodCogs,
       auditLogsResult,
     ] = await Promise.all([
       getTodaySalesAggregate(bid, range.from, range.to),
@@ -61,7 +66,12 @@ export const GET = withObservability('/api/dashboard/owner', async (req: Request
       getAccountByCode(bid, '4000'),
       getAccountByCode(bid, '1200'),
       getAccountByCode(bid, '2010'),
+      getAccountByCode(bid, '1010'),
+      getAccountByCode(bid, '1020'),
       getTodayCollections(bid, range.from, range.to),
+      getPeriodSalesReturns(bid, range.from, range.to),
+      getPeriodPurchaseReturns(bid, range.from, range.to),
+      getPeriodCogs(bid, range.from, range.to),
       getRecentAuditLogs(bid),
     ])
 
@@ -99,10 +109,32 @@ export const GET = withObservability('/api/dashboard/owner', async (req: Request
     const receivablesBalance = arAccount ? Number(arAccount.balanceCache) : 0
     const payablesBalance = apAccount ? Number(apAccount.balanceCache) : 0
     const totalSalesBalance = salesAccount ? Number(salesAccount.balanceCache) : 0
-    const [periodReceivablesMovement, periodPayablesMovement] = await Promise.all([
+    const cashBalanceNumber = cashAccount ? Number(cashAccount.balanceCache) : null
+    const bankBalanceNumber = bankAccount ? Number(bankAccount.balanceCache) : null
+    const [
+      periodReceivablesMovement,
+      periodPayablesMovement,
+      cashMovement,
+      bankMovement,
+    ] = await Promise.all([
       arAccount ? getPeriodAccountMovement(bid, arAccount.id, range.from, range.to, 'asset') : Promise.resolve(null),
       apAccount ? getPeriodAccountMovement(bid, apAccount.id, range.from, range.to, 'liability') : Promise.resolve(null),
+      getPeriodMoneyMovement(bid, 'cash', range.from, range.to),
+      getPeriodMoneyMovement(bid, 'bank', range.from, range.to),
     ])
+
+    const cashInflow = cashMovement?.inflow ?? null
+    const cashOutflow = cashMovement?.outflow ?? null
+    const bankInflow = bankMovement?.inflow ?? null
+    const bankOutflow = bankMovement?.outflow ?? null
+    const totalInflow = cashInflow !== null && bankInflow !== null ? cashInflow + bankInflow : null
+    const totalOutflow = cashOutflow !== null && bankOutflow !== null ? cashOutflow + bankOutflow : null
+    const pendingOutstanding = receivablesBalance + payablesBalance
+
+    const salesReturnsNumber = periodSalesReturns ?? 0
+    const purchaseReturnsNumber = periodPurchaseReturns ?? 0
+    const cogsNumber = periodCogs ?? 0
+    const approxProfit = todaySalesNumber - salesReturnsNumber - cogsNumber - todayExpensesNumber
 
     // ── Audit logs (20 most recent) — fetched concurrently above ──
     const auditLogs = auditLogsResult
@@ -119,13 +151,24 @@ export const GET = withObservability('/api/dashboard/owner', async (req: Request
         todayExpensesPaisas: todayExpensesPaisas.toString(),
         todayNetCashFlow: todayNetCashFlowNumber,
         todayPurchases: periodPurchases,
-        cashBalance: null,
-        bankBalance: null,
+        cashBalance: cashBalanceNumber,
+        bankBalance: bankBalanceNumber,
+        cashInflow,
+        cashOutflow,
+        bankInflow,
+        bankOutflow,
+        totalInflow,
+        totalOutflow,
+        periodSalesReturns: salesReturnsNumber,
+        periodPurchaseReturns: purchaseReturnsNumber,
+        periodCogs: cogsNumber,
+        approxProfit,
         periodReceivablesMovement,
         periodPayablesMovement,
         totalReceivables: receivablesBalance,
         totalPayables: payablesBalance,
         totalSales: totalSalesBalance,
+        pendingOutstanding,
         lowStockCount: stockResult.lowStockCount,
         negativeStockCount: stockResult.negativeStockCount,
       },
@@ -134,6 +177,10 @@ export const GET = withObservability('/api/dashboard/owner', async (req: Request
         todayCollections: collectionsAvailable,
         todayExpenses: true,
         todayNetCashFlow: netCashFlowAvailable,
+        cashBalance: cashBalanceNumber !== null,
+        bankBalance: bankBalanceNumber !== null,
+        cashMovement: cashMovement !== null,
+        bankMovement: bankMovement !== null,
         totalReceivables: true,
         totalPayables: true,
         totalSales: true,
@@ -475,22 +522,35 @@ async function getPeriodAccountMovement(
 ): Promise<number | null> {
   try {
     const admin = getAdminSupabase()
-    const { data, error } = await admin.from('voucher_lines')
-      .select('debit, credit, vouchers!inner(voucher_date, is_cancelled)')
+    const { data, error } = await admin.from('ledger_voucher_lines')
+      .select('debit_paisas, credit_paisas, ledger_vouchers!inner(transaction_date)')
       .eq('business_id', businessId)
       .eq('account_id', accountId)
-      .gte('vouchers.voucher_date', from)
-      .lte('vouchers.voucher_date', to)
-      .eq('vouchers.is_cancelled', false)
+      .gte('ledger_vouchers.transaction_date', from)
+      .lte('ledger_vouchers.transaction_date', to)
     if (!error && data) {
       let movement = 0n
       for (const row of data as any[]) {
-        const debit = BigInt(row.debit ?? 0)
-        const credit = BigInt(row.credit ?? 0)
+        const debit = BigInt(row.debit_paisas ?? 0)
+        const credit = BigInt(row.credit_paisas ?? 0)
         movement += kind === 'asset' ? debit - credit : credit - debit
       }
       return Number(movement)
     }
+  } catch { /* unavailable in this deployment */ }
+  return null
+}
+
+/** Closing balance as of a date (inclusive); current snapshot, not period movement. */
+async function getAccountClosingBalance(businessId: string, accountId: string, asOfDate: string): Promise<number | null> {
+  try {
+    const admin = getAdminSupabase()
+    const { data, error } = await admin.rpc('ledger_account_balance_paisas', {
+      p_business_id: businessId,
+      p_account_id: accountId,
+      p_as_of_date: asOfDate,
+    })
+    if (!error) return Number(data ?? 0)
   } catch { /* unavailable in this deployment */ }
   return null
 }
@@ -515,7 +575,7 @@ async function getTodayExpenses(businessId: string, from: string, to: string) {
   return []
 }
 
-// ── Today collections (receipts, excluding cancelled vouchers) ──
+// ── Period collections: RC (receipt) voucher debits into cash/bank/wallet ──
 
 async function getTodayCollections(
   businessId: string,
@@ -524,45 +584,105 @@ async function getTodayCollections(
 ): Promise<{ value: number | null; available: boolean }> {
   try {
     const admin = getAdminSupabase()
-    const { data: receiptsRaw, error: receiptsError } = await admin
-      .from('receipts')
-      .select('id, amount, voucher_id')
+    const { data, error } = await admin
+      .from('ledger_voucher_lines')
+      .select('debit_paisas, ledger_accounts!inner(operational_money_key), ledger_vouchers!inner(voucher_type, transaction_date)')
       .eq('business_id', businessId)
-      .gte('receipt_date', from)
-      .lte('receipt_date', to)
-      .eq('status', 'posted')
-      .is('reversal_voucher_id', null)
-
-    if (!receiptsError && Array.isArray(receiptsRaw)) {
-      const receiptRows = receiptsRaw as any[]
-      if (receiptRows.length === 0) return { value: 0, available: true }
-
-      const voucherIds = Array.from(
-        new Set(
-          receiptRows
-            .map(r => r.voucher_id)
-            .filter((v): v is string => typeof v === 'string' && v.length > 0),
-        ),
-      )
-      const allowedVoucherIds = new Set<string>(voucherIds)
-      if (voucherIds.length > 0) {
-        const { data: vouchersRaw } = await admin
-          .from('vouchers')
-          .select('id, is_cancelled')
-          .eq('business_id', businessId)
-          .in('id', voucherIds)
-        const vouchers = (vouchersRaw ?? []) as any[]
-        for (const v of vouchers) {
-          if (v && v.is_cancelled) allowedVoucherIds.delete(v.id)
-        }
-      }
-      const sum = receiptRows
-        .filter(r => !r.voucher_id || allowedVoucherIds.has(r.voucher_id))
-        .reduce((s, r) => s + BigInt(r.amount ?? 0), 0n)
+      .eq('ledger_vouchers.voucher_type', 'RC')
+      .not('ledger_accounts.operational_money_key', 'is', null)
+      .gte('ledger_vouchers.transaction_date', from)
+      .lte('ledger_vouchers.transaction_date', to)
+    if (!error && data) {
+      const sum = (data as any[]).reduce((s, row) => s + BigInt(row.debit_paisas ?? 0), 0n)
       return { value: Number(sum), available: true }
     }
   } catch { /* fall through */ }
   return { value: null, available: false }
+}
+
+// ── Period money-account movement, split by inflow/outflow, for a single operational key ──
+
+async function getPeriodMoneyMovement(
+  businessId: string, operationalKey: 'cash' | 'bank', from: string, to: string,
+): Promise<{ inflow: number; outflow: number } | null> {
+  try {
+    const admin = getAdminSupabase()
+    const { data, error } = await admin
+      .from('ledger_voucher_lines')
+      .select('debit_paisas, credit_paisas, ledger_accounts!inner(operational_money_key), ledger_vouchers!inner(transaction_date)')
+      .eq('business_id', businessId)
+      .eq('ledger_accounts.operational_money_key', operationalKey)
+      .gte('ledger_vouchers.transaction_date', from)
+      .lte('ledger_vouchers.transaction_date', to)
+    if (!error && data) {
+      let inflow = 0n; let outflow = 0n
+      for (const row of data as any[]) {
+        inflow += BigInt(row.debit_paisas ?? 0)
+        outflow += BigInt(row.credit_paisas ?? 0)
+      }
+      return { inflow: Number(inflow), outflow: Number(outflow) }
+    }
+  } catch { /* unavailable in this deployment */ }
+  return null
+}
+
+// ── Period Sales/Purchase Returns ──
+
+async function getPeriodSalesReturns(businessId: string, from: string, to: string): Promise<number | null> {
+  try {
+    const admin = getAdminSupabase()
+    const { data, error } = await admin
+      .from('sales_returns')
+      .select('total')
+      .eq('business_id', businessId)
+      .gte('return_date', from)
+      .lte('return_date', to)
+    if (!error && data) {
+      let total = 0n
+      for (const row of data as any[]) total += BigInt(row.total ?? 0)
+      return Number(total)
+    }
+  } catch { /* unavailable in this deployment */ }
+  return null
+}
+
+async function getPeriodPurchaseReturns(businessId: string, from: string, to: string): Promise<number | null> {
+  try {
+    const admin = getAdminSupabase()
+    const { data, error } = await admin
+      .from('purchase_returns')
+      .select('total_amount')
+      .eq('business_id', businessId)
+      .gte('return_date', from)
+      .lte('return_date', to)
+    if (!error && data) {
+      let total = 0n
+      for (const row of data as any[]) total += BigInt(row.total_amount ?? 0)
+      return Number(total)
+    }
+  } catch { /* unavailable in this deployment */ }
+  return null
+}
+
+// ── Period Cost of Goods Sold (account 5000), for Approximate Profit ──
+
+async function getPeriodCogs(businessId: string, from: string, to: string): Promise<number | null> {
+  try {
+    const admin = getAdminSupabase()
+    const { data, error } = await admin.rpc('ledger_profit_loss', {
+      p_business_id: businessId,
+      p_from_date: from,
+      p_to_date: to,
+    })
+    if (!error && data) {
+      let total = 0n
+      for (const row of data as any[]) {
+        if (row.section === 'COST_OF_GOODS_SOLD') total += BigInt(row.amount ?? 0)
+      }
+      return Number(total)
+    }
+  } catch { /* unavailable in this deployment */ }
+  return null
 }
 
 // ── Recent audit logs (20 most recent) ──

@@ -19,14 +19,29 @@ export interface OwnerDashboardData {
     todayPurchases: number | null
     cashBalance: number | null
     bankBalance: number | null
+    cashInflow: number | null
+    cashOutflow: number | null
+    bankInflow: number | null
+    bankOutflow: number | null
+    totalInflow: number | null
+    totalOutflow: number | null
+    periodSalesReturns: number
+    periodPurchaseReturns: number
+    periodCogs: number
+    approxProfit: number
     periodReceivablesMovement: number | null
     periodPayablesMovement: number | null
+    pendingOutstanding: number
   }
   availability: {
     todaySales: boolean
     todayCollections: boolean
     todayExpenses: boolean
     todayNetCashFlow: boolean
+    cashBalance: boolean
+    bankBalance: boolean
+    cashMovement: boolean
+    bankMovement: boolean
     totalReceivables: boolean
     totalPayables: boolean
     totalSales: boolean

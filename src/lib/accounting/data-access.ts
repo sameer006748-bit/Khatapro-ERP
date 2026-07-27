@@ -155,6 +155,12 @@ export async function getAccountById(businessId: string, accountId: string): Pro
       .eq('business_id', businessId)
       .maybeSingle()
     if (!cat) return null
+    const { data: balancePaisas, error: balanceError } = await admin.rpc('ledger_account_balance_paisas', {
+      p_business_id: businessId,
+      p_account_id: accountId,
+      p_as_of_date: null,
+    })
+    if (balanceError) throw new Error(`Supabase account balance query failed: ${balanceError.message}`)
     return {
       id: data.id,
       code: data.account_code,
@@ -164,7 +170,7 @@ export async function getAccountById(businessId: string, accountId: string): Pro
       isBusinessAccount: data.operational_money_key !== null,
       isPartyAccount: data.party_type !== null,
       partyType: data.party_type,
-      balanceCache: 0n,
+      balanceCache: BigInt(balancePaisas ?? 0),
       category: { id: cat.id, code: cat.stable_code, name: cat.display_name, type: cat.report_class },
     }
   }

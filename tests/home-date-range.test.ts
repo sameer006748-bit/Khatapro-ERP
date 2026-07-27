@@ -80,7 +80,7 @@ test('the active range is visible and mobile presets remain scrollable', () => {
 test('Home authorization and accounting presentation logic remain intact', () => {
   assert.match(route, /loaded\.roleName === 'Owner\/Admin'/)
   assert.match(route, /requirePermission\(loaded, 'can_view_trial_balance'\)/)
-  assert.match(page, /const approxProfit = todaySales - todayExpenses/)
+  assert.match(page, /const approxProfit = data\.kpis\.approxProfit/)
   assert.doesNotMatch(page, /parseFloat|Math\.round|toFixed/)
 })
 
@@ -92,4 +92,86 @@ test('no stale Yesterday or This Week primary labels remain', () => {
 test('no migration files changed', () => {
   const changed = execFileSync('git', ['diff', '--name-only', 'ec05323cc1adf1593b322b1b332e014e73a41b11'], { encoding: 'utf8' })
   assert.doesNotMatch(changed, /^supabase\/migrations\//m)
+})
+
+test('Counter, Online, OFC and Other Sale are all included in the period sales aggregate', () => {
+  assert.match(route, /invoice_type === 'COUNTER'/)
+  assert.match(route, /invoice_type === 'ONLINE'/)
+  assert.match(route, /invoice_type === 'OFC'/)
+  assert.doesNotMatch(route, /invoice_type === 'OTHER'/)
+})
+
+test('period collections come from posted RC voucher lines into cash/bank/wallet, not invoice value', () => {
+  assert.match(route, /voucher_type.*'RC'/)
+  assert.match(route, /operational_money_key/)
+  assert.doesNotMatch(route, /from\('receipts'\)/)
+  assert.doesNotMatch(route, /from\('vouchers'\)/)
+  assert.doesNotMatch(route, /from\('voucher_lines'\)/)
+})
+
+test('no dead legacy voucher/receipt tables remain in the dashboard route', () => {
+  assert.doesNotMatch(route, /\.from\('vouchers'\)/)
+  assert.doesNotMatch(route, /\.from\('voucher_lines'\)/)
+  assert.doesNotMatch(route, /\.from\('receipts'\)/)
+  assert.match(route, /ledger_voucher_lines/)
+  assert.match(route, /ledger_vouchers/)
+})
+
+test('rider delivery COD is not counted as business cash receipt; only RC-type vouchers are', () => {
+  assert.doesNotMatch(route, /voucher_type.*'COD'/)
+  assert.match(route, /eq\('ledger_vouchers\.voucher_type', 'RC'\)/)
+})
+
+test('period receivables and payables movement continue to use the validated shared range', () => {
+  assert.match(route, /getPeriodAccountMovement\(bid, arAccount\.id, range\.from, range\.to, 'asset'\)/)
+  assert.match(route, /getPeriodAccountMovement\(bid, apAccount\.id, range\.from, range\.to, 'liability'\)/)
+})
+
+test('Sales Returns and Purchase Returns are period-scoped, not lifetime', () => {
+  assert.match(route, /getPeriodSalesReturns\(bid, range\.from, range\.to\)/)
+  assert.match(route, /getPeriodPurchaseReturns\(bid, range\.from, range\.to\)/)
+  assert.match(route, /from\('sales_returns'\)/)
+  assert.match(route, /from\('purchase_returns'\)/)
+  assert.match(page, /Sales Returns/)
+  assert.match(page, /Purchase Returns/)
+})
+
+test('Cash and Bank period movement are structurally separate from current closing balance', () => {
+  assert.match(route, /getPeriodMoneyMovement\(bid, 'cash', range\.from, range\.to\)/)
+  assert.match(route, /getPeriodMoneyMovement\(bid, 'bank', range\.from, range\.to\)/)
+  assert.match(page, /Cash Inflow/)
+  assert.match(page, /Cash Outflow/)
+  assert.match(page, /Bank Inflow/)
+  assert.match(page, /Bank Outflow/)
+  assert.match(page, /'Current Cash'[\s\S]{0,120}Current closing balance/)
+  assert.match(page, /'Current Bank'[\s\S]{0,120}Current closing balance/)
+})
+
+test('Total Inflow and Total Outflow combine Cash and Bank period movement', () => {
+  assert.match(route, /totalInflow = cashInflow[\s\S]{0,40}bankInflow/)
+  assert.match(route, /totalOutflow = cashOutflow[\s\S]{0,40}bankOutflow/)
+  assert.match(page, /Total Inflow/)
+  assert.match(page, /Total Outflow/)
+})
+
+test('Pending / Outstanding is presented as a current balance, not a period figure', () => {
+  assert.match(route, /pendingOutstanding = receivablesBalance \+ payablesBalance/)
+  assert.match(page, /Pending \/ Outstanding/)
+})
+
+test('Approximate Profit subtracts Sales Returns and COGS in addition to Expenses', () => {
+  assert.match(route, /getPeriodCogs\(bid, range\.from, range\.to\)/)
+  assert.match(route, /approxProfit = todaySalesNumber - salesReturnsNumber - cogsNumber - todayExpensesNumber/)
+  assert.match(route, /ledger_profit_loss/)
+  assert.match(page, /Sales − Returns − COGS − Expenses/)
+})
+
+test('date change invalidates the query and stale prior-period data is not shown while loading', () => {
+  assert.match(hook, /queryKey: \['owner-dashboard', range\.from, range\.to\]/)
+  assert.match(page, /data\.range\.from !== range\.from \|\| data\.range\.to !== range\.to/)
+})
+
+test('an explicit empty-state message is shown when the selected period has no activity', () => {
+  assert.match(page, /hasActivity/)
+  assert.match(page, /No sales, purchases, expenses or collections were recorded for/)
 })
