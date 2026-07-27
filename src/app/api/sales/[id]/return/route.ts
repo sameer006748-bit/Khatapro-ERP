@@ -39,6 +39,7 @@ export async function POST(
       businessId: su.businessId, invoiceId: id, items: parsed.data.items,
       refundMode: parsed.data.refundMode, reason: parsed.data.reason,
       idempotencyKey: parsed.data.idempotencyKey,
+      actorId: su.userId,
     })
     return NextResponse.json({ ok: true, ...result })
   } catch (e) {

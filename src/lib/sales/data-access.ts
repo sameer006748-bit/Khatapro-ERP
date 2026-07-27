@@ -107,8 +107,8 @@ async function postSaleViaSupabase(input: PostSaleInput): Promise<{ invoiceId: s
   const itemsJson = input.items.map((i) => ({ product_id: i.productId ?? null, product_name: i.productName, qty: i.qty, unit_price: i.unitPrice.toString(), is_temporary: i.isTemporary ?? false }))
   const paymentsJson = input.payments.map((p) => ({ account_id: p.accountId, amount: p.amount.toString(), is_change: p.isChange ?? false }))
   const payload = { p_business_id: input.businessId, p_invoice_type: input.invoiceType, p_invoice_date: bizDateString(input.invoiceDate), p_items: itemsJson, p_payments: paymentsJson, p_salesman_id: input.salesmanId ?? null, p_customer_id: input.customerId ?? null, p_customer_name: input.customerName ?? null, p_customer_phone: input.customerPhone ?? null, p_customer_address: input.customerAddress ?? null, p_customer_city: input.customerCity ?? null, p_memo: input.memo ?? null, p_created_by: supabaseCreatedBy, p_idempotency_key: input.idempotencyKey ?? randomUUID() }
-  const { data, error } = await admin.rpc('post_sale_phase2', payload)
-  if (error) throw new Error(`Supabase post_sale_phase2: ${error.message}`)
+  const { data, error } = await admin.rpc('post_sale_phase2_ledger', payload)
+  if (error) throw new Error(`Supabase post_sale_phase2_ledger: ${error.message}`)
   const invoiceId = data as string
   const { data: inv, error: invErr } = await admin.from('invoices').select('invoice_no').eq('id', invoiceId).single()
   if (invErr) throw new Error(`Supabase fetch invoice_no: ${invErr.message}`)
@@ -271,36 +271,43 @@ export type LinkedReturnInput = {
   refundMode: 'CREDIT' | 'CASH' | 'BANK'
   reason?: string | null
   idempotencyKey: string
+  actorId: string
 }
 
 export async function postLinkedSaleReturn(input: LinkedReturnInput): Promise<{ returnId: string; returnNo: string; total: string; status: string; idempotent: boolean }> {
   if (await isPhase4Live()) {
     const admin = getAdminSupabase()
-    const { data, error } = await admin.rpc('post_sale_return', {
+    const actorId = await resolveSupabaseUuid(input.actorId)
+    if (!actorId) throw new Error('Server-attributed return actor is unavailable')
+    const { data, error } = await admin.rpc('post_sale_return_ledger', {
       p_business_id: input.businessId,
       p_original_invoice_id: input.invoiceId,
       p_items: input.items.map((item) => ({ invoice_item_id: item.invoiceItemId, qty: item.qty })),
       p_refund_mode: input.refundMode,
       p_reason: input.reason ?? null,
       p_idempotency_key: input.idempotencyKey,
+      p_actor_id: actorId,
     })
-    if (error) throw new Error(`Supabase post_sale_return: ${error.message}`)
+    if (error) throw new Error(`Supabase post_sale_return_ledger: ${error.message}`)
     const result = data as any
     return { returnId: result.return_id, returnNo: result.return_no, total: String(result.total), status: result.status, idempotent: Boolean(result.idempotent) }
   }
   throw new Error('Linked sales returns require the Phase 2 database migration.')
 }
 
-export async function receiveInvoicePayment(input: { businessId: string; invoiceId: string; amount: bigint; mode: string; idempotencyKey: string }): Promise<{ paymentId: string; amount: string; idempotent: boolean }> {
+export async function receiveInvoicePayment(input: { businessId: string; invoiceId: string; amount: bigint; mode: string; idempotencyKey: string; actorId: string }): Promise<{ paymentId: string; amount: string; idempotent: boolean }> {
   if (!(await isPhase4Live())) throw new Error('Invoice collections require the Phase 2 database migration.')
   if (input.amount <= 0n) throw new Error('Collection amount must be positive')
   const admin = getAdminSupabase()
-  const { data, error } = await admin.rpc('receive_invoice_payment', {
+  const actorId = await resolveSupabaseUuid(input.actorId)
+  if (!actorId) throw new Error('Server-attributed collection actor is unavailable')
+  const { data, error } = await admin.rpc('receive_invoice_payment_ledger', {
     p_business_id: input.businessId, p_invoice_id: input.invoiceId,
     p_amount: input.amount.toString(), p_mode: input.mode,
     p_idempotency_key: input.idempotencyKey,
+    p_actor_id: actorId,
   })
-  if (error) throw new Error(`Supabase receive_invoice_payment: ${error.message}`)
+  if (error) throw new Error(`Supabase receive_invoice_payment_ledger: ${error.message}`)
   const result = data as any
   return { paymentId: result.payment_id, amount: String(result.amount), idempotent: Boolean(result.idempotent) }
 }

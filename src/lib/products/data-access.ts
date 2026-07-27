@@ -348,12 +348,13 @@ export async function createProduct(
     // debit / Opening Balance Equity credit voucher + audit, one transaction).
     let stockMovementId: string | undefined
     if (openingPlan) {
-      const { data: opening, error: openingErr } = await admin.rpc('post_opening_stock', {
+      const { data: opening, error: openingErr } = await admin.rpc('post_opening_stock_ledger', {
         p_business_id: businessId,
         p_product_id: productId,
         p_quantity: openingPlan.openingQty,
         p_unit_cost_paisas: openingPlan.unitCostPaisas.toString(),
         p_created_by: supabaseCreatedBy,
+        p_idempotency_key: idempotencyKey,
       })
       if (openingErr) {
         // The RPC rolled back completely: the product exists at zero quantity
@@ -366,7 +367,7 @@ export async function createProduct(
         //   P0001    → a business rule RAISE inside the RPC
         const code = (openingErr as any).code ? String((openingErr as any).code) : 'unknown'
         const rawMsg = (openingErr as any).message ? String((openingErr as any).message) : ''
-        const diagnostic = `post_opening_stock [${code}] ${rawMsg}`.slice(0, 200)
+        const diagnostic = `post_opening_stock_ledger [${code}] ${rawMsg}`.slice(0, 200)
         throw new SafeProductError(
           `Product "${input.name}" was created, but opening stock could not be posted. ` +
           'The product currently has zero stock. Add the opening quantity via Stock Entry, or retry later.',

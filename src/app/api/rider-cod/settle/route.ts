@@ -20,7 +20,7 @@ export async function POST(request: Request) {
   const amount = parseMoney(parsed.data.amount)
   if (amount === null || amount <= 0n) return NextResponse.json({ error: 'INVALID_AMOUNT' }, { status: 400 })
   try {
-    const result = await settleRiderCod({ businessId: loaded.businessId, riderId: parsed.data.riderId, amount, mode: parsed.data.mode, note: parsed.data.note, idempotencyKey: parsed.data.idempotencyKey })
+    const result = await settleRiderCod({ businessId: loaded.businessId, riderId: parsed.data.riderId, amount, mode: parsed.data.mode, note: parsed.data.note, idempotencyKey: parsed.data.idempotencyKey, actorId: loaded.userId })
     return NextResponse.json({ ok: true, ...result })
   } catch (error) {
     return safeMutationError({ route: '/api/rider-cod/settle', requestId, errorCode: 'RIDER_COD_SETTLEMENT_FAILED', userMessage: 'The rider COD settlement could not be posted.', error })

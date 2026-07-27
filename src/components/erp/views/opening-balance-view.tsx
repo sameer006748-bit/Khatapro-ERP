@@ -44,6 +44,7 @@ export function OpeningBalanceView({ user }: { user: MeUser }) {
   const [amount, setAmount] = useState('')
   const [side, setSide] = useState<'debit' | 'credit'>('debit')
   const [memo, setMemo] = useState('')
+  const [idempotencyKey, setIdempotencyKey] = useState(() => crypto.randomUUID())
   const [result, setResult] = useState<{ ok: boolean; voucherId?: string; error?: string } | null>(null)
 
   const coaQ = useQuery<{ categories: Category[] }>({
@@ -56,7 +57,7 @@ export function OpeningBalanceView({ user }: { user: MeUser }) {
       const r = await fetch('/api/opening-balance', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ accountId, amount, side, memo: memo || undefined }),
+        body: JSON.stringify({ accountId, amount, side, memo: memo || undefined, idempotencyKey }),
       })
       const j = await r.json()
       if (!r.ok) throw new Error(j?.error ?? 'POST_FAILED')
@@ -69,6 +70,7 @@ export function OpeningBalanceView({ user }: { user: MeUser }) {
       void qc.invalidateQueries({ queryKey: ['coa'] })
       setAmount('')
       setMemo('')
+      setIdempotencyKey(crypto.randomUUID())
     },
     onError: (e: Error) => {
       setResult({ ok: false, error: e.message })

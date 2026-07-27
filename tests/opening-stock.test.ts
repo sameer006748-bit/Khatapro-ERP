@@ -152,11 +152,11 @@ test('00013 function body matches 00012 (byte-identical between the markers)', a
 
 // ── Application flow: product is created at zero stock, opening only via RPC ─
 
-test('createProduct inserts with zero stock and posts opening only via post_opening_stock', async () => {
+test('createProduct inserts with zero stock and posts opening only via canonical ledger RPC', async () => {
   const src = await readFile('src/lib/products/data-access.ts', 'utf8')
   assert.ok(!src.includes('atomic_create_product'), 'no dependency on the unavailable migration 00011 RPC')
   assert.ok(src.includes('current_stock: 0'), 'product row starts at zero quantity')
-  assert.ok(src.includes("rpc('post_opening_stock'"), 'opening stock goes through the atomic RPC')
+  assert.ok(src.includes("rpc('post_opening_stock_ledger'"), 'opening stock goes through the atomic canonical-ledger RPC')
   assert.ok(src.includes('planOpeningStock('), 'input validated before any write')
 })
 

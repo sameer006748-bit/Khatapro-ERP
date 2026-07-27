@@ -46,9 +46,11 @@ export function InvoiceDetailView({ invoiceId }: { invoiceId: string }) {
   const [returnReason, setReturnReason] = useState('')
   const [refundMode, setRefundMode] = useState<'CREDIT' | 'CASH' | 'BANK'>('CREDIT')
   const [returnQty, setReturnQty] = useState<Record<string, number>>({})
+  const [returnIdempotencyKey, setReturnIdempotencyKey] = useState(() => crypto.randomUUID())
   const [paymentOpen, setPaymentOpen] = useState(false)
   const [paymentAmount, setPaymentAmount] = useState('')
   const [paymentMode, setPaymentMode] = useState('CASH')
+  const [paymentIdempotencyKey, setPaymentIdempotencyKey] = useState(() => crypto.randomUUID())
   const [printOpen, setPrintOpen] = useState(false)
 
   const q = useQuery<{ invoice: Invoice }>({
@@ -65,7 +67,7 @@ export function InvoiceDetailView({ invoiceId }: { invoiceId: string }) {
         method: 'POST', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
           items: Object.entries(returnQty).filter(([, qty]) => qty > 0).map(([invoiceItemId, qty]) => ({ invoiceItemId, qty })),
-          refundMode, reason: returnReason || undefined, idempotencyKey: crypto.randomUUID(),
+          refundMode, reason: returnReason || undefined, idempotencyKey: returnIdempotencyKey,
         }),
       })
       const j = await r.json()
@@ -81,18 +83,19 @@ export function InvoiceDetailView({ invoiceId }: { invoiceId: string }) {
       setReturnOpen(false)
       setReturnReason('')
       setReturnQty({})
+      setReturnIdempotencyKey(crypto.randomUUID())
     },
     onError: (e: Error) => toast.error(`Return failed: ${e.message}`),
   })
 
   const paymentMut = useMutation({
     mutationFn: async () => {
-      const r = await fetch(`/api/sales/${invoiceId}/payment`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ amount: paymentAmount, mode: paymentMode, idempotencyKey: crypto.randomUUID() }) })
+      const r = await fetch(`/api/sales/${invoiceId}/payment`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ amount: paymentAmount, mode: paymentMode, idempotencyKey: paymentIdempotencyKey }) })
       const j = await r.json()
       if (!r.ok) throw new Error(j?.error ?? 'PAYMENT_FAILED')
       return j
     },
-    onSuccess: () => { toast.success('Invoice collection posted.'); void qc.invalidateQueries({ queryKey: ['invoice', invoiceId] }); void qc.invalidateQueries({ queryKey: ['invoices'] }); setPaymentOpen(false); setPaymentAmount('') },
+    onSuccess: () => { toast.success('Invoice collection posted.'); void qc.invalidateQueries({ queryKey: ['invoice', invoiceId] }); void qc.invalidateQueries({ queryKey: ['invoices'] }); setPaymentOpen(false); setPaymentAmount(''); setPaymentIdempotencyKey(crypto.randomUUID()) },
     onError: (e: Error) => toast.error(`Collection failed: ${e.message}`),
   })
 

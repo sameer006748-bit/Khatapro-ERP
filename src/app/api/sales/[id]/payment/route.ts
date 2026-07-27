@@ -22,7 +22,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   if (!parsed.success) return NextResponse.json({ error: 'INVALID_INPUT' }, { status: 400 })
   try {
     const { id } = await params
-    const result = await receiveInvoicePayment({ businessId: su.businessId, invoiceId: id, amount: BigInt(parsed.data.amount), mode: parsed.data.mode, idempotencyKey: parsed.data.idempotencyKey })
+    const result = await receiveInvoicePayment({ businessId: su.businessId, invoiceId: id, amount: BigInt(parsed.data.amount), mode: parsed.data.mode, idempotencyKey: parsed.data.idempotencyKey, actorId: su.userId })
     return NextResponse.json({ ok: true, ...result })
   } catch (error) {
     const message = (error as Error).message

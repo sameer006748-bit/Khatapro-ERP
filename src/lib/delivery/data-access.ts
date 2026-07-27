@@ -273,7 +273,7 @@ export async function recordDeliveryOutcome(input: {
   const admin = getAdminSupabase()
   const actorId = await resolveSupabaseUuid(input.actorId)
   if (!actorId) throw new Error('Server-attributed delivery actor is unavailable')
-  const { data, error } = await admin.rpc('record_delivery_outcome', {
+  const { data, error } = await admin.rpc('record_delivery_outcome_ledger', {
     p_business_id: input.businessId,
     p_invoice_id: input.invoiceId,
     p_items: input.items.map(item => ({
@@ -286,7 +286,7 @@ export async function recordDeliveryOutcome(input: {
     p_idempotency_key: input.idempotencyKey,
     p_actor_id: actorId,
   })
-  if (error) throw new Error(`record_delivery_outcome: ${error.message}`)
+  if (error) throw new Error(`record_delivery_outcome_ledger: ${error.message}`)
   return data as any
 }
 
@@ -325,14 +325,17 @@ export async function riderCodBalances(businessId: string, riderId?: string | nu
 }
 
 export async function settleRiderCod(input: {
-  businessId: string; riderId: string; amount: bigint; mode: string; note?: string | null; idempotencyKey: string
+  businessId: string; riderId: string; amount: bigint; mode: string; note?: string | null; idempotencyKey: string; actorId: string
 }): Promise<{ batch_id: string; reference: string; amount: string; allocation_count: number; idempotent: boolean }> {
   const admin = getAdminSupabase()
-  const { data, error } = await admin.rpc('settle_rider_cod', {
+  const actorId = await resolveSupabaseUuid(input.actorId)
+  if (!actorId) throw new Error('Server-attributed settlement actor is unavailable')
+  const { data, error } = await admin.rpc('settle_rider_cod_ledger', {
     p_business_id: input.businessId, p_rider_id: input.riderId, p_amount: input.amount.toString(),
     p_mode: input.mode, p_note: input.note ?? null, p_idempotency_key: input.idempotencyKey,
+    p_actor_id: actorId,
   })
-  if (error) throw new Error(`settle_rider_cod: ${error.message}`)
+  if (error) throw new Error(`settle_rider_cod_ledger: ${error.message}`)
   return data as any
 }
 
