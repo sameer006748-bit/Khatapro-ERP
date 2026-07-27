@@ -16,6 +16,7 @@ const Schema = z.object({
   vendorId: z.string().nullable().optional(),
   reference: z.string().optional(),
   notes: z.string().optional(),
+  idempotencyKey: z.string().uuid().optional(),
 })
 
 export async function POST(req: Request) {
@@ -44,6 +45,7 @@ export async function POST(req: Request) {
       reference: parsed.data.reference ?? null,
       notes: parsed.data.notes ?? null,
       createdBy: su.userId,
+      idempotencyKey: parsed.data.idempotencyKey ?? crypto.randomUUID(),
     })
     return NextResponse.json({ ok: true, ...result })
   } catch (error) {

@@ -157,10 +157,11 @@ function TopupModal({ pettyCashAccountId, accounts, onClose }: { pettyCashAccoun
   const [amount, setAmount] = useState('')
   const [date, setDate] = useState(bizDateString(new Date()))
   const [reference, setReference] = useState('')
+  const [idempotencyKey] = useState(() => crypto.randomUUID())
 
   const mut = useMutation({
     mutationFn: async () => {
-      const r = await fetch('/api/contra-entry', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ contraDate: date, fromAccountId, toAccountId: pettyCashAccountId, amount, reference: reference || undefined, notes: reference || `Petty cash top-up from ${accounts.find(a => a.id === fromAccountId)?.name}` }) })
+      const r = await fetch('/api/contra-entry', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ contraDate: date, fromAccountId, toAccountId: pettyCashAccountId, amount, reference: reference || undefined, notes: reference || `Petty cash top-up from ${accounts.find(a => a.id === fromAccountId)?.name}`, idempotencyKey }) })
       const j = await r.json(); if (!r.ok) throw new Error(j?.error ?? 'Failed'); return j
     },
     onSuccess: () => { toast.success('Petty cash topped up.'); void qc.invalidateQueries({ queryKey: ['trial-balance'] }); void qc.invalidateQueries({ queryKey: ['day-book'] }); onClose() },
@@ -185,18 +186,19 @@ function PettyExpenseBatchModal({ pettyCashAccountId, expenseAccounts, ledgerAcc
   const [lines, setLines] = useState<ExpenseLine[]>([{ key: '1', expenseAccountId: '', description: '', amount: '' }])
   const [reference, setReference] = useState('')
   const [result, setResult] = useState<{ expenseNo?: string } | null>(null)
+  const [idempotencyKey, setIdempotencyKey] = useState(() => crypto.randomUUID())
 
   const total = lines.reduce((s, l) => s + (parseMoney(l.amount) ?? 0n), 0n)
 
   function addLine() { setLines(ls => [...ls, { key: String(Date.now()), expenseAccountId: '', description: '', amount: '' }]) }
   function removeLine(key: string) { setLines(ls => ls.length <= 1 ? ls : ls.filter(l => l.key !== key)) }
   function updateLine(key: string, field: keyof ExpenseLine, value: string) { setLines(ls => ls.map(l => l.key === key ? { ...l, [field]: value } : l)) }
-  function reset() { setResult(null); setLines([{ key: '1', expenseAccountId: '', description: '', amount: '' }]); setReference(''); setExpenseDate(bizDateString(new Date())) }
+  function reset() { setResult(null); setLines([{ key: '1', expenseAccountId: '', description: '', amount: '' }]); setReference(''); setExpenseDate(bizDateString(new Date())); setIdempotencyKey(crypto.randomUUID()) }
 
   const mut = useMutation({
     mutationFn: async () => {
       const validLines = lines.filter(l => l.expenseAccountId && ((parseMoney(l.amount) ?? 0n) > 0n))
-      const r = await fetch('/api/expense-batch', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ expenseDate, paymentAccountId: pettyCashAccountId, lines: validLines.map(l => ({ expenseAccountId: l.expenseAccountId, description: l.description || undefined, amount: l.amount })), reference: reference || undefined, notes: 'Petty cash daily expenses' }) })
+      const r = await fetch('/api/expense-batch', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ expenseDate, paymentAccountId: pettyCashAccountId, lines: validLines.map(l => ({ expenseAccountId: l.expenseAccountId, description: l.description || undefined, amount: l.amount })), reference: reference || undefined, notes: 'Petty cash daily expenses', idempotencyKey }) })
       const j = await r.json(); if (!r.ok) throw new Error(j?.error ?? 'Failed'); return j
     },
     onSuccess: (j) => {

@@ -5,7 +5,6 @@ import { authOptions } from '@/lib/auth/authOptions'
 import { loadSessionUser, requirePermission } from '@/lib/auth/permissions'
 import { postReceiptVoucher } from '@/lib/vouchers/data-access'
 import { parseMoney } from '@/lib/format'
-import { assertPhase8ReceiptFeatures } from '@/lib/supabase/rpc-compatibility'
 import { resolveRequestId, safeMutationError } from '@/lib/observability'
 
 const isUuid = (s: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s)
@@ -38,15 +37,6 @@ export async function POST(req: Request) {
   const body = await req.json().catch(() => null)
   const parsed = Schema.safeParse(body)
   if (!parsed.success) return NextResponse.json({ error: 'INVALID_INPUT', details: parsed.error.flatten() }, { status: 400 })
-  try {
-    assertPhase8ReceiptFeatures({
-      invoiceId: parsed.data.invoiceId,
-      allocations: parsed.data.allocations,
-      idempotencyKey: parsed.data.idempotencyKey,
-    })
-  } catch (e) {
-    return NextResponse.json({ error: (e as Error).message }, { status: 400 })
-  }
   if (!isUuid(parsed.data.receivedIntoAccountId)) return NextResponse.json({ error: 'Invalid received-into account ID' }, { status: 400 })
   if (!isUuid(parsed.data.creditAccountId)) return NextResponse.json({ error: 'Invalid credit account ID' }, { status: 400 })
   if (parsed.data.receivedIntoAccountId === parsed.data.creditAccountId) return NextResponse.json({ error: 'Received-into and credit accounts must differ' }, { status: 400 })
@@ -64,6 +54,12 @@ export async function POST(req: Request) {
       reference: parsed.data.reference ?? null,
       notes: parsed.data.notes ?? null,
       createdBy: su.userId,
+      invoiceId: parsed.data.invoiceId ?? null,
+      allocations: parsed.data.allocations?.map(allocation => ({
+        invoiceId: allocation.invoiceId,
+        allocatedAmount: parseMoney(allocation.allocatedAmount) ?? 0n,
+      })) ?? null,
+      idempotencyKey: parsed.data.idempotencyKey ?? crypto.randomUUID(),
     })
     return NextResponse.json({ ok: true, ...result })
   } catch (error) {

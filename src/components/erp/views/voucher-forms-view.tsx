@@ -43,6 +43,7 @@ export function PaymentVoucherView({ user }: { user: MeUser }) {
   const [amount, setAmount] = useState('')
   const [reference, setReference] = useState('')
   const [result, setResult] = useState<{ ok: boolean; paymentNo?: string; error?: string } | null>(null)
+  const [idempotencyKey, setIdempotencyKey] = useState(() => crypto.randomUUID())
 
   const coaQ = useQuery({ queryKey: ['coa'], queryFn: () => fetch('/api/setup/coa').then(r => r.json()), staleTime: 300_000 })
   const accounts: Account[] = useMemo(() => (coaQ.data?.categories ?? []).flatMap((c: any) => c.accounts.filter((a: any) => a.isActive).map((a: any) => ({ id: a.id, code: a.code, name: a.name, categoryType: c.type }))), [coaQ.data])
@@ -50,7 +51,7 @@ export function PaymentVoucherView({ user }: { user: MeUser }) {
 
   const mut = useMutation({
     mutationFn: async () => {
-      const r = await fetch('/api/payment-voucher', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ paymentDate, paidFromAccountId, debitAccountId, amount, reference: reference || undefined }) })
+      const r = await fetch('/api/payment-voucher', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ paymentDate, paidFromAccountId, debitAccountId, amount, reference: reference || undefined, idempotencyKey }) })
       const j = await r.json(); if (!r.ok) throw new Error(j?.error ?? 'Failed'); return j
     },
     onSuccess: (j) => { toast.success(`Payment Voucher posted: ${j.paymentNo}`); setResult({ ok: true, paymentNo: j.paymentNo }); void qc.invalidateQueries({ queryKey: ['day-book'] }); void qc.invalidateQueries({ queryKey: ['trial-balance'] }) },
@@ -66,7 +67,7 @@ export function PaymentVoucherView({ user }: { user: MeUser }) {
       <p className="text-xs text-muted-foreground mb-1">Payment Voucher Posted</p>
       <p className="text-2xl font-bold text-primary" data-num>{result.paymentNo}</p>
       <div className="mt-4 flex flex-col gap-2">
-        <Button className="w-full" onClick={() => { setResult(null); setAmount(''); setReference('') }}>New Payment</Button>
+        <Button className="w-full" onClick={() => { setResult(null); setAmount(''); setReference(''); setIdempotencyKey(crypto.randomUUID()) }}>New Payment</Button>
         <Button variant="outline" className="w-full" onClick={() => window.open('/?page=day-book', '_self')}>View in Day Book</Button>
       </div>
     </div>
@@ -104,6 +105,7 @@ export function ReceiptVoucherView({ user }: { user: MeUser }) {
   const [amount, setAmount] = useState('')
   const [reference, setReference] = useState('')
   const [result, setResult] = useState<{ ok: boolean; receiptNo?: string; error?: string } | null>(null)
+  const [idempotencyKey, setIdempotencyKey] = useState(() => crypto.randomUUID())
 
   const coaQ = useQuery({ queryKey: ['coa'], queryFn: () => fetch('/api/setup/coa').then(r => r.json()), staleTime: 300_000 })
   const accounts: Account[] = useMemo(() => (coaQ.data?.categories ?? []).flatMap((c: any) => c.accounts.filter((a: any) => a.isActive).map((a: any) => ({ id: a.id, code: a.code, name: a.name, categoryType: c.type }))), [coaQ.data])
@@ -111,7 +113,7 @@ export function ReceiptVoucherView({ user }: { user: MeUser }) {
 
   const mut = useMutation({
     mutationFn: async () => {
-      const body = { receiptDate, receivedIntoAccountId, creditAccountId, amount, reference: reference || undefined }
+      const body = { receiptDate, receivedIntoAccountId, creditAccountId, amount, reference: reference || undefined, idempotencyKey }
       const r = await fetch('/api/receipt-voucher', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
       const j = await r.json(); if (!r.ok) throw new Error(j?.error ?? 'Failed'); return j
     },
@@ -128,7 +130,7 @@ export function ReceiptVoucherView({ user }: { user: MeUser }) {
       <p className="text-xs text-muted-foreground mb-1">Receipt Voucher Posted</p>
       <p className="text-2xl font-bold text-primary" data-num>{result.receiptNo}</p>
       <div className="mt-4 flex flex-col gap-2">
-        <Button className="w-full" onClick={() => { setResult(null); setAmount(''); setReference('') }}>New Receipt</Button>
+        <Button className="w-full" onClick={() => { setResult(null); setAmount(''); setReference(''); setIdempotencyKey(crypto.randomUUID()) }}>New Receipt</Button>
         <Button variant="outline" className="w-full" onClick={() => window.open('/?page=day-book', '_self')}>View in Day Book</Button>
       </div>
     </div>
@@ -268,7 +270,7 @@ export function ContraEntryView({ user }: { user: MeUser }) {
   const mut = useMutation({ mutationFn: async () => {
     const r = await fetch('/api/contra-entry', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ contraDate: date, fromAccountId, toAccountId, amount, notes: note || undefined, idempotencyKey }) })
     const j = await r.json(); if (!r.ok) throw new Error(j?.error ?? 'Failed'); return j
-  }, onSuccess: (j) => { setResult({ reference: j.reference }); toast.success(`Transfer posted: ${j.reference}`); void qc.invalidateQueries({ queryKey: ['operational-money'] }) }, onError: (error: Error) => setResult({ error: error.message }) })
+  }, onSuccess: (j) => { setResult({ reference: j.reference }); setIdempotencyKey(crypto.randomUUID()); toast.success(`Transfer posted: ${j.reference}`); void qc.invalidateQueries({ queryKey: ['operational-money'] }) }, onError: (error: Error) => setResult({ error: error.message }) })
   const from = accounts.find(a => a.id === fromAccountId)
   const to = accounts.find(a => a.id === toAccountId)
   return <div className="space-y-4 max-w-2xl">

@@ -3,43 +3,82 @@
  * All money is BigInt paisas. UI sends paisas as strings.
  */
 import 'server-only'
+import { randomUUID } from 'crypto'
 import { getAdminSupabase } from '@/lib/supabase/admin'
 import { resolveSupabaseUuid } from '@/lib/accounting/voucher-supabase'
 import { bizDateString } from '@/lib/dates'
-import {
-  assertPhase8ReceiptFeatures,
-  buildPhase8PostReceiptVoucherPayload,
-  type Phase8PostReceiptVoucherPayload,
-} from '@/lib/supabase/rpc-compatibility'
 import { probeTable } from '@/lib/supabase/phase-probe'
 
 const _p6cache = { lastChecked: 0, lastResult: false }
 
 async function isPhase6Live(): Promise<boolean> {
-  return probeTable(_p6cache, 'expenses')
+  return probeTable(_p6cache, 'ledger_vouchers')
+}
+
+async function postCanonicalVoucher(input: {
+  businessId: string
+  voucherType: string
+  date: Date
+  narration: string
+  lines: Array<{ accountId: string; debit: bigint; credit: bigint; narration?: string | null }>
+  sourceType?: string | null
+  sourceId?: string | null
+  reference?: string | null
+  idempotencyKey?: string | null
+  actorId?: string | null
+}) {
+  const actorId = await resolveSupabaseUuid(input.actorId)
+  if (!actorId) throw new Error('Server-attributed voucher actor is unavailable')
+  const { data, error } = await getAdminSupabase().rpc('post_ledger_voucher', {
+    p_business_id: input.businessId,
+    p_voucher_type: input.voucherType,
+    p_transaction_date: bizDateString(input.date),
+    p_narration: input.narration,
+    p_lines: input.lines.map((line, index) => ({
+      account_id: line.accountId,
+      debit_paisas: line.debit.toString(),
+      credit_paisas: line.credit.toString(),
+      line_narration: line.narration ?? null,
+      source_line_reference: String(index + 1),
+    })),
+    p_source_type: input.sourceType ?? null,
+    p_source_id: input.sourceId ?? null,
+    p_idempotency_key: input.idempotencyKey ?? randomUUID(),
+    p_posted_by: actorId,
+    p_reference: input.reference ?? null,
+    p_readable_number: null,
+    p_reverses_voucher_id: null,
+  })
+  if (error) throw new Error(`post_ledger_voucher: ${error.message}`)
+  return data as { voucher_id: string; readable_number: string; idempotent: boolean }
 }
 
 // ─── Post Payment Voucher ───
 export async function postPaymentVoucher(input: {
   businessId: string; paymentDate: Date; paidFromAccountId: string; debitAccountId: string
   amountPaisas: bigint; vendorId?: string | null; reference?: string | null; notes?: string | null; createdBy?: string | null
+  idempotencyKey?: string | null
 }): Promise<{ paymentId: string; paymentNo: string; voucherId: string }> {
-  const admin = getAdminSupabase()
-  const supabaseCreatedBy = await resolveSupabaseUuid(input.createdBy)
-  const { data, error } = await admin.rpc('post_payment_voucher', {
-    p_business_id: input.businessId,
-    p_payment_date: bizDateString(input.paymentDate),
-    p_paid_from_account_id: input.paidFromAccountId,
-    p_debit_account_id: input.debitAccountId,
-    p_amount_paisas: input.amountPaisas.toString(),
-    p_vendor_id: input.vendorId ?? null,
-    p_reference: input.reference ?? null,
-    p_notes: input.notes ?? null,
-    p_created_by: supabaseCreatedBy,
+  const result = await postCanonicalVoucher({
+    businessId: input.businessId,
+    voucherType: 'PV',
+    date: input.paymentDate,
+    narration: input.notes ?? 'Payment voucher',
+    lines: [
+      { accountId: input.debitAccountId, debit: input.amountPaisas, credit: 0n, narration: 'Payment debit' },
+      { accountId: input.paidFromAccountId, debit: 0n, credit: input.amountPaisas, narration: 'Funds paid' },
+    ],
+    sourceType: input.vendorId && input.idempotencyKey ? 'vendor_payment' : null,
+    sourceId: input.vendorId && input.idempotencyKey ? `${input.vendorId}:${input.idempotencyKey}` : null,
+    reference: input.reference,
+    idempotencyKey: input.idempotencyKey,
+    actorId: input.createdBy,
   })
-  if (error) throw new Error(`post_payment_voucher: ${error.message}`)
-  const r = data as any
-  return { paymentId: r.payment_id, paymentNo: r.payment_no, voucherId: r.voucher_id }
+  return {
+    paymentId: result.voucher_id,
+    paymentNo: result.readable_number,
+    voucherId: result.voucher_id,
+  }
 }
 
 // ─── Post Receipt Voucher ───
@@ -52,35 +91,28 @@ export async function postReceiptVoucher(input: {
   allocations?: Array<{ invoiceId: string; allocatedAmount: bigint }> | null
   idempotencyKey?: string | null
 }): Promise<{ receiptId: string; receiptNo: string; voucherId: string }> {
-  assertPhase8ReceiptFeatures({
-    invoiceId: input.invoiceId,
-    allocations: input.allocations,
+  if (input.allocations?.length) {
+    throw new Error('Receipt allocations require the invoice-specific collection workflow')
+  }
+  const result = await postCanonicalVoucher({
+    businessId: input.businessId,
+    voucherType: 'RV',
+    date: input.receiptDate,
+    narration: input.notes ?? 'Receipt voucher',
+    lines: [
+      { accountId: input.receivedIntoAccountId, debit: input.amountPaisas, credit: 0n, narration: 'Funds received' },
+      { accountId: input.creditAccountId, debit: 0n, credit: input.amountPaisas, narration: 'Receipt credit' },
+    ],
+    sourceType: input.invoiceId ? 'invoice_receipt' : null,
+    sourceId: input.invoiceId ?? null,
+    reference: input.reference,
     idempotencyKey: input.idempotencyKey,
+    actorId: input.createdBy,
   })
-  const admin = getAdminSupabase()
-  const supabaseCreatedBy = await resolveSupabaseUuid(input.createdBy)
-
-  const payload: Phase8PostReceiptVoucherPayload = buildPhase8PostReceiptVoucherPayload({
-    p_business_id: input.businessId,
-    p_receipt_date: bizDateString(input.receiptDate),
-    p_received_into_account_id: input.receivedIntoAccountId,
-    p_credit_account_id: input.creditAccountId,
-    p_amount_paisas: input.amountPaisas.toString(),
-    p_customer_id: input.customerId ?? null,
-    p_reference: input.reference ?? null,
-    p_notes: input.notes ?? null,
-    p_created_by: supabaseCreatedBy,
-    invoiceId: input.invoiceId,
-    allocations: input.allocations,
-    idempotencyKey: input.idempotencyKey,
-  })
-  const { data, error } = await admin.rpc('post_receipt_voucher', payload)
-  if (error) throw new Error(`post_receipt_voucher: ${error.message}`)
-  const r = data as { receipt_id: string; receipt_no: string; voucher_id: string }
   return {
-    receiptId: r.receipt_id,
-    receiptNo: r.receipt_no,
-    voucherId: r.voucher_id,
+    receiptId: result.voucher_id,
+    receiptNo: result.readable_number,
+    voucherId: result.voucher_id,
   }
 }
 
@@ -89,48 +121,50 @@ export async function postJournalVoucher(input: {
   businessId: string; jvDate: Date; memo: string
   lines: Array<{ accountId: string; debit: bigint; credit: bigint; memo?: string | null }>
   reference?: string | null; createdBy?: string | null
+  idempotencyKey?: string | null
 }): Promise<{ voucherId: string; voucherNo: string }> {
-  const admin = getAdminSupabase()
-  const supabaseCreatedBy = await resolveSupabaseUuid(input.createdBy)
-  const linesJson = input.lines.map(l => ({
-    account_id: l.accountId,
-    debit: l.debit.toString(),
-    credit: l.credit.toString(),
-    memo: l.memo ?? null,
-  }))
-  const { data, error } = await admin.rpc('post_journal_voucher', {
-    p_business_id: input.businessId,
-    p_jv_date: bizDateString(input.jvDate),
-    p_memo: input.memo,
-    p_lines: linesJson,
-    p_reference: input.reference ?? null,
-    p_created_by: supabaseCreatedBy,
+  const result = await postCanonicalVoucher({
+    businessId: input.businessId,
+    voucherType: 'JV',
+    date: input.jvDate,
+    narration: input.memo,
+    lines: input.lines.map(line => ({
+      accountId: line.accountId,
+      debit: line.debit,
+      credit: line.credit,
+      narration: line.memo,
+    })),
+    reference: input.reference,
+    idempotencyKey: input.idempotencyKey,
+    actorId: input.createdBy,
   })
-  if (error) throw new Error(`post_journal_voucher: ${error.message}`)
-  const r = data as any
-  return { voucherId: r.voucher_id, voucherNo: r.voucher_no }
+  return { voucherId: result.voucher_id, voucherNo: result.readable_number }
 }
 
 // ─── Post Contra Entry ───
 export async function postContraEntry(input: {
   businessId: string; contraDate: Date; fromAccountId: string; toAccountId: string
   amountPaisas: bigint; reference?: string | null; notes?: string | null; createdBy?: string | null
+  idempotencyKey?: string | null
 }): Promise<{ contraId: string; contraNo: string; voucherId: string }> {
-  const admin = getAdminSupabase()
-  const supabaseCreatedBy = await resolveSupabaseUuid(input.createdBy)
-  const { data, error } = await admin.rpc('post_contra_entry', {
-    p_business_id: input.businessId,
-    p_contra_date: bizDateString(input.contraDate),
-    p_from_account_id: input.fromAccountId,
-    p_to_account_id: input.toAccountId,
-    p_amount_paisas: input.amountPaisas.toString(),
-    p_reference: input.reference ?? null,
-    p_notes: input.notes ?? null,
-    p_created_by: supabaseCreatedBy,
+  const result = await postCanonicalVoucher({
+    businessId: input.businessId,
+    voucherType: 'CT',
+    date: input.contraDate,
+    narration: input.notes ?? 'Contra transfer',
+    lines: [
+      { accountId: input.toAccountId, debit: input.amountPaisas, credit: 0n, narration: 'Transfer in' },
+      { accountId: input.fromAccountId, debit: 0n, credit: input.amountPaisas, narration: 'Transfer out' },
+    ],
+    reference: input.reference,
+    idempotencyKey: input.idempotencyKey,
+    actorId: input.createdBy,
   })
-  if (error) throw new Error(`post_contra_entry: ${error.message}`)
-  const r = data as any
-  return { contraId: r.contra_id, contraNo: r.contra_no, voucherId: r.voucher_id }
+  return {
+    contraId: result.voucher_id,
+    contraNo: result.readable_number,
+    voucherId: result.voucher_id,
+  }
 }
 
 // ─── Post Expense Batch ───
@@ -138,26 +172,37 @@ export async function postExpenseBatch(input: {
   businessId: string; expenseDate: Date; paymentAccountId: string
   lines: Array<{ expenseAccountId: string; description?: string | null; amountPaisas: bigint }>
   reference?: string | null; notes?: string | null; createdBy?: string | null
+  idempotencyKey?: string | null
 }): Promise<{ expenseId: string; expenseNo: string; voucherId: string }> {
-  const admin = getAdminSupabase()
-  const supabaseCreatedBy = await resolveSupabaseUuid(input.createdBy)
-  const linesJson = input.lines.map(l => ({
-    expense_account_id: l.expenseAccountId,
-    description: l.description ?? null,
-    amount_paisas: l.amountPaisas.toString(),
-  }))
-  const { data, error } = await admin.rpc('post_expense_batch', {
-    p_business_id: input.businessId,
-    p_expense_date: bizDateString(input.expenseDate),
-    p_payment_account_id: input.paymentAccountId,
-    p_lines: linesJson,
-    p_reference: input.reference ?? null,
-    p_notes: input.notes ?? null,
-    p_created_by: supabaseCreatedBy,
+  const total = input.lines.reduce((sum, line) => sum + line.amountPaisas, 0n)
+  const result = await postCanonicalVoucher({
+    businessId: input.businessId,
+    voucherType: 'EXP',
+    date: input.expenseDate,
+    narration: input.notes ?? 'Expense batch',
+    lines: [
+      ...input.lines.map(line => ({
+        accountId: line.expenseAccountId,
+        debit: line.amountPaisas,
+        credit: 0n,
+        narration: line.description,
+      })),
+      {
+        accountId: input.paymentAccountId,
+        debit: 0n,
+        credit: total,
+        narration: 'Expense payment',
+      },
+    ],
+    reference: input.reference,
+    idempotencyKey: input.idempotencyKey,
+    actorId: input.createdBy,
   })
-  if (error) throw new Error(`post_expense_batch: ${error.message}`)
-  const r = data as any
-  return { expenseId: r.expense_id, expenseNo: r.expense_no, voucherId: r.voucher_id }
+  return {
+    expenseId: result.voucher_id,
+    expenseNo: result.readable_number,
+    voucherId: result.voucher_id,
+  }
 }
 
 // ─── Reverse Voucher (safe — blocks source-controlled documents) ───
@@ -166,16 +211,17 @@ export async function reverseVoucher(input: {
 }): Promise<{ blocked: boolean; blockReason?: string; reversalVoucherId?: string }> {
   const admin = getAdminSupabase()
   const supabaseCreatedBy = await resolveSupabaseUuid(input.createdBy)
-  const { data, error } = await admin.rpc('reverse_voucher_safe', {
-    p_voucher_id: input.voucherId,
+  const { data, error } = await admin.rpc('reverse_ledger_voucher', {
     p_business_id: input.businessId,
-    p_cancelled_by: supabaseCreatedBy,
-    p_reason: input.reason ?? null,
+    p_voucher_id: input.voucherId,
+    p_reversal_date: bizDateString(new Date()),
+    p_reason: input.reason ?? 'Correction',
+    p_idempotency_key: `reversal:${input.voucherId}`,
+    p_posted_by: supabaseCreatedBy,
   })
-  if (error) throw new Error(`reverse_voucher_safe: ${error.message}`)
-  const r = data as any
-  if (r.blocked) return { blocked: true, blockReason: r.block_reason }
-  return { blocked: false, reversalVoucherId: r.reversal_voucher_id }
+  if (error) throw new Error(`reverse_ledger_voucher: ${error.message}`)
+  const r = data as { voucher_id: string }
+  return { blocked: false, reversalVoucherId: r.voucher_id }
 }
 
 // ─── Day Book ───
@@ -195,13 +241,13 @@ export async function dayBook(
   filters?: { fromDate?: string | null; toDate?: string | null; voucherType?: string | null },
 ): Promise<DayBookRow[]> {
   const admin = getAdminSupabase()
-  const { data, error } = await admin.rpc('day_book', {
+  const { data, error } = await admin.rpc('ledger_day_book', {
     p_business_id: businessId,
     p_from_date: filters?.fromDate ?? null,
     p_to_date: filters?.toDate ?? null,
     p_voucher_type: filters?.voucherType ?? null,
   })
-  if (error) throw new Error(`day_book: ${error.message}`)
+  if (error) throw new Error(`ledger_day_book: ${error.message}`)
   if (!data || !Array.isArray(data)) return []
   return (data as any[]).map(r => ({
     voucherId: r.voucher_id,
@@ -245,37 +291,37 @@ export type VoucherDetail = {
 export async function getVoucherDetail(businessId: string, voucherId: string): Promise<VoucherDetail | null> {
   if (await isPhase6Live()) {
     const admin = getAdminSupabase()
-    const { data, error } = await admin.from('vouchers')
-      .select(`id, voucher_no, voucher_type, voucher_date, memo, is_cancelled, posted_at, posted_by,
-               total_debit, total_credit, reference_type, reference_id, cancel_voucher_id,
-               voucher_lines!inner(id, account_id, debit, credit, memo, line_order,
-                 account:accounts(id, code, name, category:account_categories(code)))`)
+    const { data, error } = await admin.from('ledger_vouchers')
+      .select(`id, readable_number, voucher_type, transaction_date, narration, posted_at, posted_by,
+               total_debit_paisas, total_credit_paisas, source_type, source_id, reverses_voucher_id,
+               ledger_voucher_lines!inner(id, account_id, debit_paisas, credit_paisas, line_narration, line_number,
+                 account:ledger_accounts(id, account_code, account_name, category:ledger_account_categories(stable_code)))`)
       .eq('id', voucherId).eq('business_id', businessId).maybeSingle()
     if (error || !data) return null
     const v = data as any
     return {
       id: v.id,
-      voucherNo: v.voucher_no,
+      voucherNo: v.readable_number,
       voucherType: v.voucher_type,
-      voucherDate: v.voucher_date,
-      memo: v.memo,
-      isCancelled: v.is_cancelled,
+      voucherDate: v.transaction_date,
+      memo: v.narration,
+      isCancelled: false,
       postedAt: v.posted_at,
       postedBy: v.posted_by,
-      totalDebit: String(v.total_debit),
-      totalCredit: String(v.total_credit),
-      referenceType: v.reference_type,
-      referenceId: v.reference_id,
-      cancelVoucherId: v.cancel_voucher_id,
-      lines: (v.voucher_lines ?? []).sort((a: any, b: any) => (a.line_order ?? 0) - (b.line_order ?? 0)).map((l: any) => ({
+      totalDebit: String(v.total_debit_paisas),
+      totalCredit: String(v.total_credit_paisas),
+      referenceType: v.source_type,
+      referenceId: v.source_id,
+      cancelVoucherId: v.reverses_voucher_id,
+      lines: (v.ledger_voucher_lines ?? []).sort((a: any, b: any) => (a.line_number ?? 0) - (b.line_number ?? 0)).map((l: any) => ({
         id: l.id,
         accountId: l.account_id,
-        accountCode: l.account?.code ?? '',
-        accountName: l.account?.name ?? '',
-        categoryCode: l.account?.category?.code ?? '',
-        debit: String(l.debit),
-        credit: String(l.credit),
-        memo: l.memo,
+        accountCode: l.account?.account_code ?? '',
+        accountName: l.account?.account_name ?? '',
+        categoryCode: l.account?.category?.stable_code ?? '',
+        debit: String(l.debit_paisas),
+        credit: String(l.credit_paisas),
+        memo: l.line_narration,
       })),
     }
   }
@@ -292,46 +338,44 @@ export type ExpenseRow = {
 
 export async function listExpenses(businessId: string, limit = 100): Promise<ExpenseRow[]> {
   const admin = getAdminSupabase()
-  const { data, error } = await admin.from('expenses')
-    .select(`id, expense_no, expense_date, payment_account_id, total_amount, reference, notes, status, voucher_id,
-             expense_lines(id, expense_account_id, description, amount)`)
-    .eq('business_id', businessId)
-    .order('expense_date', { ascending: false }).order('created_at', { ascending: false })
-    .limit(limit)
+  const { data, error } = await admin.rpc('ledger_day_book', {
+    p_business_id: businessId,
+    p_from_date: null,
+    p_to_date: null,
+    p_voucher_type: 'EXP',
+  })
   if (error) throw new Error(`listExpenses: ${error.message}`)
-  return (data ?? []).map((r: any) => ({
-    id: r.id,
-    expenseNo: r.expense_no,
-    expenseDate: r.expense_date,
-    paymentAccountId: r.payment_account_id,
-    totalAmount: String(r.total_amount),
-    reference: r.reference,
-    notes: r.notes,
-    status: r.status,
-    voucherId: r.voucher_id,
-    lines: (r.expense_lines ?? []).map((l: any) => ({
-      id: l.id,
-      expenseAccountId: l.expense_account_id,
-      description: l.description,
-      amount: String(l.amount),
-    })),
-  }))
+  return (data ?? []).slice(0, limit).map((row: any) => {
+    const debitLines = (row.lines ?? []).filter((line: any) => BigInt(line.debit ?? 0) > 0n)
+    const paymentLine = (row.lines ?? []).find((line: any) => BigInt(line.credit ?? 0) > 0n)
+    return {
+      id: row.voucher_id,
+      expenseNo: row.voucher_no,
+      expenseDate: row.voucher_date,
+      paymentAccountId: paymentLine?.account_id ?? '',
+      totalAmount: String(row.total_debit ?? '0'),
+      reference: row.source_label ?? null,
+      notes: row.memo ?? null,
+      status: 'posted',
+      voucherId: row.voucher_id,
+      lines: debitLines.map((line: any) => ({
+        id: line.line_id,
+        expenseAccountId: line.account_id,
+        description: line.memo,
+        amount: String(line.debit ?? '0'),
+      })),
+    }
+  })
 }
 
 // ─── Get account balance from voucher_lines (for Petty Cash balance) ───
 export async function getAccountBalance(businessId: string, accountId: string): Promise<bigint> {
   const admin = getAdminSupabase()
-  // Get all non-cancelled voucher_ids for this business
-  const { data: vouchers } = await admin.from('vouchers')
-    .select('id').eq('business_id', businessId).eq('is_cancelled', false)
-  const voucherIds = (vouchers ?? []).map((v: any) => v.id)
-  if (voucherIds.length === 0) return 0n
-  const { data, error } = await admin.from('voucher_lines')
-    .select('debit, credit')
-    .eq('account_id', accountId)
-    .in('voucher_id', voucherIds)
-  if (error) return 0n
-  let debit = 0n; let credit = 0n
-  for (const l of data ?? []) { debit += BigInt(l.debit); credit += BigInt(l.credit) }
-  return debit - credit
+  const { data, error } = await admin.rpc('ledger_account_balance_paisas', {
+    p_business_id: businessId,
+    p_account_id: accountId,
+    p_as_of_date: null,
+  })
+  if (error || data === null) return 0n
+  return BigInt(data as string | number)
 }

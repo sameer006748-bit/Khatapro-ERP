@@ -27,6 +27,7 @@ const PostSchema = z.object({
   voucherDate: z.string(), // yyyy-MM-dd
   memo: z.string().optional(),
   lines: z.array(LineSchema).min(2),
+  idempotencyKey: z.string().uuid().optional(),
 })
 
 export async function POST(req: Request) {
@@ -45,7 +46,7 @@ export async function POST(req: Request) {
       { status: 400 },
     )
   }
-  const { voucherType, voucherDate, memo, lines } = parsed.data
+  const { voucherType, voucherDate, memo, lines, idempotencyKey } = parsed.data
 
   // Convert lines: parse money strings to BigInt paisas.
   let lineInputs
@@ -78,6 +79,7 @@ export async function POST(req: Request) {
       memo: memo ?? null,
       lines: lineInputs,
       postedBy: su.userId,
+      idempotencyKey: idempotencyKey ?? crypto.randomUUID(),
     })
     return NextResponse.json({ ok: true, voucherId })
   } catch (e) {
@@ -102,11 +104,17 @@ const getVouchers = async () => {
     const { getAdminSupabase } = await import('@/lib/supabase/admin')
     const admin = getAdminSupabase()
     const { data, error } = await admin
-      .from('vouchers')
+      .from('ledger_vouchers')
       .select(`
-        id, voucher_type, voucher_date, memo, is_cancelled, posted_at,
-        total_debit, total_credit,
-        voucher_lines ( id, account_id, debit, credit, memo, account:accounts ( code, name, category:account_categories ( code ) ) )
+        id, readable_number, voucher_type, transaction_date, narration, posted_at,
+        total_debit_paisas, total_credit_paisas,
+        ledger_voucher_lines (
+          id, account_id, debit_paisas, credit_paisas, line_narration,
+          account:ledger_accounts (
+            account_code, account_name,
+            category:ledger_account_categories ( stable_code )
+          )
+        )
       `)
       .eq('business_id', su.businessId)
       .order('posted_at', { ascending: false })
@@ -118,21 +126,22 @@ const getVouchers = async () => {
       rows: (data ?? []).map((v: any) => ({
         id: v.id,
         voucherType: v.voucher_type,
-        voucherDate: v.voucher_date,
-        memo: v.memo,
-        isCancelled: v.is_cancelled,
+        voucherNo: v.readable_number,
+        voucherDate: v.transaction_date,
+        memo: v.narration,
+        isCancelled: false,
         postedAt: v.posted_at,
-        totalDebit: String(v.total_debit),
-        totalCredit: String(v.total_credit),
-        lines: (v.voucher_lines ?? []).map((l: any) => ({
+        totalDebit: String(v.total_debit_paisas),
+        totalCredit: String(v.total_credit_paisas),
+        lines: (v.ledger_voucher_lines ?? []).map((l: any) => ({
           id: l.id,
           accountId: l.account_id,
-          accountCode: l.account?.code ?? '',
-          accountName: l.account?.name ?? '',
-          categoryCode: l.account?.category?.code ?? '',
-          debit: String(l.debit),
-          credit: String(l.credit),
-          memo: l.memo,
+          accountCode: l.account?.account_code ?? '',
+          accountName: l.account?.account_name ?? '',
+          categoryCode: l.account?.category?.stable_code ?? '',
+          debit: String(l.debit_paisas),
+          credit: String(l.credit_paisas),
+          memo: l.line_narration,
         })),
       })),
     })
