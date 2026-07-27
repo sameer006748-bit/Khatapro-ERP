@@ -133,6 +133,28 @@ These are implementation changes, not deployed/runtime acceptance evidence. The 
 
 ### UUID-ledger pre-push verification addendum — 2026-07-27
 
+### Home production-compatibility addendum — 2026-07-27
+
+The Home row remains **BLOCKED FROM RUNTIME VERIFICATION**, but its source path
+is no longer ledger-only. `/api/dashboard/owner` now performs a cached,
+bounded UUID-ledger table/RPC capability check. Explicit PostgREST
+missing-table/missing-RPC results select an operational fallback; genuine
+authentication and business-scope failures still fail closed.
+
+The fallback supports Sales with Counter/Online/OFC/Other breakout, actual
+Received payments, Expenses, Purchases, available Sales and Purchase Returns,
+period receivables/payables generated, Current Receivables, Current Payables,
+and stock alerts. Rider delivery alone is excluded from Received. Current
+Cash/Bank, complete Cash/Bank movement, UUID-ledger COGS, lifetime Total Sales,
+and COGS-based Approximate Profit are explicitly unavailable until the ledger
+exists; no zero balance is fabricated.
+
+Independent metric isolation, abortable date-range requests, one bounded
+automatic retry, and non-sensitive timing diagnostics address the full-page
+failure and retry/hanging risk. Static and focused automated coverage is
+present; authenticated production figures and browser behavior still require
+runtime verification. No migration, deployment, or push was performed.
+
 Migration `00031` now fails closed on exact pending operational RPC signatures and return types, and Rider COD settlement now posts any settlement-earned commission to Commission Expense and Commission Payable in the same canonical voucher. Financial-report default and preset dates now use the Asia/Karachi business date instead of UTC.
 
 This closes proven source defects only. Migration `00031` remains **BLOCKED FROM RUNTIME VERIFICATION**: its pending Phase 2/3 RPC bodies, row shapes, locks, idempotency, and rollback behavior have not been executed together on a controlled production-shaped database. Source implementation and static verification are complete for the bounded UUID-ledger scope; database execution, authenticated browser UAT, and production deployment remain pending.

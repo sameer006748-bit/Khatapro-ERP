@@ -82,6 +82,35 @@ New coverage added this task:
 - Rapid preset-switching behavior under real network latency (React Query's existing `queryKey`-based invalidation is structurally correct, but not observed live)
 - Print/export of the summary (not in scope — no such feature exists on this screen)
 
+## Production compatibility addendum (2026-07-27)
+
+This addendum supersedes the ledger-only runtime assumption above. Home now
+performs one bounded, five-minute runtime capability check. When
+`ledger_accounts` and `ledger_profit_loss` are available, it uses canonical
+UUID-ledger balances, movements, and COGS. A specifically classified PostgREST
+missing-table or missing-RPC response selects the current-production
+operational fallback. Authentication, authorization, and business-scope
+failures are never converted into fallback.
+
+The fallback supports Sales and Counter/Online/OFC/Other breakout from
+`invoices`, Amount Received from actual `payments` rows with
+`direction = Received`, Expenses, Purchases, available Sales/Purchase Returns,
+period receivables/payables generated, Current Receivables from
+`customers.credit`, Current Payables from purchase `outstanding_amount`, and
+stock alerts. Rider delivery state is not queried; COD counts only after
+settlement creates an actual Received payment.
+
+Without the UUID ledger, Current Cash, Current Bank, complete Cash/Bank
+movement, COGS, lifetime Total Sales, and COGS-based Approximate Profit are
+`null`/Not available, never fabricated as zero. Optional metrics are isolated
+and fetched concurrently. Range fetches are abortable, automatic retry is
+bounded to one and disabled for 401/403, and diagnostics contain timing/path
+metadata but no financial values or customer data.
+
+Focused coverage is in `tests/dashboard-production-compatibility.test.ts` and
+`tests/home-date-range.test.ts`. Authenticated production browser verification
+remains required. No migration, deployment, or push was performed.
+
 ## Known blockers
 
 - No browser/authenticated session available to perform live UI verification, per the same limitation already recorded in `CLIENT-REQUIREMENTS-DEPLOYED-GAP-AUDIT.md` for this row.

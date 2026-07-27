@@ -146,16 +146,18 @@ export function OwnerDashboard({ user }: { user: any }) {
   const receivablesMovement = data.kpis.periodReceivablesMovement
   const payablesMovement = data.kpis.periodPayablesMovement
   const approxProfit = data.kpis.approxProfit ?? (todaySales - todayExpenses)
+  const lowStockCount = data.kpis.lowStockCount ?? 0
+  const negativeStockCount = data.kpis.negativeStockCount ?? 0
   const activeRangeLabel = preset === 'today' ? 'Today' : preset === 'last3' ? 'Last 3 Days' : preset === 'last7' ? 'Last 7 Days' : preset === 'month' ? 'This Month' : `${range.from} to ${range.to}`
   const hasActivity = todaySales > 0 || todayExpenses > 0 || (todayPurchases ?? 0) > 0 || (todayCollections ?? 0) > 0
 
   const primaryCards: Array<{ label: string; value: string; sub: string; icon: React.ComponentType<{ className?: string }>; accent: string; show: boolean }> = [
-    { label: 'Sales', value: formatWholeRupees(todaySales), sub: `${data.salesByType.counter.count} counter · ${data.salesByType.online.count} online · ${data.salesByType.ofc.count} OFC`, icon: ShoppingCart, accent: 'bg-emerald-500/10 text-emerald-600', show: true },
+    { label: 'Sales', value: data.kpis.todaySales != null ? formatWholeRupees(todaySales) : '—', sub: data.kpis.todaySales != null ? `${data.salesByType.counter.count} counter · ${data.salesByType.online.count} online · ${data.salesByType.ofc.count} OFC · ${data.salesByType.other.count} other` : 'Not available', icon: ShoppingCart, accent: 'bg-emerald-500/10 text-emerald-600', show: true },
     { label: 'Amount Received', value: todayCollections != null ? formatWholeRupees(todayCollections) : '—', sub: todayCollections != null ? `Received · ${activeRangeLabel}` : 'Not available', icon: ArrowDownToLine, accent: 'bg-green-500/10 text-green-600', show: true },
-    { label: 'Expenses', value: formatWholeRupees(todayExpenses), sub: `Expenses · ${activeRangeLabel}`, icon: ArrowUpFromLine, accent: 'bg-red-500/10 text-red-600', show: true },
+    { label: 'Expenses', value: data.kpis.todayExpenses != null ? formatWholeRupees(todayExpenses) : '—', sub: data.kpis.todayExpenses != null ? `Expenses · ${activeRangeLabel}` : 'Not available', icon: ArrowUpFromLine, accent: 'bg-red-500/10 text-red-600', show: true },
     { label: 'Purchases', value: todayPurchases != null ? formatWholeRupees(todayPurchases) : '—', sub: todayPurchases != null ? `Purchases · ${activeRangeLabel}` : 'Not available', icon: Receipt, accent: 'bg-amber-500/10 text-amber-600', show: todayPurchases != null },
-    { label: 'Sales Returns', value: formatWholeRupees(periodSalesReturns), sub: `Returns · ${activeRangeLabel}`, icon: Undo2, accent: 'bg-rose-500/10 text-rose-600', show: true },
-    { label: 'Purchase Returns', value: formatWholeRupees(periodPurchaseReturns), sub: `Returns · ${activeRangeLabel}`, icon: Undo2, accent: 'bg-orange-500/10 text-orange-600', show: true },
+    { label: 'Sales Returns', value: data.kpis.periodSalesReturns != null ? formatWholeRupees(periodSalesReturns) : '—', sub: data.kpis.periodSalesReturns != null ? `Returns · ${activeRangeLabel}` : 'Not available', icon: Undo2, accent: 'bg-rose-500/10 text-rose-600', show: true },
+    { label: 'Purchase Returns', value: data.kpis.periodPurchaseReturns != null ? formatWholeRupees(periodPurchaseReturns) : '—', sub: data.kpis.periodPurchaseReturns != null ? `Returns · ${activeRangeLabel}` : 'Not available', icon: Undo2, accent: 'bg-orange-500/10 text-orange-600', show: true },
     { label: 'Cash Inflow', value: cashInflow != null ? formatWholeRupees(cashInflow) : '—', sub: `Period movement · ${activeRangeLabel}`, icon: ArrowDownToLine, accent: 'bg-teal-500/10 text-teal-600', show: cashInflow != null },
     { label: 'Cash Outflow', value: cashOutflow != null ? formatWholeRupees(cashOutflow) : '—', sub: `Period movement · ${activeRangeLabel}`, icon: ArrowUpFromLine, accent: 'bg-teal-500/10 text-teal-600', show: cashOutflow != null },
     { label: 'Current Cash', value: cashBalance != null ? formatWholeRupees(cashBalance) : '—', sub: 'Current closing balance', icon: Banknote, accent: 'bg-teal-500/10 text-teal-600', show: cashBalance != null },
@@ -164,12 +166,12 @@ export function OwnerDashboard({ user }: { user: any }) {
     { label: 'Current Bank', value: bankBalance != null ? formatWholeRupees(bankBalance) : '—', sub: 'Current closing balance', icon: Building2, accent: 'bg-sky-500/10 text-sky-600', show: bankBalance != null },
     { label: 'Total Inflow', value: totalInflow != null ? formatWholeRupees(totalInflow) : '—', sub: `Cash + Bank · ${activeRangeLabel}`, icon: ArrowDownToLine, accent: 'bg-green-500/10 text-green-600', show: totalInflow != null },
     { label: 'Total Outflow', value: totalOutflow != null ? formatWholeRupees(totalOutflow) : '—', sub: `Cash + Bank · ${activeRangeLabel}`, icon: ArrowUpFromLine, accent: 'bg-red-500/10 text-red-600', show: totalOutflow != null },
-    { label: 'Current Receivables', value: formatWholeRupees(totalReceivables), sub: 'Current balance', icon: Users, accent: 'bg-violet-500/10 text-violet-600', show: true },
-    { label: 'Current Payables', value: formatWholeRupees(totalPayables), sub: 'Current balance', icon: Wallet, accent: 'bg-amber-500/10 text-amber-600', show: true },
-    { label: 'Pending / Outstanding', value: formatWholeRupees(pendingOutstanding), sub: 'Receivables + Payables · current balance', icon: Scale, accent: 'bg-fuchsia-500/10 text-fuchsia-600', show: true },
+    { label: 'Current Receivables', value: data.kpis.totalReceivables != null ? formatWholeRupees(totalReceivables) : '—', sub: data.kpis.totalReceivables != null ? 'Current balance' : 'Not available', icon: Users, accent: 'bg-violet-500/10 text-violet-600', show: true },
+    { label: 'Current Payables', value: data.kpis.totalPayables != null ? formatWholeRupees(totalPayables) : '—', sub: data.kpis.totalPayables != null ? 'Current balance' : 'Not available', icon: Wallet, accent: 'bg-amber-500/10 text-amber-600', show: true },
+    { label: 'Pending / Outstanding', value: data.kpis.pendingOutstanding != null ? formatWholeRupees(pendingOutstanding) : '—', sub: data.kpis.pendingOutstanding != null ? 'Receivables + Payables · current balance' : 'Not available', icon: Scale, accent: 'bg-fuchsia-500/10 text-fuchsia-600', show: true },
     { label: 'Receivables Movement', value: receivablesMovement != null ? formatWholeRupees(receivablesMovement) : '—', sub: `Period movement · ${activeRangeLabel}`, icon: TrendingUp, accent: 'bg-violet-500/10 text-violet-600', show: receivablesMovement != null },
     { label: 'Payables Movement', value: payablesMovement != null ? formatWholeRupees(payablesMovement) : '—', sub: `Period movement · ${activeRangeLabel}`, icon: TrendingDown, accent: 'bg-amber-500/10 text-amber-600', show: payablesMovement != null },
-    { label: 'Approximate Profit', value: formatWholeRupees(approxProfit), sub: `Sales − Returns − COGS − Expenses · ${activeRangeLabel}`, icon: TrendingUp, accent: approxProfit >= 0 ? 'bg-blue-500/10 text-blue-600' : 'bg-orange-500/10 text-orange-600', show: true },
+    { label: 'Approximate Profit', value: data.kpis.approxProfit != null ? formatWholeRupees(approxProfit) : '—', sub: data.kpis.approxProfit != null ? `Sales − Returns − COGS − Expenses · ${activeRangeLabel}` : 'Not available without reliable COGS', icon: TrendingUp, accent: approxProfit >= 0 ? 'bg-blue-500/10 text-blue-600' : 'bg-orange-500/10 text-orange-600', show: true },
   ]
 
   const visibleCards = primaryCards.filter(c => c.show)
@@ -303,7 +305,7 @@ export function OwnerDashboard({ user }: { user: any }) {
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
             <PendingCard icon={Users} label="Current Receivables" value={formatWholeRupees(totalReceivables)} sub="Current balance" accent="text-violet-600" />
             <PendingCard icon={Wallet} label="Current Payables" value={formatWholeRupees(totalPayables)} sub="Current balance" accent="text-amber-600" />
-            <PendingCard icon={AlertTriangle} label="Current Low / Negative Stock" value={`${data.kpis.lowStockCount + data.kpis.negativeStockCount} items`} sub={`${data.kpis.negativeStockCount} negative`} accent={(data.kpis.lowStockCount + data.kpis.negativeStockCount) > 0 ? 'text-red-600' : 'text-green-600'} />
+            <PendingCard icon={AlertTriangle} label="Current Low / Negative Stock" value={data.kpis.lowStockCount != null && data.kpis.negativeStockCount != null ? `${lowStockCount + negativeStockCount} items` : '—'} sub={data.kpis.negativeStockCount != null ? `${negativeStockCount} negative` : 'Not available'} accent={(lowStockCount + negativeStockCount) > 0 ? 'text-red-600' : 'text-green-600'} />
             <PendingCard icon={ShoppingCart} label="Online Orders" value={`${data.salesByType.online.count} in period`} sub={`Online orders · ${activeRangeLabel}`} accent="text-sky-600" />
           </div>
         </GlassPanel>
@@ -367,7 +369,7 @@ export function OwnerDashboard({ user }: { user: any }) {
               </div>
 
               {/* Stock Alerts in Advanced */}
-              {(data.kpis.lowStockCount + data.kpis.negativeStockCount) > 0 && (
+              {(lowStockCount + negativeStockCount) > 0 && (
                 <div>
                   <div className="flex items-center justify-between mb-2">
                     <span className="text-xs font-medium text-foreground">Stock Alerts</span>

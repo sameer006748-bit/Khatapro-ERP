@@ -1,21 +1,23 @@
 import { useQuery } from '@tanstack/react-query'
 import { bizPresetDateRange, type BusinessDateRange } from '@/lib/dates'
+import { shouldRetryDashboardRequest } from '@/lib/dashboard/compatibility'
 
 export interface OwnerDashboardData {
   today: string
   range: BusinessDateRange
+  dataSource: 'uuid-ledger' | 'operational-fallback'
   kpis: {
-    todaySales: number
-    todaySalesPaisas: string
+    todaySales: number | null
+    todaySalesPaisas: string | null
     todayCollections: number | null
-    todayExpenses: number
-    todayExpensesPaisas: string
+    todayExpenses: number | null
+    todayExpensesPaisas: string | null
     todayNetCashFlow: number | null
-    totalReceivables: number
-    totalPayables: number
-    totalSales: number
-    lowStockCount: number
-    negativeStockCount: number
+    totalReceivables: number | null
+    totalPayables: number | null
+    totalSales: number | null
+    lowStockCount: number | null
+    negativeStockCount: number | null
     todayPurchases: number | null
     cashBalance: number | null
     bankBalance: number | null
@@ -25,19 +27,24 @@ export interface OwnerDashboardData {
     bankOutflow: number | null
     totalInflow: number | null
     totalOutflow: number | null
-    periodSalesReturns: number
-    periodPurchaseReturns: number
-    periodCogs: number
-    approxProfit: number
+    periodSalesReturns: number | null
+    periodPurchaseReturns: number | null
+    periodCogs: number | null
+    approxProfit: number | null
     periodReceivablesMovement: number | null
     periodPayablesMovement: number | null
-    pendingOutstanding: number
+    pendingOutstanding: number | null
   }
   availability: {
     todaySales: boolean
     todayCollections: boolean
     todayExpenses: boolean
     todayNetCashFlow: boolean
+    todayPurchases: boolean
+    periodSalesReturns: boolean
+    periodPurchaseReturns: boolean
+    periodCogs: boolean
+    approxProfit: boolean
     cashBalance: boolean
     bankBalance: boolean
     cashMovement: boolean
@@ -45,6 +52,8 @@ export interface OwnerDashboardData {
     totalReceivables: boolean
     totalPayables: boolean
     totalSales: boolean
+    receivablesMovement: boolean
+    payablesMovement: boolean
     lowStockCount: boolean
     negativeStockCount: boolean
   }
@@ -52,6 +61,7 @@ export interface OwnerDashboardData {
     counter: { count: number; amount: string }
     online: { count: number; amount: string }
     ofc: { count: number; amount: string }
+    other: { count: number; amount: string }
   }
   recentInvoices: Array<{
     id: string
@@ -92,14 +102,17 @@ export interface OwnerDashboardData {
   }>
 }
 
-async function fetchOwnerDashboard(range: BusinessDateRange): Promise<OwnerDashboardData> {
+class DashboardFetchError extends Error {
+  constructor(public readonly status: number) {
+    super(status === 401 || status === 403 ? 'Unauthorized' : 'DASHBOARD_LOAD_FAILED')
+  }
+}
+
+async function fetchOwnerDashboard(range: BusinessDateRange, signal?: AbortSignal): Promise<OwnerDashboardData> {
   const params = new URLSearchParams({ from: range.from, to: range.to })
-  const r = await fetch(`/api/dashboard/owner?${params.toString()}`, { cache: 'no-store' })
+  const r = await fetch(`/api/dashboard/owner?${params.toString()}`, { cache: 'no-store', signal })
   if (!r.ok) {
-    if (r.status === 401 || r.status === 403) {
-      throw new Error('Unauthorized')
-    }
-    throw new Error('DASHBOARD_LOAD_FAILED')
+    throw new DashboardFetchError(r.status)
   }
   return r.json()
 }
@@ -107,13 +120,11 @@ async function fetchOwnerDashboard(range: BusinessDateRange): Promise<OwnerDashb
 export function useOwnerDashboard(range: BusinessDateRange = bizPresetDateRange('today')) {
   return useQuery({
     queryKey: ['owner-dashboard', range.from, range.to],
-    queryFn: () => fetchOwnerDashboard(range),
+    queryFn: ({ signal }) => fetchOwnerDashboard(range, signal),
     staleTime: 30_000,
     refetchInterval: 60_000,
-    retry: (failureCount, error) => {
-      if (error instanceof Error && error.message === 'Unauthorized') return false
-      return failureCount < 2
-    },
+    retry: (failureCount, error) =>
+      shouldRetryDashboardRequest(failureCount, error instanceof DashboardFetchError ? error.status : undefined),
   })
 }
 

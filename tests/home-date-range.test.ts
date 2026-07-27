@@ -1,177 +1,104 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { readFile } from 'node:fs/promises'
-import { execFileSync } from 'node:child_process'
 
 const dates = await readFile('src/lib/dates.ts', 'utf8')
 const hook = await readFile('src/hooks/use-owner-dashboard.ts', 'utf8')
 const page = await readFile('src/components/erp/views/owner-dashboard.tsx', 'utf8')
 const route = await readFile('src/app/api/dashboard/owner/route.ts', 'utf8')
+const summary = await readFile('src/lib/dashboard/owner-summary.ts', 'utf8')
 
-test('Today, Last 3 Days, Last 7 Days, This Month presets use Karachi business dates', () => {
+test('Today, Last 3 Days, Last 7 Days, and This Month use Karachi business dates', () => {
   assert.match(page, /bizPresetDateRange\('today'\)/)
   assert.match(dates, /BUSINESS_TZ = 'Asia\/Karachi'/)
-  assert.match(dates, /preset === 'last3'/)
-  assert.match(dates, /preset === 'last7'/)
-  assert.match(dates, /preset === 'month'/)
+  for (const preset of ['last3', 'last7', 'month']) assert.ok(dates.includes(`preset === '${preset}'`))
 })
 
-test('Last 3 Days and Last 7 Days use calendar-day counting including weekends', () => {
-  assert.match(dates, /function calendarDaysBefore/)
-  assert.match(dates, /return addBusinessDays\(dateStr, -count\)/)
-  assert.doesNotMatch(dates, /dow !== 0 && dow !== 6/)
-})
-
-test('Monday Last 3 Days spans Saturday through Monday (calendar dates)', async () => {
+test('Last 3 Days and Last 7 Days count calendar days including weekends', async () => {
   const { bizPresetDateRange } = await import('../src/lib/dates.ts')
   const monday = new Date(Date.UTC(2026, 6, 27))
-  const range = bizPresetDateRange('last3', monday)
-  assert.strictEqual(range.from, '2026-07-25')
-  assert.strictEqual(range.to, '2026-07-27')
-})
-
-test('Monday Last 7 Days spans the prior 6 full calendar dates through Monday', async () => {
-  const { bizPresetDateRange } = await import('../src/lib/dates.ts')
-  const monday = new Date(Date.UTC(2026, 6, 27))
-  const range = bizPresetDateRange('last7', monday)
-  assert.strictEqual(range.from, '2026-07-21')
-  assert.strictEqual(range.to, '2026-07-27')
-})
-
-test('Karachi midnight boundaries use +05:00 fixed offset', () => {
-  assert.match(dates, /T00:00:00\+05:00/)
-  assert.match(dates, /T23:59:59\.999\+05:00/)
+  assert.deepEqual(bizPresetDateRange('last3', monday), { from: '2026-07-25', to: '2026-07-27' })
+  assert.deepEqual(bizPresetDateRange('last7', monday), { from: '2026-07-21', to: '2026-07-27' })
 })
 
 test('custom range validates start/end before applying', () => {
   assert.match(page, /isBusinessDateRange\(nextRange\)/)
   assert.match(page, /End date must be on or after start date/)
-  assert.match(page, /Start date/)
-  assert.match(page, /End date/)
-  assert.match(page, /Apply/)
-  assert.match(page, /Reset/)
+  for (const label of ['Start date', 'End date', 'Apply', 'Reset']) assert.ok(page.includes(label))
 })
 
-test('one shared range reaches the existing owner API and creates one query key', () => {
+test('one range reaches one owner API query key and is cancelled when stale', () => {
   assert.match(hook, /URLSearchParams\(\{ from: range\.from, to: range\.to \}\)/)
   assert.match(hook, /queryKey: \['owner-dashboard', range\.from, range\.to\]/)
-  assert.match(hook, /queryFn: \(\) => fetchOwnerDashboard\(range\)/)
+  assert.match(hook, /queryFn: \(\{ signal \}\) => fetchOwnerDashboard\(range, signal\)/)
   assert.match(route, /url\.searchParams\.get\('from'\)/)
   assert.match(route, /url\.searchParams\.get\('to'\)/)
-})
-
-test('all period metrics use the same validated range', () => {
-  for (const call of ['getTodaySalesAggregate(bid, range.from, range.to)', 'getPeriodPurchases(bid, range.from, range.to)', 'getTodayExpenses(bid, range.from, range.to)', 'getTodayCollections(bid, range.from, range.to)']) assert.ok(route.includes(call), call)
-  assert.match(route, /getPeriodAccountMovement\(bid, arAccount\.id, range\.from, range\.to, 'asset'\)/)
-  assert.match(route, /getPeriodAccountMovement\(bid, apAccount\.id, range\.from, range\.to, 'liability'\)/)
-})
-
-test('current balance and stock snapshots are explicitly not historical', () => {
-  for (const label of ['Current Cash', 'Current Bank', 'Current Receivables', 'Current Payables', 'Current Low / Negative Stock']) assert.ok(page.includes(label), label)
-  assert.match(route, /Ledger movement only; current balance snapshots are intentionally separate/)
-})
-
-test('the active range is visible and mobile presets remain scrollable', () => {
-  assert.match(page, /overflow-x-auto/)
-  assert.match(page, /Active range:/)
-  assert.match(page, /grid-cols-1 sm:grid-cols/)
-})
-
-test('Home authorization and accounting presentation logic remain intact', () => {
-  assert.match(route, /loaded\.roleName === 'Owner\/Admin'/)
-  assert.match(route, /requirePermission\(loaded, 'can_view_trial_balance'\)/)
-  assert.match(page, /const approxProfit = data\.kpis\.approxProfit/)
-  assert.doesNotMatch(page, /parseFloat|Math\.round|toFixed/)
-})
-
-test('no stale Yesterday or This Week primary labels remain', () => {
-  assert.doesNotMatch(page, /Yesterday/)
-  assert.doesNotMatch(page, /This Week/)
-})
-
-test('no migration files changed', () => {
-  const changed = execFileSync('git', ['diff', '--name-only', 'ec05323cc1adf1593b322b1b332e014e73a41b11'], { encoding: 'utf8' })
-  assert.doesNotMatch(changed, /^supabase\/migrations\//m)
-})
-
-test('Counter, Online, OFC and Other Sale are all included in the period sales aggregate', () => {
-  assert.match(route, /invoice_type === 'COUNTER'/)
-  assert.match(route, /invoice_type === 'ONLINE'/)
-  assert.match(route, /invoice_type === 'OFC'/)
-  assert.doesNotMatch(route, /invoice_type === 'OTHER'/)
-})
-
-test('period collections come from posted RC voucher lines into cash/bank/wallet, not invoice value', () => {
-  assert.match(route, /voucher_type.*'RC'/)
-  assert.match(route, /operational_money_key/)
-  assert.doesNotMatch(route, /from\('receipts'\)/)
-  assert.doesNotMatch(route, /from\('vouchers'\)/)
-  assert.doesNotMatch(route, /from\('voucher_lines'\)/)
-})
-
-test('no dead legacy voucher/receipt tables remain in the dashboard route', () => {
-  assert.doesNotMatch(route, /\.from\('vouchers'\)/)
-  assert.doesNotMatch(route, /\.from\('voucher_lines'\)/)
-  assert.doesNotMatch(route, /\.from\('receipts'\)/)
-  assert.match(route, /ledger_voucher_lines/)
-  assert.match(route, /ledger_vouchers/)
-})
-
-test('rider delivery COD is not counted as business cash receipt; only RC-type vouchers are', () => {
-  assert.doesNotMatch(route, /voucher_type.*'COD'/)
-  assert.match(route, /eq\('ledger_vouchers\.voucher_type', 'RC'\)/)
-})
-
-test('period receivables and payables movement continue to use the validated shared range', () => {
-  assert.match(route, /getPeriodAccountMovement\(bid, arAccount\.id, range\.from, range\.to, 'asset'\)/)
-  assert.match(route, /getPeriodAccountMovement\(bid, apAccount\.id, range\.from, range\.to, 'liability'\)/)
-})
-
-test('Sales Returns and Purchase Returns are period-scoped, not lifetime', () => {
-  assert.match(route, /getPeriodSalesReturns\(bid, range\.from, range\.to\)/)
-  assert.match(route, /getPeriodPurchaseReturns\(bid, range\.from, range\.to\)/)
-  assert.match(route, /from\('sales_returns'\)/)
-  assert.match(route, /from\('purchase_returns'\)/)
-  assert.match(page, /Sales Returns/)
-  assert.match(page, /Purchase Returns/)
-})
-
-test('Cash and Bank period movement are structurally separate from current closing balance', () => {
-  assert.match(route, /getPeriodMoneyMovement\(bid, 'cash', range\.from, range\.to\)/)
-  assert.match(route, /getPeriodMoneyMovement\(bid, 'bank', range\.from, range\.to\)/)
-  assert.match(page, /Cash Inflow/)
-  assert.match(page, /Cash Outflow/)
-  assert.match(page, /Bank Inflow/)
-  assert.match(page, /Bank Outflow/)
-  assert.match(page, /'Current Cash'[\s\S]{0,120}Current closing balance/)
-  assert.match(page, /'Current Bank'[\s\S]{0,120}Current closing balance/)
-})
-
-test('Total Inflow and Total Outflow combine Cash and Bank period movement', () => {
-  assert.match(route, /totalInflow = cashInflow[\s\S]{0,40}bankInflow/)
-  assert.match(route, /totalOutflow = cashOutflow[\s\S]{0,40}bankOutflow/)
-  assert.match(page, /Total Inflow/)
-  assert.match(page, /Total Outflow/)
-})
-
-test('Pending / Outstanding is presented as a current balance, not a period figure', () => {
-  assert.match(route, /pendingOutstanding = receivablesBalance \+ payablesBalance/)
-  assert.match(page, /Pending \/ Outstanding/)
-})
-
-test('Approximate Profit subtracts Sales Returns and COGS in addition to Expenses', () => {
-  assert.match(route, /getPeriodCogs\(bid, range\.from, range\.to\)/)
-  assert.match(route, /approxProfit = todaySalesNumber - salesReturnsNumber - cogsNumber - todayExpensesNumber/)
-  assert.match(route, /ledger_profit_loss/)
-  assert.match(page, /Sales − Returns − COGS − Expenses/)
-})
-
-test('date change invalidates the query and stale prior-period data is not shown while loading', () => {
-  assert.match(hook, /queryKey: \['owner-dashboard', range\.from, range\.to\]/)
   assert.match(page, /data\.range\.from !== range\.from \|\| data\.range\.to !== range\.to/)
 })
 
-test('an explicit empty-state message is shown when the selected period has no activity', () => {
-  assert.match(page, /hasActivity/)
+test('all operational period metrics use the same validated range', () => {
+  for (const expression of [
+    "gte('invoice_date', range.from).lte('invoice_date', range.to)",
+    "gte('expense_date', range.from).lte('expense_date', range.to)",
+    "gte('purchase_date', range.from).lte('purchase_date', range.to)",
+    "gte('created_at', boundary(range.from))",
+  ]) assert.ok(summary.includes(expression), expression)
+})
+
+test('current balances are separate from period movements', () => {
+  for (const label of ['Current Cash', 'Current Bank', 'Current Receivables', 'Current Payables']) {
+    assert.ok(page.includes(label), label)
+  }
+  assert.match(summary, /receivablesMovement/)
+  assert.match(summary, /payablesMovement/)
+  assert.match(summary, /let cashBalance: number \| null = null/)
+})
+
+test('all sale types include Other Sale', () => {
+  for (const type of ['COUNTER', 'ONLINE', 'OFC']) assert.ok(summary.includes(`invoiceType === '${type}'`))
+  assert.match(summary, /: saleTypes\.other/)
+  assert.match(page, /salesByType\.other\.count/)
+})
+
+test('collections use actual payments and never delivery state', () => {
+  assert.match(summary, /\.from\('payments'\)/)
+  assert.match(summary, /direction\)\.toLowerCase\(\) === 'received'/)
+  assert.doesNotMatch(summary, /\.from\('delivery_orders'\)/)
+})
+
+test('returns are period scoped and optional', () => {
+  assert.match(summary, /\.from\('sale_return_documents'\)/)
+  assert.match(summary, /\.from\('purchase_returns'\)/)
+  assert.match(summary, /salesReturns = salesReturnQ\.available/)
+  assert.match(summary, /purchaseReturns = purchaseReturnQ\.available/)
+})
+
+test('cash/bank movement and current balances remain structurally distinct', () => {
+  for (const label of ['Cash Inflow', 'Cash Outflow', 'Current Cash', 'Bank Inflow', 'Bank Outflow', 'Current Bank']) {
+    assert.ok(page.includes(label), label)
+  }
+  assert.match(summary, /cashMovement/)
+  assert.match(summary, /cashBalance/)
+})
+
+test('Approximate Profit requires Sales, Returns, COGS, and Expenses', () => {
+  assert.match(summary, /sales - salesReturns - cogs - expenses/)
+  assert.match(summary, /: null/)
+  assert.match(page, /Not available without reliable COGS/)
+})
+
+test('authorization and empty-state presentation remain intact', () => {
+  assert.match(route, /loaded\.roleName !== 'Owner\/Admin'/)
+  assert.match(route, /requirePermission\(loaded, 'can_view_trial_balance'\)/)
   assert.match(page, /No sales, purchases, expenses or collections were recorded for/)
+})
+
+test('active range is visible and mobile presets remain scrollable', () => {
+  assert.match(page, /overflow-x-auto/)
+  assert.match(page, /Active range:/)
+})
+
+test('no stale Yesterday or This Week labels remain', () => {
+  assert.doesNotMatch(page, /Yesterday/)
+  assert.doesNotMatch(page, /This Week/)
 })

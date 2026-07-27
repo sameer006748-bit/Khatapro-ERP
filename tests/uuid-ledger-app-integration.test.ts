@@ -13,6 +13,7 @@ const subcategories = await readFile('src/lib/money/persisted-account-subcategor
 const reportsView = await readFile('src/components/erp/views/reports-view.tsx', 'utf8')
 const reportsRoute = await readFile('src/app/api/reports/route.ts', 'utf8')
 const ownerDashboardRoute = await readFile('src/app/api/dashboard/owner/route.ts', 'utf8')
+const ownerDashboardSummary = await readFile('src/lib/dashboard/owner-summary.ts', 'utf8')
 
 test('production chart and balances use canonical ledger tables and RPC', () => {
   assert.match(accounting, /probeTable\(_phase1Cache, 'ledger_accounts'\)/)
@@ -53,8 +54,9 @@ test('P&L and Balance Sheet have no active app-side accounting patches', () => {
   assert.match(reportsRoute, /section === 'COST_OF_GOODS_SOLD'/)
   assert.match(reportsRoute, /account_code === '1300'/)
   assert.doesNotMatch(reportsRoute, /account_code === '1310'|account_code === '5010'/)
-  assert.match(ownerDashboardRoute, /getAccountByCode\(bid, '4000'\)/)
-  assert.doesNotMatch(ownerDashboardRoute, /getAccountByCode\(bid, '4010'\)/)
+  assert.match(ownerDashboardRoute, /buildOwnerDashboardPayload/)
+  assert.match(ownerDashboardSummary, /getAccountByCode\(bid, '4000'\)/)
+  assert.doesNotMatch(ownerDashboardSummary, /getAccountByCode\(bid, '4010'\)/)
 })
 
 test('financial report defaults use the Asia/Karachi business date', () => {
