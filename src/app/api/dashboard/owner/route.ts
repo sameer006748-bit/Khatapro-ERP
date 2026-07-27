@@ -58,7 +58,7 @@ export const GET = withObservability('/api/dashboard/owner', async (req: Request
       getRecentPurchases(bid, RECENT_LIMIT, range.from, range.to),
       getStockAggregates(bid, STOCK_ALERT_LIMIT),
       getTodayExpenses(bid, range.from, range.to),
-      getAccountByCode(bid, '4010'),
+      getAccountByCode(bid, '4000'),
       getAccountByCode(bid, '1200'),
       getAccountByCode(bid, '2010'),
       getTodayCollections(bid, range.from, range.to),
@@ -97,8 +97,8 @@ export const GET = withObservability('/api/dashboard/owner', async (req: Request
 
     // ── Account balances (single-row lookups) ──
     const receivablesBalance = arAccount ? Number(arAccount.balanceCache) : 0
-    const payablesBalance = apAccount ? Number(-apAccount.balanceCache) : 0
-    const totalSalesBalance = salesAccount ? Number(-salesAccount.balanceCache) : 0
+    const payablesBalance = apAccount ? Number(apAccount.balanceCache) : 0
+    const totalSalesBalance = salesAccount ? Number(salesAccount.balanceCache) : 0
     const [periodReceivablesMovement, periodPayablesMovement] = await Promise.all([
       arAccount ? getPeriodAccountMovement(bid, arAccount.id, range.from, range.to, 'asset') : Promise.resolve(null),
       apAccount ? getPeriodAccountMovement(bid, apAccount.id, range.from, range.to, 'liability') : Promise.resolve(null),

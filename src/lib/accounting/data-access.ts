@@ -2,7 +2,7 @@
  * Smart data-access helpers that switch between Supabase and Prisma based on
  * whether Supabase env vars are configured.
  *
- * Phase 1 setup data (accounts, categories, business accounts) lives in
+ * Canonical setup data (ledger_accounts and ledger_account_categories) lives in
  * whichever database is active. When Supabase is live, we read from Supabase
  * tables via the admin client; otherwise we fall back to Prisma/SQLite.
  *
@@ -15,8 +15,7 @@ import { getAdminSupabase } from '@/lib/supabase/admin'
 import { probeTable } from '@/lib/supabase/phase-probe'
 
 /**
- * True when Supabase env vars are set AND Phase 1 migration is applied
- * (so the accounts table exists). Cached after first check.
+ * True when Supabase env vars are set AND the production UUID ledger exists.
  */
 const _phase1Cache = { lastChecked: 0, lastResult: false }
 
@@ -26,7 +25,7 @@ async function isSupabaseLive(): Promise<boolean> {
   // than returning false — this prevents falling through to Prisma/SQLite,
   // which is unavailable on serverless and crashes accounting reads. It also
   // re-probes on a 30s TTL instead of permanently caching a transient failure.
-  return probeTable(_phase1Cache, 'permissions')
+  return probeTable(_phase1Cache, 'ledger_accounts')
 }
 
 export type AccountRow = {
@@ -92,39 +91,47 @@ async function getChartOfAccountsFromPrisma(businessId: string): Promise<Categor
 async function getChartOfAccountsFromSupabase(businessId: string): Promise<CategoryWithAccounts[]> {
   const admin = getAdminSupabase()
   const { data: cats, error } = await admin
-    .from('account_categories')
-    .select('id, code, name, type')
+    .from('ledger_account_categories')
+    .select('id, stable_code, display_name, report_class')
     .eq('business_id', businessId)
-    .order('code')
+    .order('stable_code')
   if (error) throw new Error(`Supabase CoA query failed: ${error.message}`)
   if (!cats) return []
 
   const { data: accts, error: e2 } = await admin
-    .from('accounts')
-    .select('id, code, name, category_id, is_active, is_business_account, is_party_account, party_type, balance_cache')
+    .from('ledger_accounts')
+    .select('id, account_code, account_name, category_id, is_active, operational_money_key, party_type')
     .eq('business_id', businessId)
-    .order('code')
+    .order('account_code')
   if (e2) throw new Error(`Supabase accounts query failed: ${e2.message}`)
   if (!accts) return []
+  const { data: balances, error: balanceError } = await admin.rpc('ledger_account_balances', {
+    p_business_id: businessId,
+    p_as_of_date: null,
+  })
+  if (balanceError) throw new Error(`Supabase ledger balances failed: ${balanceError.message}`)
+  const balanceByAccount = new Map<string, bigint>(
+    (balances ?? []).map((row: any) => [row.account_id, BigInt(row.balance_paisas ?? 0)]),
+  )
 
   return cats.map((c) => ({
     id: c.id,
-    code: c.code,
-    name: c.name,
-    type: c.type,
+    code: c.stable_code,
+    name: c.display_name,
+    type: c.report_class,
     accounts: accts
       .filter((a) => a.category_id === c.id)
       .map((a) => ({
         id: a.id,
-        code: a.code,
-        name: a.name,
+        code: a.account_code,
+        name: a.account_name,
         categoryId: a.category_id,
         isActive: a.is_active,
-        isBusinessAccount: a.is_business_account,
-        isPartyAccount: a.is_party_account,
+        isBusinessAccount: a.operational_money_key !== null,
+        isPartyAccount: a.party_type !== null,
         partyType: a.party_type,
-        balanceCache: BigInt(a.balance_cache ?? 0),
-        category: { id: c.id, code: c.code, name: c.name, type: c.type },
+        balanceCache: balanceByAccount.get(a.id) ?? 0n,
+        category: { id: c.id, code: c.stable_code, name: c.display_name, type: c.report_class },
       })),
   }))
 }
@@ -134,30 +141,31 @@ export async function getAccountById(businessId: string, accountId: string): Pro
   if (await isSupabaseLive()) {
     const admin = getAdminSupabase()
     const { data, error } = await admin
-      .from('accounts')
-      .select('id, code, name, category_id, is_active, is_business_account, is_party_account, party_type, balance_cache')
+      .from('ledger_accounts')
+      .select('id, account_code, account_name, category_id, is_active, operational_money_key, party_type')
       .eq('id', accountId)
       .eq('business_id', businessId)
       .maybeSingle()
     if (error || !data) return null
     // Fetch category separately
     const { data: cat } = await admin
-      .from('account_categories')
-      .select('id, code, name, type')
+      .from('ledger_account_categories')
+      .select('id, stable_code, display_name, report_class')
       .eq('id', data.category_id)
+      .eq('business_id', businessId)
       .maybeSingle()
     if (!cat) return null
     return {
       id: data.id,
-      code: data.code,
-      name: data.name,
+      code: data.account_code,
+      name: data.account_name,
       categoryId: data.category_id,
       isActive: data.is_active,
-      isBusinessAccount: data.is_business_account,
-      isPartyAccount: data.is_party_account,
+      isBusinessAccount: data.operational_money_key !== null,
+      isPartyAccount: data.party_type !== null,
       partyType: data.party_type,
-      balanceCache: BigInt(data.balance_cache ?? 0),
-      category: { id: cat.id, code: cat.code, name: cat.name, type: cat.type },
+      balanceCache: 0n,
+      category: { id: cat.id, code: cat.stable_code, name: cat.display_name, type: cat.report_class },
     }
   }
   const a = await db.account.findFirst({
@@ -184,10 +192,10 @@ export async function getAccountByCode(businessId: string, code: string): Promis
   if (await isSupabaseLive()) {
     const admin = getAdminSupabase()
     const { data, error } = await admin
-      .from('accounts')
-      .select('id, code, name, category_id, is_active, is_business_account, is_party_account, party_type, balance_cache')
+      .from('ledger_accounts')
+      .select('id, account_code')
       .eq('business_id', businessId)
-      .eq('code', code)
+      .eq('account_code', code)
       .maybeSingle()
     if (error || !data) return null
     return getAccountById(businessId, data.id)
@@ -217,7 +225,7 @@ export async function validateAccounts(businessId: string, accountIds: string[])
   if (await isSupabaseLive()) {
     const admin = getAdminSupabase()
     const { count, error } = await admin
-      .from('accounts')
+      .from('ledger_accounts')
       .select('id', { count: 'exact', head: true })
       .in('id', unique)
       .eq('business_id', businessId)

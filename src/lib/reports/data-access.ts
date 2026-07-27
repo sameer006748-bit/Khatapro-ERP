@@ -6,21 +6,29 @@ import { getAdminSupabase } from '@/lib/supabase/admin'
 import { bizDateString } from '@/lib/dates'
 export async function reportProfitLoss(businessId: string, fromDate: string, toDate: string) {
   const admin = getAdminSupabase()
-  const { data, error } = await admin.rpc('report_profit_loss', { p_business_id: businessId, p_from_date: fromDate, p_to_date: toDate })
-  if (error) throw new Error(`report_profit_loss: ${error.message}`)
-  const rows = data as any[]
-
-  // App-side filter: only Income and Expense accounts belong in P&L.
-  // If migration 00008i has been applied, the RPC already filters this in SQL.
-  // If not, we filter here to remove Asset/Liability/Equity rows that appear
-  // with amount=0 due to the old HAVING clause inconsistency.
-  return rows.filter(r => r.category_type === 'Income' || r.category_type === 'Expense')
+  const { data, error } = await admin.rpc('ledger_profit_loss', {
+    p_business_id: businessId,
+    p_from_date: fromDate,
+    p_to_date: toDate,
+  })
+  if (error) throw new Error(`ledger_profit_loss: ${error.message}`)
+  return (data ?? []) as any[]
 }
 
 export async function reportBalanceSheet(businessId: string, asOfDate: string) {
   const admin = getAdminSupabase()
-  const { data, error } = await admin.rpc('report_balance_sheet', { p_business_id: businessId, p_as_of_date: asOfDate })
-  if (error) throw new Error(`report_balance_sheet: ${error.message}`)
+  const { data, error } = await admin.rpc('ledger_balance_sheet', {
+    p_business_id: businessId,
+    p_as_of_date: asOfDate,
+  })
+  if (error) throw new Error(`ledger_balance_sheet: ${error.message}`)
+  return (data ?? []) as any[]
+}
+
+/*
+ * Historical app-side legacy-table fallbacks are intentionally disabled.
+ * Migration 00030 is now the only production Balance Sheet calculation.
+ *
   const rows = data as any[]
 
   // App-side Current Earnings fallback.
@@ -146,7 +154,7 @@ export async function reportBalanceSheet(businessId: string, asOfDate: string) {
 
   // Filter to BS accounts only (in case RPC returned non-BS rows)
   return rows.filter(r => ['ASSET', 'LIABILITY', 'EQUITY'].includes(r.section))
-}
+*/
 
 export async function reportSalesSummary(businessId: string, fromDate: string, toDate: string) {
   const admin = getAdminSupabase()
@@ -438,12 +446,12 @@ export async function reportProductProfitability(
 // ─────────────────────────────────────────────────────────────
 export async function reportTrialBalance(businessId: string) {
   const admin = getAdminSupabase()
-  const { data, error } = await admin.rpc('trial_balance', {
+  const { data, error } = await admin.rpc('ledger_trial_balance', {
     p_business_id: businessId,
     p_from_date: null,
     p_to_date: null,
   })
-  if (error) throw new Error(`trial_balance: ${error.message}`)
+  if (error) throw new Error(`ledger_trial_balance: ${error.message}`)
   return (data ?? []) as any[]
 }
 
@@ -479,34 +487,21 @@ async function getAccountBalanceByCode(
   asOfDate?: string,
 ): Promise<bigint> {
   const admin = getAdminSupabase()
-  // Get the account id first
   const { data: acct, error: acctErr } = await admin
-    .from('accounts')
-    .select('id, category_id')
+    .from('ledger_accounts')
+    .select('id')
     .eq('business_id', businessId)
-    .eq('code', code)
+    .eq('account_code', code)
     .maybeSingle()
   if (acctErr || !acct) return 0n
 
-  // Sum voucher_lines for non-cancelled vouchers
-  let query = admin
-    .from('voucher_lines')
-    .select('debit, credit, voucher_id, vouchers!inner(is_cancelled, voucher_date)')
-    .eq('account_id', acct.id)
-    .eq('vouchers.is_cancelled', false)
-  if (asOfDate) {
-    query = query.lte('vouchers.voucher_date', asOfDate)
-  }
-  const { data, error } = await query
-  if (error || !data) return 0n
-
-  let debit = 0n
-  let credit = 0n
-  for (const l of data as any[]) {
-    debit += BigInt(l.debit ?? 0)
-    credit += BigInt(l.credit ?? 0)
-  }
-  return debit - credit
+  const { data, error } = await admin.rpc('ledger_account_balance_paisas', {
+    p_business_id: businessId,
+    p_account_id: acct.id,
+    p_as_of_date: asOfDate ?? null,
+  })
+  if (error || data === null) return 0n
+  return BigInt(data as string | number)
 }
 
 export async function reportExceptions(businessId: string): Promise<ExceptionRow[]> {
@@ -516,7 +511,7 @@ export async function reportExceptions(businessId: string): Promise<ExceptionRow
 
   // 1. Trial Balance difference (CRITICAL)
   try {
-    const { data: tb } = await admin.rpc('trial_balance', {
+    const { data: tb } = await admin.rpc('ledger_trial_balance', {
       p_business_id: businessId,
       p_from_date: null,
       p_to_date: null,
@@ -547,7 +542,7 @@ export async function reportExceptions(businessId: string): Promise<ExceptionRow
 
   // 2. Balance Sheet difference (CRITICAL)
   try {
-    const { data: bs } = await admin.rpc('report_balance_sheet', {
+    const { data: bs } = await admin.rpc('ledger_balance_sheet', {
       p_business_id: businessId,
       p_as_of_date: today,
     })
@@ -745,19 +740,19 @@ export async function reportExceptions(businessId: string): Promise<ExceptionRow
   // 8. Negative Cash/Bank (MEDIUM)
   try {
     const { data: accts } = await admin
-      .from('accounts')
-      .select('id, code, name, category_id, account_categories!inner(code, type)')
+      .from('ledger_accounts')
+      .select('id, account_code, account_name, report_class')
       .eq('business_id', businessId)
       .eq('is_active', true)
-      .eq('account_categories.code', 'ASSET')
+      .eq('report_class', 'Asset')
     if (accts) {
       for (const a of accts as any[]) {
-        const bal = await getAccountBalanceByCode(businessId, a.code)
+        const bal = await getAccountBalanceByCode(businessId, a.account_code)
         if (bal < 0n) {
           out.push({
             severity: 'MEDIUM',
             issue: `Negative balance in asset account`,
-            reference: `${a.code} ${a.name}`,
+            reference: `${a.account_code} ${a.account_name}`,
             amount: bal.toString(),
             date: today,
             drill_down: `/?ledger=${a.id}`,
@@ -881,19 +876,19 @@ export async function reportExceptions(businessId: string): Promise<ExceptionRow
   // 13. Unusual asset credit (MEDIUM) — ASSET accounts with credit balance
   try {
     const { data: accts } = await admin
-      .from('accounts')
-      .select('id, code, name, category_id, account_categories!inner(code, type)')
+      .from('ledger_accounts')
+      .select('id, account_code, account_name, report_class')
       .eq('business_id', businessId)
       .eq('is_active', true)
-      .eq('account_categories.code', 'ASSET')
+      .eq('report_class', 'Asset')
     if (accts) {
       for (const a of accts as any[]) {
-        const bal = await getAccountBalanceByCode(businessId, a.code)
+        const bal = await getAccountBalanceByCode(businessId, a.account_code)
         if (bal < 0n) {
           out.push({
             severity: 'MEDIUM',
             issue: `Unusual credit balance on asset account`,
-            reference: `${a.code} ${a.name}`,
+            reference: `${a.account_code} ${a.account_name}`,
             amount: (-bal).toString(),
             date: today,
             drill_down: `/?ledger=${a.id}`,
@@ -909,19 +904,19 @@ export async function reportExceptions(businessId: string): Promise<ExceptionRow
   // 14. Unusual liability debit (MEDIUM)
   try {
     const { data: accts } = await admin
-      .from('accounts')
-      .select('id, code, name, category_id, account_categories!inner(code, type)')
+      .from('ledger_accounts')
+      .select('id, account_code, account_name, report_class')
       .eq('business_id', businessId)
       .eq('is_active', true)
-      .eq('account_categories.code', 'LIABILITY')
+      .eq('report_class', 'Liability')
     if (accts) {
       for (const a of accts as any[]) {
-        const bal = await getAccountBalanceByCode(businessId, a.code)
+        const bal = await getAccountBalanceByCode(businessId, a.account_code)
         if (bal > 0n) {
           out.push({
             severity: 'MEDIUM',
             issue: `Unusual debit balance on liability account`,
-            reference: `${a.code} ${a.name}`,
+            reference: `${a.account_code} ${a.account_name}`,
             amount: bal.toString(),
             date: today,
             drill_down: `/?ledger=${a.id}`,

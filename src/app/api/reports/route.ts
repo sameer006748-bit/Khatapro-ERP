@@ -62,30 +62,28 @@ export const GET = withObservability('/api/reports', async (req: Request) => {
       case 'delivery-summary': return NextResponse.json({ rows: await reportDeliverySummary(bid) })
       case 'cod-settlements': return NextResponse.json({ rows: await reportCodSettlements(bid) })
       case 'overview': {
-        const [pl, bs, inv, cash, sales, expenses] = await Promise.all([
+        const [pl, bs] = await Promise.all([
           reportProfitLoss(bid, fromDate, toDate),
           reportBalanceSheet(bid, toDate),
-          reportInventoryValuation(bid),
-          reportCashFlow(bid, fromDate, toDate),
-          reportSalesSummary(bid, fromDate, toDate),
-          reportExpenseSummary(bid, fromDate, toDate),
         ])
-        const revenue = pl.filter(r => r.section === 'REVENUE').reduce((s, r) => s + Number(r.amount), 0)
-        const expensesTotal = pl.filter(r => r.section === 'EXPENSE').reduce((s, r) => s + Number(r.amount), 0)
-        const cogs = pl.filter(r => r.account_code === '5010').reduce((s, r) => s + Number(r.amount), 0)
-        const assets = bs.filter(r => r.section === 'ASSET').reduce((s, r) => s + Number(r.balance), 0)
-        const liabilities = bs.filter(r => r.section === 'LIABILITY').reduce((s, r) => s + Number(r.balance), 0)
-        const equity = bs.filter(r => r.section === 'EQUITY').reduce((s, r) => s + Number(r.balance), 0)
-        const invValue = inv.reduce((s, r) => s + Number(r.stock_value), 0)
-        const cashBalance = cash.reduce((s, r) => s + Number(r.closing_balance), 0)
-        const custRecv = bs.find(r => r.account_code === '1200')?.balance || '0'
-        const vendorPay = bs.find(r => r.account_code === '2010')?.balance || '0'
-        const riderCod = bs.find(r => r.account_code === '1310')?.balance || '0'
+        const sumAmount = (rows: any[]) => rows.reduce((sum, row) => sum + BigInt(row.amount ?? 0), 0n)
+        const sumBalance = (rows: any[]) => rows.reduce((sum, row) => sum + BigInt(row.balance ?? 0), 0n)
+        const revenue = sumAmount(pl.filter(r => r.section === 'REVENUE'))
+        const cogs = sumAmount(pl.filter(r => r.section === 'COST_OF_GOODS_SOLD'))
+        const expensesTotal = sumAmount(pl.filter(r => r.section === 'EXPENSE'))
+        const assets = sumBalance(bs.filter(r => r.section === 'ASSET'))
+        const liabilities = sumBalance(bs.filter(r => r.section === 'LIABILITY'))
+        const equity = sumBalance(bs.filter(r => r.section === 'EQUITY'))
+        const cashBalance = sumBalance(bs.filter(r => ['1010', '1020', '1030', '1040'].includes(r.account_code)))
+        const custRecv = BigInt(bs.find(r => r.account_code === '1200')?.balance ?? 0)
+        const vendorPay = BigInt(bs.find(r => r.account_code === '2010')?.balance ?? 0)
+        const invValue = BigInt(bs.find(r => r.account_code === '1100')?.balance ?? 0)
+        const riderCod = BigInt(bs.find(r => r.account_code === '1300')?.balance ?? 0)
         return NextResponse.json({
           kpis: {
             netSales: String(revenue),
             grossProfit: String(revenue - cogs),
-            netProfit: String(revenue - expensesTotal),
+            netProfit: String(revenue - cogs - expensesTotal),
             totalExpenses: String(expensesTotal),
             cashBalance: String(cashBalance),
             customerReceivable: String(custRecv),

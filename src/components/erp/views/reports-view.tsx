@@ -231,12 +231,13 @@ function OverviewReport({ kpis, bs }: { kpis: any; bs: any }) {
 
 function ProfitLossReport({ rows }: { rows: any[] }) {
   const revenue = rows.filter(r => r.section === 'REVENUE')
+  const cogsRows = rows.filter(r => r.section === 'COST_OF_GOODS_SOLD')
   const expenses = rows.filter(r => r.section === 'EXPENSE')
-  const totalRevenue = revenue.reduce((s, r) => s + Number(r.amount), 0)
-  const totalExpenses = expenses.reduce((s, r) => s + Number(r.amount), 0)
-  const cogs = rows.find(r => r.account_code === '5010')?.amount || '0'
-  const grossProfit = totalRevenue - Number(cogs)
-  const netProfit = totalRevenue - totalExpenses
+  const totalRevenue = revenue.reduce((sum, row) => sum + BigInt(row.amount ?? 0), 0n)
+  const totalCogs = cogsRows.reduce((sum, row) => sum + BigInt(row.amount ?? 0), 0n)
+  const totalExpenses = expenses.reduce((sum, row) => sum + BigInt(row.amount ?? 0), 0n)
+  const grossProfit = totalRevenue - totalCogs
+  const netProfit = grossProfit - totalExpenses
   return (
     <div className="space-y-3">
       <div className="card-3d p-3 border-amber-200 bg-amber-50">
@@ -254,23 +255,29 @@ function ProfitLossReport({ rows }: { rows: any[] }) {
           </div>
         ))}
         <div className="flex justify-between text-sm font-bold mt-2 pt-2 border-t border-border">
-          <span>Total Revenue</span><span data-num>{formatMoney(BigInt(totalRevenue))}</span>
+          <span>Total Revenue</span><span data-num>{formatMoney(totalRevenue)}</span>
         </div>
       </div>
       <div className="card-3d p-4">
         <h3 className="text-sm font-semibold text-foreground mb-3">Cost of Goods Sold</h3>
-        {Number(cogs) > 0 ? <div className="flex justify-between text-xs py-1"><span>5010 · Purchases / COGS</span><span className="font-medium" data-num>{formatMoney(BigInt(cogs), false)}</span></div> : <p className="text-xs text-muted-foreground">No COGS in this period.</p>}
-        <div className="flex justify-between text-sm font-bold mt-2 pt-2 border-t border-border"><span>Gross Profit</span><span data-num>{formatMoney(BigInt(grossProfit))}</span></div>
+        {cogsRows.length === 0 ? <p className="text-xs text-muted-foreground">No COGS in this period.</p> : cogsRows.map(row => (
+          <div key={row.account_code} className="flex justify-between text-xs py-1 border-b border-border/30">
+            <span><span data-num>{row.account_code}</span> · {row.account_name}</span>
+            <span className="font-medium" data-num>{formatMoney(BigInt(row.amount), false)}</span>
+          </div>
+        ))}
+        <div className="flex justify-between text-sm font-bold mt-2 pt-2 border-t border-border"><span>Total COGS</span><span data-num>{formatMoney(totalCogs)}</span></div>
+        <div className="flex justify-between text-sm font-bold mt-2 pt-2 border-t border-border"><span>Gross Profit</span><span data-num>{formatMoney(grossProfit)}</span></div>
       </div>
       <div className="card-3d p-4">
         <h3 className="text-sm font-semibold text-foreground mb-3">Operating Expenses</h3>
-        {expenses.filter(r => r.account_code !== '5010').length === 0 ? <p className="text-xs text-muted-foreground">No expenses in this period.</p> : expenses.filter(r => r.account_code !== '5010').map(r => (
+        {expenses.length === 0 ? <p className="text-xs text-muted-foreground">No expenses in this period.</p> : expenses.map(r => (
           <div key={r.account_code} className="flex justify-between text-xs py-1 border-b border-border/30">
             <span><span data-num>{r.account_code}</span> · {r.account_name}</span>
             <span className="font-medium" data-num>{formatMoney(BigInt(r.amount), false)}</span>
           </div>
         ))}
-        <div className="flex justify-between text-sm font-bold mt-2 pt-2 border-t border-border"><span>Net Profit</span><span className={netProfit >= 0 ? 'text-emerald-600' : 'text-rose-600'} data-num>{formatMoney(BigInt(netProfit))}</span></div>
+        <div className="flex justify-between text-sm font-bold mt-2 pt-2 border-t border-border"><span>Net Profit</span><span className={netProfit >= 0n ? 'text-emerald-600' : 'text-rose-600'} data-num>{formatMoney(netProfit)}</span></div>
       </div>
     </div>
   )
@@ -283,10 +290,10 @@ function BalanceSheetReport({ rows }: { rows: any[] }) {
   // Split equity into permanent (Owner Capital, Drawings, Opening Balance) and Current Earnings (calculated)
   const permanentEquity = equity.filter(r => r.is_calculated !== true)
   const currentEarnings = equity.find(r => r.is_calculated === true)
-  const totalAssets = assets.reduce((s, r) => s + Number(r.balance), 0)
-  const totalLiabilities = liabilities.reduce((s, r) => s + Number(r.balance), 0)
-  const totalPermanentEquity = permanentEquity.reduce((s, r) => s + Number(r.balance), 0)
-  const currentEarningsAmount = currentEarnings ? Number(currentEarnings.balance) : 0
+  const totalAssets = assets.reduce((sum, row) => sum + BigInt(row.balance ?? 0), 0n)
+  const totalLiabilities = liabilities.reduce((sum, row) => sum + BigInt(row.balance ?? 0), 0n)
+  const totalPermanentEquity = permanentEquity.reduce((sum, row) => sum + BigInt(row.balance ?? 0), 0n)
+  const currentEarningsAmount = currentEarnings ? BigInt(currentEarnings.balance) : 0n
   const totalEquity = totalPermanentEquity + currentEarningsAmount
   const balanced = totalAssets === totalLiabilities + totalEquity
   return (
@@ -297,7 +304,7 @@ function BalanceSheetReport({ rows }: { rows: any[] }) {
           <span className="font-medium">
             {balanced
               ? 'Balanced — Assets = Liabilities + Equity (incl. Current Earnings)'
-              : `Difference: ${formatMoney(BigInt(totalAssets - totalLiabilities - totalEquity))}`}
+              : `Difference: ${formatMoney(totalAssets - totalLiabilities - totalEquity)}`}
           </span>
         </div>
       </div>
@@ -313,8 +320,8 @@ function BalanceSheetReport({ rows }: { rows: any[] }) {
                 Calculated from Income − Expense vouchers up to selected date. Not a posted voucher.
               </p>
             </div>
-            <span className={`text-sm font-bold ${currentEarningsAmount >= 0 ? 'text-emerald-600' : 'text-rose-600'}`} data-num>
-              {formatMoney(BigInt(currentEarningsAmount))}
+            <span className={`text-sm font-bold ${currentEarningsAmount >= 0n ? 'text-emerald-600' : 'text-rose-600'}`} data-num>
+              {formatMoney(currentEarningsAmount)}
             </span>
           </div>
         </div>
@@ -322,41 +329,41 @@ function BalanceSheetReport({ rows }: { rows: any[] }) {
       <div className="card-3d p-4 bg-muted/30">
         <div className="flex justify-between text-sm font-bold">
           <span>Liabilities + Equity</span>
-          <span data-num>{formatMoney(BigInt(totalLiabilities + totalEquity))}</span>
+          <span data-num>{formatMoney(totalLiabilities + totalEquity)}</span>
         </div>
         <div className="flex justify-between text-xs text-muted-foreground mt-1">
           <span>Assets</span>
-          <span data-num>{formatMoney(BigInt(totalAssets))}</span>
+          <span data-num>{formatMoney(totalAssets)}</span>
         </div>
         <div className={`flex justify-between text-xs font-medium mt-1 ${balanced ? 'text-emerald-600' : 'text-amber-600'}`}>
           <span>Difference</span>
-          <span data-num>{formatMoney(BigInt(totalAssets - totalLiabilities - totalEquity))}</span>
+          <span data-num>{formatMoney(totalAssets - totalLiabilities - totalEquity)}</span>
         </div>
       </div>
     </div>
   )
 }
 
-function Section({ title, rows, total }: { title: string; rows: any[]; total: number }) {
+function Section({ title, rows, total }: { title: string; rows: any[]; total: bigint }) {
   return (
     <div className="card-3d p-4">
       <h3 className="text-sm font-semibold text-foreground mb-3">{title}</h3>
       {rows.length === 0 ? <p className="text-xs text-muted-foreground">No accounts with balance.</p> : rows.map(r => {
-        const balance = Number(r.balance)
-        const isAbnormal = (r.section === 'ASSET' && balance < 0) || ((r.section === 'LIABILITY' || r.section === 'EQUITY') && balance < 0)
+        const balance = BigInt(r.balance)
+        const isAbnormal = (r.section === 'ASSET' && balance < 0n) || ((r.section === 'LIABILITY' || r.section === 'EQUITY') && balance < 0n)
         return (
           <div key={r.account_code} className="flex justify-between text-xs py-1 border-b border-border/30">
             <span>
               <span data-num>{r.account_code}</span> · {r.account_name}
-              {r.section === 'ASSET' && balance < 0 && <span className="ml-1 text-[9px] text-amber-600">(Credit Balance — abnormal)</span>}
-              {r.section === 'LIABILITY' && balance < 0 && <span className="ml-1 text-[9px] text-amber-600">(Debit Balance — advance/drawing)</span>}
-              {r.section === 'EQUITY' && balance < 0 && <span className="ml-1 text-[9px] text-amber-600">(Net Loss / Drawing)</span>}
+              {r.section === 'ASSET' && balance < 0n && <span className="ml-1 text-[9px] text-amber-600">(Credit Balance — abnormal)</span>}
+              {r.section === 'LIABILITY' && balance < 0n && <span className="ml-1 text-[9px] text-amber-600">(Debit Balance — advance/drawing)</span>}
+              {r.section === 'EQUITY' && balance < 0n && <span className="ml-1 text-[9px] text-amber-600">(Net Loss / Drawing)</span>}
             </span>
             <span className={`font-medium ${isAbnormal ? 'text-amber-700' : ''}`} data-num>{formatMoney(BigInt(r.balance), false)}</span>
           </div>
         )
       })}
-      <div className="flex justify-between text-sm font-bold mt-2 pt-2 border-t border-border"><span>Total {title}</span><span data-num>{formatMoney(BigInt(total))}</span></div>
+      <div className="flex justify-between text-sm font-bold mt-2 pt-2 border-t border-border"><span>Total {title}</span><span data-num>{formatMoney(total)}</span></div>
     </div>
   )
 }

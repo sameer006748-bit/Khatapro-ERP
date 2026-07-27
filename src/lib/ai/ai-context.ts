@@ -197,11 +197,19 @@ async function buildBusinessContext(session: SessionUser, screen: AiScreen, prom
     if (name === 'cash') { addValue('Cash inflow', sum(rows, 'total_debit'), 'period_activity'); addValue('Cash outflow', sum(rows, 'total_credit'), 'period_activity') }
     if (name === 'profitLoss') {
       const revenue = rows.filter((row) => row.section === 'REVENUE')
+      const costOfGoodsSold = rows.filter((row) => row.section === 'COST_OF_GOODS_SOLD')
       const expenses = rows.filter((row) => row.section === 'EXPENSE')
       const revenueTotal = sum(revenue, 'amount')
-      const expenseTotal = sum(expenses, 'amount')
-      context.profitLoss = { revenue: revenueTotal.toString(), expenses: expenseTotal.toString(), netProfit: (revenueTotal - expenseTotal).toString() }
-      addValue('Profit or loss', revenueTotal - expenseTotal, 'period_activity')
+      const cogsTotal = sum(costOfGoodsSold, 'amount')
+      const operatingExpenseTotal = sum(expenses, 'amount')
+      const totalExpense = cogsTotal + operatingExpenseTotal
+      context.profitLoss = {
+        revenue: revenueTotal.toString(),
+        costOfGoodsSold: cogsTotal.toString(),
+        expenses: operatingExpenseTotal.toString(),
+        netProfit: (revenueTotal - totalExpense).toString(),
+      }
+      addValue('Profit or loss', revenueTotal - totalExpense, 'period_activity')
     }
     if (name === 'balanceSheet') {
       const assets = sum(rows.filter((row) => row.section === 'ASSET'), 'balance')
