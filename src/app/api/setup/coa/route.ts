@@ -7,6 +7,7 @@ import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth/authOptions'
 import { loadSessionUser } from '@/lib/auth/permissions'
 import { getChartOfAccounts } from '@/lib/accounting/data-access'
+import { getAccountingAvailability, unavailableAccountingPayload } from '@/lib/accounting/availability'
 
 export async function GET() {
   const session = await getServerSession(authOptions)
@@ -16,9 +17,17 @@ export async function GET() {
     return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
   }
 
+  const capability = await getAccountingAvailability(su.businessId)
+  if (capability.path === 'operational-fallback') {
+    return NextResponse.json(unavailableAccountingPayload(
+      { categories: [] },
+      capability.reason,
+    ))
+  }
   const cats = await getChartOfAccounts(su.businessId)
 
   return NextResponse.json({
+    availability: { accounting: true },
     categories: cats.map((c) => ({
       id: c.id,
       code: c.code,

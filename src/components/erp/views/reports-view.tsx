@@ -163,7 +163,7 @@ function ReportContent({ type, fromDate, toDate, user }: { type: ReportType; fro
     queryKey: ['report', type, fromDate, toDate],
     queryFn: () => fetch(`/api/reports?type=${type}&fromDate=${fromDate}&toDate=${toDate}`).then(r => r.json()),
     enabled: !!type,
-    retry: 1, retryDelay: 500,
+    retry: false,
     staleTime: 60_000,
     gcTime: 5 * 60_000,
   })
@@ -171,6 +171,9 @@ function ReportContent({ type, fromDate, toDate, user }: { type: ReportType; fro
   if (q.isLoading) return <div className="card-3d p-8 text-center text-sm text-muted-foreground animate-pulse">Loading report…</div>
   if (q.isError || !q.data) return <div className="card-3d p-8 text-center"><p className="text-sm text-destructive mb-3">Unable to load report.</p><Button variant="outline" size="sm" onClick={() => q.refetch()}>Retry</Button></div>
   if (q.data.error === 'FORBIDDEN') return <div className="card-3d p-8 text-center"><p className="text-sm text-amber-600">You do not have permission to view this report.</p></div>
+  if (q.data.availability?.accounting === false) {
+    return <div className="card-3d p-8 text-center"><p className="text-sm text-amber-700">Not available until accounting migration</p></div>
+  }
 
   const rows = q.data?.rows ?? []
   const kpis = q.data?.kpis

@@ -9,11 +9,12 @@ export type DashboardDataPath = 'uuid-ledger' | 'operational-fallback'
 
 export type LedgerCapability = {
   path: DashboardDataPath
-  reason: 'available' | 'missing-table' | 'missing-rpc'
+  reason: 'available' | 'missing-table' | 'missing-rpc' | 'missing-column'
 }
 
 const MISSING_TABLE_CODES = new Set(['42P01', 'PGRST205'])
 const MISSING_RPC_CODES = new Set(['42883', 'PGRST202'])
+const MISSING_COLUMN_CODES = new Set(['42703', 'PGRST204'])
 const AUTH_SCOPE_CODES = new Set(['42501', 'PGRST301', 'PGRST302'])
 const CACHE_TTL_MS = 5 * 60_000
 
@@ -41,6 +42,11 @@ export function classifyPostgrestCompatibilityError(
     || /could not find the function .*schema cache/.test(text)
   ) return 'missing-rpc'
   if (
+    MISSING_COLUMN_CODES.has(code)
+    || /column .* does not exist/.test(text)
+    || /could not find the .* column .*schema cache/.test(text)
+  ) return 'missing-column'
+  if (
     AUTH_SCOPE_CODES.has(code)
     || /permission denied|not authorized|authorization denied|business scope|row-level security/.test(text)
   ) return 'auth-scope'
@@ -49,7 +55,7 @@ export function classifyPostgrestCompatibilityError(
 
 export function isSchemaUnavailableError(error: PostgrestLikeError | null | undefined): boolean {
   const kind = classifyPostgrestCompatibilityError(error)
-  return kind === 'missing-table' || kind === 'missing-rpc'
+  return kind === 'missing-table' || kind === 'missing-rpc' || kind === 'missing-column'
 }
 
 export function isAuthOrScopeError(error: PostgrestLikeError | null | undefined): boolean {
@@ -89,7 +95,7 @@ async function probeLedgerCapability(
   })
   if (rpcProbe.error) {
     const kind = classifyPostgrestCompatibilityError(rpcProbe.error)
-    if (kind === 'missing-table' || kind === 'missing-rpc') {
+    if (kind === 'missing-table' || kind === 'missing-rpc' || kind === 'missing-column') {
       return { path: 'operational-fallback', reason: kind }
     }
     throw rpcProbe.error

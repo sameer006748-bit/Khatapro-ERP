@@ -70,7 +70,7 @@ export function OtherSaleView({ user }: { user: MeUser }) {
   })
   const salesmenQ = useQuery<{ rows: Salesman[] }>({
     queryKey: ['salesmen'],
-    queryFn: () => fetch('/api/sales/salesmen').then(r => r.json()),
+    queryFn: () => fetch('/api/salesmen').then(r => r.json()),
     staleTime: 60_000,
   })
   const customersQ = useQuery<{ rows: Customer[] }>({

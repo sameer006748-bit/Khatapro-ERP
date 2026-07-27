@@ -43,9 +43,10 @@ export function BusinessAccountsView({ user }: { user: MeUser }) {
   const canManage = user.permissions.includes('can_manage_setup')
   const [open, setOpen] = useState(false)
 
-  const q = useQuery<{ rows: BusinessAccountRow[] }>({
+  const q = useQuery<{ rows: BusinessAccountRow[]; availability?: { accounting: boolean; message?: string } }>({
     queryKey: ['business-accounts'],
     queryFn: () => fetch('/api/setup/business-accounts').then((r) => r.json()),
+    retry: false,
   })
 
   const createMut = useMutation({
@@ -72,6 +73,11 @@ export function BusinessAccountsView({ user }: { user: MeUser }) {
 
   return (
     <div className="space-y-6">
+      {q.data?.availability?.accounting === false && (
+        <div className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          Not available until accounting migration
+        </div>
+      )}
       <div className="flex items-end justify-between gap-4 flex-wrap">
         <div>
           <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight text-foreground">

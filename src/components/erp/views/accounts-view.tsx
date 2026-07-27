@@ -26,14 +26,14 @@ export function AccountsView({ user }: { user: MeUser }) {
   const [entryModal, setEntryModal] = useState<null | 'receive' | 'pay' | 'expense' | 'transfer' | 'petty-topup' | 'petty-expense' | 'adjustment'>(null)
   const [advancedOpen, setAdvancedOpen] = useState(false)
 
-  const coaQ = useQuery({ queryKey: ['coa'], queryFn: () => fetch('/api/setup/coa').then(r => r.json()), staleTime: 300_000 })
+  const coaQ = useQuery({ queryKey: ['coa'], queryFn: () => fetch('/api/setup/coa').then(r => r.json()), staleTime: 300_000, retry: false })
   const accounts: Account[] = useMemo(() => (coaQ.data?.categories ?? []).flatMap((c: any) => c.accounts.filter((a: any) => a.isActive).map((a: any) => ({ id: a.id, code: a.code, name: a.name, isBusinessAccount: a.isBusinessAccount, isPartyAccount: a.isPartyAccount, partyType: a.partyType, categoryCode: c.code, categoryType: c.type }))), [coaQ.data])
   const businessAccounts = accounts.filter(a => a.categoryType === 'Asset' && a.isBusinessAccount)
   const expenseAccounts = accounts.filter(a => a.categoryType === 'Expense')
 
   // Trial balance for balances (mutations invalidate ['trial-balance'], so a
   // short staleTime only skips refetches on plain navigation revisits)
-  const tbQ = useQuery({ queryKey: ['trial-balance'], queryFn: () => fetch('/api/trial-balance').then(r => r.json()), staleTime: 30_000 })
+  const tbQ = useQuery({ queryKey: ['trial-balance'], queryFn: () => fetch('/api/trial-balance').then(r => r.json()), staleTime: 30_000, retry: false })
   const tbRows: any[] = tbQ.data?.rows ?? []
   const getBalance = (code: string): bigint => {
     const row = tbRows.find((r: any) => r.accountCode === code)
@@ -41,7 +41,7 @@ export function AccountsView({ user }: { user: MeUser }) {
   }
 
   // Day book for recent activity (invalidated by every posting mutation)
-  const dayBookQ = useQuery({ queryKey: ['day-book'], queryFn: () => fetch('/api/day-book').then(r => r.json()), staleTime: 30_000 })
+  const dayBookQ = useQuery({ queryKey: ['day-book'], queryFn: () => fetch('/api/day-book').then(r => r.json()), staleTime: 30_000, retry: false })
   const recentVouchers: any[] = (dayBookQ.data?.rows ?? []).slice(0, 15)
 
   // Today's summary (Asia/Karachi date)
@@ -80,6 +80,13 @@ export function AccountsView({ user }: { user: MeUser }) {
 
   return (
     <div className="space-y-5">
+      {(coaQ.data?.availability?.accounting === false
+        || tbQ.data?.availability?.accounting === false
+        || dayBookQ.data?.availability?.accounting === false) && (
+        <div className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          Not available until accounting migration
+        </div>
+      )}
       {/* Header */}
       <div className="flex items-end justify-between gap-3 flex-wrap">
         <div>

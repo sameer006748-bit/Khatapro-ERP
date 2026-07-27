@@ -32,9 +32,11 @@ export function TrialBalanceView() {
     grandDebit: string
     grandCredit: string
     isBalanced: boolean
+    availability?: { accounting: boolean; message?: string }
   }>({
     queryKey: ['trial-balance'],
     queryFn: () => fetch('/api/trial-balance').then((r) => r.json()),
+    retry: false,
   })
 
   const nonZeroRows = (q.data?.rows ?? []).filter(
@@ -43,6 +45,11 @@ export function TrialBalanceView() {
 
   return (
     <div className="space-y-6">
+      {q.data?.availability?.accounting === false && (
+        <div className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          Not available until accounting migration
+        </div>
+      )}
       <div>
         <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight text-foreground">
           Trial Balance

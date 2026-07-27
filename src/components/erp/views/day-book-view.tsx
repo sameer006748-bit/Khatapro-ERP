@@ -46,11 +46,12 @@ export function DayBookView({ user, onSelectVoucher }: { user: MeUser; onSelectV
   if (toDate) params.set('toDate', toDate)
   if (voucherType !== 'all') params.set('voucherType', voucherType)
 
-  const q = useQuery<{ rows: DayBookRow[] }>({
+  const q = useQuery<{ rows: DayBookRow[]; availability?: { accounting: boolean; message?: string } }>({
     queryKey: ['day-book', fromDate, toDate, voucherType],
     queryFn: () => fetch(`/api/day-book?${params.toString()}`).then(r => r.json()),
     staleTime: 30_000,
     gcTime: 5 * 60_000,
+    retry: false,
   })
 
   const rows = q.data?.rows ?? []
@@ -74,6 +75,11 @@ export function DayBookView({ user, onSelectVoucher }: { user: MeUser; onSelectV
 
   return (
     <div className="space-y-4">
+      {q.data?.availability?.accounting === false && (
+        <div className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          Not available until accounting migration
+        </div>
+      )}
       <div>
         <h1 className="text-xl font-semibold tracking-tight text-foreground">Day Book</h1>
         <p className="text-xs text-muted-foreground mt-0.5">All posted vouchers — expand any row to see its lines</p>

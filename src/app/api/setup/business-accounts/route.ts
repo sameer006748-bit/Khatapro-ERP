@@ -13,6 +13,7 @@ import { z } from 'zod'
 import { db } from '@/lib/db'
 import { authOptions } from '@/lib/auth/authOptions'
 import { loadSessionUser, requirePermission, writeAudit } from '@/lib/auth/permissions'
+import { getAccountingAvailability, unavailableAccountingPayload } from '@/lib/accounting/availability'
 
 const BUSINESS_ACCOUNT_TYPES = [
   'Cash', 'Petty Cash', 'Bank', 'Easypaisa', 'JazzCash', 'Wallet', 'Custom / Other',
@@ -32,6 +33,11 @@ export async function GET() {
   const su = await loadSessionUser((session.user as any).id)
   if (!su) {
     return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
+  }
+
+  const capability = await getAccountingAvailability(su.businessId)
+  if (capability.path === 'operational-fallback') {
+    return NextResponse.json(unavailableAccountingPayload({ rows: [] }, capability.reason))
   }
 
   const rows = await db.businessAccount.findMany({
@@ -69,6 +75,13 @@ export async function POST(req: Request) {
   if (!session?.user) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
   const loaded = await loadSessionUser((session.user as any).id)
   const su = await requirePermission(loaded, 'can_manage_setup')
+  const capability = await getAccountingAvailability(su.businessId)
+  if (capability.path === 'operational-fallback') {
+    return NextResponse.json(unavailableAccountingPayload(
+      { error: 'ACCOUNTING_MIGRATION_REQUIRED' },
+      capability.reason,
+    ), { status: 409 })
+  }
 
   const body = await req.json().catch(() => null)
   const parsed = CreateSchema.safeParse(body)

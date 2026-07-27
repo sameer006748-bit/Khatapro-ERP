@@ -7,6 +7,7 @@ import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth/authOptions'
 import { loadSessionUser, requirePermission } from '@/lib/auth/permissions'
 import { trialBalanceSmart } from '@/lib/accounting/voucher-supabase'
+import { getAccountingAvailability, unavailableAccountingPayload } from '@/lib/accounting/availability'
 
 export async function GET() {
   const session = await getServerSession(authOptions)
@@ -14,6 +15,15 @@ export async function GET() {
   const loaded = await loadSessionUser((session.user as any).id)
   if (!loaded) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
   const su = await requirePermission(loaded, 'can_view_trial_balance')
+  const capability = await getAccountingAvailability(su.businessId)
+  if (capability.path === 'operational-fallback') {
+    return NextResponse.json(unavailableAccountingPayload({
+      rows: [],
+      grandDebit: null,
+      grandCredit: null,
+      isBalanced: null,
+    }, capability.reason))
+  }
 
   const rows = await trialBalanceSmart(su.businessId)
 
@@ -25,6 +35,7 @@ export async function GET() {
   }
 
   return NextResponse.json({
+    availability: { accounting: true },
     rows: rows.map((r) => ({
       accountId: r.account.id,
       accountCode: r.account.code,

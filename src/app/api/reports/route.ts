@@ -5,6 +5,8 @@ import { loadSessionUser, hasPermission } from '@/lib/auth/permissions'
 import { reportProfitLoss, reportBalanceSheet, reportSalesSummary, reportInventoryValuation, reportCashFlow, reportExpenseSummary, reportCustomerOutstanding, reportVendorOutstanding, reportSalesDetail, reportPurchaseDetail, reportStockMovements, reportDeliverySummary, reportCodSettlements, reportProductProfitability, reportTrialBalance, reportExceptions } from '@/lib/reports/data-access'
 import { resolveRequestId, safeApiError, withObservability } from '@/lib/observability'
 import { bizDateString } from '@/lib/dates'
+import { isSchemaUnavailableError } from '@/lib/dashboard/compatibility'
+import { unavailableAccountingPayload } from '@/lib/accounting/availability'
 
 export const GET = withObservability('/api/reports', async (req: Request) => {
   const requestId = resolveRequestId(req)
@@ -102,6 +104,12 @@ export const GET = withObservability('/api/reports', async (req: Request) => {
       default: return NextResponse.json({ error: 'UNKNOWN_REPORT_TYPE' }, { status: 400 })
     }
   } catch (error) {
+    if (isSchemaUnavailableError(error instanceof Error ? error : { message: String(error) })) {
+      return NextResponse.json(unavailableAccountingPayload(
+        { rows: [] },
+        'schema-unavailable',
+      ))
+    }
     return safeApiError({
       route: '/api/reports',
       requestId,
