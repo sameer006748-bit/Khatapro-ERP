@@ -14,6 +14,11 @@ import { getAdminSupabase } from '@/lib/supabase/admin'
 import { probeTable } from '@/lib/supabase/phase-probe'
 import { resolveSupabaseUuid } from '@/lib/accounting/voucher-supabase'
 import { planOpeningStock, SafeProductError } from '@/lib/products/opening-stock'
+import {
+  missingProductOptionalColumn,
+  productColumnCandidates,
+  type ProductOptionalColumns,
+} from '@/lib/products/schema-compatibility'
 
 /**
  * Fail-closed Supabase phase probe.
@@ -23,6 +28,8 @@ import { planOpeningStock, SafeProductError } from '@/lib/products/opening-stock
  * only permitted when Supabase env vars are genuinely absent.
  */
 const _p3cache = { lastChecked: 0, lastResult: false }
+const PRODUCT_OPTIONAL_COLUMNS_TTL_MS = 30_000
+let productOptionalColumnsCache: { value: ProductOptionalColumns; expiresAt: number } | null = null
 
 async function isPhase3Live(): Promise<boolean> {
   return probeTable(_p3cache, 'products')
@@ -147,21 +154,37 @@ export async function listProducts(
 ): Promise<ProductRow[]> {
   if (await isPhase3Live()) {
     const admin = getAdminSupabase()
-    // Try with low_stock_threshold column; if it fails (migration not applied
-    // yet), retry without it and use default 5.
-    const selectWithThreshold = 'id, name, category_id, unit, sale_price, purchase_price, current_stock, is_temporary, is_active, marked_for_merge, low_stock_threshold, commission_rate, created_at, product_categories(name)'
-    const selectWithoutThreshold = 'id, name, category_id, unit, sale_price, purchase_price, current_stock, is_temporary, is_active, marked_for_merge, created_at, product_categories(name)'
-    let query = admin.from('products').select(selectWithThreshold as any).eq('business_id', businessId).order('name')
-    if (opts?.temporaryOnly) { query = query.eq('is_temporary', true) }
-    let result = await query
-    // If error is about missing column, retry without it
-    if (result.error && result.error.message.includes('low_stock_threshold')) {
-      query = admin.from('products').select(selectWithoutThreshold as any).eq('business_id', businessId).order('name')
-      if (opts?.temporaryOnly) { query = query.eq('is_temporary', true) }
-      result = await query
+    const cached = productOptionalColumnsCache && productOptionalColumnsCache.expiresAt > Date.now()
+      ? productOptionalColumnsCache.value
+      : null
+    let result: { data: unknown; error: { code?: string | null; message?: string | null; details?: string | null } | null } | null = null
+    let selected: ProductOptionalColumns | null = null
+    for (const optional of productColumnCandidates(cached)) {
+      const fields = [
+        'id, name, category_id, unit, sale_price, purchase_price, current_stock, is_temporary, is_active, marked_for_merge',
+        optional.lowStockThreshold ? 'low_stock_threshold' : '',
+        optional.commissionRate ? 'commission_rate' : '',
+        'created_at, product_categories(name)',
+      ].filter(Boolean).join(', ')
+      let query: any = admin.from('products').select(fields).eq('business_id', businessId).order('name')
+      if (opts?.temporaryOnly) query = query.eq('is_temporary', true)
+      const attempt = await query as NonNullable<typeof result>
+      result = attempt
+      if (!attempt.error) {
+        selected = optional
+        break
+      }
+      // Only absent optional fields get a compatibility fallback. Other
+      // database and permission failures retain their native error path.
+      if (!missingProductOptionalColumn(attempt.error)) throw attempt.error
     }
-    if (result.error) throw new Error(`Supabase: ${result.error.message}`)
-    let rows = (result.data ?? []) as any[]
+    if (!result || result.error || !selected) throw result?.error ?? new Error('Product schema capability unavailable')
+    const successfulResult = result
+    productOptionalColumnsCache = {
+      value: selected,
+      expiresAt: Date.now() + (selected.lowStockThreshold && selected.commissionRate ? 5 * 60_000 : PRODUCT_OPTIONAL_COLUMNS_TTL_MS),
+    }
+    let rows = (successfulResult.data ?? []) as any[]
     if (opts?.search) {
       const q = opts.search.toLowerCase()
       rows = rows.filter((r) => r.name?.toLowerCase().includes(q))
@@ -179,7 +202,11 @@ export async function listProducts(
       isActive: r.is_active,
       markedForMerge: r.marked_for_merge,
       lowStockThreshold: r.low_stock_threshold ?? 5,
-      commissionRatePaisas: r.commission_rate === null || r.commission_rate === undefined ? null : String(r.commission_rate),
+      // null means this optional accounting feature is unavailable; it is not
+      // a fabricated zero financial value.
+      commissionRatePaisas: selected.commissionRate && r.commission_rate !== null && r.commission_rate !== undefined
+        ? String(r.commission_rate)
+        : null,
       createdAt: r.created_at,
     }))
   }
@@ -189,7 +216,24 @@ export async function listProducts(
       ...(opts?.temporaryOnly ? { isTemporary: true } : {}),
       ...(opts?.search ? { name: { contains: opts.search } } : {}),
     },
-    include: { category: true },
+    // The generated Prisma client can be ahead of an existing local database.
+    // Select only the operational columns this read actually needs so optional
+    // schema additions never make the whole product list unavailable.
+    select: {
+      id: true,
+      name: true,
+      categoryId: true,
+      unit: true,
+      salePrice: true,
+      purchasePrice: true,
+      currentStock: true,
+      isTemporary: true,
+      isActive: true,
+      markedForMerge: true,
+      lowStockThreshold: true,
+      createdAt: true,
+      category: { select: { name: true } },
+    },
     orderBy: { name: 'asc' },
   })
   return products.map((p) => ({
@@ -205,7 +249,7 @@ export async function listProducts(
     isActive: p.isActive,
     markedForMerge: p.markedForMerge,
     lowStockThreshold: p.lowStockThreshold,
-    commissionRatePaisas: p.commissionRate === null ? null : p.commissionRate.toString(),
+    commissionRatePaisas: null,
     createdAt: p.createdAt.toISOString(),
   }))
 }
@@ -245,6 +289,7 @@ async function fetchProductRow(admin: ReturnType<typeof getAdminSupabase>, produ
     isActive: p.is_active,
     markedForMerge: p.marked_for_merge,
     lowStockThreshold: p.low_stock_threshold ?? 5,
+    commissionRatePaisas: null,
     createdAt: p.created_at,
   }
 }
@@ -412,6 +457,7 @@ export async function createProduct(
           isActive: product.isActive,
           markedForMerge: product.markedForMerge,
           lowStockThreshold: product.lowStockThreshold,
+          commissionRatePaisas: product.commissionRate === null ? null : product.commissionRate.toString(),
           createdAt: product.createdAt.toISOString(),
         },
         stockMovementId: sm?.id,
@@ -430,6 +476,7 @@ export async function createProduct(
       currentStock: 0,
       isTemporary: input.isTemporary ?? false,
       lowStockThreshold: input.lowStockThreshold ?? 5,
+      commissionRate: input.commissionRatePaisas ?? null,
       idempotencyKey,
     },
   })
@@ -467,6 +514,7 @@ export async function createProduct(
       isActive: p.isActive,
       markedForMerge: p.markedForMerge,
       lowStockThreshold: p.lowStockThreshold,
+      commissionRatePaisas: p.commissionRate === null ? null : p.commissionRate.toString(),
       createdAt: p.createdAt.toISOString(),
     },
     stockMovementId,
@@ -638,7 +686,17 @@ export async function listStockMovements(
   }
   const movements = await db.stockMovement.findMany({
     where: { businessId, ...(productId ? { productId } : {}) },
-    include: { product: true },
+    select: {
+      id: true,
+      productId: true,
+      movementType: true,
+      quantity: true,
+      balanceAfter: true,
+      reason: true,
+      movementDate: true,
+      createdAt: true,
+      product: { select: { name: true } },
+    },
     orderBy: { createdAt: 'desc' },
     take: 200,
   })

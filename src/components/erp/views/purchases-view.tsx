@@ -14,6 +14,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { useRouter } from 'next/navigation'
 import type { MeUser } from '@/components/erp/erp-app'
 import { AiFieldHelp } from '@/components/erp/ai-actions'
+import { apiFetchJson } from '@/lib/api-client'
 
 type Purchase = { id: string; purchaseNo: string; vendorId: string; vendorName: string | null; vendorPhone?: string | null; vendorAddress?: string | null; vendorCity?: string | null; supplierBillNo: string | null; purchaseDate: string; total: string; paidAmount: string; outstandingAmount: string; status: string }
 type Vendor = { id: string; name: string; phone: string | null }
@@ -41,7 +42,7 @@ export function PurchasesView({ user }: { user: MeUser }) {
   const [replacementPurchase, setReplacementPurchase] = useState<PurchaseDetail | null>(null)
   const [applyAdvancePurchase, setApplyAdvancePurchase] = useState<PurchaseDetail | null>(null)
 
-  const purchasesQ = useQuery<{ rows: Purchase[] }>({ queryKey: ['purchases'], queryFn: () => fetch('/api/purchases').then(r => r.json()), staleTime: 30_000 })
+  const purchasesQ = useQuery<{ rows: Purchase[] }>({ queryKey: ['purchases'], queryFn: ({ signal }) => apiFetchJson('/api/purchases', { signal }), staleTime: 30_000 })
 
   const purchases = purchasesQ.data?.rows ?? []
   const filtered = useMemo(() => {
@@ -143,9 +144,9 @@ function AddPurchaseModal({ user, onClose, onViewPurchase }: { user: MeUser; onC
   const [search, setSearch] = useState('')
   const [result, setResult] = useState<{ ok: boolean; purchaseNo?: string; purchaseId?: string; error?: string } | null>(null)
 
-  const vendorsQ = useQuery<{ rows: Vendor[] }>({ queryKey: ['vendors'], queryFn: () => fetch('/api/vendors').then(r => r.json()), staleTime: 30_000 })
-  const productsQ = useQuery<{ rows: Product[] }>({ queryKey: ['products'], queryFn: () => fetch('/api/products').then(r => r.json()), staleTime: 30_000 })
-  const coaQ = useQuery({ queryKey: ['coa'], queryFn: () => fetch('/api/setup/coa').then(r => r.json()), staleTime: 300_000 })
+  const vendorsQ = useQuery<{ rows: Vendor[] }>({ queryKey: ['vendors'], queryFn: ({ signal }) => apiFetchJson('/api/vendors', { signal }), staleTime: 30_000 })
+  const productsQ = useQuery<{ rows: Product[] }>({ queryKey: ['products'], queryFn: ({ signal }) => apiFetchJson('/api/products', { signal }), staleTime: 30_000 })
+  const coaQ = useQuery<any>({ queryKey: ['coa'], queryFn: ({ signal }) => apiFetchJson<any>('/api/setup/coa', { signal }), staleTime: 300_000 })
   const accounts: Account[] = useMemo(() => coaQ.data?.categories?.flatMap((c: any) => c.accounts).filter((a: any) => a.isBusinessAccount && a.isActive).map((a: any) => ({ id: a.id, code: a.code, name: a.name })) ?? [], [coaQ.data])
 
   const subtotal = useMemo(() => cart.reduce((s, it) => { const c = parseMoney(it.unitCost); const q = BigInt(it.qty || '0'); return s + (c ?? 0n) * q }, 0n), [cart])
@@ -214,8 +215,8 @@ function AddPurchaseModal({ user, onClose, onViewPurchase }: { user: MeUser; onC
 
 function PurchaseDetailModal({ purchaseId, user, canPay, canReturn, onClose, onPay, onReturn, onReplacement, onApplyAdvance }: { purchaseId: string; user: MeUser; canPay: boolean; canReturn: boolean; onClose: () => void; onPay: (p: Purchase) => void; onReturn: (p: PurchaseDetail) => void; onReplacement: (p: PurchaseDetail) => void; onApplyAdvance: (p: PurchaseDetail) => void }) {
   const qc = useQueryClient()
-  const q = useQuery<{ purchase: PurchaseDetail }>({ queryKey: ['purchase', purchaseId], queryFn: () => fetch(`/api/purchases/${purchaseId}`).then(r => r.json()), enabled: !!purchaseId, retry: 1, retryDelay: 500 })
-  const replacementsQ = useQuery<{ rows: Array<{ id: string; replacementNo: string; date: string; outgoingValue: string; incomingValue: string; valueDiff: string; notes: string | null }> }>({ queryKey: ['purchase-replacements', purchaseId], queryFn: () => fetch(`/api/purchases/${purchaseId}/replacements`).then(r => r.json()), enabled: !!purchaseId, retry: 1, retryDelay: 500 })
+  const q = useQuery<{ purchase: PurchaseDetail }>({ queryKey: ['purchase', purchaseId], queryFn: ({ signal }) => apiFetchJson(`/api/purchases/${purchaseId}`, { signal }), enabled: !!purchaseId })
+  const replacementsQ = useQuery<{ rows: Array<{ id: string; replacementNo: string; date: string; outgoingValue: string; incomingValue: string; valueDiff: string; notes: string | null }> }>({ queryKey: ['purchase-replacements', purchaseId], queryFn: ({ signal }) => apiFetchJson(`/api/purchases/${purchaseId}/replacements`, { signal }), enabled: !!purchaseId })
 
   if (q.isLoading) return <Shell title="Loading…" onClose={onClose}><div className="text-center py-4 text-sm text-muted-foreground animate-pulse">Loading purchase…</div></Shell>
   if (q.isError || !q.data?.purchase) return <Shell title="Error" onClose={onClose}><div className="text-center py-4"><p className="text-sm text-destructive mb-3">Unable to load purchase.</p><Button variant="outline" size="sm" onClick={() => q.refetch()}>Retry</Button></div></Shell>
@@ -411,7 +412,7 @@ function PayVendorModal({ purchase, user, onClose }: { purchase: Purchase; user:
   const [accountId, setAccountId] = useState('')
   const [amount, setAmount] = useState(formatWholeRupees(BigInt(purchase.outstandingAmount), false))
   const [notes, setNotes] = useState('')
-  const coaQ = useQuery({ queryKey: ['coa'], queryFn: () => fetch('/api/setup/coa').then(r => r.json()), staleTime: 300_000 })
+  const coaQ = useQuery<any>({ queryKey: ['coa'], queryFn: ({ signal }) => apiFetchJson<any>('/api/setup/coa', { signal }), staleTime: 300_000 })
   const accounts: Account[] = useMemo(() => coaQ.data?.categories?.flatMap((c: any) => c.accounts).filter((a: any) => a.isBusinessAccount && a.isActive).map((a: any) => ({ id: a.id, code: a.code, name: a.name })) ?? [], [coaQ.data])
   const mut = useMutation({
     mutationFn: async () => {
@@ -502,7 +503,7 @@ function ReplacementModal({ purchase, user, onClose }: { purchase: PurchaseDetai
   }>>([])
   const [notes, setNotes] = useState('')
 
-  const productsQ = useQuery<{ rows: Product[] }>({ queryKey: ['products'], queryFn: () => fetch('/api/products').then(r => r.json()), staleTime: 30_000 })
+  const productsQ = useQuery<{ rows: Product[] }>({ queryKey: ['products'], queryFn: ({ signal }) => apiFetchJson('/api/products', { signal }), staleTime: 30_000 })
 
   function addRow(originalItemId: string) {
     const it = purchase.items?.find(i => i.id === originalItemId)

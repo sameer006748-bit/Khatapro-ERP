@@ -4,6 +4,7 @@ import { SessionProvider } from 'next-auth/react'
 import { ThemeProvider } from 'next-themes'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useState } from 'react'
+import { shouldRetryApiRequest } from '@/lib/api-client'
 
 export function Providers({ children }: { children: React.ReactNode }) {
   const [client] = useState(
@@ -16,7 +17,11 @@ export function Providers({ children }: { children: React.ReactNode }) {
             // every query on each mount (previously 0 → refetch storm on every
             // navigation). Individual hooks can still override.
             staleTime: 30_000,
-            retry: 1,
+            // Retry once on transient/network errors, but never retry on auth
+            // failures (401/403) — retrying those just delays the inevitable
+            // redirect to sign-in and wastes a request.
+            retry: shouldRetryApiRequest,
+            retryDelay: 500,
           },
         },
       }),

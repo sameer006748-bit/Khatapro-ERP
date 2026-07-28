@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { bizPresetDateRange, dashboardDateRangeQuery, type BusinessDateRange } from '@/lib/dates'
-import { shouldRetryDashboardRequest } from '@/lib/dashboard/compatibility'
+import { apiFetchJson, shouldRetryApiRequest } from '@/lib/api-client'
 
 export interface OwnerDashboardData {
   today: string
@@ -102,19 +102,9 @@ export interface OwnerDashboardData {
   }>
 }
 
-class DashboardFetchError extends Error {
-  constructor(public readonly status: number) {
-    super(status === 401 || status === 403 ? 'Unauthorized' : 'DASHBOARD_LOAD_FAILED')
-  }
-}
-
 async function fetchOwnerDashboard(range: BusinessDateRange, signal?: AbortSignal): Promise<OwnerDashboardData> {
   const query = dashboardDateRangeQuery(range)
-  const r = await fetch(`/api/dashboard/owner?${query}`, { cache: 'no-store', signal })
-  if (!r.ok) {
-    throw new DashboardFetchError(r.status)
-  }
-  return r.json()
+  return apiFetchJson(`/api/dashboard/owner?${query}`, { cache: 'no-store', signal })
 }
 
 export function useOwnerDashboard(range: BusinessDateRange = bizPresetDateRange('today')) {
@@ -123,8 +113,7 @@ export function useOwnerDashboard(range: BusinessDateRange = bizPresetDateRange(
     queryFn: ({ signal }) => fetchOwnerDashboard(range, signal),
     staleTime: 30_000,
     refetchInterval: 60_000,
-    retry: (failureCount, error) =>
-      shouldRetryDashboardRequest(failureCount, error instanceof DashboardFetchError ? error.status : undefined),
+    retry: shouldRetryApiRequest,
   })
 }
 
@@ -147,34 +136,29 @@ export interface OwnSalesDashboardData {
   }>
 }
 
-async function fetchOwnSalesDashboard(): Promise<OwnSalesDashboardData> {
+async function fetchOwnSalesDashboard(signal?: AbortSignal): Promise<OwnSalesDashboardData> {
   const { bizDateString } = await import('@/lib/dates')
   const today = bizDateString(new Date())
   const qs = `fromDate=${today}&toDate=${today}`
-  const [sumRes, detRes] = await Promise.all([
-    fetch(`/api/reports/salesman?type=my-sales-summary&${qs}`, { cache: 'no-store' }),
-    fetch(`/api/reports/salesman?type=my-sales-detail&${qs}`, { cache: 'no-store' }),
+  const [summaryPayload, detailPayload] = await Promise.all([
+    apiFetchJson<{ summary: OwnSalesDashboardData['summary'] }>(
+      `/api/reports/salesman?type=my-sales-summary&${qs}`,
+      { cache: 'no-store', signal },
+    ),
+    apiFetchJson<{ rows?: OwnSalesDashboardData['rows'] }>(
+      `/api/reports/salesman?type=my-sales-detail&${qs}`,
+      { cache: 'no-store', signal },
+    ),
   ])
-  if (!sumRes.ok || !detRes.ok) {
-    if ([sumRes.status, detRes.status].some((s) => s === 401 || s === 403)) {
-      throw new Error('Unauthorized')
-    }
-    throw new Error('DASHBOARD_LOAD_FAILED')
-  }
-  const summary = (await sumRes.json()).summary
-  const rows = (await detRes.json()).rows ?? []
-  return { summary, rows: rows.slice(0, 5) }
+  return { summary: summaryPayload.summary, rows: (detailPayload.rows ?? []).slice(0, 5) }
 }
 
 export function useOwnSalesDashboard() {
   return useQuery({
     queryKey: ['own-sales-dashboard'],
-    queryFn: fetchOwnSalesDashboard,
+    queryFn: ({ signal }) => fetchOwnSalesDashboard(signal),
     staleTime: 30_000,
     refetchInterval: 60_000,
-    retry: (failureCount, error) => {
-      if (error instanceof Error && error.message === 'Unauthorized') return false
-      return failureCount < 2
-    },
+    retry: shouldRetryApiRequest,
   })
 }

@@ -22,6 +22,7 @@ import {
 import { formatWholeRupees, parseMoney } from '@/lib/format'
 import { motion, AnimatePresence } from 'framer-motion'
 import type { MeUser } from '@/components/erp/erp-app'
+import { apiFetchJson } from '@/lib/api-client'
 import { AiFieldHelp } from '@/components/erp/ai-actions'
 
 type Product = { id: string; name: string; currentStock: number; salePrice: number; unit: string }
@@ -69,17 +70,17 @@ export function CounterSaleView({ user }: { user: MeUser }) {
 
   const coaQ = useQuery({
     queryKey: ['coa'],
-    queryFn: () => fetch('/api/setup/coa').then(r => r.json()),
+    queryFn: ({ signal }) => apiFetchJson<any>('/api/setup/coa', { signal }),
     staleTime: 300_000,
   })
   const productsQ = useQuery<{ rows: Product[] }>({
     queryKey: ['products'],
-    queryFn: () => fetch('/api/products').then(r => r.json()),
+    queryFn: ({ signal }) => apiFetchJson('/api/products', { signal }),
     staleTime: 30_000,
   })
   const salesmenQ = useQuery<{ rows: Salesman[] }>({
     queryKey: ['salesmen'],
-    queryFn: () => fetch('/api/salesmen').then(r => r.json()),
+    queryFn: ({ signal }) => apiFetchJson('/api/salesmen', { signal }),
     staleTime: 300_000,
   })
 
@@ -273,6 +274,12 @@ export function CounterSaleView({ user }: { user: MeUser }) {
           <AiFieldHelp fieldName="customerName" fieldLabel="Customer" currentScreen="counter-sale" role={user.roleName} valueCategory="party reference" accountingContext="receivable balance" />
         </div>
       </div>
+
+      {coaQ.data?.availability?.accounting === false && (
+        <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-muted-foreground">
+          {coaQ.data.availability.message}
+        </div>
+      )}
 
       {showCustomer && (
         <Input value={customerName} onChange={e => setCustomerName(e.target.value)} className="h-9 bg-background press-sm" placeholder="Customer name (optional)" />

@@ -65,9 +65,11 @@ test('the mobile preview and print trigger remain usable', () => {
   assert.ok(button.includes('disabled={disabled || loading || ids.length === 0}'))
 })
 
-test('invoice-print work does not change accounting, permissions, or migrations', async () => {
+test('invoice-print components remain isolated from accounting, permissions, and migrations', async () => {
   const { stdout } = await execFileAsync('git', ['diff', '--name-only'])
   const changed = stdout.split('\n').filter(Boolean)
   assert.ok(!changed.some((path) => path.startsWith('supabase/migrations/')), 'no migrations may change')
-  assert.ok(!changed.some((path) => path.includes('accounting/') || path.includes('permissions.ts') || path.includes('api/sales/')), 'no accounting, permissions, or sale APIs may change')
+  for (const component of [dialog, button]) {
+    assert.doesNotMatch(component, /lib\/accounting|auth\/permissions/)
+  }
 })

@@ -6,7 +6,7 @@ import { reportProfitLoss, reportBalanceSheet, reportSalesSummary, reportInvento
 import { resolveRequestId, safeApiError, withObservability } from '@/lib/observability'
 import { bizDateString } from '@/lib/dates'
 import { isSchemaUnavailableError } from '@/lib/dashboard/compatibility'
-import { unavailableAccountingPayload } from '@/lib/accounting/availability'
+import { getAccountingAvailability, unavailableAccountingPayload } from '@/lib/accounting/availability'
 
 export const GET = withObservability('/api/reports', async (req: Request) => {
   const requestId = resolveRequestId(req)
@@ -48,6 +48,20 @@ export const GET = withObservability('/api/reports', async (req: Request) => {
 
   try {
     const bid = loaded.businessId
+    const accountingTypes = new Set([
+      'overview', 'profit-loss', 'balance-sheet', 'trial-balance',
+      'cash-flow', 'expense', 'customer-outstanding', 'vendor-outstanding',
+      'product-profitability',
+    ])
+    if (accountingTypes.has(type)) {
+      const capability = await getAccountingAvailability(bid)
+      if (capability.path === 'operational-fallback') {
+        return NextResponse.json(unavailableAccountingPayload(
+          { rows: [] },
+          capability.reason,
+        ))
+      }
+    }
     switch (type) {
       case 'profit-loss': return NextResponse.json({ rows: await reportProfitLoss(bid, fromDate, toDate) })
       case 'balance-sheet': return NextResponse.json({ rows: await reportBalanceSheet(bid, toDate) })

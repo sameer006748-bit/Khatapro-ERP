@@ -50,6 +50,11 @@ export const authOptions: NextAuthOptions = {
             name: su.displayName,
           } as any
         } else {
+          if (process.env.VERCEL) {
+            // A serverless deployment with missing Supabase configuration must
+            // fail closed; it may never authenticate against bundled SQLite.
+            return null
+          }
           // Local development fallback: Prisma + SQLite
           const { db } = await import('@/lib/db')
           const u = await db.user.findUnique({

@@ -56,7 +56,7 @@ test('production-absent accounts tables are not assumed by the classification la
 
 test('Home date-range query behavior remains shared and untouched', () => {
   assert.match(homeHook, /queryKey: \['owner-dashboard', range\.from, range\.to\]/)
-  assert.match(homeHook, /URLSearchParams\(\{ from: range\.from, to: range\.to \}\)/)
+  assert.match(homeHook, /dashboardDateRangeQuery\(range\)/)
 })
 
 test('management controls include create, assign, rename and archive', () => {

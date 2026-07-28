@@ -1,5 +1,7 @@
 import { getAdminSupabase } from '@/lib/supabase/admin'
 import { getAccountByCode } from '@/lib/accounting/data-access'
+import { db } from '@/lib/db'
+import { isSupabaseConfigured } from '@/lib/supabase/config'
 import {
   detectLedgerCapability,
   isolateDashboardMetric,
@@ -49,12 +51,221 @@ function isPostedInvoice(row: any): boolean {
   return !['cancelled', 'returned'].includes(String(row.status ?? '').toLowerCase())
 }
 
+async function buildLocalOperationalPayload(input: {
+  businessId: string
+  range: Range
+  today: string
+  requestId: string
+}) {
+  const startedAt = Date.now()
+  const from = new Date(`${input.range.from}T00:00:00+05:00`)
+  const to = new Date(`${input.range.to}T23:59:59.999+05:00`)
+  const [invoices, purchases, products, auditLogs] = await Promise.all([
+    db.invoice.findMany({
+      where: { businessId: input.businessId, invoiceDate: { gte: from, lte: to } },
+      select: {
+        id: true,
+        invoiceNo: true,
+        invoiceType: true,
+        invoiceDate: true,
+        customerName: true,
+        total: true,
+        paidAmount: true,
+        isCancelled: true,
+        isReturned: true,
+      },
+      orderBy: [{ invoiceDate: 'desc' }, { createdAt: 'desc' }],
+    }),
+    db.purchase.findMany({
+      where: { businessId: input.businessId, purchaseDate: { gte: from, lte: to } },
+      select: {
+        id: true,
+        purchaseNo: true,
+        purchaseDate: true,
+        total: true,
+        paidAmount: true,
+        status: true,
+        vendor: { select: { name: true } },
+      },
+      orderBy: [{ purchaseDate: 'desc' }, { createdAt: 'desc' }],
+    }),
+    db.product.findMany({
+      where: { businessId: input.businessId, isActive: true },
+      select: {
+        id: true,
+        name: true,
+        currentStock: true,
+        lowStockThreshold: true,
+      },
+    }),
+    db.auditLog.findMany({
+      where: { businessId: input.businessId },
+      select: {
+        id: true,
+        timestamp: true,
+        action: true,
+        entity: true,
+        entityId: true,
+      },
+      orderBy: { timestamp: 'desc' },
+      take: 20,
+    }),
+  ])
+  const postedInvoices = invoices.filter(invoice => !invoice.isCancelled && !invoice.isReturned)
+  const postedPurchases = purchases.filter(purchase => purchase.status.toLowerCase() !== 'cancelled')
+  const todaySales = Number(postedInvoices.reduce((total, invoice) => total + invoice.total, 0n))
+  const todayPurchases = Number(postedPurchases.reduce((total, purchase) => total + purchase.total, 0n))
+  const saleTypes = {
+    counter: { count: 0, amount: 0n },
+    online: { count: 0, amount: 0n },
+    ofc: { count: 0, amount: 0n },
+    other: { count: 0, amount: 0n },
+  }
+  for (const invoice of postedInvoices) {
+    const type = invoice.invoiceType.toUpperCase()
+    const bucket = type === 'COUNTER' ? saleTypes.counter
+      : type === 'ONLINE' ? saleTypes.online
+        : type === 'OFC' ? saleTypes.ofc : saleTypes.other
+    bucket.count += 1
+    bucket.amount += invoice.total
+  }
+  const negative = products.filter(product => product.currentStock < 0)
+  const low = products.filter(product => product.currentStock > 0
+    && product.currentStock <= product.lowStockThreshold)
+  const unavailableNames = [
+    'todayCollections', 'todayExpenses', 'todayNetCashFlow',
+    'periodSalesReturns', 'periodPurchaseReturns', 'periodCogs', 'approxProfit',
+    'cashBalance', 'bankBalance', 'cashMovement', 'bankMovement',
+    'totalReceivables', 'totalPayables', 'totalSales',
+    'receivablesMovement', 'payablesMovement',
+  ]
+  const availability = {
+    todaySales: true,
+    todayCollections: false,
+    todayExpenses: false,
+    todayNetCashFlow: false,
+    todayPurchases: true,
+    periodSalesReturns: false,
+    periodPurchaseReturns: false,
+    periodCogs: false,
+    approxProfit: false,
+    cashBalance: false,
+    bankBalance: false,
+    cashMovement: false,
+    bankMovement: false,
+    totalReceivables: false,
+    totalPayables: false,
+    totalSales: false,
+    receivablesMovement: false,
+    payablesMovement: false,
+    lowStockCount: true,
+    negativeStockCount: true,
+  }
+  console.info('[dashboard] owner summary', {
+    requestId: input.requestId,
+    path: 'operational-fallback',
+    capabilityReason: 'supabase-not-configured',
+    durationMs: Date.now() - startedAt,
+    unavailableMetrics: unavailableNames,
+  })
+  const saleType = (item: { count: number; amount: bigint }) => ({
+    count: item.count,
+    amount: item.amount.toString(),
+  })
+  return {
+    today: input.today,
+    range: input.range,
+    dataSource: 'operational-fallback',
+    kpis: {
+      todaySales,
+      todaySalesPaisas: String(todaySales),
+      todayCollections: null,
+      todayExpenses: null,
+      todayExpensesPaisas: null,
+      todayNetCashFlow: null,
+      todayPurchases,
+      cashBalance: null,
+      bankBalance: null,
+      cashInflow: null,
+      cashOutflow: null,
+      bankInflow: null,
+      bankOutflow: null,
+      totalInflow: null,
+      totalOutflow: null,
+      periodSalesReturns: null,
+      periodPurchaseReturns: null,
+      periodCogs: null,
+      approxProfit: null,
+      periodReceivablesMovement: null,
+      periodPayablesMovement: null,
+      totalReceivables: null,
+      totalPayables: null,
+      totalSales: null,
+      pendingOutstanding: null,
+      lowStockCount: low.length,
+      negativeStockCount: negative.length,
+    },
+    availability,
+    salesByType: {
+      counter: saleType(saleTypes.counter),
+      online: saleType(saleTypes.online),
+      ofc: saleType(saleTypes.ofc),
+      other: saleType(saleTypes.other),
+    },
+    recentInvoices: postedInvoices.slice(0, 5).map(invoice => ({
+      id: invoice.id,
+      invoiceNo: invoice.invoiceNo,
+      invoiceType: invoice.invoiceType,
+      invoiceDate: invoice.invoiceDate.toISOString(),
+      customerName: invoice.customerName,
+      salesmanName: null,
+      total: invoice.total.toString(),
+      paidAmount: invoice.paidAmount.toString(),
+    })),
+    recentPurchases: postedPurchases.slice(0, 5).map(purchase => ({
+      id: purchase.id,
+      purchaseNo: purchase.purchaseNo,
+      vendorName: purchase.vendor.name,
+      purchaseDate: purchase.purchaseDate.toISOString(),
+      total: purchase.total.toString(),
+      paidAmount: purchase.paidAmount.toString(),
+      status: purchase.status,
+    })),
+    lowStockProducts: low.slice(0, 6).map(product => ({
+      id: product.id,
+      name: product.name,
+      currentStock: product.currentStock,
+      lowStockThreshold: product.lowStockThreshold,
+    })),
+    negativeStockProducts: negative.slice(0, 6).map(product => ({
+      id: product.id,
+      name: product.name,
+      currentStock: product.currentStock,
+    })),
+    auditLogs: auditLogs.map(row => ({
+      id: row.id,
+      timestamp: row.timestamp.toISOString(),
+      action: row.action,
+      entity: row.entity,
+      entityId: row.entityId,
+    })),
+  }
+}
+
 export async function buildOwnerDashboardPayload(input: {
   businessId: string
   range: Range
   today: string
   requestId: string
 }) {
+  if (!isSupabaseConfigured()) {
+    if (process.env.VERCEL) {
+      throw Object.assign(new Error('Serverless runtime database is not configured.'), {
+        name: 'ServerlessDatabaseProhibitedError',
+      })
+    }
+    return buildLocalOperationalPayload(input)
+  }
   const startedAt = Date.now()
   const admin: any = getAdminSupabase()
   const unavailable = new Set<string>()

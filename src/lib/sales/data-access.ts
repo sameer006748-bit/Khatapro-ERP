@@ -26,6 +26,14 @@ async function isPhase4Live(): Promise<boolean> {
 }
 
 export type SalesmanRow = { id: string; name: string; phone: string | null; commissionPct: number; isActive: boolean }
+export type CustomerRow = {
+  id: string
+  name: string
+  phone: string | null
+  address: string | null
+  city: string | null
+  isActive: boolean
+}
 export type InvoiceRow = { id: string; invoiceNo: string; invoiceType: string; invoiceDate: string; customerName: string | null; customerPhone?: string | null; customerAddress?: string | null; customerCity?: string | null; salesmanName: string | null; subtotal: string; discount?: string; total: string; paidAmount: string; status?: string; isCancelled: boolean; isReturned: boolean; memo?: string | null; items?: InvoiceItemRow[]; payments?: PaymentAllocationRow[] }
 export type InvoiceItemRow = { id: string; productId: string | null; productName: string; qty: number; returnedQty?: number; unitPrice: string; lineTotal: string; isTemporary: boolean }
 export type PaymentAllocationRow = { id: string; accountId?: string; accountCode?: string; accountName: string; amount: string; isChange?: boolean; direction?: string | null; paymentMode?: string | null }
@@ -245,7 +253,28 @@ export async function listInvoices(businessId: string, opts?: { type?: string; s
     if (error) throw new Error(`Supabase: ${error.message}`)
     return (data ?? []).map((r: any) => ({ id: r.id, invoiceNo: r.invoice_no, invoiceType: r.invoice_type, invoiceDate: r.invoice_date, customerName: r.customer_name, salesmanName: r.salesmen?.name ?? null, subtotal: String(r.subtotal), total: String(r.total), paidAmount: String(r.paid), status: r.status, isCancelled: r.status === 'Cancelled', isReturned: r.status === 'Returned' }))
   }
-  const invoices = await db.invoice.findMany({ where: { businessId, ...(opts?.type ? { invoiceType: opts.type } : {}), ...(opts?.salesmanId ? { salesmanId: opts.salesmanId } : {}) }, include: { salesman: true }, orderBy: [{ invoiceDate: 'desc' }, { createdAt: 'desc' }], take: 100 })
+  const invoices = await db.invoice.findMany({
+    where: {
+      businessId,
+      ...(opts?.type ? { invoiceType: opts.type } : {}),
+      ...(opts?.salesmanId ? { salesmanId: opts.salesmanId } : {}),
+    },
+    select: {
+      id: true,
+      invoiceNo: true,
+      invoiceType: true,
+      invoiceDate: true,
+      customerName: true,
+      subtotal: true,
+      total: true,
+      paidAmount: true,
+      isCancelled: true,
+      isReturned: true,
+      salesman: { select: { name: true } },
+    },
+    orderBy: [{ invoiceDate: 'desc' }, { createdAt: 'desc' }],
+    take: 100,
+  })
   return invoices.map((i) => ({ id: i.id, invoiceNo: i.invoiceNo, invoiceType: i.invoiceType, invoiceDate: i.invoiceDate.toISOString(), customerName: i.customerName, salesmanName: i.salesman?.name ?? null, subtotal: i.subtotal.toString(), total: i.total.toString(), paidAmount: i.paidAmount.toString(), isCancelled: i.isCancelled, isReturned: i.isReturned }))
 }
 
@@ -310,4 +339,45 @@ export async function receiveInvoicePayment(input: { businessId: string; invoice
   if (error) throw new Error(`Supabase receive_invoice_payment_ledger: ${error.message}`)
   const result = data as any
   return { paymentId: result.payment_id, amount: String(result.amount), idempotent: Boolean(result.idempotent) }
+}
+
+export async function listCustomers(businessId: string): Promise<CustomerRow[]> {
+  if (await isPhase4Live()) {
+    const admin = getAdminSupabase()
+    const { data, error } = await admin
+      .from('customers')
+      .select('id, name, phone, address, city, is_active')
+      .eq('business_id', businessId)
+      .eq('is_active', true)
+      .order('name')
+    if (error) throw error
+    return (data ?? []).map((customer: any) => ({
+      id: customer.id,
+      name: customer.name,
+      phone: customer.phone,
+      address: customer.address,
+      city: customer.city,
+      isActive: customer.is_active,
+    }))
+  }
+  const customers = await db.customer.findMany({
+    where: { businessId, isActive: true },
+    select: {
+      id: true,
+      name: true,
+      phone: true,
+      address: true,
+      city: true,
+      isActive: true,
+    },
+    orderBy: { name: 'asc' },
+  })
+  return customers.map((customer) => ({
+    id: customer.id,
+    name: customer.name,
+    phone: customer.phone,
+    address: customer.address,
+    city: customer.city,
+    isActive: customer.isActive,
+  }))
 }

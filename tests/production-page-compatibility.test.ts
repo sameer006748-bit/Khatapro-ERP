@@ -16,7 +16,11 @@ const expensesRoute = await readFile('src/app/api/expenses/route.ts', 'utf8')
 const reportsRoute = await readFile('src/app/api/reports/route.ts', 'utf8')
 const accountsView = await readFile('src/components/erp/views/accounts-view.tsx', 'utf8')
 const reportsView = await readFile('src/components/erp/views/reports-view.tsx', 'utf8')
+const counterSaleView = await readFile('src/components/erp/views/counter-sale-view.tsx', 'utf8')
+const onlineSaleView = await readFile('src/components/erp/views/online-sale-view.tsx', 'utf8')
+const ofcSaleView = await readFile('src/components/erp/views/ofc-sale-view.tsx', 'utf8')
 const otherSaleView = await readFile('src/components/erp/views/other-sale-view.tsx', 'utf8')
+const expenseView = await readFile('src/components/erp/views/expense-batch-view.tsx', 'utf8')
 
 function client(tableError: any = null, rpcError: any = null) {
   return {
@@ -80,9 +84,12 @@ test('unsupported UI sections show the required message and do not retry', () =>
   assert.match(reportsView, /Not available until accounting migration/)
   assert.match(accountsView, /retry: false/)
   assert.match(reportsView, /retry: false/)
+  for (const view of [counterSaleView, onlineSaleView, ofcSaleView, otherSaleView, expenseView]) {
+    assert.match(view, /availability\.message/)
+  }
 })
 
 test('Other Sale uses the live salesmen route', () => {
-  assert.match(otherSaleView, /fetch\('\/api\/salesmen'\)/)
-  assert.doesNotMatch(otherSaleView, /fetch\('\/api\/sales\/salesmen'\)/)
+  assert.match(otherSaleView, /apiFetchJson\('\/api\/salesmen'/)
+  assert.doesNotMatch(otherSaleView, /apiFetchJson\('\/api\/sales\/salesmen'/)
 })

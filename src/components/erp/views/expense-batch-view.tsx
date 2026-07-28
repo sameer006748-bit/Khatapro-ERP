@@ -11,6 +11,7 @@ import { toast } from 'sonner'
 import { Plus, Trash2, ArrowRight, AlertCircle, CheckCircle2 } from 'lucide-react'
 import { formatMoney, parseMoney } from '@/lib/format'
 import type { MeUser } from '@/components/erp/erp-app'
+import { apiFetchJson } from '@/lib/api-client'
 
 type Account = { id: string; code: string; name: string; categoryType: string }
 
@@ -26,7 +27,7 @@ export function ExpenseBatchView({ user }: { user: MeUser }) {
   const [result, setResult] = useState<{ ok: boolean; expenseNo?: string; error?: string } | null>(null)
   const [idempotencyKey, setIdempotencyKey] = useState(() => crypto.randomUUID())
 
-  const coaQ = useQuery({ queryKey: ['coa'], queryFn: () => fetch('/api/setup/coa').then(r => r.json()) })
+  const coaQ = useQuery<any>({ queryKey: ['coa'], queryFn: ({ signal }) => apiFetchJson<any>('/api/setup/coa', { signal }) })
   const accounts: Account[] = useMemo(() => (coaQ.data?.categories ?? []).flatMap((c: any) => c.accounts.filter((a: any) => a.isActive).map((a: any) => ({ id: a.id, code: a.code, name: a.name, categoryType: c.type }))), [coaQ.data])
   const businessAccounts = accounts.filter(a => a.categoryType === 'Asset')
   const expenseAccounts = accounts.filter(a => a.categoryType === 'Expense')
@@ -48,6 +49,18 @@ export function ExpenseBatchView({ user }: { user: MeUser }) {
   })
 
   const canPost = paymentAccountId && lines.length >= 1 && lines.every(l => l.expenseAccountId && (parseMoney(l.amount) ?? 0n) > 0n) && total > 0n
+
+  if (coaQ.data?.availability?.accounting === false) {
+    return (
+      <div className="space-y-4">
+        <div><h1 className="text-xl font-semibold tracking-tight text-foreground">Expense Batch</h1></div>
+        <div className="card-3d p-6 text-center text-sm text-muted-foreground">
+          <AlertCircle className="size-8 mx-auto mb-3 text-amber-500" />
+          {coaQ.data.availability.message}
+        </div>
+      </div>
+    )
+  }
 
   if (result?.ok) return (
     <div className="card-3d p-6 max-w-md mx-auto text-center">

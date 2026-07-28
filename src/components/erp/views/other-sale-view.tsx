@@ -21,6 +21,7 @@ import {
 import { formatWholeRupees, parseMoney } from '@/lib/format'
 import { motion, AnimatePresence } from 'framer-motion'
 import type { MeUser } from '@/components/erp/erp-app'
+import { apiFetchJson } from '@/lib/api-client'
 
 type Product = { id: string; name: string; currentStock: number; salePrice: number; unit: string }
 type Salesman = { id: string; name: string; commissionPct: number }
@@ -58,30 +59,32 @@ export function OtherSaleView({ user }: { user: MeUser }) {
   const [isPosting, setIsPosting] = useState(false)
   const postingRef = useRef(false)
 
-  const coaQ = useQuery({
+  const coaQ = useQuery<any>({
     queryKey: ['coa'],
-    queryFn: () => fetch('/api/setup/coa').then(r => r.json()),
+    queryFn: ({ signal }) => apiFetchJson<any>('/api/setup/coa', { signal }),
     staleTime: 300_000,
   })
   const productsQ = useQuery<{ rows: Product[] }>({
     queryKey: ['products'],
-    queryFn: () => fetch('/api/products').then(r => r.json()),
+    queryFn: ({ signal }) => apiFetchJson('/api/products', { signal }),
     staleTime: 30_000,
   })
   const salesmenQ = useQuery<{ rows: Salesman[] }>({
     queryKey: ['salesmen'],
-    queryFn: () => fetch('/api/salesmen').then(r => r.json()),
+    queryFn: ({ signal }) => apiFetchJson('/api/salesmen', { signal }),
     staleTime: 60_000,
   })
   const customersQ = useQuery<{ rows: Customer[] }>({
     queryKey: ['customers'],
-    queryFn: () => fetch('/api/customers').then(r => r.json()),
+    queryFn: ({ signal }) => apiFetchJson('/api/customers', { signal }),
     staleTime: 60_000,
   })
 
   const accounts = useMemo(() => {
-    const rows: Account[] = Array.isArray(coaQ.data) ? (coaQ.data as any) : (coaQ.data as any)?.rows ?? []
-    return rows.filter((a) => a.isBusinessAccount)
+    const categories = (coaQ.data as any)?.categories ?? []
+    return categories
+      .flatMap((category: any) => category.accounts ?? [])
+      .filter((account: Account & { isActive?: boolean }) => account.isBusinessAccount && account.isActive !== false)
   }, [coaQ.data])
 
   const filteredProducts = useMemo(() => {
@@ -235,6 +238,12 @@ export function OtherSaleView({ user }: { user: MeUser }) {
           <PrintInvoiceButton invoiceId={result.invoiceId} variant="outline" size="sm" />
         )}
       </div>
+
+      {coaQ.data?.availability?.accounting === false && (
+        <div className="mb-4 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-muted-foreground">
+          {coaQ.data.availability.message}
+        </div>
+      )}
 
       {/* Result display */}
       {result && (

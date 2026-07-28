@@ -86,7 +86,11 @@ test('only proven stale UUID overloads are removed after text-safe replacements'
   const dropAt = migration.indexOf("drop function if exists public.process_return(uuid, jsonb, text)")
   assert.ok(createAt >= 0 && dropAt > createAt)
   for (const signature of ['process_return(uuid, jsonb, text)', 'mark_invoice_paid(uuid)', 'receive_payment(uuid, uuid, numeric, text)']) assert.ok(migration.includes(signature))
-  assert.match(migration, /proname = 'record_sale'[\s\S]{0,240}~\* '\(\^\|, \)uuid'/)
+  const overloadGuard = migration.slice(
+    migration.indexOf("p.proname = 'record_sale'"),
+    migration.indexOf('loop', migration.indexOf("p.proname = 'record_sale'")),
+  )
+  assert.ok(overloadGuard.includes("~* '(^|, )uuid(,|$)'"))
 })
 
 test('the UI provides a linked-return preview and invoice-specific collection action', () => {

@@ -126,12 +126,12 @@ export function OwnerDashboard({ user }: { user: any }) {
   const karachiTime = new Date().toLocaleString('en-GB', { timeZone: 'Asia/Karachi', hour: '2-digit', minute: '2-digit' })
 
   // ── Metrics ──
-  const todaySales = data.kpis.todaySales ?? 0
+  const todaySales = data.kpis.todaySales
   const todayCollections = data.kpis.todayCollections
-  const todayExpenses = data.kpis.todayExpenses ?? 0
+  const todayExpenses = data.kpis.todayExpenses
   const todayPurchases = data.kpis.todayPurchases
-  const totalReceivables = data.kpis.totalReceivables ?? 0
-  const totalPayables = data.kpis.totalPayables ?? 0
+  const totalReceivables = data.kpis.totalReceivables
+  const totalPayables = data.kpis.totalPayables
   const cashBalance = data.kpis.cashBalance
   const bankBalance = data.kpis.bankBalance
   const cashInflow = data.kpis.cashInflow
@@ -140,16 +140,16 @@ export function OwnerDashboard({ user }: { user: any }) {
   const bankOutflow = data.kpis.bankOutflow
   const totalInflow = data.kpis.totalInflow
   const totalOutflow = data.kpis.totalOutflow
-  const periodSalesReturns = data.kpis.periodSalesReturns ?? 0
-  const periodPurchaseReturns = data.kpis.periodPurchaseReturns ?? 0
-  const pendingOutstanding = data.kpis.pendingOutstanding ?? 0
+  const periodSalesReturns = data.kpis.periodSalesReturns
+  const periodPurchaseReturns = data.kpis.periodPurchaseReturns
+  const pendingOutstanding = data.kpis.pendingOutstanding
   const receivablesMovement = data.kpis.periodReceivablesMovement
   const payablesMovement = data.kpis.periodPayablesMovement
-  const approxProfit = data.kpis.approxProfit ?? (todaySales - todayExpenses)
-  const lowStockCount = data.kpis.lowStockCount ?? 0
-  const negativeStockCount = data.kpis.negativeStockCount ?? 0
+  const approxProfit = data.kpis.approxProfit
+  const lowStockCount = data.kpis.lowStockCount
+  const negativeStockCount = data.kpis.negativeStockCount
   const activeRangeLabel = preset === 'today' ? 'Today' : preset === 'last3' ? 'Last 3 Days' : preset === 'last7' ? 'Last 7 Days' : preset === 'month' ? 'This Month' : `${range.from} to ${range.to}`
-  const hasActivity = todaySales > 0 || todayExpenses > 0 || (todayPurchases ?? 0) > 0 || (todayCollections ?? 0) > 0
+  const hasActivity = (todaySales ?? 0) > 0 || (todayExpenses ?? 0) > 0 || (todayPurchases ?? 0) > 0 || (todayCollections ?? 0) > 0
 
   const primaryCards: Array<{ label: string; value: string; sub: string; icon: React.ComponentType<{ className?: string }>; accent: string; show: boolean }> = [
     { label: 'Sales', value: data.kpis.todaySales != null ? formatWholeRupees(todaySales) : '—', sub: data.kpis.todaySales != null ? `${data.salesByType.counter.count} counter · ${data.salesByType.online.count} online · ${data.salesByType.ofc.count} OFC · ${data.salesByType.other.count} other` : 'Not available', icon: ShoppingCart, accent: 'bg-emerald-500/10 text-emerald-600', show: true },
@@ -171,7 +171,7 @@ export function OwnerDashboard({ user }: { user: any }) {
     { label: 'Pending / Outstanding', value: data.kpis.pendingOutstanding != null ? formatWholeRupees(pendingOutstanding) : '—', sub: data.kpis.pendingOutstanding != null ? 'Receivables + Payables · current balance' : 'Not available', icon: Scale, accent: 'bg-fuchsia-500/10 text-fuchsia-600', show: true },
     { label: 'Receivables Movement', value: receivablesMovement != null ? formatWholeRupees(receivablesMovement) : '—', sub: `Period movement · ${activeRangeLabel}`, icon: TrendingUp, accent: 'bg-violet-500/10 text-violet-600', show: receivablesMovement != null },
     { label: 'Payables Movement', value: payablesMovement != null ? formatWholeRupees(payablesMovement) : '—', sub: `Period movement · ${activeRangeLabel}`, icon: TrendingDown, accent: 'bg-amber-500/10 text-amber-600', show: payablesMovement != null },
-    { label: 'Approximate Profit', value: data.kpis.approxProfit != null ? formatWholeRupees(approxProfit) : '—', sub: data.kpis.approxProfit != null ? `Sales − Returns − COGS − Expenses · ${activeRangeLabel}` : 'Not available without reliable COGS', icon: TrendingUp, accent: approxProfit >= 0 ? 'bg-blue-500/10 text-blue-600' : 'bg-orange-500/10 text-orange-600', show: true },
+    { label: 'Approximate Profit', value: approxProfit != null ? formatWholeRupees(approxProfit) : '—', sub: approxProfit != null ? `Sales − Returns − COGS − Expenses · ${activeRangeLabel}` : 'Not available without reliable COGS', icon: TrendingUp, accent: (approxProfit ?? 0) >= 0 ? 'bg-blue-500/10 text-blue-600' : 'bg-orange-500/10 text-orange-600', show: true },
   ]
 
   const visibleCards = primaryCards.filter(c => c.show)
@@ -251,7 +251,7 @@ export function OwnerDashboard({ user }: { user: any }) {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div className="rounded-xl border border-border bg-muted/20 p-4">
               <div className="flex items-center gap-2 mb-1"><ShoppingCart className="size-4 text-emerald-600" /><span className="text-sm font-medium text-foreground">Sales</span></div>
-              <div className="text-lg font-bold text-foreground" data-num>{formatWholeRupees(todaySales)}</div>
+              <div className="text-lg font-bold text-foreground" data-num>{todaySales != null ? formatWholeRupees(todaySales) : '—'}</div>
               <div className="text-[11px] text-muted-foreground mt-0.5">{data.salesByType.counter.count} counter \u00B7 {data.salesByType.online.count} online \u00B7 {data.salesByType.ofc.count} OFC</div>
             </div>
             <div className="rounded-xl border border-border bg-muted/20 p-4">
@@ -280,13 +280,13 @@ export function OwnerDashboard({ user }: { user: any }) {
             </div>
             <div className="rounded-xl border border-border bg-muted/20 p-4">
               <div className="flex items-center gap-2 mb-1"><ArrowUpFromLine className="size-4 text-red-600" /><span className="text-sm font-medium text-foreground">Expenses</span></div>
-              <div className="text-lg font-bold text-foreground" data-num>{formatWholeRupees(todayExpenses)}</div>
-              <div className="text-[11px] text-muted-foreground mt-0.5">Expenses · {activeRangeLabel}</div>
+              <div className="text-lg font-bold text-foreground" data-num>{todayExpenses != null ? formatWholeRupees(todayExpenses) : '—'}</div>
+              <div className="text-[11px] text-muted-foreground mt-0.5">{todayExpenses != null ? `Expenses · ${activeRangeLabel}` : 'Not available'}</div>
             </div>
             <div className="rounded-xl border border-border bg-muted/20 p-4">
               <div className="flex items-center gap-2 mb-1"><Wallet className="size-4 text-amber-600" /><span className="text-sm font-medium text-foreground">Current Payables</span></div>
-              <div className="text-lg font-bold text-foreground" data-num>{formatWholeRupees(totalPayables)}</div>
-              <div className="text-[11px] text-muted-foreground mt-0.5">Current balance</div>
+              <div className="text-lg font-bold text-foreground" data-num>{totalPayables != null ? formatWholeRupees(totalPayables) : '—'}</div>
+              <div className="text-[11px] text-muted-foreground mt-0.5">{totalPayables != null ? 'Current balance' : 'Not available'}</div>
             </div>
           </div>
         </GlassPanel>
@@ -303,9 +303,9 @@ export function OwnerDashboard({ user }: { user: any }) {
             <Chip icon={ShoppingCart} label="View Orders" onClick={() => router.push('/?page=sales-list')} />
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-            <PendingCard icon={Users} label="Current Receivables" value={formatWholeRupees(totalReceivables)} sub="Current balance" accent="text-violet-600" />
-            <PendingCard icon={Wallet} label="Current Payables" value={formatWholeRupees(totalPayables)} sub="Current balance" accent="text-amber-600" />
-            <PendingCard icon={AlertTriangle} label="Current Low / Negative Stock" value={data.kpis.lowStockCount != null && data.kpis.negativeStockCount != null ? `${lowStockCount + negativeStockCount} items` : '—'} sub={data.kpis.negativeStockCount != null ? `${negativeStockCount} negative` : 'Not available'} accent={(lowStockCount + negativeStockCount) > 0 ? 'text-red-600' : 'text-green-600'} />
+            <PendingCard icon={Users} label="Current Receivables" value={totalReceivables != null ? formatWholeRupees(totalReceivables) : '—'} sub={totalReceivables != null ? 'Current balance' : 'Not available'} accent="text-violet-600" />
+            <PendingCard icon={Wallet} label="Current Payables" value={totalPayables != null ? formatWholeRupees(totalPayables) : '—'} sub={totalPayables != null ? 'Current balance' : 'Not available'} accent="text-amber-600" />
+            <PendingCard icon={AlertTriangle} label="Current Low / Negative Stock" value={lowStockCount != null && negativeStockCount != null ? `${lowStockCount + negativeStockCount} items` : '—'} sub={negativeStockCount != null ? `${negativeStockCount} negative` : 'Not available'} accent={((lowStockCount ?? 0) + (negativeStockCount ?? 0)) > 0 ? 'text-red-600' : 'text-green-600'} />
             <PendingCard icon={ShoppingCart} label="Online Orders" value={`${data.salesByType.online.count} in period`} sub={`Online orders · ${activeRangeLabel}`} accent="text-sky-600" />
           </div>
         </GlassPanel>
@@ -369,7 +369,7 @@ export function OwnerDashboard({ user }: { user: any }) {
               </div>
 
               {/* Stock Alerts in Advanced */}
-              {(lowStockCount + negativeStockCount) > 0 && (
+              {((lowStockCount ?? 0) + (negativeStockCount ?? 0)) > 0 && (
                 <div>
                   <div className="flex items-center justify-between mb-2">
                     <span className="text-xs font-medium text-foreground">Stock Alerts</span>

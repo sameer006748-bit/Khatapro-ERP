@@ -39,6 +39,7 @@ export const loadSessionUser = cache(_loadSessionUser)
 
 async function _loadSessionUser(userId: string): Promise<SessionUser | null> {
   if (!isSupabaseConfigured()) {
+    if (process.env.VERCEL) return null
     // Local development fallback: Prisma + SQLite
     const u = await db.user.findUnique({
       where: { id: userId },
@@ -195,6 +196,7 @@ export async function requireOwner(s: SessionUser | null): Promise<SessionUser> 
  */
 export async function noOwnerExists(): Promise<boolean> {
   if (!isSupabaseConfigured()) {
+    if (process.env.VERCEL) return false
     const ownerRole = await db.role.findFirst({
       where: { name: 'Owner/Admin', isSystem: true },
     })
@@ -238,6 +240,11 @@ export async function writeAudit(args: {
   details?: Record<string, unknown> | null
 }) {
   if (!isSupabaseConfigured()) {
+    if (process.env.VERCEL) {
+      const error = new Error('Serverless local database fallback is prohibited.')
+      error.name = 'ServerlessDatabaseProhibitedError'
+      throw error
+    }
     await db.auditLog.create({
       data: {
         businessId: args.businessId,

@@ -22,6 +22,11 @@ export async function probeTable(
   table: string,
 ): Promise<boolean> {
   if (!isSupabaseConfigured()) {
+    if (process.env.VERCEL) {
+      const error = new Error('Serverless local database fallback is prohibited.')
+      error.name = 'ServerlessDatabaseProhibitedError'
+      throw error
+    }
     // Safe: no Supabase config → Prisma fallback is expected.
     return false
   }

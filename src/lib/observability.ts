@@ -5,6 +5,11 @@ import { NextResponse } from 'next/server'
  * Minimal server-only API observability: request timing, a request/trace ID,
  * and slow-request warnings. Emits structured JSON logs with only safe,
  * non-sensitive fields — never payloads, PII, SQL, amounts, or stack traces.
+ *
+ * Error diagnostics: classifies errors into safe technical fields (error class,
+ * database/PostgREST code, relation/RPC/column name) for server logs only.
+ * Never logs tokens, cookies, passwords, PII, full payloads, or sensitive amounts.
+ * Never returns internal database details to the client.
  */
 
 const REQUEST_ID_HEADER = 'x-request-id'
@@ -23,6 +28,112 @@ type ErrorCategory =
   | 'validation'
   | 'database'
   | 'internal'
+
+/** Safe, redacted diagnostic fields extracted from an unknown error. */
+export type ErrorDiagnostics = {
+  errorClass: string
+  code: string | null
+  relation: string | null
+  rpc: string | null
+  column: string | null
+  sourceFile: string | null
+  stackLocation: string | null
+}
+
+/** Maximum length for any single redacted string field in logs. */
+const MAX_FIELD_LEN = 200
+
+function truncate(value: string | null | undefined): string | null {
+  if (!value) return null
+  const s = String(value)
+  return s.length > MAX_FIELD_LEN ? s.slice(0, MAX_FIELD_LEN) + '…' : s
+}
+
+function technicalIdentifier(value: string | null | undefined): string | null {
+  const candidate = truncate(value)
+  return candidate && /^[A-Za-z_][A-Za-z0-9_.-]{0,199}$/.test(candidate) ? candidate : null
+}
+
+function identifierFromErrorText(
+  text: string,
+  kind: 'relation' | 'rpc' | 'column',
+): string | null {
+  const labels = kind === 'relation'
+    ? '(?:relation|table)'
+    : kind === 'rpc'
+      ? '(?:function|rpc)'
+      : 'column'
+  const match = new RegExp(`${labels}\\s+(?:public\\.)?["']?([A-Za-z_][A-Za-z0-9_.]*)`, 'i').exec(text)
+  return technicalIdentifier(match?.[1])
+}
+
+function stackDiagnosticFrom(error: unknown): Pick<ErrorDiagnostics, 'sourceFile' | 'stackLocation'> {
+  if (!(error instanceof Error) || !error.stack) {
+    return { sourceFile: null, stackLocation: null }
+  }
+  for (const line of error.stack.split('\n').slice(1)) {
+    const match = /([A-Za-z0-9_.-]+\.(?:ts|tsx|js|jsx|mjs|cjs):\d+:\d+)/.exec(line)
+    if (match) {
+      return {
+        sourceFile: technicalIdentifier(match[1].split(':')[0]),
+        stackLocation: truncate(match[1]),
+      }
+    }
+  }
+  return { sourceFile: null, stackLocation: null }
+}
+
+/**
+ * Extract safe technical diagnostics from an unknown error.
+ *
+ * Whitelisted fields only: error class name, PostgREST/Postgres code,
+ * relation/RPC/column name where explicitly supplied by the driver.
+ * Never extracts or logs: tokens, cookies, passwords, PII, full payloads,
+ * SQL statements, or sensitive accounting amounts.
+ */
+export function classifyError(error: unknown): ErrorDiagnostics {
+  if (!error) {
+    return {
+      errorClass: 'Unknown',
+      code: null,
+      relation: null,
+      rpc: null,
+      column: null,
+      sourceFile: null,
+      stackLocation: null,
+    }
+  }
+
+  const errorClass = error instanceof Error ? error.constructor.name : typeof error === 'object' ? 'Object' : 'Primitive'
+
+  // PostgREST / @supabase/supabase-js error shape: { code, message, details, hint }
+  if (error && typeof error === 'object') {
+    const e = error as Record<string, unknown>
+    const code = typeof e.code === 'string' ? technicalIdentifier(e.code) : null
+    const detailText = [e.details, e.hint, e.message]
+      .filter((value): value is string => typeof value === 'string')
+      .join(' ')
+    const stack = stackDiagnosticFrom(error)
+    return {
+      errorClass,
+      code,
+      relation: identifierFromErrorText(detailText, 'relation'),
+      rpc: identifierFromErrorText(detailText, 'rpc'),
+      column: identifierFromErrorText(detailText, 'column'),
+      ...stack,
+    }
+  }
+
+  return {
+    errorClass,
+    code: null,
+    relation: null,
+    rpc: null,
+    column: null,
+    sourceFile: null,
+    stackLocation: null,
+  }
+}
 
 function environment(): string {
   return process.env.NODE_ENV || 'development'
@@ -138,9 +249,10 @@ export function safeApiError(opts: {
   status?: number
   durationMs?: number
 }): NextResponse {
-  // Intentionally do not serialize the raw exception. Provider/database
-  // messages can contain SQL, payload fragments, identifiers, or values.
-  void opts.error
+  // Extract safe, redacted diagnostics for server logs only. The raw exception
+  // is never serialized into the client response — provider/database messages
+  // can contain SQL, payload fragments, identifiers, or values.
+  const diag = classifyError(opts.error)
 
   emit({
     requestId: opts.requestId,
@@ -152,6 +264,13 @@ export function safeApiError(opts: {
     environment: environment(),
     errorCategory: 'internal',
     errorCode: opts.errorCode,
+    errorClass: diag.errorClass,
+    ...(diag.code ? { dbCode: diag.code } : {}),
+    ...(diag.relation ? { relation: diag.relation } : {}),
+    ...(diag.rpc ? { rpc: diag.rpc } : {}),
+    ...(diag.column ? { column: diag.column } : {}),
+    ...(diag.sourceFile ? { sourceFile: diag.sourceFile } : {}),
+    ...(diag.stackLocation ? { stackLocation: diag.stackLocation } : {}),
   })
 
   return NextResponse.json(
@@ -198,9 +317,27 @@ export function withObservability(route: string, handler: RouteHandler): RouteHa
         /* immutable headers — return unchanged */
       }
       return res
-    } catch {
+    } catch (error) {
       const durationMs = now() - start
-      log(requestId, route, method, 500, durationMs, 'internal')
+      const diag = classifyError(error)
+      emit({
+        requestId,
+        route,
+        method,
+        status: 500,
+        durationMs: Math.round(durationMs),
+        severity: 'error',
+        environment: environment(),
+        errorCategory: 'internal',
+        errorCode: 'REQUEST_FAILED',
+        errorClass: diag.errorClass,
+        ...(diag.code ? { dbCode: diag.code } : {}),
+        ...(diag.relation ? { relation: diag.relation } : {}),
+        ...(diag.rpc ? { rpc: diag.rpc } : {}),
+        ...(diag.column ? { column: diag.column } : {}),
+        ...(diag.sourceFile ? { sourceFile: diag.sourceFile } : {}),
+        ...(diag.stackLocation ? { stackLocation: diag.stackLocation } : {}),
+      })
       return NextResponse.json(
         {
           error: 'REQUEST_FAILED',

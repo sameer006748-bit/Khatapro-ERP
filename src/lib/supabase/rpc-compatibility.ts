@@ -188,13 +188,16 @@ export function buildPhase9PostSalePayload(
   input: BuildPhase9PostSalePayloadInput,
 ): Phase9PostSalePayload {
   assertPhase9SaleFeatures(input)
-  // Phase-aware: on Phase 8 emit exactly the 13 Phase-8 arguments so the
-  // PostgREST function-signature lookup resolves. On Phase 9 add the two extra
-  // named arguments the Phase-9 signature accepts.
-  if (CURRENT_DATABASE_PHASE === 8) {
+  // Capability-aware: only include the Phase-9 named arguments the deployed
+  // RPC signature actually accepts. Sending arguments the function doesn't
+  // accept causes a PGRST202 signature-mismatch error. When neither Phase-9
+  // capability is available, emit exactly the 13 Phase-8 arguments.
+  const hasDiscount = CURRENT_DATABASE_CAPABILITIES.salesDiscounts
+  const hasIdempotency = CURRENT_DATABASE_CAPABILITIES.salesIdempotency
+  if (!hasDiscount && !hasIdempotency) {
     return buildPhase8PostSalePayload(input)
   }
-  return {
+  const payload: Phase9PostSalePayload = {
     p_business_id: input.p_business_id,
     p_invoice_type: input.p_invoice_type,
     p_invoice_date: input.p_invoice_date,
@@ -208,9 +211,14 @@ export function buildPhase9PostSalePayload(
     p_customer_city: input.p_customer_city,
     p_memo: input.p_memo,
     p_created_by: input.p_created_by,
-    p_discount_paisas: (input.discountPaisas ?? 0n).toString(),
-    p_idempotency_key: input.idempotencyKey || null,
   }
+  if (hasDiscount) {
+    payload.p_discount_paisas = (input.discountPaisas ?? 0n).toString()
+  }
+  if (hasIdempotency) {
+    payload.p_idempotency_key = input.idempotencyKey || null
+  }
+  return payload
 }
 
 export function buildPhase8PostReceiptVoucherPayload(

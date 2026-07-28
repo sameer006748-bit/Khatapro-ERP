@@ -50,28 +50,28 @@ const receiptInput = {
   p_created_by: null,
 }
 
-test('compatibility boundary is fixed to Phase 8 with Phase 9 features disabled', () => {
-  assert.equal(CURRENT_DATABASE_PHASE, 8)
+test('compatibility boundary reflects the deployed capability set', () => {
+  assert.equal(CURRENT_DATABASE_PHASE, 16)
   assert.deepEqual(CURRENT_DATABASE_CAPABILITIES, {
     salesDiscounts: false,
-    salesIdempotency: false,
+    salesIdempotency: true,
     receiptAllocations: false,
     receiptIdempotency: false,
   })
 })
 
-test('Phase 8 post_sale payload has exactly the 13 Phase-8 argument names', () => {
-  assert.equal(CURRENT_DATABASE_PHASE, 8)
+test('post_sale sends only arguments confirmed by deployed capabilities', () => {
+  assert.equal(CURRENT_DATABASE_PHASE, 16)
   const payload = buildPhase9PostSalePayload({ ...saleInput, discountPaisas: 0n })
-  assert.deepEqual(Object.keys(payload), [...PHASE_8_POST_SALE_ARGUMENT_NAMES])
+  assert.deepEqual(Object.keys(payload), [...PHASE_8_POST_SALE_ARGUMENT_NAMES, 'p_idempotency_key'])
   assert.equal('p_discount_paisas' in payload, false)
-  assert.equal('p_idempotency_key' in payload, false)
+  assert.equal('p_idempotency_key' in payload, true)
 })
 
-test('Phase 8 post_sale omits discount/idempotency without sending null or zero', () => {
+test('post_sale omits discount and sends the confirmed idempotency argument', () => {
   const payload = buildPhase9PostSalePayload({ ...saleInput, discountPaisas: 0n, idempotencyKey: null })
   assert.equal(Object.prototype.hasOwnProperty.call(payload, 'p_discount_paisas'), false)
-  assert.equal(Object.prototype.hasOwnProperty.call(payload, 'p_idempotency_key'), false)
+  assert.equal(Object.prototype.hasOwnProperty.call(payload, 'p_idempotency_key'), true)
 })
 
 test('post_sale accepts a zero/default discount', () => {
@@ -86,11 +86,9 @@ test('post_sale rejects a nonzero discount before payload construction', () => {
   )
 })
 
-test('post_sale rejects a Phase 9 retry key', () => {
-  assert.throws(
-    () => buildPhase9PostSalePayload({ ...saleInput, idempotencyKey: 'stale-key' }),
-    /Sale retry keys are unavailable/,
-  )
+test('post_sale accepts a retry key only because that capability is confirmed', () => {
+  const payload = buildPhase9PostSalePayload({ ...saleInput, idempotencyKey: 'stale-key' })
+  assert.equal(payload.p_idempotency_key, 'stale-key')
 })
 
 test('post_receipt_voucher payload has exactly the Phase 8 argument names', () => {

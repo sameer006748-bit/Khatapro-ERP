@@ -20,7 +20,7 @@ export async function getAccountingAvailability(
   businessId: string,
 ): Promise<AccountingAvailability> {
   if (!isSupabaseConfigured()) {
-    return process.env.VERCEL
+    return process.env.VERCEL || process.env.NODE_ENV === 'production'
       ? { path: 'operational-fallback', reason: 'missing-table' }
       : { path: 'legacy-local', reason: 'supabase-not-configured' }
   }
@@ -33,13 +33,17 @@ export async function getAccountingAvailability(
 
 export function unavailableAccountingPayload<T extends Record<string, unknown>>(
   payload: T,
-  reason: string,
+  diagnosticReason: string,
 ) {
   return {
     ...payload,
+    available: false as const,
+    reason: 'ACCOUNTING_MIGRATION_REQUIRED' as const,
     availability: {
       accounting: false,
-      reason,
+      available: false,
+      reason: 'ACCOUNTING_MIGRATION_REQUIRED',
+      diagnosticReason,
       message: ACCOUNTING_MIGRATION_MESSAGE,
     },
   }

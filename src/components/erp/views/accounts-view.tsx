@@ -12,6 +12,7 @@ import { formatMoney, parseMoney } from '@/lib/format'
 import { bizDate, bizDateString } from '@/lib/dates'
 import { motion, AnimatePresence } from 'framer-motion'
 import type { MeUser } from '@/components/erp/erp-app'
+import { apiFetchJson } from '@/lib/api-client'
 import { ACCOUNT_CATEGORY_DEFINITIONS, UNCATEGORIZED_CATEGORY, classifyMoneyActivity, matchesAccountSubcategory, summarizeAccountSubcategories, type MoneyActivity } from '@/lib/money/account-subcategories'
 
 type Account = { id: string; code: string; name: string; isBusinessAccount: boolean; isPartyAccount: boolean; partyType: string | null; categoryCode: string; categoryType: string }
@@ -26,14 +27,14 @@ export function AccountsView({ user }: { user: MeUser }) {
   const [entryModal, setEntryModal] = useState<null | 'receive' | 'pay' | 'expense' | 'transfer' | 'petty-topup' | 'petty-expense' | 'adjustment'>(null)
   const [advancedOpen, setAdvancedOpen] = useState(false)
 
-  const coaQ = useQuery({ queryKey: ['coa'], queryFn: () => fetch('/api/setup/coa').then(r => r.json()), staleTime: 300_000, retry: false })
+  const coaQ = useQuery<any>({ queryKey: ['coa'], queryFn: ({ signal }) => apiFetchJson<any>('/api/setup/coa', { signal }), staleTime: 300_000, retry: false })
   const accounts: Account[] = useMemo(() => (coaQ.data?.categories ?? []).flatMap((c: any) => c.accounts.filter((a: any) => a.isActive).map((a: any) => ({ id: a.id, code: a.code, name: a.name, isBusinessAccount: a.isBusinessAccount, isPartyAccount: a.isPartyAccount, partyType: a.partyType, categoryCode: c.code, categoryType: c.type }))), [coaQ.data])
   const businessAccounts = accounts.filter(a => a.categoryType === 'Asset' && a.isBusinessAccount)
   const expenseAccounts = accounts.filter(a => a.categoryType === 'Expense')
 
   // Trial balance for balances (mutations invalidate ['trial-balance'], so a
   // short staleTime only skips refetches on plain navigation revisits)
-  const tbQ = useQuery({ queryKey: ['trial-balance'], queryFn: () => fetch('/api/trial-balance').then(r => r.json()), staleTime: 30_000, retry: false })
+  const tbQ = useQuery<any>({ queryKey: ['trial-balance'], queryFn: ({ signal }) => apiFetchJson<any>('/api/trial-balance', { signal }), staleTime: 30_000, retry: false })
   const tbRows: any[] = tbQ.data?.rows ?? []
   const getBalance = (code: string): bigint => {
     const row = tbRows.find((r: any) => r.accountCode === code)
@@ -41,7 +42,7 @@ export function AccountsView({ user }: { user: MeUser }) {
   }
 
   // Day book for recent activity (invalidated by every posting mutation)
-  const dayBookQ = useQuery({ queryKey: ['day-book'], queryFn: () => fetch('/api/day-book').then(r => r.json()), staleTime: 30_000, retry: false })
+  const dayBookQ = useQuery<any>({ queryKey: ['day-book'], queryFn: ({ signal }) => apiFetchJson<any>('/api/day-book', { signal }), staleTime: 30_000, retry: false })
   const recentVouchers: any[] = (dayBookQ.data?.rows ?? []).slice(0, 15)
 
   // Today's summary (Asia/Karachi date)
@@ -307,11 +308,7 @@ function AccountSubcategoryPanel({ activities, accounts, user }: { activities: M
     assignments: Array<{ accountId: string; parentCode: string; subcategoryId: string | null }>
   }>({
     queryKey: ['account-subcategories'],
-    queryFn: async () => {
-      const response = await fetch('/api/account-subcategories', { cache: 'no-store' })
-      if (!response.ok) throw new Error('Category persistence requires migration 00021')
-      return response.json()
-    },
+    queryFn: ({ signal }) => apiFetchJson('/api/account-subcategories', { cache: 'no-store', signal }),
     retry: false,
   })
   const canManage = user.roleName === 'Owner' || user.roleName === 'Admin'

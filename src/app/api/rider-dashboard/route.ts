@@ -4,6 +4,7 @@ import { authOptions } from '@/lib/auth/authOptions'
 import { loadSessionUser, hasPermission } from '@/lib/auth/permissions'
 import { riderDashboardSummary, getRiderByUserId, listDeliveryOrders } from '@/lib/delivery/data-access'
 import { resolveRequestId, safeApiError, withObservability } from '@/lib/observability'
+import { isSupabaseConfigured } from '@/lib/supabase/config'
 
 export const GET = withObservability('/api/rider-dashboard', async (request: Request) => {
   const requestId = resolveRequestId(request)
@@ -15,6 +16,16 @@ export const GET = withObservability('/api/rider-dashboard', async (request: Req
 
     // For Rider role: return their own dashboard
     if (loaded.roleName === 'Rider') {
+      if (!isSupabaseConfigured()) {
+        return NextResponse.json({
+          available: false,
+          reason: 'DELIVERY_MIGRATION_REQUIRED',
+          message: 'Not available until delivery migration',
+          summary: null,
+          riderId: null,
+          recentOrders: [],
+        })
+      }
       const rider = await getRiderByUserId(loaded.businessId, loaded.userId)
       if (!rider) return NextResponse.json({ error: 'No rider profile linked to your account' }, { status: 403 })
       const [summary, orders] = await Promise.all([

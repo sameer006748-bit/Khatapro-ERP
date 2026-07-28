@@ -16,7 +16,11 @@ const MISSING_TABLE_CODES = new Set(['42P01', 'PGRST205'])
 const MISSING_RPC_CODES = new Set(['42883', 'PGRST202'])
 const MISSING_COLUMN_CODES = new Set(['42703', 'PGRST204'])
 const AUTH_SCOPE_CODES = new Set(['42501', 'PGRST301', 'PGRST302'])
-const CACHE_TTL_MS = 5 * 60_000
+// Positive (uuid-ledger) results are cached for 5 minutes. Negative
+// (operational-fallback) results are cached for only 30 seconds so a
+// transient probe failure does not poison all requests for 5 minutes.
+const POSITIVE_CACHE_TTL_MS = 5 * 60_000
+const NEGATIVE_CACHE_TTL_MS = 30_000
 
 let cachedCapability: { expiresAt: number; value: LedgerCapability } | null = null
 let capabilityPromise: Promise<LedgerCapability> | null = null
@@ -27,7 +31,7 @@ function errorText(error: PostgrestLikeError): string {
 
 export function classifyPostgrestCompatibilityError(
   error: PostgrestLikeError | null | undefined,
-): 'missing-table' | 'missing-rpc' | 'auth-scope' | 'other' {
+): 'missing-table' | 'missing-rpc' | 'missing-column' | 'auth-scope' | 'other' {
   if (!error) return 'other'
   const code = String(error.code ?? '').toUpperCase()
   const text = errorText(error)
@@ -114,7 +118,8 @@ export async function detectLedgerCapability(
 
   capabilityPromise = probeLedgerCapability(client, businessId, asOfDate)
     .then((value) => {
-      cachedCapability = { value, expiresAt: now + CACHE_TTL_MS }
+      const ttl = value.path === 'uuid-ledger' ? POSITIVE_CACHE_TTL_MS : NEGATIVE_CACHE_TTL_MS
+      cachedCapability = { value, expiresAt: now + ttl }
       return value
     })
     .finally(() => {

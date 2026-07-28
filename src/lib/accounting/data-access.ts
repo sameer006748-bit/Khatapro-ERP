@@ -65,7 +65,26 @@ export async function getChartOfAccounts(businessId: string): Promise<CategoryWi
 async function getChartOfAccountsFromPrisma(businessId: string): Promise<CategoryWithAccounts[]> {
   const cats = await db.accountCategory.findMany({
     where: { businessId },
-    include: { accounts: { orderBy: { code: 'asc' } } },
+    select: {
+      id: true,
+      code: true,
+      name: true,
+      type: true,
+      accounts: {
+        select: {
+          id: true,
+          code: true,
+          name: true,
+          categoryId: true,
+          isActive: true,
+          isBusinessAccount: true,
+          isPartyAccount: true,
+          partyType: true,
+          balanceCache: true,
+        },
+        orderBy: { code: 'asc' },
+      },
+    },
     orderBy: { code: 'asc' },
   })
   return cats.map((c) => ({

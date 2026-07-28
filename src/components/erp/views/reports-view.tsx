@@ -11,6 +11,7 @@ import { bizDate, bizDateString } from '@/lib/dates'
 import { BarChart3, FileText, Scale, Wallet, Package, Users, Bike, ScrollText, TrendingUp, TrendingDown, Download, Printer, ChevronRight, AlertTriangle, CheckCircle2, ShieldAlert } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import type { MeUser } from '@/components/erp/erp-app'
+import { apiFetchJson } from '@/lib/api-client'
 
 type Category = 'overview' | 'financial' | 'sales' | 'purchases' | 'inventory' | 'parties' | 'delivery' | 'audit'
 type ReportType = 'overview' | 'profit-loss' | 'balance-sheet' | 'trial-balance' | 'cash-flow' | 'expense' | 'sales-summary' | 'sales-detail' | 'customer-outstanding' | 'vendor-outstanding' | 'inventory-valuation' | 'stock-movements' | 'product-profitability' | 'purchase-detail' | 'delivery-summary' | 'cod-settlements' | 'exceptions'
@@ -159,9 +160,9 @@ export function ReportsView({ user }: { user: MeUser }) {
 }
 
 function ReportContent({ type, fromDate, toDate, user }: { type: ReportType; fromDate: string; toDate: string; user: MeUser }) {
-  const q = useQuery({
+  const q = useQuery<any>({
     queryKey: ['report', type, fromDate, toDate],
-    queryFn: () => fetch(`/api/reports?type=${type}&fromDate=${fromDate}&toDate=${toDate}`).then(r => r.json()),
+    queryFn: ({ signal }) => apiFetchJson<any>(`/api/reports?type=${type}&fromDate=${fromDate}&toDate=${toDate}`, { signal }),
     enabled: !!type,
     retry: false,
     staleTime: 60_000,

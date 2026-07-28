@@ -7,6 +7,7 @@ import {
   listPersistedAccountSubcategories,
   managePersistedAccountSubcategory,
 } from '@/lib/money/persisted-account-subcategories'
+import { getAccountingAvailability, unavailableAccountingPayload } from '@/lib/accounting/availability'
 import { resolveRequestId, safeApiError, safeMutationError } from '@/lib/observability'
 
 const ActionSchema = z.object({
@@ -34,6 +35,13 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: 'FORBIDDEN' }, { status: 403 })
   }
   try {
+    const capability = await getAccountingAvailability(loaded.businessId)
+    if (capability.path === 'operational-fallback') {
+      return NextResponse.json(unavailableAccountingPayload(
+        { categories: [], assignments: [] },
+        capability.reason,
+      ))
+    }
     return NextResponse.json(await listPersistedAccountSubcategories(loaded.businessId, loaded.userId))
   } catch (error) {
     return safeApiError({ route: '/api/account-subcategories', requestId, errorCode: 'CATEGORY_LOAD_FAILED', userMessage: 'Account categories could not be loaded.', error })

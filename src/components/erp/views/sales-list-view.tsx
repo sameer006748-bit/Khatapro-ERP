@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { useRouter } from 'next/navigation'
 import { PrintInvoiceButton } from '@/components/invoice/print-invoice-button'
+import { apiFetchJson } from '@/lib/api-client'
 
 type Invoice = {
   id: string
@@ -38,10 +39,10 @@ export function SalesListView() {
 
   const q = useQuery<{ rows: Invoice[] }>({
     queryKey: ['invoices', typeFilter],
-    queryFn: () => {
+    queryFn: ({ signal }) => {
       const params = new URLSearchParams()
       if (typeFilter) params.set('type', typeFilter)
-      return fetch(`/api/sales/counter?${params}`).then(r => r.json())
+      return apiFetchJson(`/api/sales/counter?${params}`, { signal })
     },
   })
 

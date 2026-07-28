@@ -10,6 +10,7 @@ import { bizDate } from '@/lib/dates'
 import { Search, ChevronDown, ChevronRight, BookOpen, ArrowLeft } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import type { MeUser } from '@/components/erp/erp-app'
+import { apiFetchJson } from '@/lib/api-client'
 
 type DayBookRow = {
   voucherId: string; voucherNo: string | null; voucherType: string; voucherDate: string
@@ -48,7 +49,7 @@ export function DayBookView({ user, onSelectVoucher }: { user: MeUser; onSelectV
 
   const q = useQuery<{ rows: DayBookRow[]; availability?: { accounting: boolean; message?: string } }>({
     queryKey: ['day-book', fromDate, toDate, voucherType],
-    queryFn: () => fetch(`/api/day-book?${params.toString()}`).then(r => r.json()),
+    queryFn: ({ signal }) => apiFetchJson(`/api/day-book?${params.toString()}`, { signal }),
     staleTime: 30_000,
     gcTime: 5 * 60_000,
     retry: false,

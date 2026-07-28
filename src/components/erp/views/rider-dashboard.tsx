@@ -79,6 +79,17 @@ export function RiderDashboard({ user }: { user: any }) {
     )
   }
 
+  if (data?.available === false) {
+    return (
+      <div className="space-y-6">
+        <GlassPanel padding="p-8">
+          <h1 className="text-2xl font-semibold mb-2">Welcome, {user.displayName.split(' ')[0]}.</h1>
+          <p className="text-muted-foreground">{data.message}</p>
+        </GlassPanel>
+      </div>
+    )
+  }
+
   if (error || !data || !data.summary) {
     return (
       <div className="space-y-6">

@@ -14,6 +14,7 @@ import { motion } from 'framer-motion'
 import { PrintInvoiceButton } from '@/components/invoice/print-invoice-button'
 import { CURRENT_DATABASE_CAPABILITIES } from '@/lib/supabase/rpc-compatibility'
 import type { MeUser } from '@/components/erp/erp-app'
+import { apiFetchJson } from '@/lib/api-client'
 
 type Product = { id: string; name: string; salePrice: number }
 type Account = { id: string; code: string; name: string }
@@ -36,9 +37,9 @@ export function OfcSaleView({ user }: { user: MeUser }) {
   const [result, setResult] = useState<{ ok: boolean; invoiceNo?: string; invoiceId?: string; error?: string } | null>(null)
   const [idempotencyKey, setIdempotencyKey] = useState(() => crypto.randomUUID())
 
-  const coaQ = useQuery({ queryKey: ['coa'], queryFn: () => fetch('/api/setup/coa').then(r => r.json()), staleTime: 300_000 })
-  const productsQ = useQuery<{ rows: Product[] }>({ queryKey: ['products'], queryFn: () => fetch('/api/products').then(r => r.json()), staleTime: 30_000 })
-  const salesmenQ = useQuery<{ rows: Salesman[] }>({ queryKey: ['salesmen'], queryFn: () => fetch('/api/salesmen').then(r => r.json()), staleTime: 300_000, enabled: mustPickSalesman })
+  const coaQ = useQuery<any>({ queryKey: ['coa'], queryFn: ({ signal }) => apiFetchJson<any>('/api/setup/coa', { signal }), staleTime: 300_000 })
+  const productsQ = useQuery<{ rows: Product[] }>({ queryKey: ['products'], queryFn: ({ signal }) => apiFetchJson('/api/products', { signal }), staleTime: 30_000 })
+  const salesmenQ = useQuery<{ rows: Salesman[] }>({ queryKey: ['salesmen'], queryFn: ({ signal }) => apiFetchJson('/api/salesmen', { signal }), staleTime: 300_000, enabled: mustPickSalesman })
 
   const activeSalesmen = useMemo(() => (salesmenQ.data?.rows ?? []).filter(s => s.isActive !== false), [salesmenQ.data])
   // Same rule as Counter Sale: auto-select only when there is exactly ONE
@@ -177,6 +178,12 @@ export function OfcSaleView({ user }: { user: MeUser }) {
       <h1 className="text-xl font-semibold tracking-tight text-foreground">OFC Sale</h1>
 
       {/* ── Salesman ── */}
+      {coaQ.data?.availability?.accounting === false && (
+        <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-muted-foreground">
+          {coaQ.data.availability.message}
+        </div>
+      )}
+
       {mustPickSalesman && (
         <div className="card-3d p-4 space-y-2">
           <h2 className="text-sm font-semibold text-foreground">Salesman *</h2>
