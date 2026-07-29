@@ -11,7 +11,29 @@ export const CURRENT_DATABASE_CAPABILITIES = {
   salesIdempotency: true,
   receiptAllocations: false,
   receiptIdempotency: false,
+  /**
+   * Same-bill sale/return adjustment and referenced historical returns posted
+   * through the sale RPC. The deployed `post_sale_*` signature accepts no
+   * returned quantity, so a mixed bill must fail closed rather than silently
+   * post as a plain sale. Enabled by migration 00033 (prepared, NOT applied).
+   */
+  mixedSaleReturns: false,
 } as const
+
+/**
+ * Name of the sale RPC to invoke.
+ *
+ * Both entry points take the identical 14-argument shape, so the only
+ * difference is whether the database can honour a per-line `returned_qty`.
+ * Migration 00033 adds `post_sale_with_returns_ledger` as a pure addition —
+ * `post_sale_phase2_ledger` keeps working untouched — so flipping
+ * `mixedSaleReturns` to true after applying 00033 is the whole switch.
+ */
+export function salePostingRpcName(): 'post_sale_with_returns_ledger' | 'post_sale_phase2_ledger' {
+  return CURRENT_DATABASE_CAPABILITIES.mixedSaleReturns
+    ? 'post_sale_with_returns_ledger'
+    : 'post_sale_phase2_ledger'
+}
 
 // Exact named arguments of the Phase-8 public.post_sale(13 args). This is what
 // production accepts today; p_discount_paisas / p_idempotency_key do not exist on
@@ -139,6 +161,20 @@ export function assertPhase9SaleFeatures(input: {
   if (!CURRENT_DATABASE_CAPABILITIES.salesIdempotency && input.idempotencyKey) {
     throw new UnsupportedDatabaseFeatureError(
       'Sale retry keys are unavailable on the current database. Refresh the sale form and submit once; no sale was posted.',
+    )
+  }
+}
+
+/**
+ * Same-bill / referenced returns are migration-dependent on the deployed
+ * database. Fail closed with a precise, owner-actionable message instead of
+ * quietly posting the bill as if nothing had been returned.
+ */
+export function assertMixedSaleReturnSupport(input: { hasReturnLines: boolean }): void {
+  if (input.hasReturnLines && !CURRENT_DATABASE_CAPABILITIES.mixedSaleReturns) {
+    throw new UnsupportedDatabaseFeatureError(
+      'Sale-with-return billing needs database migration 00033 (mixed sale returns). ' +
+        'Until an owner applies it, post the sale without returned quantities and raise the return from the original invoice. No sale was posted.',
     )
   }
 }

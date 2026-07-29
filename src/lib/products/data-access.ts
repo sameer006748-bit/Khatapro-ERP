@@ -231,6 +231,7 @@ export async function listProducts(
       isActive: true,
       markedForMerge: true,
       lowStockThreshold: true,
+      commissionRate: true,
       createdAt: true,
       category: { select: { name: true } },
     },
@@ -249,7 +250,9 @@ export async function listProducts(
     isActive: p.isActive,
     markedForMerge: p.markedForMerge,
     lowStockThreshold: p.lowStockThreshold,
-    commissionRatePaisas: null,
+    // Per-piece commission drives the sale-screen preview; a genuinely
+    // unconfigured product reports null rather than a fabricated zero.
+    commissionRatePaisas: p.commissionRate === null ? null : p.commissionRate.toString(),
     createdAt: p.createdAt.toISOString(),
   }))
 }

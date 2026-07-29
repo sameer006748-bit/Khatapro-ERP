@@ -57,6 +57,8 @@ test('compatibility boundary reflects the deployed capability set', () => {
     salesIdempotency: true,
     receiptAllocations: false,
     receiptIdempotency: false,
+    // Migration 00033 is prepared but NOT applied, so same-bill returns stay off.
+    mixedSaleReturns: false,
   })
 })
 

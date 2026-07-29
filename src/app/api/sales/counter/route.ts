@@ -11,19 +11,23 @@ import { getServerSession } from 'next-auth'
 import { z } from 'zod'
 import { authOptions } from '@/lib/auth/authOptions'
 import { loadSessionUser, requirePermission, hasPermission } from '@/lib/auth/permissions'
-import { postSale, listInvoices, resolveSalesmanIdForUser, resolveEffectiveSalesmanId } from '@/lib/sales/data-access'
+import { postSale, listInvoices, resolveSalesmanIdForUser, resolveSaleSeller } from '@/lib/sales/data-access'
+import { SaleLineError } from '@/lib/sales/sale-engine'
 import { parseMoney } from '@/lib/format'
-import { parseDiscountPaisas } from '@/lib/sales/discount'
-import { assertPhase9SaleFeatures } from '@/lib/supabase/rpc-compatibility'
+import { assertPhase9SaleFeatures, UnsupportedDatabaseFeatureError } from '@/lib/supabase/rpc-compatibility'
 import { isSupabaseConfigured } from '@/lib/supabase/config'
 import { resolveRequestId, newRequestId, withObservability } from '@/lib/observability'
 
 const ItemSchema = z.object({
   productId: z.string().nullable().optional(),
   productName: z.string().min(1),
-  qty: z.number().int().positive(),
+  // Zero is valid only for a referenced historical-return row; the shared
+  // engine enforces that pairing.
+  qty: z.number().int().min(0),
+  returnedQty: z.number().int().min(0).optional(),
   unitPrice: z.string().min(1),
   isTemporary: z.boolean().optional(),
+  originalInvoiceItemId: z.string().min(1).nullable().optional(),
 })
 
 const PaymentSchema = z.object({
@@ -38,6 +42,7 @@ const PostSaleSchema = z.object({
   items: z.array(ItemSchema).min(1),
   payments: z.array(PaymentSchema).min(1),
   salesmanId: z.string().nullable().optional(),
+  sellerRole: z.enum(['OWNER', 'SALESMAN']).optional(),
   customerId: z.string().nullable().optional(),
   customerName: z.string().optional(),
   customerPhone: z.string().optional(),
@@ -69,7 +74,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'INVALID_INPUT', details: parsed.error.flatten() }, { status: 400 })
   }
 
-  let items: Array<{ productId?: string | null; productName: string; qty: number; unitPrice: bigint; isTemporary?: boolean }>
+  let items: Array<{ productId?: string | null; productName: string; qty: number; returnedQty?: number; unitPrice: bigint; isTemporary?: boolean; originalInvoiceItemId?: string | null }>
   let payments: Array<{ accountId: string; amount: bigint; isChange?: boolean }>
   try {
     items = parsed.data.items.map((i) => {
@@ -119,7 +124,10 @@ export async function POST(req: Request) {
   const startMs = performance.now()
 
   try {
-    const smResult = await resolveEffectiveSalesmanId(su, parsed.data.salesmanId ?? null)
+    const smResult = await resolveSaleSeller(su, {
+      sellerRole: parsed.data.sellerRole ?? null,
+      salesmanId: parsed.data.salesmanId ?? null,
+    })
     if (!smResult.ok) {
       return NextResponse.json({ error: smResult.error }, { status: smResult.status })
     }
@@ -131,6 +139,7 @@ export async function POST(req: Request) {
       items,
       payments,
       salesmanId: smResult.salesmanId,
+      sellerRole: smResult.sellerRole,
       customerId: parsed.data.customerId ?? null,
       customerName: parsed.data.customerName ?? null,
       customerPhone: parsed.data.customerPhone ?? null,
@@ -143,6 +152,15 @@ export async function POST(req: Request) {
   } catch (e) {
     const durationMs = Math.round(performance.now() - startMs)
     const msg = (e as Error).message || ''
+
+    // Business-rule rejections and migration-dependent features are the user's
+    // to act on — surface the exact reason instead of a generic failure.
+    if (e instanceof SaleLineError) {
+      return NextResponse.json({ error: msg }, { status: 400 })
+    }
+    if (e instanceof UnsupportedDatabaseFeatureError) {
+      return NextResponse.json({ error: msg, setupRequired: true }, { status: 409 })
+    }
 
     if (msg.includes('Unique constraint') || msg.includes('unique constraint')) {
       return NextResponse.json({ error: 'Transaction conflict. Please retry in a moment.' }, { status: 409 })

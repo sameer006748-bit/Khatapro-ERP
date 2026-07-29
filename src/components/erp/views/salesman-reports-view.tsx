@@ -173,7 +173,7 @@ function TabContent({ tab, fromDate, toDate }: { tab: TabId; fromDate: string; t
     case 'my-returns':
       return <MyReturns rows={q.data.rows ?? []} />
     case 'my-commission':
-      return <MyCommission rows={q.data.rows ?? []} />
+      return <MyCommission rows={q.data.rows ?? []} detail={q.data.detail} legacyReason={q.data.legacyReason ?? null} />
     default:
       return null
   }
@@ -332,7 +332,40 @@ function MyReturns({ rows }: { rows: any[] }) {
   )
 }
 
-function MyCommission({ rows }: { rows: any[] }) {
+/** One item-level commission entry from GET /api/reports/salesman?type=my-commission. */
+type CommissionDetailRow = {
+  invoiceId: string
+  invoiceNo: string
+  invoiceDate: string
+  invoiceItemId: string
+  productName: string
+  soldQty: number
+  returnedQty: number
+  netEligibleQty: number
+  ratePaisas: string
+  commissionPaisas: string
+  status: string
+  eventType: string
+  sellerName: string | null
+  sellerRole: 'OWNER' | 'SALESMAN'
+  paymentReference: string | null
+  createdAt: string | null
+}
+
+type CommissionDetail = {
+  available: boolean
+  reason: string | null
+  rows: CommissionDetailRow[]
+  totalPaisas: string
+}
+
+const EVENT_LABEL: Record<string, string> = {
+  calculated: 'Eligible on sale',
+  collection: 'Earned on collection',
+  reversal: 'Reversed by return',
+}
+
+function MyCommission({ rows, detail, legacyReason }: { rows: any[]; detail?: CommissionDetail; legacyReason?: string | null }) {
   let totalCommission = 0n
   let totalCollected = 0n
   for (const r of rows) {
@@ -341,48 +374,122 @@ function MyCommission({ rows }: { rows: any[] }) {
       totalCollected += BigInt(r.collected_amount ?? 0)
     } catch {}
   }
+  const detailRows = detail?.rows ?? []
+  const detailTotal = (() => {
+    try { return BigInt(detail?.totalPaisas ?? 0) } catch { return 0n }
+  })()
   return (
     <div className="space-y-3">
-      <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
         <KPI label="Total Collected" value={formatMoney(totalCollected)} />
-        <KPI label="Total Commission" value={formatMoney(totalCommission)} accent="text-emerald-600" />
-        <KPI label="Entries" value={String(rows.length)} />
+        <KPI label="Product Commission" value={formatMoney(detailTotal)} accent="text-emerald-600" />
+        <KPI label="Percentage Commission" value={formatMoney(totalCommission)} />
+        <KPI label="Entries" value={String(detailRows.length + rows.length)} />
       </div>
+
+      {/* Product-wise entries — item level, never merged into one invoice figure */}
       <div className="card-3d overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-border text-[10px] uppercase text-muted-foreground bg-muted/40">
-                <th className="text-left p-2 font-medium">Date</th>
-                <th className="text-left p-2 font-medium">Invoice</th>
-                <th className="text-right p-2 font-medium">Collected</th>
-                <th className="text-right p-2 font-medium">Pct</th>
-                <th className="text-right p-2 font-medium">Commission</th>
-                <th className="text-left p-2 font-medium">Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.length === 0 ? (
-                <tr><td colSpan={6} className="p-4 text-center text-sm text-muted-foreground">No commission entries in this period.</td></tr>
-              ) : rows.map(r => (
-                <tr key={r.id} className="border-b border-border/40">
-                  <td className="p-2 text-xs text-muted-foreground" data-num>{bizDate(r.invoices?.invoice_date ?? r.created_at)}</td>
-                  <td className="p-2 font-medium" data-num>{r.invoices?.invoice_no ?? '—'}</td>
-                  <td className="p-2 text-right" data-num>{r.collected_amount !== null && r.collected_amount !== undefined ? formatMoney(BigInt(r.collected_amount), false) : '—'}</td>
-                  <td className="p-2 text-right" data-num>{Number(r.commission_pct ?? 0).toFixed(2)}%</td>
-                  <td className="p-2 text-right font-medium text-emerald-600" data-num>
-                    {formatMoney(BigInt(r.commission_amount ?? 0), false)}
-                  </td>
-                  <td className="p-2">
-                    <span className="text-[9px] uppercase px-1 py-0.5 rounded bg-amber-50 text-amber-700">
-                      {r.status ?? 'accrued'}
-                    </span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div className="px-3 py-2.5 border-b border-border flex items-center justify-between gap-3">
+          <h2 className="text-sm font-semibold text-foreground">Product-wise commission</h2>
+          <span className="text-[9px] uppercase tracking-wider text-muted-foreground">Per net sold piece</span>
         </div>
+        {detail && !detail.available ? (
+          <div className="px-3 py-3 text-xs text-amber-700 bg-amber-50/60">{detail.reason}</div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border text-[10px] uppercase text-muted-foreground bg-muted/40">
+                  <th className="text-left p-2 font-medium">Date</th>
+                  <th className="text-left p-2 font-medium">Invoice</th>
+                  <th className="text-left p-2 font-medium">Product</th>
+                  <th className="text-left p-2 font-medium">Seller</th>
+                  <th className="text-right p-2 font-medium">Sold</th>
+                  <th className="text-right p-2 font-medium">Returned</th>
+                  <th className="text-right p-2 font-medium">Net</th>
+                  <th className="text-right p-2 font-medium">Rate/pc</th>
+                  <th className="text-right p-2 font-medium">Commission</th>
+                  <th className="text-left p-2 font-medium">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {detailRows.length === 0 ? (
+                  <tr><td colSpan={10} className="p-4 text-center text-sm text-muted-foreground">No product commission entries in this period.</td></tr>
+                ) : detailRows.map((r, i) => (
+                  <tr key={`${r.invoiceItemId}-${r.eventType}-${i}`} className="border-b border-border/40">
+                    <td className="p-2 text-xs text-muted-foreground" data-num>{r.invoiceDate ? bizDate(r.invoiceDate) : '—'}</td>
+                    <td className="p-2 font-medium" data-num>{r.invoiceNo}</td>
+                    <td className="p-2 text-xs">{r.productName}</td>
+                    <td className="p-2 text-xs">
+                      <div>{r.sellerName ?? (r.sellerRole === 'OWNER' ? 'Owner' : 'Salesman')}</div>
+                      <div className="text-[9px] uppercase tracking-wider text-muted-foreground">{r.sellerRole === 'OWNER' ? 'Owner' : 'Salesman'}</div>
+                    </td>
+                    <td className="p-2 text-right" data-num>{r.soldQty}</td>
+                    <td className="p-2 text-right text-rose-600" data-num>{r.returnedQty}</td>
+                    <td className="p-2 text-right font-medium" data-num>{r.netEligibleQty}</td>
+                    <td className="p-2 text-right" data-num>{formatMoney(BigInt(r.ratePaisas), false)}</td>
+                    <td className="p-2 text-right font-medium text-emerald-600" data-num>{formatMoney(BigInt(r.commissionPaisas), false)}</td>
+                    <td className="p-2">
+                      <div className="text-[10px]">{EVENT_LABEL[r.eventType] ?? r.eventType}</div>
+                      <div className="text-[9px] uppercase tracking-wider text-muted-foreground">{r.status}{r.paymentReference ? ` · ${r.paymentReference}` : ''}</div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        {detailRows.length > 0 && (
+          <div className="px-3 py-2 border-t border-border bg-muted/30 flex items-center justify-between text-sm">
+            <span className="text-xs text-muted-foreground">Total product commission</span>
+            <span className="font-semibold text-emerald-600" data-num>{formatMoney(detailTotal)}</span>
+          </div>
+        )}
+      </div>
+
+      {/* Legacy percentage-of-collection commission */}
+      <div className="card-3d overflow-hidden">
+        <div className="px-3 py-2.5 border-b border-border">
+          <h2 className="text-sm font-semibold text-foreground">Percentage commission on collections</h2>
+        </div>
+        {legacyReason ? (
+          <div className="px-3 py-3 text-xs text-amber-700 bg-amber-50/60">{legacyReason}</div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border text-[10px] uppercase text-muted-foreground bg-muted/40">
+                  <th className="text-left p-2 font-medium">Date</th>
+                  <th className="text-left p-2 font-medium">Invoice</th>
+                  <th className="text-right p-2 font-medium">Collected</th>
+                  <th className="text-right p-2 font-medium">Pct</th>
+                  <th className="text-right p-2 font-medium">Commission</th>
+                  <th className="text-left p-2 font-medium">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.length === 0 ? (
+                  <tr><td colSpan={6} className="p-4 text-center text-sm text-muted-foreground">No percentage commission entries in this period.</td></tr>
+                ) : rows.map(r => (
+                  <tr key={r.id} className="border-b border-border/40">
+                    <td className="p-2 text-xs text-muted-foreground" data-num>{bizDate(r.invoices?.invoice_date ?? r.created_at)}</td>
+                    <td className="p-2 font-medium" data-num>{r.invoices?.invoice_no ?? '—'}</td>
+                    <td className="p-2 text-right" data-num>{r.collected_amount !== null && r.collected_amount !== undefined ? formatMoney(BigInt(r.collected_amount), false) : '—'}</td>
+                    <td className="p-2 text-right" data-num>{Number(r.commission_pct ?? 0).toFixed(2)}%</td>
+                    <td className="p-2 text-right font-medium text-emerald-600" data-num>
+                      {formatMoney(BigInt(r.commission_amount ?? 0), false)}
+                    </td>
+                    <td className="p-2">
+                      <span className="text-[9px] uppercase px-1 py-0.5 rounded bg-amber-50 text-amber-700">
+                        {r.status ?? 'accrued'}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </div>
   )

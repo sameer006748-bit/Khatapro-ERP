@@ -69,11 +69,13 @@ test('postSaleViaPrisma guards against double commission', async () => {
   // Verify legacy percentage commission is gated
   assert.match(src, /hasPerPieceEligibility/,
     'Must check for per-piece eligibility before running legacy commission')
-  assert.match(src, /if \(!hasPerPieceEligibility\)/,
+  assert.match(src, /if \(!hasPerPieceEligibility && input\.salesmanId\)/,
     'Legacy commission must only run when no per-piece eligibility exists')
-  // Verify per-piece eligibility is calculated
-  assert.match(src, /calculateCommissionEligibility/,
+  // Verify per-piece eligibility is calculated by the shared sale engine
+  assert.match(src, /line\.commissionAmountPaisas/,
     'Must calculate per-piece eligibility')
+  assert.match(src, /computeEarnedCommission\(/,
+    'Collection-triggered earning must come from the shared engine')
   // Verify CommissionEvent is created for per-piece
   assert.match(src, /commissionEvent\.create/,
     'Must create CommissionEvent for per-piece eligibility')
@@ -113,8 +115,15 @@ test('Other Sale route forces invoiceType OTHER', async () => {
     'Other Sale route must force invoiceType OTHER')
   assert.match(otherRoute, /customerId: z\.string\(\)\.min\(1\)/,
     'Other Sale route must require customerId')
-  assert.match(otherRoute, /resolveEffectiveSalesmanId/,
-    'Other Sale route must use server-controlled salesman')
+  // Seller attribution is server-authoritative: resolveSaleSeller decides
+  // Owner-vs-Salesman from session permissions, so an Owner sale can never be
+  // credited to an unrelated salesman.
+  assert.match(otherRoute, /resolveSaleSeller/,
+    'Other Sale route must use server-controlled seller attribution')
+  assert.match(otherRoute, /salesmanId: smResult\.salesmanId/,
+    'Posted salesman must come from the server resolution, not the request body')
+  assert.match(otherRoute, /sellerRole: smResult\.sellerRole/,
+    'Seller role must come from the server resolution')
 })
 
 test('Other Sale route validates payment', async () => {

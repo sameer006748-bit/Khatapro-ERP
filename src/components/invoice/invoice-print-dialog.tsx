@@ -1,23 +1,32 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { X, Printer } from 'lucide-react'
 import { formatMoney } from '@/lib/format'
 import { bizDate, bizFormat } from '@/lib/dates'
+import { buildInvoicePrintModel, type InvoicePrintModel } from '@/lib/sales/sale-engine'
 
 /**
- * Half-A4 Invoice Print System
+ * Invoice Print System
  *
  * Modes:
- *   1. single — One invoice on a half A4 sheet (148.5mm × 210mm)
- *   2. two-up — Two invoices on one full A4 page (top + bottom halves)
- *   3. top-half — One invoice on the top half of a full A4 page
- *   4. bottom-half — One invoice on the bottom half of a full A4 page
- *   5. full-a4 — One invoice on a full A4 page (fallback for long invoices)
+ *   1. single  — One invoice on the top half of an A4 sheet (148.5mm)
+ *   2. two-up  — Two invoices on one full A4 page (top + bottom halves)
+ *   3. full-a4 — One invoice on a full A4 page (long invoices)
+ *   4. thermal — 80mm continuous roll receipt
+ *
+ * Every layout renders from the same `buildInvoicePrintModel` serialization,
+ * so sold/returned/net quantities and totals cannot diverge between them.
+ * Commission is internal: it prints only on an explicitly selected owner copy.
  */
 
-export type InvoicePrintMode = 'single' | 'two-up' | 'top-half' | 'bottom-half' | 'full-a4'
+export type InvoicePrintMode = 'single' | 'two-up' | 'top-half' | 'bottom-half' | 'full-a4' | 'thermal'
+
+export type PrintableCommission = {
+  totalPaisas: string
+  lines: Array<{ productName: string; netEligibleQty: number; ratePaisas: string; commissionPaisas: string }>
+}
 
 export type PrintableInvoice = {
   id: string
@@ -45,6 +54,8 @@ export type PrintableInvoice = {
     productName: string
     sku: string | null  // Real SKU from server, or null if unavailable
     qty: number
+    /** Pieces handed back on this bill. Drives the returned/net columns. */
+    returnedQty?: number
     unitPrice: string
     lineTotal: string
   }>
@@ -54,6 +65,8 @@ export type PrintableInvoice = {
     amount: string
     isChange: boolean
   }>
+  /** Owner-only. Present only when the caller opted into an internal copy. */
+  commission?: PrintableCommission | null
 }
 
 const MODE_LABELS: Record<InvoicePrintMode, string> = {
@@ -62,10 +75,11 @@ const MODE_LABELS: Record<InvoicePrintMode, string> = {
   'top-half': 'Full A4 — Top Half Only',
   'bottom-half': 'Full A4 — Bottom Half Only',
   'full-a4': 'Full A4 — Single Invoice',
+  'thermal': 'Thermal — 80mm Receipt',
 }
 
 const STORAGE_KEY = 'khatapro-invoice-print-mode'
-const PRINT_MODE_OPTIONS: InvoicePrintMode[] = ['single', 'two-up', 'full-a4']
+const PRINT_MODE_OPTIONS: InvoicePrintMode[] = ['single', 'two-up', 'full-a4', 'thermal']
 
 const PRINT_ACTION_LABELS: Record<InvoicePrintMode, string> = {
   'single': 'Print Half A4',
@@ -73,6 +87,36 @@ const PRINT_ACTION_LABELS: Record<InvoicePrintMode, string> = {
   'top-half': 'Print Half A4',
   'bottom-half': 'Print Half A4',
   'full-a4': 'Print Full A4',
+  'thermal': 'Print 80mm Receipt',
+}
+
+/** Map the transport shape onto the shared engine serialization. */
+function toModel(inv: PrintableInvoice, includeCommission: boolean): InvoicePrintModel {
+  return buildInvoicePrintModel({
+    invoiceNo: inv.invoiceNo,
+    invoiceType: inv.invoiceType,
+    invoiceDate: inv.invoiceDate,
+    sellerName: inv.salesmanName,
+    sellerRole: inv.salesmanName ? 'SALESMAN' : 'OWNER',
+    customerName: inv.customerName,
+    customerPhone: inv.customerPhone,
+    customerAddress: inv.customerAddress,
+    customerCity: inv.customerCity,
+    source: inv.source,
+    codAmountPaisas: inv.codAmount,
+    deliveryFeePaisas: inv.deliveryFee,
+    memo: inv.memo,
+    items: inv.items,
+    subtotal: inv.subtotal,
+    discount: inv.discount,
+    total: inv.total,
+    paidAmount: inv.paidAmount,
+    changeAmount: inv.changeAmount,
+    payments: inv.payments,
+    isReturned: inv.isReturned,
+    isCancelled: inv.isCancelled,
+    commission: includeCommission ? inv.commission ?? null : null,
+  })
 }
 
 export function InvoicePrintDialog({
@@ -94,6 +138,8 @@ export function InvoicePrintDialog({
     if (saved && PRINT_MODE_OPTIONS.includes(saved)) return saved
     return 'single'
   })
+  // Internal copies are opt-in per print, never sticky.
+  const [internalCopy, setInternalCopy] = useState(false)
 
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -105,6 +151,12 @@ export function InvoicePrintDialog({
   const printRootRef = useRef<HTMLDivElement>(null)
   const [measuredHeight, setMeasuredHeight] = useState(0)
   const [overflowDetected, setOverflowDetected] = useState(false)
+
+  const commissionAvailable = invoices.some(inv => (inv.commission?.lines.length ?? 0) > 0)
+  const models = useMemo(
+    () => invoices.map(inv => toModel(inv, internalCopy && commissionAvailable)),
+    [invoices, internalCopy, commissionAvailable],
+  )
 
   useEffect(() => {
     if (!open || !printRootRef.current) return
@@ -121,28 +173,26 @@ export function InvoicePrintDialog({
     }
     const timer = setTimeout(measure, 200)
     return () => clearTimeout(timer)
-  }, [open, invoices, mode])
+  }, [open, invoices, mode, internalCopy])
 
   if (!open) return null
 
   const maxItems = Math.max(...invoices.map(inv => inv.items.length), 0)
-  const overflowWarning = mode !== 'full-a4' && (maxItems > 10 || overflowDetected)
+  const isHalfLayout = mode === 'single' || mode === 'two-up' || mode === 'top-half' || mode === 'bottom-half'
+  const overflowWarning = isHalfLayout && (maxItems > 10 || overflowDetected)
   const twoUpInvalid = mode === 'two-up' && invoices.length !== 2
 
   function handlePrint() {
-    if (twoUpInvalid || (overflowDetected && mode !== 'full-a4')) return
+    if (twoUpInvalid || (overflowDetected && isHalfLayout)) return
     // Add body class for reliable print isolation (no :has() dependency).
     document.body.classList.add('printing-invoice')
     // Inject mode-specific @page style for true physical page sizing.
-    // Physical Half-A4: 210mm × 148.5mm. Full A4: 210mm × 297mm.
+    // A4 portrait for sheet modes; 80mm continuous roll for thermal.
     const pageStyle = document.createElement('style')
     pageStyle.id = 'invoice-print-page-size'
-    if (mode === 'single') {
-      // One invoice still prints on a full A4 portrait sheet, top half only.
-      pageStyle.textContent = '@page { size: A4 portrait; margin: 0; }'
-    } else {
-      pageStyle.textContent = '@page { size: A4 portrait; margin: 0; }'
-    }
+    pageStyle.textContent = mode === 'thermal'
+      ? '@page { size: 80mm auto; margin: 0; }'
+      : '@page { size: A4 portrait; margin: 0; }'
     document.head.appendChild(pageStyle)
     // Use setTimeout to ensure DOM updates before print dialog opens.
     setTimeout(() => {
@@ -187,7 +237,7 @@ export function InvoicePrintDialog({
               <div className="flex-1 overflow-y-auto p-4 space-y-4">
                 <div>
                   <label className="text-xs font-medium text-muted-foreground mb-2 block">Print Mode</label>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                     {PRINT_MODE_OPTIONS.map((m) => (
                       <button
                         key={m}
@@ -204,6 +254,23 @@ export function InvoicePrintDialog({
                     ))}
                   </div>
                 </div>
+
+                {commissionAvailable && (
+                  <label className="flex items-start gap-2 p-3 rounded-lg border border-border bg-muted/30 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={internalCopy}
+                      onChange={e => setInternalCopy(e.target.checked)}
+                      className="mt-0.5"
+                    />
+                    <span className="text-xs">
+                      <span className="font-medium text-foreground">Internal copy — include commission</span>
+                      <span className="block text-[10px] text-muted-foreground mt-0.5">
+                        Off by default. Never give a copy printed with this option to a customer.
+                      </span>
+                    </span>
+                  </label>
+                )}
 
                 <div>
                   <label className="text-xs font-medium text-muted-foreground mb-2 block">
@@ -239,12 +306,12 @@ export function InvoicePrintDialog({
                   </div>
                 )}
 
-                {overflowDetected && mode !== 'full-a4' && (
+                {overflowDetected && isHalfLayout && (
                   <div className="p-3 rounded-lg border border-rose-200 bg-rose-50">
                     <p className="text-xs font-medium text-rose-800">
                       ⚠ Content overflow detected! Rendered height ({measuredHeight}px) exceeds Half-A4 printable height ({HALF_A4_PRINTABLE_PX}px). Half-A4 printing is blocked to prevent clipping.
                     </p>
-                    <p className="text-[10px] text-rose-700 mt-1">Switch to &quot;Full A4 — Single Invoice&quot; mode to print without clipping.</p>
+                    <p className="text-[10px] text-rose-700 mt-1">Switch to &quot;Full A4 — Single Invoice&quot; or the 80mm receipt to print without clipping.</p>
                     <button
                       onClick={() => setMode('full-a4')}
                       className="mt-2 px-3 py-1.5 rounded-md bg-rose-600 text-white text-xs font-medium press-sm"
@@ -265,18 +332,20 @@ export function InvoicePrintDialog({
                 <div>
                   <label className="text-xs font-medium text-muted-foreground mb-2 block">Preview</label>
                   <div className="border border-border rounded-lg overflow-hidden bg-muted/30">
-                    <InvoicePreview mode={mode} invoices={invoices} businessName={businessName} />
+                    <InvoicePreview mode={mode} models={models} businessName={businessName} />
                   </div>
                 </div>
               </div>
 
               <div className="flex items-center justify-between gap-3 p-4 border-t border-border">
-                <p className="text-[10px] text-muted-foreground">Print at 100% scale. Use A4 paper.</p>
+                <p className="text-[10px] text-muted-foreground">
+                  {mode === 'thermal' ? 'Print at 100% scale on an 80mm roll.' : 'Print at 100% scale. Use A4 paper.'}
+                </p>
                 <div className="flex gap-2">
                   <button onClick={onClose} className="px-4 py-2 rounded-md text-sm font-medium border border-border press-sm">Cancel</button>
                   <button
                     onClick={handlePrint}
-                    disabled={twoUpInvalid || (overflowDetected && mode !== 'full-a4')}
+                    disabled={twoUpInvalid || (overflowDetected && isHalfLayout)}
                     className="px-4 py-2 rounded-md text-sm font-medium bg-primary text-primary-foreground press-sm flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     <Printer className="size-4" /> {PRINT_ACTION_LABELS[mode]}
@@ -289,27 +358,37 @@ export function InvoicePrintDialog({
           {/* Off-screen measurement container — visible (not display:none) but positioned off-screen.
               Uses MeasurementInvoice with inline styles that mimic print CSS for accurate height measurement. */}
           <div ref={printRootRef} style={{ position: 'absolute', left: '-9999px', top: '0', width: '210mm', visibility: 'hidden' }} aria-hidden="true">
-            {invoices[0] && <MeasurementInvoice inv={invoices[0]} businessName={businessName} />}
+            {models[0] && <MeasurementInvoice model={models[0]} businessName={businessName} />}
           </div>
           {/* Actual print root for printing */}
           <InvoicePrintStyles />
-          <InvoicePrintRoot mode={mode} invoices={invoices} businessName={businessName} businessContact={businessContact} />
+          <InvoicePrintRoot mode={mode} models={models} businessName={businessName} businessContact={businessContact} />
         </>
       )}
     </AnimatePresence>
   )
 }
 
-function InvoicePreview({ mode, invoices, businessName }: { mode: InvoicePrintMode; invoices: PrintableInvoice[]; businessName: string }) {
+function InvoicePreview({ mode, models, businessName }: { mode: InvoicePrintMode; models: InvoicePrintModel[]; businessName: string }) {
   const isFullA4 = mode === 'full-a4'
   const showTop = mode === 'single' || mode === 'two-up' || mode === 'top-half'
   const showBottom = mode === 'two-up' || mode === 'bottom-half'
+
+  if (mode === 'thermal') {
+    return (
+      <div className="p-4 flex justify-center">
+        <div className="bg-white border border-border shadow-sm" style={{ width: 76 }}>
+          <div className="p-1.5"><MiniInvoice model={models[0]} businessName={businessName} /></div>
+        </div>
+      </div>
+    )
+  }
 
   if (isFullA4) {
     return (
       <div className="p-4 flex justify-center">
         <div className="bg-white border border-border shadow-sm" style={{ width: 140, height: 198 }}>
-          <div className="h-full p-2"><MiniInvoice inv={invoices[0]} businessName={businessName} /></div>
+          <div className="h-full p-2"><MiniInvoice model={models[0]} businessName={businessName} /></div>
         </div>
       </div>
     )
@@ -320,13 +399,13 @@ function InvoicePreview({ mode, invoices, businessName }: { mode: InvoicePrintMo
         <div className="bg-white border border-border shadow-sm" style={{ width: 140, height: 198 }}>
         <div className="h-full flex flex-col">
           <div className={`flex-1 p-2 ${showTop ? '' : 'opacity-20'}`}>
-            {showTop && invoices[0] && <MiniInvoice inv={invoices[0]} businessName={businessName} />}
+            {showTop && models[0] && <MiniInvoice model={models[0]} businessName={businessName} />}
           </div>
           <div className="border-t border-dashed border-foreground/40 relative">
             <span className="absolute -top-2 left-1/2 -translate-x-1/2 text-[7px] bg-muted px-1 text-muted-foreground">cut</span>
           </div>
           <div className={`flex-1 p-2 ${showBottom ? '' : 'opacity-20'}`}>
-            {showBottom && invoices[1] && <MiniInvoice inv={invoices[1]} businessName={businessName} />}
+            {showBottom && models[1] && <MiniInvoice model={models[1]} businessName={businessName} />}
           </div>
         </div>
       </div>
@@ -334,33 +413,31 @@ function InvoicePreview({ mode, invoices, businessName }: { mode: InvoicePrintMo
   )
 }
 
-function MiniInvoice({ inv, businessName }: { inv?: PrintableInvoice; businessName: string }) {
-  if (!inv) return <div className="h-full grid place-items-center text-[8px] text-muted-foreground">blank</div>
+function MiniInvoice({ model, businessName }: { model?: InvoicePrintModel; businessName: string }) {
+  if (!model) return <div className="h-full grid place-items-center text-[8px] text-muted-foreground">blank</div>
   return (
-    <div className="h-full flex flex-col text-[7px] leading-tight">
+    <div className="h-full flex flex-col text-[7px] leading-tight text-black">
       <div className="font-bold text-[8px]">{businessName}</div>
-      <div className="text-[6px] text-muted-foreground">{inv.invoiceNo}</div>
+      <div className="text-[6px] text-muted-foreground">{model.invoiceNo}</div>
       <div className="mt-1 flex-1 space-y-0.5">
-        {inv.items.slice(0, 3).map((it, i) => (
-          <div key={i} className="flex justify-between">
-            <span className="truncate">{it.productName}</span>
-            <span className="whitespace-nowrap">{it.qty}x</span>
+        {model.lines.slice(0, 3).map((line, i) => (
+          <div key={i} className="flex justify-between gap-1">
+            <span className="truncate">{line.productName}</span>
+            <span className="whitespace-nowrap">{model.hasReturns ? `${line.netQty} net` : `${line.soldQty}x`}</span>
           </div>
         ))}
-        {inv.items.length > 3 && <div className="text-[6px] text-muted-foreground">+{inv.items.length - 3} more</div>}
+        {model.lines.length > 3 && <div className="text-[6px] text-muted-foreground">+{model.lines.length - 3} more</div>}
       </div>
-      <div className="mt-1 font-bold border-t border-foreground/20 pt-0.5">Total: Rs {(Number(inv.total) / 100).toFixed(0)}</div>
+      <div className="mt-1 font-bold border-t border-foreground/20 pt-0.5">Total: Rs {(Number(model.netPayablePaisas) / 100).toFixed(0)}</div>
     </div>
   )
 }
 
 // ─── Measurement container — renders invoice content off-screen for height measurement ───
 // Uses inline styles that mimic the print CSS so the measurement is accurate in screen media.
-function MeasurementInvoice({ inv, businessName }: { inv: PrintableInvoice; businessName: string }) {
-  if (!inv) return null
-  const paid = BigInt(inv.paidAmount)
-  const total = BigInt(inv.total)
-  const outstanding = total - paid
+function MeasurementInvoice({ model, businessName }: { model: InvoicePrintModel; businessName: string }) {
+  if (!model) return null
+  const cell = { border: '0.5pt solid #999', padding: '0.8mm 1.5mm', textAlign: 'right' as const }
 
   return (
     <div style={{
@@ -378,23 +455,23 @@ function MeasurementInvoice({ inv, businessName }: { inv: PrintableInvoice; busi
           <div style={{ fontSize: '13pt', fontWeight: 700 }}>{businessName}</div>
         </div>
         <div style={{ textAlign: 'right' }}>
-          <div style={{ fontSize: '11pt', fontWeight: 700 }}>INVOICE</div>
-          <div style={{ fontSize: '10pt', fontWeight: 600 }}>{inv.invoiceNo}</div>
-          <div style={{ display: 'inline-block', fontSize: '7pt', fontWeight: 600, padding: '0.5mm 1.5mm', border: '0.5pt solid #000', borderRadius: '1mm' }}>{inv.invoiceType}</div>
+          <div style={{ fontSize: '11pt', fontWeight: 700 }}>{model.documentTitle}</div>
+          <div style={{ fontSize: '10pt', fontWeight: 600 }}>{model.invoiceNo}</div>
+          <div style={{ display: 'inline-block', fontSize: '7pt', fontWeight: 600, padding: '0.5mm 1.5mm', border: '0.5pt solid #000', borderRadius: '1mm' }}>{model.channelLabel}</div>
         </div>
       </div>
 
       {/* Meta */}
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: '4mm', marginBottom: '2mm', fontSize: '8pt' }}>
         <div>
-          <div><strong>Date:</strong> {bizDate(inv.invoiceDate)}</div>
-          {inv.salesmanName && <div><strong>Salesman:</strong> {inv.salesmanName}</div>}
-          {inv.source && <div><strong>Source:</strong> {inv.source}</div>}
+          <div><strong>Date:</strong> {bizDate(model.invoiceDate)}</div>
+          {model.sellerName && <div><strong>Seller:</strong> {model.sellerName}</div>}
+          {model.source && <div><strong>Source:</strong> {model.source}</div>}
         </div>
         <div>
-          {inv.customerName && <div><strong>Customer:</strong> {inv.customerName}</div>}
-          {inv.customerPhone && <div><strong>Phone:</strong> {inv.customerPhone}</div>}
-          {inv.customerAddress && <div><strong>Address:</strong> {inv.customerAddress}{inv.customerCity ? `, ${inv.customerCity}` : ''}</div>}
+          {model.customerName && <div><strong>Customer:</strong> {model.customerName}</div>}
+          {model.customerPhone && <div><strong>Phone:</strong> {model.customerPhone}</div>}
+          {model.customerAddress && <div><strong>Address:</strong> {model.customerAddress}{model.customerCity ? `, ${model.customerCity}` : ''}</div>}
         </div>
       </div>
 
@@ -403,20 +480,24 @@ function MeasurementInvoice({ inv, businessName }: { inv: PrintableInvoice; busi
         <thead>
           <tr>
             <th style={{ background: '#f0f0f0', border: '0.5pt solid #000', padding: '1mm 1.5mm', textAlign: 'left', fontWeight: 600, fontSize: '8pt' }}>Item</th>
-            <th style={{ background: '#f0f0f0', border: '0.5pt solid #000', padding: '1mm 1.5mm', textAlign: 'right', fontWeight: 600, fontSize: '8pt' }}>Qty</th>
-            <th style={{ background: '#f0f0f0', border: '0.5pt solid #000', padding: '1mm 1.5mm', textAlign: 'right', fontWeight: 600, fontSize: '8pt' }}>Rate</th>
-            <th style={{ background: '#f0f0f0', border: '0.5pt solid #000', padding: '1mm 1.5mm', textAlign: 'right', fontWeight: 600, fontSize: '8pt' }}>Amount</th>
+            <th style={{ background: '#f0f0f0', ...cell, fontWeight: 600, fontSize: '8pt' }}>{model.hasReturns ? 'Sold' : 'Qty'}</th>
+            {model.hasReturns && <th style={{ background: '#f0f0f0', ...cell, fontWeight: 600, fontSize: '8pt' }}>Ret.</th>}
+            {model.hasReturns && <th style={{ background: '#f0f0f0', ...cell, fontWeight: 600, fontSize: '8pt' }}>Net</th>}
+            <th style={{ background: '#f0f0f0', ...cell, fontWeight: 600, fontSize: '8pt' }}>Rate</th>
+            <th style={{ background: '#f0f0f0', ...cell, fontWeight: 600, fontSize: '8pt' }}>Amount</th>
           </tr>
         </thead>
         <tbody>
-          {inv.items.map((it, i) => (
+          {model.lines.map((line, i) => (
             <tr key={i}>
-              <td style={{ border: '0.5pt solid #999', padding: '0.8mm 1.5mm', verticalAlign: 'top', width: '50%' }}>
-                {it.productName}{it.sku && <span style={{ color: '#666', fontSize: '7.5pt' }}> [{it.sku}]</span>}
+              <td style={{ border: '0.5pt solid #999', padding: '0.8mm 1.5mm', verticalAlign: 'top' }}>
+                {line.productName}{line.sku && <span style={{ color: '#666', fontSize: '7.5pt' }}> [{line.sku}]</span>}
               </td>
-              <td style={{ border: '0.5pt solid #999', padding: '0.8mm 1.5mm', textAlign: 'right', width: '12%' }}>{it.qty}</td>
-              <td style={{ border: '0.5pt solid #999', padding: '0.8mm 1.5mm', textAlign: 'right', width: '19%' }}>{formatMoney(BigInt(it.unitPrice), false)}</td>
-              <td style={{ border: '0.5pt solid #999', padding: '0.8mm 1.5mm', textAlign: 'right', width: '19%' }}>{formatMoney(BigInt(it.lineTotal), false)}</td>
+              <td style={cell}>{line.soldQty}</td>
+              {model.hasReturns && <td style={cell}>{line.returnedQty}</td>}
+              {model.hasReturns && <td style={cell}>{line.netQty}</td>}
+              <td style={cell}>{formatMoney(BigInt(line.unitPricePaisas), false)}</td>
+              <td style={cell}>{formatMoney(BigInt(line.lineTotalPaisas), false)}</td>
             </tr>
           ))}
         </tbody>
@@ -424,22 +505,23 @@ function MeasurementInvoice({ inv, businessName }: { inv: PrintableInvoice; busi
 
       {/* Totals */}
       <div style={{ marginLeft: 'auto', width: '60%', fontSize: '8.5pt', marginBottom: '1.5mm' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.4mm 0' }}><span>Subtotal</span><span>{formatMoney(BigInt(inv.subtotal), false)}</span></div>
-        {BigInt(inv.discount) > 0n && <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.4mm 0', color: '#666' }}><span>Discount</span><span>-{formatMoney(BigInt(inv.discount), false)}</span></div>}
-        {inv.deliveryFee && BigInt(inv.deliveryFee) > 0n && <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.4mm 0' }}><span>Delivery Fee</span><span>{formatMoney(BigInt(inv.deliveryFee), false)}</span></div>}
-        <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1pt solid #000', borderBottom: '1pt solid #000', fontWeight: 700, fontSize: '10pt', padding: '1mm 0', margin: '0.5mm 0' }}><span>Grand Total</span><span>{formatMoney(total, false)}</span></div>
-        <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.4mm 0' }}><span>Paid</span><span>{formatMoney(paid, false)}</span></div>
-        {outstanding > 0n && <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.4mm 0', fontWeight: 600 }}><span>Outstanding</span><span>{formatMoney(outstanding, false)}</span></div>}
+        <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.4mm 0' }}><span>Subtotal</span><span>{formatMoney(BigInt(model.subtotalPaisas), false)}</span></div>
+        {BigInt(model.returnDeductionPaisas) > 0n && <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.4mm 0' }}><span>Less returns</span><span>-{formatMoney(BigInt(model.returnDeductionPaisas), false)}</span></div>}
+        {BigInt(model.discountPaisas) > 0n && <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.4mm 0', color: '#666' }}><span>Discount</span><span>-{formatMoney(BigInt(model.discountPaisas), false)}</span></div>}
+        {model.deliveryFeePaisas && BigInt(model.deliveryFeePaisas) > 0n && <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.4mm 0' }}><span>Delivery Fee</span><span>{formatMoney(BigInt(model.deliveryFeePaisas), false)}</span></div>}
+        <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1pt solid #000', borderBottom: '1pt solid #000', fontWeight: 700, fontSize: '10pt', padding: '1mm 0', margin: '0.5mm 0' }}><span>Net Payable</span><span>{formatMoney(BigInt(model.netPayablePaisas), false)}</span></div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.4mm 0' }}><span>Paid</span><span>{formatMoney(BigInt(model.paidPaisas), false)}</span></div>
+        {BigInt(model.balancePaisas) > 0n && <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.4mm 0', fontWeight: 600 }}><span>Balance</span><span>{formatMoney(BigInt(model.balancePaisas), false)}</span></div>}
       </div>
 
       {/* Payment summary */}
-      {inv.payments.length > 0 && (
+      {model.payments.length > 0 && (
         <div style={{ border: '0.5pt solid #999', padding: '1mm 1.5mm', fontSize: '7.5pt', marginBottom: '1.5mm' }}>
           <div style={{ fontWeight: 600, marginBottom: '0.5mm', fontSize: '8pt' }}>Payment Summary</div>
-          {inv.payments.map((p, i) => (
+          {model.payments.map((p, i) => (
             <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '0.2mm 0' }}>
               <span>[{p.accountCode}] {p.accountName}{p.isChange && ' (Change)'}</span>
-              <span>{formatMoney(BigInt(p.amount), false)}</span>
+              <span>{formatMoney(BigInt(p.amountPaisas), false)}</span>
             </div>
           ))}
         </div>
@@ -447,24 +529,31 @@ function MeasurementInvoice({ inv, businessName }: { inv: PrintableInvoice; busi
 
       {/* Footer */}
       <div style={{ marginTop: 'auto', borderTop: '0.5pt solid #999', paddingTop: '1mm', fontSize: '7.5pt', color: '#555', display: 'flex', justifyContent: 'space-between' }}>
-        <span style={{ fontStyle: 'italic' }}>{inv.memo || 'Thank you for your business!'}</span>
+        <span style={{ fontStyle: 'italic' }}>{model.memo || 'Thank you for your business!'}</span>
       </div>
     </div>
   )
 }
 
-function InvoicePrintRoot({ mode, invoices, businessName, businessContact }: { mode: InvoicePrintMode; invoices: PrintableInvoice[]; businessName: string; businessContact?: { phone?: string; address?: string; email?: string } | null }) {
+function InvoicePrintRoot({ mode, models, businessName, businessContact }: { mode: InvoicePrintMode; models: InvoicePrintModel[]; businessName: string; businessContact?: { phone?: string; address?: string; email?: string } | null }) {
   const isHalf = mode === 'single'
-  const isFullA4 = mode === 'full-a4'
   const showTop = mode === 'single' || mode === 'two-up' || mode === 'top-half'
   const showBottom = mode === 'two-up' || mode === 'bottom-half'
 
-  if (isFullA4) {
+  if (mode === 'thermal') {
+    return (
+      <div className="invoice-print-root invoice-print-root-thermal hidden print:block">
+        <ThermalReceipt model={models[0]} businessName={businessName} businessContact={businessContact} />
+      </div>
+    )
+  }
+
+  if (mode === 'full-a4') {
     // Full A4 — single invoice uses entire page
     return (
       <div className="invoice-print-root hidden print:block">
         <div className="a4-page a4-single">
-          <FullA4Invoice inv={invoices[0]} businessName={businessName} businessContact={businessContact} />
+          <InvoiceDocument model={models[0]} variant="full" businessName={businessName} businessContact={businessContact} />
         </div>
       </div>
     )
@@ -474,19 +563,19 @@ function InvoicePrintRoot({ mode, invoices, businessName, businessContact }: { m
     <div className="invoice-print-root hidden print:block">
       {isHalf ? (
         <div className="a4-page">
-          <div className="a4-half a4-half-top"><HalfA4Invoice inv={invoices[0]} businessName={businessName} businessContact={businessContact} /></div>
+          <div className="a4-half a4-half-top"><InvoiceDocument model={models[0]} variant="half" businessName={businessName} businessContact={businessContact} /></div>
           <div className="a4-half a4-half-bottom a4-half-blank" />
         </div>
       ) : (
         <div className="a4-page">
           {showTop ? (
             <div className="a4-half a4-half-top">
-              <HalfA4Invoice inv={invoices[0]} businessName={businessName} businessContact={businessContact} />
+              <InvoiceDocument model={models[0]} variant="half" businessName={businessName} businessContact={businessContact} />
             </div>
           ) : <div className="a4-half a4-half-top a4-half-blank" />}
           {showBottom ? (
             <div className="a4-half a4-half-bottom">
-              {invoices[1] && <HalfA4Invoice inv={invoices[1]} businessName={businessName} businessContact={businessContact} />}
+              {models[1] && <InvoiceDocument model={models[1]} variant="half" businessName={businessName} businessContact={businessContact} />}
             </div>
           ) : <div className="a4-half a4-half-bottom a4-half-blank" />}
         </div>
@@ -495,20 +584,25 @@ function InvoicePrintRoot({ mode, invoices, businessName, businessContact }: { m
   )
 }
 
-function invoiceDocumentTitle(type: PrintableInvoice['invoiceType']) {
-  if (type === 'ONLINE') return 'ONLINE ORDER'
-  if (type === 'OFC') return 'OFC INVOICE'
-  return 'SALE INVOICE'
-}
-
-function HalfA4Invoice({ inv, businessName, businessContact }: { inv: PrintableInvoice; businessName: string; businessContact?: { phone?: string; address?: string; email?: string } | null }) {
-  if (!inv) return null
-  const paid = BigInt(inv.paidAmount)
-  const total = BigInt(inv.total)
-  const outstanding = total - paid
+/**
+ * Half-A4 and full-A4 share one document body: only the page box differs, so
+ * the two sheet sizes can never drift apart in content.
+ */
+function InvoiceDocument({
+  model,
+  variant,
+  businessName,
+  businessContact,
+}: {
+  model?: InvoicePrintModel
+  variant: 'half' | 'full'
+  businessName: string
+  businessContact?: { phone?: string; address?: string; email?: string } | null
+}) {
+  if (!model) return null
 
   return (
-    <div className="invoice-half">
+    <div className={variant === 'half' ? 'invoice-half' : 'invoice-full-a4'}>
       <div className="inv-header">
         <div className="inv-business">
           <div className="inv-business-name">{businessName}</div>
@@ -517,173 +611,206 @@ function HalfA4Invoice({ inv, businessName, businessContact }: { inv: PrintableI
           {businessContact?.email && <div className="inv-business-contact">{businessContact.email}</div>}
         </div>
         <div className="inv-title-block">
-          <div className="inv-title">{invoiceDocumentTitle(inv.invoiceType)}</div>
-          <div className="inv-no" data-num>{inv.invoiceNo}</div>
-          <div className="inv-type-badge">{inv.invoiceType}</div>
+          <div className="inv-title">{model.documentTitle}</div>
+          <div className="inv-no" data-num>{model.invoiceNo}</div>
+          <div className="inv-type-badge">{model.channelLabel}</div>
         </div>
       </div>
 
       <div className="inv-meta">
         <div className="inv-meta-col">
-          <div className="inv-meta-row"><span className="inv-meta-label">Date:</span><span className="inv-meta-value" data-num>{bizDate(inv.invoiceDate)}</span></div>
-          {inv.salesmanName && <div className="inv-meta-row"><span className="inv-meta-label">Salesman:</span><span className="inv-meta-value">{inv.salesmanName}</span></div>}
-          {inv.source && <div className="inv-meta-row"><span className="inv-meta-label">Source:</span><span className="inv-meta-value">{inv.source}</span></div>}
+          <div className="inv-meta-row"><span className="inv-meta-label">Date:</span><span className="inv-meta-value" data-num>{bizFormat(model.invoiceDate, 'datetime')}</span></div>
+          {model.sellerName && (
+            <div className="inv-meta-row">
+              <span className="inv-meta-label">Seller:</span>
+              <span className="inv-meta-value">{model.sellerName}{model.sellerRoleLabel ? ` (${model.sellerRoleLabel})` : ''}</span>
+            </div>
+          )}
+          {model.source && <div className="inv-meta-row"><span className="inv-meta-label">Source:</span><span className="inv-meta-value">{model.source}</span></div>}
+          {model.riderName && <div className="inv-meta-row"><span className="inv-meta-label">Rider:</span><span className="inv-meta-value">{model.riderName}</span></div>}
         </div>
         <div className="inv-meta-col">
-          {inv.customerName && <div className="inv-meta-row"><span className="inv-meta-label">Customer:</span><span className="inv-meta-value">{inv.customerName}</span></div>}
-          {inv.customerPhone && <div className="inv-meta-row"><span className="inv-meta-label">Phone:</span><span className="inv-meta-value" data-num>{inv.customerPhone}</span></div>}
-          {inv.customerAddress && <div className="inv-meta-row"><span className="inv-meta-label">Address:</span><span className="inv-meta-value">{inv.customerAddress}{inv.customerCity ? `, ${inv.customerCity}` : ''}</span></div>}
+          {model.customerName && <div className="inv-meta-row"><span className="inv-meta-label">Customer:</span><span className="inv-meta-value">{model.customerName}</span></div>}
+          {model.customerPhone && <div className="inv-meta-row"><span className="inv-meta-label">Phone:</span><span className="inv-meta-value" data-num>{model.customerPhone}</span></div>}
+          {model.customerAddress && <div className="inv-meta-row"><span className="inv-meta-label">Address:</span><span className="inv-meta-value">{model.customerAddress}{model.customerCity ? `, ${model.customerCity}` : ''}</span></div>}
         </div>
       </div>
 
-      <table className="inv-items-table">
+      <table className={`inv-items-table${model.hasReturns ? ' inv-items-table-returns' : ''}`}>
         <thead>
           <tr>
             <th className="inv-col-item">Item</th>
-            <th className="inv-col-qty">Qty</th>
+            <th className="inv-col-qty">{model.hasReturns ? 'Sold' : 'Qty'}</th>
+            {model.hasReturns && <th className="inv-col-qty">Ret.</th>}
+            {model.hasReturns && <th className="inv-col-qty">Net</th>}
             <th className="inv-col-rate">Rate</th>
             <th className="inv-col-total">Amount</th>
           </tr>
         </thead>
         <tbody>
-          {inv.items.map((it, i) => (
+          {model.lines.map((line, i) => (
             <tr key={i}>
               <td className="inv-col-item">
-                {it.productName}
-                {it.sku && <span className="inv-sku"> [{it.sku}]</span>}
+                {line.productName}
+                {line.sku && <span className="inv-sku"> [{line.sku}]</span>}
               </td>
-              <td className="inv-col-qty" data-num>{it.qty}</td>
-              <td className="inv-col-rate" data-num>{formatMoney(BigInt(it.unitPrice), false)}</td>
-              <td className="inv-col-total" data-num>{formatMoney(BigInt(it.lineTotal), false)}</td>
+              <td className="inv-col-qty" data-num>{line.soldQty}</td>
+              {model.hasReturns && <td className="inv-col-qty" data-num>{line.returnedQty}</td>}
+              {model.hasReturns && <td className="inv-col-qty" data-num>{line.netQty}</td>}
+              <td className="inv-col-rate" data-num>{formatMoney(BigInt(line.unitPricePaisas), false)}</td>
+              <td className="inv-col-total" data-num>{formatMoney(BigInt(line.lineTotalPaisas), false)}</td>
             </tr>
           ))}
         </tbody>
       </table>
 
       <div className="inv-totals">
-        <div className="inv-totals-row"><span>Subtotal</span><span data-num>{formatMoney(BigInt(inv.subtotal), false)}</span></div>
-        {BigInt(inv.discount) > 0n && <div className="inv-totals-row inv-totals-discount"><span>Discount</span><span data-num>-{formatMoney(BigInt(inv.discount), false)}</span></div>}
-        {inv.deliveryFee && BigInt(inv.deliveryFee) > 0n && <div className="inv-totals-row"><span>Delivery Fee</span><span data-num>{formatMoney(BigInt(inv.deliveryFee), false)}</span></div>}
-        <div className="inv-totals-row inv-totals-grand"><span>Grand Total</span><span data-num>{formatMoney(total, false)}</span></div>
-        <div className="inv-totals-row"><span>Paid</span><span data-num>{formatMoney(paid, false)}</span></div>
-        {outstanding > 0n && <div className="inv-totals-row inv-totals-outstanding"><span>Outstanding</span><span data-num>{formatMoney(outstanding, false)}</span></div>}
-        {inv.changeAmount && BigInt(inv.changeAmount) > 0n && <div className="inv-totals-row"><span>Change</span><span data-num>{formatMoney(BigInt(inv.changeAmount), false)}</span></div>}
-        {inv.codAmount && BigInt(inv.codAmount) > 0n && <div className="inv-totals-row inv-totals-cod"><span>COD Amount</span><span data-num>{formatMoney(BigInt(inv.codAmount), false)}</span></div>}
+        <div className="inv-totals-row"><span>Subtotal</span><span data-num>{formatMoney(BigInt(model.subtotalPaisas), false)}</span></div>
+        {BigInt(model.returnDeductionPaisas) > 0n && <div className="inv-totals-row inv-totals-discount"><span>Less returns</span><span data-num>-{formatMoney(BigInt(model.returnDeductionPaisas), false)}</span></div>}
+        {BigInt(model.discountPaisas) > 0n && <div className="inv-totals-row inv-totals-discount"><span>Discount</span><span data-num>-{formatMoney(BigInt(model.discountPaisas), false)}</span></div>}
+        {model.deliveryFeePaisas && BigInt(model.deliveryFeePaisas) > 0n && <div className="inv-totals-row"><span>Delivery Fee</span><span data-num>{formatMoney(BigInt(model.deliveryFeePaisas), false)}</span></div>}
+        <div className="inv-totals-row inv-totals-grand"><span>Net Payable</span><span data-num>{formatMoney(BigInt(model.netPayablePaisas), false)}</span></div>
+        <div className="inv-totals-row"><span>Paid</span><span data-num>{formatMoney(BigInt(model.paidPaisas), false)}</span></div>
+        {BigInt(model.balancePaisas) > 0n && <div className="inv-totals-row inv-totals-outstanding"><span>Balance</span><span data-num>{formatMoney(BigInt(model.balancePaisas), false)}</span></div>}
+        {model.changePaisas && BigInt(model.changePaisas) > 0n && <div className="inv-totals-row"><span>Change</span><span data-num>{formatMoney(BigInt(model.changePaisas), false)}</span></div>}
+        {model.codAmountPaisas && BigInt(model.codAmountPaisas) > 0n && <div className="inv-totals-row inv-totals-cod"><span>COD Amount</span><span data-num>{formatMoney(BigInt(model.codAmountPaisas), false)}</span></div>}
       </div>
 
-      {inv.payments.length > 0 && (
+      {model.payments.length > 0 && (
         <div className="inv-payments">
           <div className="inv-payments-title">Payment Summary</div>
-          {inv.payments.map((p, i) => (
+          {model.payments.map((p, i) => (
             <div key={i} className="inv-payment-row">
               <span>[{p.accountCode}] {p.accountName}{p.isChange && ' (Change)'}</span>
-              <span data-num>{formatMoney(BigInt(p.amount), false)}</span>
+              <span data-num>{formatMoney(BigInt(p.amountPaisas), false)}</span>
             </div>
           ))}
         </div>
       )}
 
-      {inv.isReturned && <div className="inv-status-banner inv-status-returned">RETURNED</div>}
-      {inv.isCancelled && <div className="inv-status-banner inv-status-cancelled">CANCELLED</div>}
-      {outstanding === 0n && !inv.isReturned && !inv.isCancelled && <div className="inv-status-banner inv-status-paid">PAID</div>}
+      {model.internalCommission && <InternalCommissionBlock commission={model.internalCommission} />}
+
+      {model.isReturned && <div className="inv-status-banner inv-status-returned">RETURNED</div>}
+      {model.isCancelled && <div className="inv-status-banner inv-status-cancelled">CANCELLED</div>}
+      {BigInt(model.balancePaisas) === 0n && !model.isReturned && !model.isCancelled && <div className="inv-status-banner inv-status-paid">PAID</div>}
 
       <div className="inv-footer">
-        <div className="inv-footer-message">{inv.memo || 'Thank you for your business!'}</div>
+        <div className="inv-footer-message">{model.memo || 'Thank you for your business!'}</div>
         <div className="inv-footer-timestamp" data-num>Printed: {bizFormat(new Date().toISOString(), 'datetime')}</div>
       </div>
     </div>
   )
 }
 
-function FullA4Invoice({ inv, businessName, businessContact }: { inv: PrintableInvoice; businessName: string; businessContact?: { phone?: string; address?: string; email?: string } | null }) {
-  if (!inv) return null
-  const paid = BigInt(inv.paidAmount)
-  const total = BigInt(inv.total)
-  const outstanding = total - paid
+/** Owner copy only — rendered solely when commission was explicitly included. */
+function InternalCommissionBlock({ commission }: { commission: NonNullable<InvoicePrintModel['internalCommission']> }) {
+  return (
+    <div className="inv-commission">
+      <div className="inv-commission-title">Internal copy — commission (not for customer)</div>
+      {commission.lines.map((line, i) => (
+        <div key={i} className="inv-payment-row">
+          <span>{line.productName} — {line.netEligibleQty} × {formatMoney(BigInt(line.ratePaisas), false)}</span>
+          <span data-num>{formatMoney(BigInt(line.commissionPaisas), false)}</span>
+        </div>
+      ))}
+      <div className="inv-payment-row inv-commission-total">
+        <span>Total commission</span>
+        <span data-num>{formatMoney(BigInt(commission.totalPaisas), false)}</span>
+      </div>
+    </div>
+  )
+}
+
+/** 80mm roll receipt — same model, single-column layout. */
+function ThermalReceipt({
+  model,
+  businessName,
+  businessContact,
+}: {
+  model?: InvoicePrintModel
+  businessName: string
+  businessContact?: { phone?: string; address?: string; email?: string } | null
+}) {
+  if (!model) return null
 
   return (
-    <div className="invoice-full-a4">
-      <div className="inv-header">
-        <div className="inv-business">
-          <div className="inv-business-name">{businessName}</div>
-          {businessContact?.phone && <div className="inv-business-contact">{businessContact.phone}</div>}
-          {businessContact?.address && <div className="inv-business-contact">{businessContact.address}</div>}
-          {businessContact?.email && <div className="inv-business-contact">{businessContact.email}</div>}
-        </div>
-        <div className="inv-title-block">
-          <div className="inv-title">{invoiceDocumentTitle(inv.invoiceType)}</div>
-          <div className="inv-no" data-num>{inv.invoiceNo}</div>
-          <div className="inv-type-badge">{inv.invoiceType}</div>
-        </div>
+    <div className="thermal-receipt">
+      <div className="thr-head">
+        <div className="thr-business">{businessName}</div>
+        {businessContact?.phone && <div className="thr-line">{businessContact.phone}</div>}
+        {businessContact?.address && <div className="thr-line">{businessContact.address}</div>}
+        <div className="thr-title">{model.documentTitle}</div>
       </div>
 
-      <div className="inv-meta">
-        <div className="inv-meta-col">
-          <div className="inv-meta-row"><span className="inv-meta-label">Date:</span><span className="inv-meta-value" data-num>{bizDate(inv.invoiceDate)}</span></div>
-          {inv.salesmanName && <div className="inv-meta-row"><span className="inv-meta-label">Salesman:</span><span className="inv-meta-value">{inv.salesmanName}</span></div>}
-          {inv.source && <div className="inv-meta-row"><span className="inv-meta-label">Source:</span><span className="inv-meta-value">{inv.source}</span></div>}
-        </div>
-        <div className="inv-meta-col">
-          {inv.customerName && <div className="inv-meta-row"><span className="inv-meta-label">Customer:</span><span className="inv-meta-value">{inv.customerName}</span></div>}
-          {inv.customerPhone && <div className="inv-meta-row"><span className="inv-meta-label">Phone:</span><span className="inv-meta-value" data-num>{inv.customerPhone}</span></div>}
-          {inv.customerAddress && <div className="inv-meta-row"><span className="inv-meta-label">Address:</span><span className="inv-meta-value">{inv.customerAddress}{inv.customerCity ? `, ${inv.customerCity}` : ''}</span></div>}
-        </div>
+      <div className="thr-meta">
+        <div className="thr-row"><span>Invoice</span><span data-num>{model.invoiceNo}</span></div>
+        <div className="thr-row"><span>Date</span><span data-num>{bizFormat(model.invoiceDate, 'datetime')}</span></div>
+        <div className="thr-row"><span>Channel</span><span>{model.channelLabel}</span></div>
+        {model.sellerName && <div className="thr-row"><span>Seller</span><span>{model.sellerName}{model.sellerRoleLabel ? ` (${model.sellerRoleLabel})` : ''}</span></div>}
+        {model.customerName && <div className="thr-row"><span>Customer</span><span>{model.customerName}</span></div>}
+        {model.customerPhone && <div className="thr-row"><span>Phone</span><span data-num>{model.customerPhone}</span></div>}
       </div>
 
-      <table className="inv-items-table">
-        <thead>
-          <tr>
-            <th className="inv-col-item">Item</th>
-            <th className="inv-col-qty">Qty</th>
-            <th className="inv-col-rate">Rate</th>
-            <th className="inv-col-total">Amount</th>
-          </tr>
-        </thead>
-        <tbody>
-          {inv.items.map((it, i) => (
-            <tr key={i}>
-              <td className="inv-col-item">
-                {it.productName}
-                {it.sku && <span className="inv-sku"> [{it.sku}]</span>}
-              </td>
-              <td className="inv-col-qty" data-num>{it.qty}</td>
-              <td className="inv-col-rate" data-num>{formatMoney(BigInt(it.unitPrice), false)}</td>
-              <td className="inv-col-total" data-num>{formatMoney(BigInt(it.lineTotal), false)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <div className="thr-rule" />
 
-      <div className="inv-totals">
-        <div className="inv-totals-row"><span>Subtotal</span><span data-num>{formatMoney(BigInt(inv.subtotal), false)}</span></div>
-        {BigInt(inv.discount) > 0n && <div className="inv-totals-row inv-totals-discount"><span>Discount</span><span data-num>-{formatMoney(BigInt(inv.discount), false)}</span></div>}
-        {inv.deliveryFee && BigInt(inv.deliveryFee) > 0n && <div className="inv-totals-row"><span>Delivery Fee</span><span data-num>{formatMoney(BigInt(inv.deliveryFee), false)}</span></div>}
-        <div className="inv-totals-row inv-totals-grand"><span>Grand Total</span><span data-num>{formatMoney(total, false)}</span></div>
-        <div className="inv-totals-row"><span>Paid</span><span data-num>{formatMoney(paid, false)}</span></div>
-        {outstanding > 0n && <div className="inv-totals-row inv-totals-outstanding"><span>Outstanding</span><span data-num>{formatMoney(outstanding, false)}</span></div>}
-        {inv.changeAmount && BigInt(inv.changeAmount) > 0n && <div className="inv-totals-row"><span>Change</span><span data-num>{formatMoney(BigInt(inv.changeAmount), false)}</span></div>}
-        {inv.codAmount && BigInt(inv.codAmount) > 0n && <div className="inv-totals-row inv-totals-cod"><span>COD Amount</span><span data-num>{formatMoney(BigInt(inv.codAmount), false)}</span></div>}
-      </div>
-
-      {inv.payments.length > 0 && (
-        <div className="inv-payments">
-          <div className="inv-payments-title">Payment Summary</div>
-          {inv.payments.map((p, i) => (
-            <div key={i} className="inv-payment-row">
-              <span>[{p.accountCode}] {p.accountName}{p.isChange && ' (Change)'}</span>
-              <span data-num>{formatMoney(BigInt(p.amount), false)}</span>
+      <div className="thr-items">
+        {model.lines.map((line, i) => (
+          <div key={i} className="thr-item">
+            <div className="thr-item-name">{line.productName}</div>
+            <div className="thr-row">
+              <span data-num>
+                {model.hasReturns
+                  ? `${line.soldQty} - ${line.returnedQty} = ${line.netQty} × ${formatMoney(BigInt(line.unitPricePaisas), false)}`
+                  : `${line.soldQty} × ${formatMoney(BigInt(line.unitPricePaisas), false)}`}
+              </span>
+              <span data-num>{formatMoney(BigInt(line.lineTotalPaisas), false)}</span>
             </div>
-          ))}
-        </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="thr-rule" />
+
+      <div className="thr-totals">
+        <div className="thr-row"><span>Subtotal</span><span data-num>{formatMoney(BigInt(model.subtotalPaisas), false)}</span></div>
+        {BigInt(model.returnDeductionPaisas) > 0n && <div className="thr-row"><span>Less returns</span><span data-num>-{formatMoney(BigInt(model.returnDeductionPaisas), false)}</span></div>}
+        {BigInt(model.discountPaisas) > 0n && <div className="thr-row"><span>Discount</span><span data-num>-{formatMoney(BigInt(model.discountPaisas), false)}</span></div>}
+        <div className="thr-row thr-grand"><span>Net Payable</span><span data-num>{formatMoney(BigInt(model.netPayablePaisas), false)}</span></div>
+        <div className="thr-row"><span>Paid</span><span data-num>{formatMoney(BigInt(model.paidPaisas), false)}</span></div>
+        {BigInt(model.balancePaisas) > 0n && <div className="thr-row"><span>Balance</span><span data-num>{formatMoney(BigInt(model.balancePaisas), false)}</span></div>}
+        {model.codAmountPaisas && BigInt(model.codAmountPaisas) > 0n && <div className="thr-row"><span>COD</span><span data-num>{formatMoney(BigInt(model.codAmountPaisas), false)}</span></div>}
+      </div>
+
+      {model.payments.length > 0 && (
+        <>
+          <div className="thr-rule" />
+          <div className="thr-totals">
+            {model.payments.map((p, i) => (
+              <div key={i} className="thr-row"><span>{p.accountName}{p.isChange ? ' (Change)' : ''}</span><span data-num>{formatMoney(BigInt(p.amountPaisas), false)}</span></div>
+            ))}
+          </div>
+        </>
       )}
 
-      {inv.isReturned && <div className="inv-status-banner inv-status-returned">RETURNED</div>}
-      {inv.isCancelled && <div className="inv-status-banner inv-status-cancelled">CANCELLED</div>}
-      {outstanding === 0n && !inv.isReturned && !inv.isCancelled && <div className="inv-status-banner inv-status-paid">PAID</div>}
+      {model.internalCommission && (
+        <>
+          <div className="thr-rule" />
+          <div className="thr-totals">
+            <div className="thr-item-name">Internal copy — commission</div>
+            {model.internalCommission.lines.map((line, i) => (
+              <div key={i} className="thr-row"><span>{line.productName} × {line.netEligibleQty}</span><span data-num>{formatMoney(BigInt(line.commissionPaisas), false)}</span></div>
+            ))}
+            <div className="thr-row thr-grand"><span>Total</span><span data-num>{formatMoney(BigInt(model.internalCommission.totalPaisas), false)}</span></div>
+          </div>
+        </>
+      )}
 
-      <div className="inv-footer">
-        <div className="inv-footer-message">{inv.memo || 'Thank you for your business!'}</div>
-        <div className="inv-footer-timestamp" data-num>Printed: {bizFormat(new Date().toISOString(), 'datetime')}</div>
+      <div className="thr-rule" />
+      <div className="thr-foot">
+        <div>{model.memo || 'Thank you for your business!'}</div>
+        {model.isReturned && <div className="thr-status">RETURNED</div>}
+        {model.isCancelled && <div className="thr-status">CANCELLED</div>}
+        <div data-num>Printed: {bizFormat(new Date().toISOString(), 'datetime')}</div>
       </div>
     </div>
   )
@@ -721,6 +848,10 @@ function InvoicePrintStyles() {
       .invoice-print-root .inv-col-item { width: 52%; text-align: left; }
       .invoice-print-root .inv-col-qty { width: 11%; text-align: right !important; }
       .invoice-print-root .inv-col-rate, .invoice-print-root .inv-col-total { width: 18.5%; text-align: right !important; }
+      /* Sold/returned/net needs two extra columns; narrow the item column to fit. */
+      .invoice-print-root .inv-items-table-returns .inv-col-item { width: 36%; }
+      .invoice-print-root .inv-items-table-returns .inv-col-qty { width: 9%; }
+      .invoice-print-root .inv-items-table-returns .inv-col-rate, .invoice-print-root .inv-items-table-returns .inv-col-total { width: 18.5%; }
       .invoice-print-root .inv-sku { color: #555; font-size: 6.5pt; }
       .invoice-print-root .inv-totals { width: 58%; margin: 2mm 0 1.5mm auto; font-size: 7.5pt; break-inside: avoid; page-break-inside: avoid; }
       .invoice-print-root .inv-totals-row, .invoice-print-root .inv-payment-row { display: flex; justify-content: space-between; gap: 4mm; padding: .35mm 0; }
@@ -728,9 +859,28 @@ function InvoicePrintStyles() {
       .invoice-print-root .inv-totals-discount, .invoice-print-root .inv-totals-outstanding { font-weight: 700; }
       .invoice-print-root .inv-payments { border: .2mm solid #888; padding: 1mm; font-size: 6.8pt; break-inside: avoid; page-break-inside: avoid; }
       .invoice-print-root .inv-payments-title { font-weight: 700; margin-bottom: .5mm; }
+      .invoice-print-root .inv-commission { border: .3mm dashed #000; padding: 1mm; margin-top: 1.5mm; font-size: 6.8pt; break-inside: avoid; page-break-inside: avoid; }
+      .invoice-print-root .inv-commission-title { font-weight: 700; margin-bottom: .5mm; }
+      .invoice-print-root .inv-commission-total { border-top: .2mm solid #000; margin-top: .5mm; padding-top: .5mm; font-weight: 700; }
       .invoice-print-root .inv-status-banner { margin-top: 1.5mm; border: .3mm solid #000; padding: .7mm; text-align: center; font-size: 7pt; font-weight: 700; }
       .invoice-print-root .inv-footer { display: flex; justify-content: space-between; gap: 4mm; border-top: .2mm solid #888; margin-top: 1.5mm; padding-top: 1mm; font-size: 6.5pt; color: #333; break-inside: avoid; page-break-inside: avoid; }
       .invoice-print-root .inv-footer-message { font-style: italic; }
+
+      /* ── 80mm thermal roll ── */
+      body.printing-invoice .invoice-print-root-thermal { width: 80mm; }
+      .invoice-print-root .thermal-receipt { width: 80mm; box-sizing: border-box; padding: 3mm 3mm 6mm; font: 8pt/1.3 'Courier New', monospace; color: #000; }
+      .invoice-print-root .thr-head { text-align: center; margin-bottom: 1.5mm; }
+      .invoice-print-root .thr-business { font-size: 11pt; font-weight: 700; }
+      .invoice-print-root .thr-line { font-size: 7pt; }
+      .invoice-print-root .thr-title { margin-top: 1mm; font-size: 8.5pt; font-weight: 700; letter-spacing: .3mm; }
+      .invoice-print-root .thr-row { display: flex; justify-content: space-between; gap: 2mm; }
+      .invoice-print-root .thr-row > span:last-child { text-align: right; white-space: nowrap; }
+      .invoice-print-root .thr-rule { border-top: .2mm dashed #000; margin: 1.5mm 0; }
+      .invoice-print-root .thr-item { margin-bottom: 1mm; }
+      .invoice-print-root .thr-item-name { font-weight: 700; overflow-wrap: anywhere; }
+      .invoice-print-root .thr-grand { border-top: .3mm solid #000; margin-top: 1mm; padding-top: 1mm; font-size: 9.5pt; font-weight: 700; }
+      .invoice-print-root .thr-foot { text-align: center; font-size: 7pt; }
+      .invoice-print-root .thr-status { margin-top: 1mm; font-weight: 700; letter-spacing: .4mm; }
     }
   `}</style>
 }

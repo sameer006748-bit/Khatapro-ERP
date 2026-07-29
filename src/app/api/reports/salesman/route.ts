@@ -22,7 +22,7 @@ import { NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth/authOptions'
 import { loadSessionUser, hasPermission } from '@/lib/auth/permissions'
-import { resolveSalesmanIdForUser } from '@/lib/sales/data-access'
+import { resolveSalesmanIdForUser, getSalesmanCommissionDetail } from '@/lib/sales/data-access'
 import {
   reportMySalesSummary,
   reportMySalesDetail,
@@ -94,10 +94,20 @@ export const GET = withObservability('/api/reports/salesman', async (req: Reques
         return NextResponse.json({
           rows: await reportMyReturns(bid, salesmanId, fromDate, toDate),
         })
-      case 'my-commission':
-        return NextResponse.json({
-          rows: await reportMyCommission(bid, salesmanId, fromDate, toDate),
-        })
+      case 'my-commission': {
+        // Item-level product commission is the primary view. The older
+        // percentage-based table is secondary: if that schema is missing the
+        // report still shows the per-product entries instead of failing.
+        const detail = await getSalesmanCommissionDetail(bid, salesmanId, fromDate, toDate)
+        let rows: any[] = []
+        let legacyReason: string | null = null
+        try {
+          rows = await reportMyCommission(bid, salesmanId, fromDate, toDate)
+        } catch {
+          legacyReason = 'Percentage-based commission history is unavailable on this database.'
+        }
+        return NextResponse.json({ rows, legacyReason, detail })
+      }
       default:
         return NextResponse.json({ error: 'UNKNOWN_SALESMAN_REPORT_TYPE' }, { status: 400 })
     }

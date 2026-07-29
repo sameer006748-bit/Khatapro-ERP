@@ -11,7 +11,7 @@ import { NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth/authOptions'
 import { loadSessionUser, hasPermission } from '@/lib/auth/permissions'
-import { getInvoice, resolveSalesmanIdForUser, verifyInvoiceOwnership } from '@/lib/sales/data-access'
+import { getInvoice, getBusinessIdentity, resolveSalesmanIdForUser, verifyInvoiceOwnership } from '@/lib/sales/data-access'
 import { withObservability } from '@/lib/observability'
 
 const getSale = async (
@@ -46,7 +46,10 @@ const getSale = async (
 
   const invoice = await getInvoice(su.businessId, id)
   if (!invoice) return NextResponse.json({ error: 'NOT_FOUND' }, { status: 404 })
-  return NextResponse.json({ invoice })
+  // Letterhead travels with the invoice so printed documents carry the real
+  // business identity instead of a hardcoded product name.
+  const business = await getBusinessIdentity(su.businessId)
+  return NextResponse.json({ invoice, business })
 }
 
 export const GET = withObservability('/api/sales/[id]', getSale)

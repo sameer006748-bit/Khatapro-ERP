@@ -14,10 +14,23 @@ import { bizDateString } from '@/lib/dates'
 import { getAccountByCode } from '@/lib/accounting/data-access'
 import {
   assertPhase9SaleFeatures,
+  assertMixedSaleReturnSupport,
+  salePostingRpcName,
 } from '@/lib/supabase/rpc-compatibility'
 import { probeTable } from '@/lib/supabase/phase-probe'
 import { resolveSupabaseUuid } from '@/lib/accounting/voucher-supabase'
-import { calculateCommissionEligibility } from '@/lib/sales/commission'
+import {
+  normalizeSaleLines,
+  computeSaleTotals,
+  validateSaleTotals,
+  computeStockEffects,
+  resolveSellerAttribution,
+  computeEarnedCommission,
+  SaleLineError,
+  type NormalizedSaleLine,
+  type SellerRole,
+} from '@/lib/sales/sale-engine'
+import { missingProductOptionalColumn } from '@/lib/products/schema-compatibility'
 
 const _p4cache = { lastChecked: 0, lastResult: false }
 
@@ -36,13 +49,59 @@ export type CustomerRow = {
 }
 export type InvoiceRow = { id: string; invoiceNo: string; invoiceType: string; invoiceDate: string; customerName: string | null; customerPhone?: string | null; customerAddress?: string | null; customerCity?: string | null; salesmanName: string | null; subtotal: string; discount?: string; total: string; paidAmount: string; status?: string; isCancelled: boolean; isReturned: boolean; memo?: string | null; items?: InvoiceItemRow[]; payments?: PaymentAllocationRow[] }
 export type InvoiceItemRow = { id: string; productId: string | null; productName: string; qty: number; returnedQty?: number; unitPrice: string; lineTotal: string; isTemporary: boolean }
+export type InvoiceCommissionRow = {
+  invoiceItemId: string
+  productId: string | null
+  productName: string
+  soldQty: number
+  returnedQty: number
+  netEligibleQty: number
+  ratePaisas: string
+  commissionPaisas: string
+  status: string
+  eventType: string
+  sellerName: string | null
+  sellerRole: SellerRole
+  paymentReference: string | null
+  createdAt: string | null
+}
 export type PaymentAllocationRow = { id: string; accountId?: string; accountCode?: string; accountName: string; amount: string; isChange?: boolean; direction?: string | null; paymentMode?: string | null }
+
+/**
+ * The deployed Phase-2 trigger writes its own event vocabulary
+ * (`eligibility` / `return_adjustment`, migration 00016) while the local engine
+ * writes `calculated` / `reversal`. Readers must not have to know which
+ * database they are on, so both are folded to the engine's names here. Anything
+ * unrecognised is passed through untouched rather than guessed at.
+ */
+function canonicalCommissionEventType(raw: string | null | undefined): string {
+  switch (raw) {
+    case 'eligibility': return 'calculated'
+    case 'return_adjustment': return 'reversal'
+    default: return raw ?? 'calculated'
+  }
+}
+
+export type PostSaleItemInput = {
+  productId?: string | null
+  productName: string
+  /** Pieces sold. Zero only for a referenced historical-return row. */
+  qty: number
+  /** Pieces handed back on this same bill, or against the referenced invoice item. */
+  returnedQty?: number
+  unitPrice: bigint
+  isTemporary?: boolean
+  /** Audit link when this row settles a return against an earlier invoice item. */
+  originalInvoiceItemId?: string | null
+}
 
 export type PostSaleInput = {
   businessId: string; invoiceType: string; invoiceDate: Date
-  items: Array<{ productId?: string | null; productName: string; qty: number; unitPrice: bigint; isTemporary?: boolean }>
+  items: PostSaleItemInput[]
   payments: Array<{ accountId: string; amount: bigint; isChange?: boolean }>
   salesmanId?: string | null; customerId?: string | null
+  /** Who earns the commission. OWNER means the Owner sold it personally. */
+  sellerRole?: SellerRole
   customerName?: string | null; customerPhone?: string | null; customerAddress?: string | null; customerCity?: string | null
   memo?: string | null; createdBy?: string | null; discount?: bigint; idempotencyKey?: string | null
 }
@@ -91,6 +150,33 @@ export async function resolveEffectiveSalesmanId(su: SessionUserInfo, clientSale
   return { ok: false, error: 'FORBIDDEN', status: 403 }
 }
 
+/**
+ * Server-authoritative seller attribution for every sale channel.
+ *
+ * An Owner/Admin must say explicitly whether the sale is their own or a named
+ * salesman's; there is no implicit fallback, so an Owner sale can never create
+ * a payable for an unrelated salesman. A salesman-scoped user always sells as
+ * themselves regardless of what the client sends.
+ */
+export async function resolveSaleSeller(
+  su: SessionUserInfo,
+  input: { sellerRole?: SellerRole | null; salesmanId?: string | null },
+): Promise<{ ok: true; salesmanId: string | null; sellerRole: SellerRole } | { ok: false; error: string; status: number }> {
+  const canAttributeAnySeller = su.permissions.has('can_view_sales')
+  const actorSalesmanId = canAttributeAnySeller
+    ? null
+    : await resolveSalesmanIdForUser(su.businessId, su.supabaseUserUuid, su.userId)
+
+  const resolved = resolveSellerAttribution({
+    sellerMode: input.sellerRole ?? null,
+    requestedSalesmanId: input.salesmanId ?? null,
+    actorCanAttributeAnySeller: canAttributeAnySeller,
+    actorSalesmanId,
+  })
+  if (!resolved.ok) return resolved
+  return { ok: true, salesmanId: resolved.attribution.salesmanId, sellerRole: resolved.attribution.role }
+}
+
 export async function verifyInvoiceOwnership(businessId: string, invoiceId: string, salesmanId: string): Promise<boolean> {
   if (await isPhase4Live()) {
     const admin = getAdminSupabase()
@@ -103,37 +189,172 @@ export async function verifyInvoiceOwnership(businessId: string, invoiceId: stri
   return inv.salesmanId === salesmanId
 }
 
-export async function postSale(input: PostSaleInput): Promise<{ invoiceId: string; invoiceNo: string }> {
-  assertPhase9SaleFeatures({ discountPaisas: input.discount, idempotencyKey: input.idempotencyKey })
-  if (await isPhase4Live()) return postSaleViaSupabase(input)
-  return postSaleViaPrisma(input)
+/**
+ * Resolve the per-piece commission rate (paisas) for each product on the bill.
+ *
+ * When the migration-dependent `commission_rate` column is absent in
+ * production the rate is reported as unavailable (null) rather than silently
+ * rewritten to zero, so the caller can surface a precise setup message instead
+ * of a fabricated figure.
+ */
+export async function resolveProductCommissionRates(
+  businessId: string,
+  productIds: readonly string[],
+): Promise<{ rates: Map<string, bigint>; available: boolean }> {
+  const unique = [...new Set(productIds)]
+  const rates = new Map<string, bigint>()
+  if (unique.length === 0) return { rates, available: true }
+
+  if (await isPhase4Live()) {
+    const admin = getAdminSupabase()
+    const { data, error } = await admin
+      .from('products')
+      .select('id, commission_rate')
+      .eq('business_id', businessId)
+      .in('id', unique)
+    if (error) {
+      if (missingProductOptionalColumn(error) === 'commissionRate') return { rates, available: false }
+      throw new Error(`Supabase product commission rates: ${error.message}`)
+    }
+    for (const row of (data ?? []) as Array<{ id: string; commission_rate: unknown }>) {
+      rates.set(row.id, BigInt(Math.round(Number(row.commission_rate ?? 0))))
+    }
+    return { rates, available: true }
+  }
+
+  const products = await db.product.findMany({
+    where: { businessId, id: { in: unique } },
+    select: { id: true, commissionRate: true },
+  })
+  for (const product of products) rates.set(product.id, product.commissionRate ?? 0n)
+  return { rates, available: true }
 }
 
-async function postSaleViaSupabase(input: PostSaleInput): Promise<{ invoiceId: string; invoiceNo: string }> {
+/**
+ * Normalize a bill through the shared engine: same-bill/referenced returns,
+ * net quantities, totals, stock effects and commission all come from one place
+ * so Counter, Online, OFC and Other cannot drift apart.
+ */
+async function prepareSaleLines(input: PostSaleInput): Promise<{
+  lines: NormalizedSaleLine[]
+  commissionRatesAvailable: boolean
+}> {
+  const productIds = input.items.map((i) => i.productId).filter((id): id is string => Boolean(id))
+  const { rates, available } = await resolveProductCommissionRates(input.businessId, productIds)
+
+  // Referenced historical returns need the remaining returnable quantity of the
+  // original invoice item, which the engine enforces against.
+  const referencedIds = input.items
+    .map((i) => i.originalInvoiceItemId)
+    .filter((id): id is string => Boolean(id))
+  const remainingByItem = referencedIds.length > 0
+    ? await loadRemainingReturnableQty(input.businessId, referencedIds)
+    : new Map<string, number>()
+
+  const lines = normalizeSaleLines(
+    input.items.map((item) => ({
+      productId: item.productId ?? null,
+      productName: item.productName,
+      soldQty: item.qty,
+      returnedQty: item.returnedQty ?? 0,
+      unitPricePaisas: item.unitPrice,
+      commissionRatePaisas: item.productId ? (rates.get(item.productId) ?? 0n) : 0n,
+      isTemporary: item.isTemporary ?? false,
+      originalInvoiceItemId: item.originalInvoiceItemId ?? null,
+      remainingReturnableQty: item.originalInvoiceItemId
+        ? (remainingByItem.get(item.originalInvoiceItemId) ?? null)
+        : null,
+    })),
+  )
+  return { lines, commissionRatesAvailable: available }
+}
+
+async function loadRemainingReturnableQty(
+  businessId: string,
+  invoiceItemIds: readonly string[],
+): Promise<Map<string, number>> {
+  const remaining = new Map<string, number>()
+  if (await isPhase4Live()) {
+    const admin = getAdminSupabase()
+    const { data, error } = await admin
+      .from('invoice_items')
+      .select('id, qty, returned_qty')
+      .eq('business_id', businessId)
+      .in('id', [...invoiceItemIds])
+    if (error) throw new Error(`Supabase referenced invoice items: ${error.message}`)
+    for (const row of (data ?? []) as Array<{ id: string; qty: number; returned_qty: number | null }>) {
+      remaining.set(row.id, row.qty - (row.returned_qty ?? 0))
+    }
+    return remaining
+  }
+  const items = await db.invoiceItem.findMany({
+    where: { businessId, id: { in: [...invoiceItemIds] } },
+    select: { id: true, qty: true, returnedQty: true },
+  })
+  for (const item of items) remaining.set(item.id, item.qty - item.returnedQty)
+  return remaining
+}
+
+export async function postSale(input: PostSaleInput): Promise<{ invoiceId: string; invoiceNo: string }> {
+  assertPhase9SaleFeatures({ discountPaisas: input.discount, idempotencyKey: input.idempotencyKey })
+  const { lines } = await prepareSaleLines(input)
+  const totals = computeSaleTotals(lines, {
+    invoiceDiscountPaisas: input.discount ?? 0n,
+    paidPaisas: input.payments.filter((p) => !p.isChange).reduce((sum, p) => sum + p.amount, 0n),
+    changePaisas: input.payments.filter((p) => p.isChange).reduce((sum, p) => sum + p.amount, 0n),
+  })
+  const invalid = validateSaleTotals(totals)
+  if (invalid) throw new SaleLineError(invalid, -1)
+
+  if (await isPhase4Live()) return postSaleViaSupabase(input, lines)
+  return postSaleViaPrisma(input, lines)
+}
+
+async function postSaleViaSupabase(
+  input: PostSaleInput,
+  lines: NormalizedSaleLine[],
+): Promise<{ invoiceId: string; invoiceNo: string }> {
+  // Until migration 00033 is applied the deployed sale RPC carries no
+  // returned-quantity argument. Rather than post a mixed bill as a plain sale
+  // (which would overstate stock-out, revenue and commission), fail closed with
+  // an owner-actionable message.
+  assertMixedSaleReturnSupport({ hasReturnLines: lines.some((line) => line.returnedQty > 0) })
+
   const admin = getAdminSupabase()
   const supabaseCreatedBy = await resolveSupabaseUuid(input.createdBy)
-  const itemsJson = input.items.map((i) => ({ product_id: i.productId ?? null, product_name: i.productName, qty: i.qty, unit_price: i.unitPrice.toString(), is_temporary: i.isTemporary ?? false }))
+  // qty is the GROSS sold quantity and returned_qty the same-bill return, which
+  // is how 00033 keeps invoice_items.qty / returned_qty and sale_return_lines
+  // truthful. On the pre-00033 RPC no line can carry a return (asserted above),
+  // so netQty === soldQty and the extra key is ignored by the older function.
+  const itemsJson = lines.map((i) => ({ product_id: i.productId, product_name: i.productName, qty: i.soldQty, returned_qty: i.returnedQty, unit_price: i.unitPricePaisas.toString(), is_temporary: i.isTemporary }))
   const paymentsJson = input.payments.map((p) => ({ account_id: p.accountId, amount: p.amount.toString(), is_change: p.isChange ?? false }))
   const payload = { p_business_id: input.businessId, p_invoice_type: input.invoiceType, p_invoice_date: bizDateString(input.invoiceDate), p_items: itemsJson, p_payments: paymentsJson, p_salesman_id: input.salesmanId ?? null, p_customer_id: input.customerId ?? null, p_customer_name: input.customerName ?? null, p_customer_phone: input.customerPhone ?? null, p_customer_address: input.customerAddress ?? null, p_customer_city: input.customerCity ?? null, p_memo: input.memo ?? null, p_created_by: supabaseCreatedBy, p_idempotency_key: input.idempotencyKey ?? randomUUID() }
-  const { data, error } = await admin.rpc('post_sale_phase2_ledger', payload)
-  if (error) throw new Error(`Supabase post_sale_phase2_ledger: ${error.message}`)
+  const rpcName = salePostingRpcName()
+  const { data, error } = await admin.rpc(rpcName, payload)
+  if (error) throw new Error(`Supabase ${rpcName}: ${error.message}`)
   const invoiceId = data as string
   const { data: inv, error: invErr } = await admin.from('invoices').select('invoice_no').eq('id', invoiceId).single()
   if (invErr) throw new Error(`Supabase fetch invoice_no: ${invErr.message}`)
   return { invoiceId, invoiceNo: (inv as { invoice_no: string }).invoice_no }
 }
 
-async function postSaleViaPrisma(input: PostSaleInput): Promise<{ invoiceId: string; invoiceNo: string }> {
-  let subtotal = 0n
-  for (const item of input.items) { subtotal += item.unitPrice * BigInt(item.qty) }
-  const discount = input.discount ?? 0n
-  if (discount < 0n) throw new Error('Discount cannot be negative')
-  if (discount > subtotal) throw new Error('Discount cannot exceed subtotal')
-  const total = subtotal - discount
-  let paidAmount = 0n
-  for (const p of input.payments) { if (!p.isChange) paidAmount += p.amount }
-  let changeTotal = 0n
-  for (const p of input.payments) { if (p.isChange) changeTotal += p.amount }
+async function postSaleViaPrisma(
+  input: PostSaleInput,
+  lines: NormalizedSaleLine[],
+): Promise<{ invoiceId: string; invoiceNo: string }> {
+  const engineTotals = computeSaleTotals(lines, {
+    invoiceDiscountPaisas: input.discount ?? 0n,
+    paidPaisas: input.payments.filter((p) => !p.isChange).reduce((sum, p) => sum + p.amount, 0n),
+    changePaisas: input.payments.filter((p) => p.isChange).reduce((sum, p) => sum + p.amount, 0n),
+  })
+
+  // `subtotal` stays the gross sold value so the returns deduction remains a
+  // visible, auditable line on the document; `total` is the net payable.
+  const subtotal = engineTotals.grossSalesPaisas
+  const discount = engineTotals.invoiceDiscountPaisas
+  const total = engineTotals.netSalePaisas
+  const paidAmount = engineTotals.paidPaisas
+  const changeTotal = engineTotals.changePaisas
 
   const salesAccount = await getAccountByCode(input.businessId, '4010')
   if (!salesAccount) throw new Error('Sales account (4010) not found')
@@ -148,6 +369,22 @@ async function postSaleViaPrisma(input: PostSaleInput): Promise<{ invoiceId: str
   if (outstanding > 0n && arAccount) voucherLines.push({ accountId: arAccount.id, debit: outstanding, credit: 0n, memo: 'Outstanding' })
 
   const result = await db.$transaction(async (tx) => {
+    // ── Idempotency: a replayed submission must not create a second invoice,
+    //    a second stock movement or a second commission event. ──
+    if (input.idempotencyKey) {
+      const replay = await tx.commissionEvent.findFirst({
+        where: { businessId: input.businessId, idempotencyKey: `sale-${input.idempotencyKey}` },
+        select: { invoiceId: true },
+      })
+      if (replay) {
+        const existingInvoice = await tx.invoice.findFirst({
+          where: { id: replay.invoiceId, businessId: input.businessId },
+          select: { id: true, invoiceNo: true },
+        })
+        if (existingInvoice) return { invoiceId: existingInvoice.id, invoiceNo: existingInvoice.invoiceNo }
+      }
+    }
+
     const seq = await tx.identitySequence.upsert({
       where: { businessId_prefix: { businessId: input.businessId, prefix: 'INV' } },
       create: { businessId: input.businessId, prefix: 'INV', lastSeq: 1 },
@@ -170,30 +407,119 @@ async function postSaleViaPrisma(input: PostSaleInput): Promise<{ invoiceId: str
       data: { businessId: input.businessId, invoiceNo, invoiceType: input.invoiceType, invoiceDate: input.invoiceDate, customerId: input.customerId ?? null, salesmanId: input.salesmanId ?? null, customerName: input.customerName ?? null, customerPhone: input.customerPhone ?? null, customerAddress: input.customerAddress ?? null, customerCity: input.customerCity ?? null, subtotal, discount, total, paidAmount, voucherId: vch.id, memo: input.memo ?? null, createdBy: input.createdBy ?? null },
     })
 
-    const invoiceItemsCreated: Array<{ id: string; productId: string | null; qty: number }> = []
-    for (const item of input.items) {
-      let smId: string | undefined
-      if (item.productId) {
-        const product = await tx.product.findFirst({ where: { id: item.productId, businessId: input.businessId }, select: { currentStock: true } })
-        if (!product) throw new Error(`Product not found: ${item.productName}`)
-        const newStock = product.currentStock - item.qty
-        const sm = await tx.stockMovement.create({ data: { businessId: input.businessId, productId: item.productId, movementType: 'adjustment_out', quantity: item.qty, balanceAfter: newStock, reason: `Sale ${invoiceNo}`, createdBy: input.createdBy ?? null } })
-        smId = sm.id
-        await tx.product.update({ where: { id: item.productId }, data: { currentStock: { decrement: item.qty } } })
+    // ── Inventory: one net movement per product line ──
+    // Sold pieces decrease stock, returned pieces restore it; only the NET is
+    // applied, inside this same transaction, so a mixed bill can never leave a
+    // half-applied stock position behind.
+    const stockMovementByProduct = new Map<string, string>()
+    for (const effect of computeStockEffects(lines)) {
+      const product = await tx.product.findFirst({
+        where: { id: effect.productId, businessId: input.businessId },
+        select: { currentStock: true },
+      })
+      if (!product) throw new Error(`Product not found: ${effect.productName}`)
+      if (effect.netChange === 0) continue
+      const newStock = product.currentStock + effect.netChange
+      const movement = await tx.stockMovement.create({
+        data: {
+          businessId: input.businessId,
+          productId: effect.productId,
+          movementType: effect.netChange < 0 ? 'adjustment_out' : 'adjustment_in',
+          quantity: Math.abs(effect.netChange),
+          balanceAfter: newStock,
+          reason: effect.returnedQty > 0
+            ? `Sale ${invoiceNo} (sold ${effect.soldQty}, returned ${effect.returnedQty})`
+            : `Sale ${invoiceNo}`,
+          createdBy: input.createdBy ?? null,
+        },
+      })
+      stockMovementByProduct.set(effect.productId, movement.id)
+      await tx.product.update({
+        where: { id: effect.productId },
+        data: { currentStock: { increment: effect.netChange } },
+      })
+    }
+
+    const invoiceItemsCreated: Array<{ id: string; line: NormalizedSaleLine }> = []
+    for (const line of lines) {
+      const invItem = await tx.invoiceItem.create({
+        data: {
+          businessId: input.businessId,
+          invoiceId: invoice.id,
+          productId: line.productId,
+          productName: line.productName,
+          qty: line.soldQty,
+          // Same-bill returns are recorded on the row itself so the invoice,
+          // the print document and the commission engine all agree on net qty.
+          returnedQty: line.kind === 'SALE' ? line.returnedQty : 0,
+          unitPrice: line.unitPricePaisas,
+          lineTotal: line.lineTotalPaisas,
+          isTemporary: line.isTemporary,
+          stockMovementId: line.productId ? (stockMovementByProduct.get(line.productId) ?? null) : null,
+        },
+      })
+      invoiceItemsCreated.push({ id: invItem.id, line })
+    }
+
+    // ── Referenced historical returns: preserve the audit linkage ──
+    const historicalReturns = lines.filter((line) => line.kind === 'HISTORICAL_RETURN')
+    if (historicalReturns.length > 0) {
+      const returnDocs = new Map<string, string>()
+      for (const line of historicalReturns) {
+        const originalItem = await tx.invoiceItem.findFirst({
+          where: { id: line.originalInvoiceItemId!, businessId: input.businessId },
+          select: { id: true, invoiceId: true, qty: true, returnedQty: true },
+        })
+        if (!originalItem) throw new Error(`Referenced invoice item not found: ${line.productName}`)
+        if (originalItem.returnedQty + line.returnedQty > originalItem.qty) {
+          throw new SaleLineError(
+            `${line.productName}: returned quantity exceeds the remaining returnable quantity on the referenced invoice.`,
+            -1,
+          )
+        }
+        let returnDocId = returnDocs.get(originalItem.invoiceId)
+        if (!returnDocId) {
+          const doc = await tx.salesReturn.create({
+            data: {
+              businessId: input.businessId,
+              originalInvoiceId: originalItem.invoiceId,
+              returnDate: input.invoiceDate,
+              returnNo: `${invoiceNo}-RET`,
+              status: 'posted',
+              reason: `Adjusted on ${invoiceNo}`,
+              createdBy: input.createdBy ?? null,
+              idempotencyKey: `mixed-${invoice.id}-${originalItem.invoiceId}`,
+            },
+          })
+          returnDocId = doc.id
+          returnDocs.set(originalItem.invoiceId, returnDocId)
+        }
+        await tx.saleReturnLine.create({
+          data: {
+            businessId: input.businessId,
+            saleReturnId: returnDocId,
+            originalInvoiceItemId: originalItem.id,
+            returnedQty: line.returnedQty,
+            reason: `Adjusted on ${invoiceNo}`,
+          },
+        })
+        await tx.invoiceItem.update({
+          where: { id: originalItem.id },
+          data: { returnedQty: { increment: line.returnedQty } },
+        })
+        await tx.salesReturn.update({
+          where: { id: returnDocId },
+          data: { total: { increment: line.returnAmountPaisas } },
+        })
       }
-      const invItem = await tx.invoiceItem.create({ data: { businessId: input.businessId, invoiceId: invoice.id, productId: item.productId ?? null, productName: item.productName, qty: item.qty, unitPrice: item.unitPrice, lineTotal: item.unitPrice * BigInt(item.qty), isTemporary: item.isTemporary ?? false, stockMovementId: smId ?? null } })
-      invoiceItemsCreated.push({ id: invItem.id, productId: item.productId ?? null, qty: item.qty })
     }
 
     // ── Product-wise per-piece commission eligibility ──
-    // Create CommissionEvent records with eventType 'calculated' for each invoice item.
-    // These are server-authoritative source data for later payment-based earning.
-    const eligibilityItems = invoiceItemsCreated.map((ii) => ({ productId: ii.productId, qty: ii.qty }))
-    const eligibilityResults = await calculateCommissionEligibility(input.businessId, eligibilityItems)
-    for (let i = 0; i < invoiceItemsCreated.length; i++) {
-      const ii = invoiceItemsCreated[i]
-      const elig = eligibilityResults[i]
-      const idempotencyKey = `elig-${invoice.id}-${ii.id}`
+    // Recorded per invoice item against the NET eligible quantity. These rows
+    // are the server-authoritative source for later payment-based earning;
+    // commission is earned on collection, never on invoice creation alone.
+    for (const { id, line } of invoiceItemsCreated) {
+      const idempotencyKey = `elig-${invoice.id}-${id}`
       const existingElig = await tx.commissionEvent.findFirst({
         where: { businessId: input.businessId, idempotencyKey },
       })
@@ -203,37 +529,96 @@ async function postSaleViaPrisma(input: PostSaleInput): Promise<{ invoiceId: str
             businessId: input.businessId,
             salesmanId: input.salesmanId ?? null,
             invoiceId: invoice.id,
-            invoiceItemId: ii.id,
+            invoiceItemId: id,
+            originalInvoiceItemId: line.originalInvoiceItemId,
             eventType: 'calculated',
-            quantity: ii.qty,
-            ratePaisas: elig.ratePaisas,
-            grossAmount: elig.eligibleAmount,
-            eligibleAmount: elig.eligibleAmount,
+            quantity: line.commissionUnits,
+            ratePaisas: line.commissionRatePaisas,
+            grossAmount: line.commissionRatePaisas * BigInt(line.soldQty),
+            eligibleAmount: line.commissionAmountPaisas,
             payableAmount: 0n,
             paidAmount: 0n,
             status: 'calculated',
             idempotencyKey,
+            // Owner-made sales are attributed to the Owner, never to a salesman.
             isOwnerOnly: input.salesmanId ? false : true,
           },
         })
       }
     }
 
-    // ── Legacy percentage-based commission (kept for backward compatibility) ──
-    // Only creates legacy SalesmanCommission if NO per-piece eligibility exists.
-    // This prevents double commission when both per-piece and percentage run.
-    const hasPerPieceEligibility = eligibilityResults.some((e) => e.eligibleAmount > 0n)
-    if (!hasPerPieceEligibility) {
-      let salesman: { id: string; commissionPct: number } | null = null
-      if (input.salesmanId) salesman = await tx.salesman.findUnique({ where: { id: input.salesmanId }, select: { id: true, commissionPct: true } })
-      for (const p of input.payments) {
-        if (!p.isChange) {
-          const alloc = await tx.paymentAllocation.create({ data: { businessId: input.businessId, invoiceId: invoice.id, accountId: p.accountId, amount: p.amount, isChange: false, voucherId: vch.id, createdBy: input.createdBy ?? null } })
-          if (salesman && p.amount > 0n) {
-            const commAmount = (p.amount * BigInt(Math.round(salesman.commissionPct * 100))) / 10000n
-            await tx.salesmanCommission.upsert({ where: { allocationId_salesmanId: { allocationId: alloc.id, salesmanId: salesman.id } }, create: { businessId: input.businessId, salesmanId: salesman.id, invoiceId: invoice.id, allocationId: alloc.id, collectedAmount: p.amount, commissionPct: salesman.commissionPct, commissionAmount: commAmount }, update: {} })
-          }
-        }
+    // Replay marker for this submission — see the idempotency guard above.
+    if (input.idempotencyKey && invoiceItemsCreated.length > 0) {
+      await tx.commissionEvent.create({
+        data: {
+          businessId: input.businessId,
+          salesmanId: input.salesmanId ?? null,
+          invoiceId: invoice.id,
+          invoiceItemId: invoiceItemsCreated[0].id,
+          eventType: 'submission',
+          quantity: 0,
+          ratePaisas: 0n,
+          grossAmount: 0n,
+          eligibleAmount: 0n,
+          payableAmount: 0n,
+          paidAmount: 0n,
+          status: 'submitted',
+          idempotencyKey: `sale-${input.idempotencyKey}`,
+          isOwnerOnly: input.salesmanId ? false : true,
+        },
+      })
+    }
+
+    // ── Payment allocations ──
+    // Always recorded, independent of the commission model in force.
+    const hasPerPieceEligibility = lines.some((line) => line.commissionAmountPaisas > 0n)
+    let salesman: { id: string; commissionPct: number } | null = null
+    if (!hasPerPieceEligibility && input.salesmanId) {
+      salesman = await tx.salesman.findUnique({ where: { id: input.salesmanId }, select: { id: true, commissionPct: true } })
+    }
+    for (const p of input.payments) {
+      if (p.isChange) continue
+      const alloc = await tx.paymentAllocation.create({ data: { businessId: input.businessId, invoiceId: invoice.id, accountId: p.accountId, amount: p.amount, isChange: false, voucherId: vch.id, createdBy: input.createdBy ?? null } })
+      // Legacy percentage commission only runs when NO product carries a
+      // per-piece rate, so the two models can never double-pay.
+      if (salesman && p.amount > 0n) {
+        const commAmount = (p.amount * BigInt(Math.round(salesman.commissionPct * 100))) / 10000n
+        await tx.salesmanCommission.upsert({ where: { allocationId_salesmanId: { allocationId: alloc.id, salesmanId: salesman.id } }, create: { businessId: input.businessId, salesmanId: salesman.id, invoiceId: invoice.id, allocationId: alloc.id, collectedAmount: p.amount, commissionPct: salesman.commissionPct, commissionAmount: commAmount }, update: {} })
+      }
+    }
+
+    // ── Collection-triggered commission ──
+    // Only money actually received earns commission. An unpaid invoice leaves
+    // the eligibility rows at status 'calculated' and earns nothing.
+    if (paidAmount - changeTotal > 0n && total > 0n) {
+      const collected = paidAmount - changeTotal
+      for (const { id, line } of invoiceItemsCreated) {
+        if (line.commissionAmountPaisas <= 0n) continue
+        const earned = computeEarnedCommission({
+          totalEligibilityPaisas: line.commissionAmountPaisas,
+          invoiceTotalPaisas: total,
+          collectedAmountPaisas: collected,
+          priorEarnedPaisas: 0n,
+        })
+        if (earned <= 0n) continue
+        await tx.commissionEvent.create({
+          data: {
+            businessId: input.businessId,
+            salesmanId: input.salesmanId ?? null,
+            invoiceId: invoice.id,
+            invoiceItemId: id,
+            eventType: 'collection',
+            quantity: line.commissionUnits,
+            ratePaisas: line.commissionRatePaisas,
+            grossAmount: line.commissionAmountPaisas,
+            eligibleAmount: line.commissionAmountPaisas,
+            payableAmount: earned,
+            paidAmount: 0n,
+            status: 'payable',
+            idempotencyKey: `coll-${invoice.id}-${id}-0`,
+            isOwnerOnly: input.salesmanId ? false : true,
+          },
+        })
       }
     }
 
@@ -290,7 +675,236 @@ export async function getInvoice(businessId: string, invoiceId: string): Promise
   }
   const inv = await db.invoice.findFirst({ where: { id: invoiceId, businessId }, include: { salesman: true, items: true, paymentAllocations: { include: { account: true } } } })
   if (!inv) return null
-  return { id: inv.id, invoiceNo: inv.invoiceNo, invoiceType: inv.invoiceType, invoiceDate: inv.invoiceDate.toISOString(), customerName: inv.customerName, salesmanName: inv.salesman?.name ?? null, subtotal: inv.subtotal.toString(), total: inv.total.toString(), paidAmount: inv.paidAmount.toString(), isCancelled: inv.isCancelled, isReturned: inv.isReturned, items: inv.items.map((it) => ({ id: it.id, productId: it.productId, productName: it.productName, qty: it.qty, unitPrice: it.unitPrice.toString(), lineTotal: it.lineTotal.toString(), isTemporary: it.isTemporary })), payments: inv.paymentAllocations.map((pa) => ({ id: pa.id, accountId: pa.accountId, accountCode: pa.account.code, accountName: pa.account.name, amount: pa.amount.toString(), isChange: pa.isChange })) }
+  return { id: inv.id, invoiceNo: inv.invoiceNo, invoiceType: inv.invoiceType, invoiceDate: inv.invoiceDate.toISOString(), customerName: inv.customerName, customerPhone: inv.customerPhone, customerAddress: inv.customerAddress, customerCity: inv.customerCity, salesmanName: inv.salesman?.name ?? null, subtotal: inv.subtotal.toString(), discount: inv.discount.toString(), total: inv.total.toString(), paidAmount: inv.paidAmount.toString(), isCancelled: inv.isCancelled, isReturned: inv.isReturned, memo: inv.memo, items: inv.items.map((it) => ({ id: it.id, productId: it.productId, productName: it.productName, qty: it.qty, returnedQty: it.returnedQty, unitPrice: it.unitPrice.toString(), lineTotal: it.lineTotal.toString(), isTemporary: it.isTemporary })), payments: inv.paymentAllocations.map((pa) => ({ id: pa.id, accountId: pa.accountId, accountCode: pa.account.code, accountName: pa.account.name, amount: pa.amount.toString(), isChange: pa.isChange })) }
+}
+
+/**
+ * Item-level commission detail for one invoice.
+ *
+ * Individual entries are preserved — a single opaque invoice-level figure is
+ * deliberately NOT returned. When the migration-dependent commission schema is
+ * absent the caller receives `available: false` and a precise reason rather
+ * than a fabricated zero.
+ */
+export async function getInvoiceCommissionDetail(
+  businessId: string,
+  invoiceId: string,
+): Promise<{ available: boolean; reason: string | null; rows: InvoiceCommissionRow[]; totalPaisas: string }> {
+  const unavailable = (reason: string) => ({ available: false, reason, rows: [], totalPaisas: '0' })
+
+  if (await isPhase4Live()) {
+    const admin = getAdminSupabase()
+    const { data, error } = await admin
+      .from('commission_events')
+      .select('invoice_item_id, event_type, quantity, rate_paisas, eligible_amount, payable_amount, status, created_at, salesman_id, salesmen(name), invoice_items(product_id, product_name, qty, returned_qty)')
+      .eq('business_id', businessId)
+      .eq('invoice_id', invoiceId)
+      .order('created_at')
+    if (error) {
+      return unavailable(
+        'Commission detail needs the Phase 2 commission tables on this database. Ask the owner to apply the pending commission migration.',
+      )
+    }
+    const rows: InvoiceCommissionRow[] = (data ?? [])
+      .filter((r: any) => r.event_type !== 'submission')
+      .map((r: any) => {
+        const eventType = canonicalCommissionEventType(r.event_type)
+        return {
+          invoiceItemId: r.invoice_item_id,
+          productId: r.invoice_items?.product_id ?? null,
+          productName: r.invoice_items?.product_name ?? 'Item',
+          soldQty: r.invoice_items?.qty ?? r.quantity ?? 0,
+          returnedQty: r.invoice_items?.returned_qty ?? 0,
+          netEligibleQty: r.quantity ?? 0,
+          ratePaisas: String(r.rate_paisas ?? 0),
+          commissionPaisas: String(eventType === 'collection' ? (r.payable_amount ?? 0) : (r.eligible_amount ?? 0)),
+          status: r.status ?? 'calculated',
+          eventType,
+          sellerName: r.salesmen?.name ?? null,
+          sellerRole: r.salesman_id ? 'SALESMAN' : 'OWNER',
+          paymentReference: eventType === 'collection' ? 'Collection' : null,
+          createdAt: r.created_at ?? null,
+        }
+      })
+    return {
+      available: true,
+      reason: null,
+      rows,
+      totalPaisas: rows
+        .filter((r) => r.eventType === 'calculated')
+        .reduce((sum, r) => sum + BigInt(r.commissionPaisas), 0n)
+        .toString(),
+    }
+  }
+
+  const events = await db.commissionEvent.findMany({
+    where: { businessId, invoiceId, eventType: { not: 'submission' } },
+    include: { invoiceItem: true, salesman: { select: { name: true } } },
+    orderBy: { createdAt: 'asc' },
+  })
+  const rows: InvoiceCommissionRow[] = events.map((event) => ({
+    invoiceItemId: event.invoiceItemId,
+    productId: event.invoiceItem?.productId ?? null,
+    productName: event.invoiceItem?.productName ?? 'Item',
+    soldQty: event.invoiceItem?.qty ?? event.quantity,
+    returnedQty: event.invoiceItem?.returnedQty ?? 0,
+    netEligibleQty: event.quantity,
+    ratePaisas: event.ratePaisas.toString(),
+    commissionPaisas: (event.eventType === 'calculated' ? event.eligibleAmount : event.payableAmount).toString(),
+    status: event.status,
+    eventType: event.eventType,
+    sellerName: event.salesman?.name ?? null,
+    sellerRole: event.salesmanId ? 'SALESMAN' : 'OWNER',
+    paymentReference: event.eventType === 'collection' ? 'Collection' : null,
+    createdAt: event.createdAt.toISOString(),
+  }))
+  return {
+    available: true,
+    reason: null,
+    rows,
+    totalPaisas: rows
+      .filter((r) => r.eventType === 'calculated')
+      .reduce((sum, r) => sum + BigInt(r.commissionPaisas), 0n)
+      .toString(),
+  }
+}
+
+/** One period-scoped commission entry, carrying its own invoice reference. */
+export type SalesmanCommissionRow = InvoiceCommissionRow & {
+  invoiceId: string
+  invoiceNo: string
+  invoiceDate: string
+}
+
+/**
+ * Item-level commission entries earned by one salesman inside a date window.
+ *
+ * Individual entries are preserved so the report can show product, sold,
+ * returned and net quantities per line instead of one opaque invoice figure.
+ */
+export async function getSalesmanCommissionDetail(
+  businessId: string,
+  salesmanId: string,
+  fromDate: string,
+  toDate: string,
+): Promise<{ available: boolean; reason: string | null; rows: SalesmanCommissionRow[]; totalPaisas: string }> {
+  const unavailable = (reason: string) => ({ available: false, reason, rows: [], totalPaisas: '0' })
+
+  if (await isPhase4Live()) {
+    const admin = getAdminSupabase()
+    const { data, error } = await admin
+      .from('commission_events')
+      .select('invoice_id, invoice_item_id, event_type, quantity, rate_paisas, eligible_amount, payable_amount, status, created_at, salesman_id, salesmen(name), invoices!inner(invoice_no, invoice_date), invoice_items(product_id, product_name, qty, returned_qty)')
+      .eq('business_id', businessId)
+      .eq('salesman_id', salesmanId)
+      .gte('invoices.invoice_date', fromDate)
+      .lte('invoices.invoice_date', toDate)
+      .order('created_at', { ascending: false })
+      .limit(500)
+    if (error) {
+      return unavailable(
+        'Product-wise commission detail needs the Phase 2 commission tables on this database. Ask the owner to apply the pending commission migration.',
+      )
+    }
+    const rows: SalesmanCommissionRow[] = (data ?? [])
+      .filter((r: any) => r.event_type !== 'submission')
+      .map((r: any) => {
+        const eventType = canonicalCommissionEventType(r.event_type)
+        return {
+          invoiceId: r.invoice_id,
+          invoiceNo: r.invoices?.invoice_no ?? '—',
+          invoiceDate: r.invoices?.invoice_date ?? '',
+          invoiceItemId: r.invoice_item_id,
+          productId: r.invoice_items?.product_id ?? null,
+          productName: r.invoice_items?.product_name ?? 'Item',
+          soldQty: r.invoice_items?.qty ?? r.quantity ?? 0,
+          returnedQty: r.invoice_items?.returned_qty ?? 0,
+          netEligibleQty: r.quantity ?? 0,
+          ratePaisas: String(r.rate_paisas ?? 0),
+          commissionPaisas: String(eventType === 'collection' ? (r.payable_amount ?? 0) : (r.eligible_amount ?? 0)),
+          status: r.status ?? 'calculated',
+          eventType,
+          sellerName: r.salesmen?.name ?? null,
+          sellerRole: (r.salesman_id ? 'SALESMAN' : 'OWNER') as SellerRole,
+          paymentReference: eventType === 'collection' ? 'Collection' : null,
+          createdAt: r.created_at ?? null,
+        }
+      })
+    return { available: true, reason: null, rows, totalPaisas: sumEarnedCommission(rows) }
+  }
+
+  const events = await db.commissionEvent.findMany({
+    where: {
+      businessId,
+      salesmanId,
+      eventType: { not: 'submission' },
+      invoice: {
+        invoiceDate: {
+          gte: new Date(`${fromDate}T00:00:00+05:00`),
+          lte: new Date(`${toDate}T23:59:59.999+05:00`),
+        },
+      },
+    },
+    include: { invoice: { select: { invoiceNo: true, invoiceDate: true } }, invoiceItem: true, salesman: { select: { name: true } } },
+    orderBy: { createdAt: 'desc' },
+    take: 500,
+  })
+  const rows: SalesmanCommissionRow[] = events.map((event) => ({
+    invoiceId: event.invoiceId,
+    invoiceNo: event.invoice?.invoiceNo ?? '—',
+    invoiceDate: event.invoice ? bizDateString(event.invoice.invoiceDate) : '',
+    invoiceItemId: event.invoiceItemId,
+    productId: event.invoiceItem?.productId ?? null,
+    productName: event.invoiceItem?.productName ?? 'Item',
+    soldQty: event.invoiceItem?.qty ?? event.quantity,
+    returnedQty: event.invoiceItem?.returnedQty ?? 0,
+    netEligibleQty: event.quantity,
+    ratePaisas: event.ratePaisas.toString(),
+    commissionPaisas: (event.eventType === 'calculated' ? event.eligibleAmount : event.payableAmount).toString(),
+    status: event.status,
+    eventType: event.eventType,
+    sellerName: event.salesman?.name ?? null,
+    sellerRole: (event.salesmanId ? 'SALESMAN' : 'OWNER') as SellerRole,
+    paymentReference: event.eventType === 'collection' ? 'Collection' : null,
+    createdAt: event.createdAt.toISOString(),
+  }))
+  return { available: true, reason: null, rows, totalPaisas: sumEarnedCommission(rows) }
+}
+
+/**
+ * Totals only the eligibility rows: a collection event repeats the same money
+ * as its `calculated` parent, so adding both would double-count.
+ */
+function sumEarnedCommission(rows: InvoiceCommissionRow[]): string {
+  return rows
+    .filter((r) => r.eventType === 'calculated')
+    .reduce((sum, r) => sum + BigInt(r.commissionPaisas), 0n)
+    .toString()
+}
+
+export type BusinessIdentity = { name: string; phone: string | null; address: string | null }
+
+/**
+ * Business letterhead for printed documents.
+ *
+ * Production column availability on `businesses` varies, so the row is read
+ * whole and each optional field is picked defensively. A failure returns null
+ * and the caller falls back to a neutral heading rather than breaking print.
+ */
+export async function getBusinessIdentity(businessId: string): Promise<BusinessIdentity | null> {
+  if (await isPhase4Live()) {
+    const admin = getAdminSupabase()
+    const { data, error } = await admin.from('businesses').select('*').eq('id', businessId).maybeSingle()
+    if (error || !data) return null
+    const row = data as Record<string, any>
+    const name = row.name ?? row.legal_name
+    if (!name) return null
+    return { name: String(name), phone: row.phone ?? null, address: row.address ?? null }
+  }
+
+  const biz = await db.business.findFirst({ where: { id: businessId }, select: { name: true, legalName: true, phone: true, address: true } })
+  if (!biz) return null
+  return { name: biz.name || biz.legalName || '', phone: biz.phone ?? null, address: biz.address ?? null }
 }
 
 export type LinkedReturnInput = {
@@ -325,8 +939,8 @@ export async function postLinkedSaleReturn(input: LinkedReturnInput): Promise<{ 
 }
 
 export async function receiveInvoicePayment(input: { businessId: string; invoiceId: string; amount: bigint; mode: string; idempotencyKey: string; actorId: string }): Promise<{ paymentId: string; amount: string; idempotent: boolean }> {
-  if (!(await isPhase4Live())) throw new Error('Invoice collections require the Phase 2 database migration.')
   if (input.amount <= 0n) throw new Error('Collection amount must be positive')
+  if (!(await isPhase4Live())) return receiveInvoicePaymentViaPrisma(input)
   const admin = getAdminSupabase()
   const actorId = await resolveSupabaseUuid(input.actorId)
   if (!actorId) throw new Error('Server-attributed collection actor is unavailable')
@@ -339,6 +953,95 @@ export async function receiveInvoicePayment(input: { businessId: string; invoice
   if (error) throw new Error(`Supabase receive_invoice_payment_ledger: ${error.message}`)
   const result = data as any
   return { paymentId: result.payment_id, amount: String(result.amount), idempotent: Boolean(result.idempotent) }
+}
+
+/**
+ * Local (Prisma) invoice collection.
+ *
+ * Mirrors the production RPC contract: idempotent by business-scoped key,
+ * never collects beyond the outstanding amount, and earns product-wise
+ * commission proportionally to the money actually received.
+ */
+async function receiveInvoicePaymentViaPrisma(input: {
+  businessId: string; invoiceId: string; amount: bigint; mode: string; idempotencyKey: string; actorId: string
+}): Promise<{ paymentId: string; amount: string; idempotent: boolean }> {
+  return db.$transaction(async (tx) => {
+    const invoice = await tx.invoice.findFirst({
+      where: { id: input.invoiceId, businessId: input.businessId },
+      select: { id: true, total: true, paidAmount: true, salesmanId: true, voucherId: true },
+    })
+    if (!invoice) throw new Error('Invoice not found')
+
+    const replay = await tx.commissionEvent.findFirst({
+      where: { businessId: input.businessId, idempotencyKey: `recv-${input.idempotencyKey}` },
+      select: { id: true },
+    })
+    if (replay) return { paymentId: replay.id, amount: input.amount.toString(), idempotent: true }
+
+    const outstanding = invoice.total - invoice.paidAmount
+    if (input.amount > outstanding) {
+      throw new Error(`Collection exceeds the outstanding amount on this invoice.`)
+    }
+
+    const account = await getAccountByCode(input.businessId, input.mode === 'BANK' ? '1020' : '1010')
+    if (!account) throw new Error(`Collection account for mode ${input.mode} was not found.`)
+
+    const allocation = await tx.paymentAllocation.create({
+      data: {
+        businessId: input.businessId, invoiceId: invoice.id, accountId: account.id,
+        amount: input.amount, isChange: false, voucherId: invoice.voucherId,
+        createdBy: input.actorId,
+      },
+    })
+    await tx.invoice.update({ where: { id: invoice.id }, data: { paidAmount: { increment: input.amount } } })
+
+    // Commission is earned here — on money received — not at invoice creation.
+    const collectedAfter = invoice.paidAmount + input.amount
+    const items = await tx.invoiceItem.findMany({ where: { invoiceId: invoice.id }, select: { id: true } })
+    for (const item of items) {
+      const eligibility = await tx.commissionEvent.findFirst({
+        where: { businessId: input.businessId, invoiceId: invoice.id, invoiceItemId: item.id, eventType: 'calculated' },
+      })
+      if (!eligibility || eligibility.eligibleAmount <= 0n) continue
+      const prior = await tx.commissionEvent.aggregate({
+        where: { businessId: input.businessId, invoiceId: invoice.id, invoiceItemId: item.id, eventType: 'collection' },
+        _sum: { payableAmount: true },
+      })
+      const priorEarned = prior._sum.payableAmount ?? 0n
+      const earned = computeEarnedCommission({
+        totalEligibilityPaisas: eligibility.eligibleAmount,
+        invoiceTotalPaisas: invoice.total,
+        collectedAmountPaisas: collectedAfter,
+        priorEarnedPaisas: priorEarned,
+      })
+      if (earned <= 0n) continue
+      await tx.commissionEvent.create({
+        data: {
+          businessId: input.businessId, salesmanId: invoice.salesmanId,
+          invoiceId: invoice.id, invoiceItemId: item.id,
+          eventType: 'collection', quantity: eligibility.quantity,
+          ratePaisas: eligibility.ratePaisas, grossAmount: eligibility.eligibleAmount,
+          eligibleAmount: eligibility.eligibleAmount, payableAmount: earned, paidAmount: 0n,
+          status: 'payable', allocationId: allocation.id,
+          idempotencyKey: `coll-${invoice.id}-${item.id}-${allocation.id}`,
+          isOwnerOnly: invoice.salesmanId ? false : true,
+        },
+      })
+    }
+
+    await tx.commissionEvent.create({
+      data: {
+        businessId: input.businessId, salesmanId: invoice.salesmanId,
+        invoiceId: invoice.id, invoiceItemId: items[0]?.id ?? '',
+        eventType: 'submission', quantity: 0, ratePaisas: 0n, grossAmount: 0n,
+        eligibleAmount: 0n, payableAmount: 0n, paidAmount: 0n, status: 'submitted',
+        allocationId: allocation.id, idempotencyKey: `recv-${input.idempotencyKey}`,
+        isOwnerOnly: invoice.salesmanId ? false : true,
+      },
+    })
+
+    return { paymentId: allocation.id, amount: input.amount.toString(), idempotent: false }
+  })
 }
 
 export async function listCustomers(businessId: string): Promise<CustomerRow[]> {

@@ -10,6 +10,7 @@ const sales = await readFile('src/lib/sales/data-access.ts', 'utf8')
 const delivery = await readFile('src/lib/delivery/data-access.ts', 'utf8')
 const products = await readFile('src/lib/products/data-access.ts', 'utf8')
 const subcategories = await readFile('src/lib/money/persisted-account-subcategories.ts', 'utf8')
+const compatibility = await readFile('src/lib/supabase/rpc-compatibility.ts', 'utf8')
 const reportsView = await readFile('src/components/erp/views/reports-view.tsx', 'utf8')
 const reportsRoute = await readFile('src/app/api/reports/route.ts', 'utf8')
 const ownerDashboardRoute = await readFile('src/app/api/dashboard/owner/route.ts', 'utf8')
@@ -79,7 +80,14 @@ test('manual payment, receipt, journal, Contra, and expense entry use one vouche
 })
 
 test('sale, return, collection, delivery, settlement, and opening stock use atomic wrappers', () => {
-  assert.match(sales, /\.rpc\('post_sale_phase2_ledger'/)
+  // The sale RPC name is chosen by the compatibility boundary: the deployed
+  // atomic wrapper today, and the mixed sale+return wrapper once migration
+  // 00033 is applied. Both are atomic ledger wrappers; neither is a raw table
+  // write, which is what this test exists to protect.
+  assert.match(sales, /const rpcName = salePostingRpcName\(\)/)
+  assert.match(sales, /admin\.rpc\(rpcName, payload\)/)
+  assert.match(compatibility, /'post_sale_phase2_ledger'/)
+  assert.match(compatibility, /'post_sale_with_returns_ledger'/)
   assert.match(sales, /\.rpc\('post_sale_return_ledger'/)
   assert.match(sales, /\.rpc\('receive_invoice_payment_ledger'/)
   assert.match(delivery, /\.rpc\('record_delivery_outcome_ledger'/)

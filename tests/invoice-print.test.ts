@@ -7,13 +7,19 @@ import { promisify } from 'node:util'
 const dialog = await readFile('src/components/invoice/invoice-print-dialog.tsx', 'utf8')
 const button = await readFile('src/components/invoice/print-invoice-button.tsx', 'utf8')
 const salesList = await readFile('src/components/erp/views/sales-list-view.tsx', 'utf8')
+const saleEngine = await readFile('src/lib/sales/sale-engine.ts', 'utf8')
 const execFileAsync = promisify(execFile)
 
 test('shared template supports Counter, Online, and OFC document titles', () => {
   assert.ok(dialog.includes("invoiceType: 'COUNTER' | 'ONLINE' | 'OFC'"))
-  assert.ok(dialog.includes("return 'ONLINE ORDER'"))
-  assert.ok(dialog.includes("return 'OFC INVOICE'"))
-  assert.ok(dialog.includes("return 'SALE INVOICE'"))
+  // The channel title now lives in the shared sale engine so Counter, Online,
+  // OFC and Other all print through one implementation instead of a copy per
+  // channel; the dialog only renders what the engine resolved.
+  assert.ok(saleEngine.includes("case 'ONLINE': return 'ONLINE ORDER'"))
+  assert.ok(saleEngine.includes("case 'OFC': return 'OFC INVOICE'"))
+  assert.ok(saleEngine.includes("return 'SALE INVOICE'"))
+  assert.ok(saleEngine.includes('documentTitle: invoiceDocumentTitle(input.invoiceType)'))
+  assert.ok(dialog.includes('{model.documentTitle}'))
 })
 
 test('half-A4 mode occupies one bounded half of an A4 portrait page', () => {
@@ -27,7 +33,11 @@ test('half-A4 mode occupies one bounded half of an A4 portrait page', () => {
 test('two-up mode requires exactly two independent invoices', () => {
   assert.ok(dialog.includes("const twoUpInvalid = mode === 'two-up' && invoices.length !== 2"))
   assert.ok(dialog.includes('twoUpInvalid'))
-  assert.ok(dialog.includes('showBottom && invoices[1]'))
+  // The second half renders only when a genuinely second invoice exists —
+  // never a duplicate of the first.
+  assert.ok(dialog.includes('showBottom && models[1]'))
+  assert.ok(dialog.includes('{models[1] && <InvoiceDocument'))
+  assert.ok(!dialog.includes('models[1] || models[0]'))
   assert.ok(!dialog.includes('invoices[1] || invoices[0]'))
   assert.ok(salesList.includes('label="Print Two Invoices on A4"'))
   assert.ok(salesList.includes('disabled={selected.length !== 2}'))
@@ -46,7 +56,10 @@ test('print isolation hides application navigation and actions', () => {
 })
 
 test('totals, optional customer fields, payment status, and return status remain conditional', () => {
-  for (const token of ['Grand Total', 'Outstanding', 'businessContact?.email', 'inv.customerAddress', 'inv.isReturned', 'inv.isCancelled', 'inv-status-paid']) {
+  // 'Net Payable' replaced 'Grand Total' in the redesigned document: a mixed
+  // bill's payable is gross sales minus the return deduction and discount, so
+  // the label now states what the figure actually is.
+  for (const token of ['Net Payable', 'inv-totals-outstanding', 'businessContact?.email', 'inv.customerAddress', 'inv.isReturned', 'inv.isCancelled', 'inv-status-paid']) {
     assert.ok(dialog.includes(token), `missing ${token}`)
   }
 })

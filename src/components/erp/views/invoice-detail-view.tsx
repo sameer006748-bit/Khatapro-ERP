@@ -3,13 +3,14 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useRouter } from 'next/navigation'
 import { formatMoney } from '@/lib/format'
-import { bizDate } from '@/lib/dates'
+import { bizDate, bizFormat } from '@/lib/dates'
 import { ArrowLeft, Printer, RotateCcw, CheckCircle2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useState } from 'react'
 import { motion } from 'framer-motion'
 import { toast } from 'sonner'
 import { PrintInvoiceButton } from '@/components/invoice/print-invoice-button'
+import { buildInvoicePrintModel } from '@/lib/sales/sale-engine'
 
 type Invoice = {
   id: string
@@ -33,6 +34,38 @@ type Invoice = {
   payments?: Array<{ id: string; accountId?: string; accountCode?: string; accountName: string; amount: string; isChange?: boolean; direction?: string | null; paymentMode?: string | null }>
 }
 
+/** One commission entry as returned by GET /api/sales/:id/commission. */
+type CommissionRow = {
+  invoiceItemId: string
+  productId: string | null
+  productName: string
+  soldQty: number
+  returnedQty: number
+  netEligibleQty: number
+  ratePaisas: string
+  commissionPaisas: string
+  status: string
+  eventType: string
+  sellerName: string | null
+  sellerRole: 'OWNER' | 'SALESMAN'
+  paymentReference: string | null
+  createdAt: string | null
+}
+
+type CommissionDetail = {
+  available: boolean
+  reason: string | null
+  rows: CommissionRow[]
+  totalPaisas: string
+  error?: string
+}
+
+const EVENT_LABEL: Record<string, string> = {
+  calculated: 'Eligible on sale',
+  collection: 'Earned on collection',
+  reversal: 'Reversed by return',
+}
+
 const TYPE_BADGE: Record<string, string> = {
   COUNTER: 'bg-emerald-100 text-emerald-700',
   ONLINE: 'bg-sky-100 text-sky-700',
@@ -51,14 +84,22 @@ export function InvoiceDetailView({ invoiceId }: { invoiceId: string }) {
   const [paymentAmount, setPaymentAmount] = useState('')
   const [paymentMode, setPaymentMode] = useState('CASH')
   const [paymentIdempotencyKey, setPaymentIdempotencyKey] = useState(() => crypto.randomUUID())
-  const [printOpen, setPrintOpen] = useState(false)
 
-  const q = useQuery<{ invoice: Invoice }>({
+  const q = useQuery<{ invoice: Invoice; business?: { name: string; phone: string | null; address: string | null } | null }>({
     queryKey: ['invoice', invoiceId],
     queryFn: () => fetch(`/api/sales/${invoiceId}`).then(r => r.json()),
     enabled: !!invoiceId,
     retry: 1,
     retryDelay: 500,
+  })
+
+  // Commission is internal data on a separate endpoint: a missing accounting
+  // migration must degrade this card alone, never the whole invoice page.
+  const commissionQ = useQuery<CommissionDetail>({
+    queryKey: ['invoice-commission', invoiceId],
+    queryFn: () => fetch(`/api/sales/${invoiceId}/commission`).then(r => r.json()),
+    enabled: !!invoiceId,
+    retry: 0,
   })
 
   const returnMut = useMutation({
@@ -77,6 +118,7 @@ export function InvoiceDetailView({ invoiceId }: { invoiceId: string }) {
     onSuccess: (result) => {
       toast.success(`Return ${result.returnNo ?? ''} posted. Stock restored once.`)
       void qc.invalidateQueries({ queryKey: ['invoice', invoiceId] })
+      void qc.invalidateQueries({ queryKey: ['invoice-commission', invoiceId] })
       void qc.invalidateQueries({ queryKey: ['invoices'] })
       void qc.invalidateQueries({ queryKey: ['trial-balance'] })
       void qc.invalidateQueries({ queryKey: ['products'] })
@@ -95,7 +137,7 @@ export function InvoiceDetailView({ invoiceId }: { invoiceId: string }) {
       if (!r.ok) throw new Error(j?.error ?? 'PAYMENT_FAILED')
       return j
     },
-    onSuccess: () => { toast.success('Invoice collection posted.'); void qc.invalidateQueries({ queryKey: ['invoice', invoiceId] }); void qc.invalidateQueries({ queryKey: ['invoices'] }); setPaymentOpen(false); setPaymentAmount(''); setPaymentIdempotencyKey(crypto.randomUUID()) },
+    onSuccess: () => { toast.success('Invoice collection posted.'); void qc.invalidateQueries({ queryKey: ['invoice', invoiceId] }); void qc.invalidateQueries({ queryKey: ['invoice-commission', invoiceId] }); void qc.invalidateQueries({ queryKey: ['invoices'] }); setPaymentOpen(false); setPaymentAmount(''); setPaymentIdempotencyKey(crypto.randomUUID()) },
     onError: (e: Error) => toast.error(`Collection failed: ${e.message}`),
   })
 
@@ -124,6 +166,36 @@ export function InvoiceDetailView({ invoiceId }: { invoiceId: string }) {
 
   const inv = q.data.invoice
   const outstanding = BigInt(inv.total) - BigInt(inv.paidAmount)
+  const business = q.data.business ?? null
+  // The browser-print block below renders from the same engine serialization
+  // the print dialog uses, so the two documents cannot show different figures.
+  // Commission is deliberately not passed: this is the customer document.
+  const printModel = buildInvoicePrintModel({
+    invoiceNo: inv.invoiceNo,
+    invoiceType: inv.invoiceType,
+    invoiceDate: inv.invoiceDate,
+    sellerName: inv.salesmanName,
+    sellerRole: inv.salesmanName ? 'SALESMAN' : 'OWNER',
+    customerName: inv.customerName,
+    customerPhone: inv.customerPhone,
+    customerAddress: inv.customerAddress,
+    customerCity: inv.customerCity,
+    memo: inv.memo,
+    items: (inv.items ?? []).map(it => ({
+      productName: `${it.productName}${it.isTemporary ? ' *' : ''}`,
+      qty: it.qty,
+      returnedQty: it.returnedQty ?? 0,
+      unitPrice: it.unitPrice,
+      lineTotal: it.lineTotal,
+    })),
+    subtotal: inv.subtotal,
+    discount: inv.discount ?? '0',
+    total: inv.total,
+    paidAmount: inv.paidAmount,
+    payments: (inv.payments ?? []).map(p => ({ accountCode: p.accountCode, accountName: p.accountName, amount: p.amount, isChange: p.isChange })),
+    isReturned: inv.isReturned,
+    isCancelled: inv.isCancelled,
+  })
 
   function back() { router.push('/') }
 
@@ -143,7 +215,9 @@ export function InvoiceDetailView({ invoiceId }: { invoiceId: string }) {
             {inv.salesmanName && <div className="text-xs text-muted-foreground mt-1">Salesman: {inv.salesmanName}</div>}
           </div>
           <div className="flex gap-2">
-            <PrintInvoiceButton invoiceId={inv.id} label="Print" size="sm" icon={Printer} />
+            {/* allowInternalCopy only offers the owner an opt-in commission copy;
+                the default print stays a clean customer document. */}
+            <PrintInvoiceButton invoiceId={inv.id} label="Print" size="sm" icon={Printer} allowInternalCopy />
             {outstanding > 0n && !inv.isCancelled && !inv.isReturned && <Button variant="outline" size="sm" className="press-sm" onClick={() => setPaymentOpen(true)}>Collect payment</Button>}
             {!inv.isReturned && !inv.isCancelled && (
               <Button variant="outline" size="sm" className="press-sm text-amber-700" onClick={() => setReturnOpen(true)}><RotateCcw className="size-3.5" /> Return</Button>
@@ -219,6 +293,57 @@ export function InvoiceDetailView({ invoiceId }: { invoiceId: string }) {
         </div>
       )}
 
+      {/* Commission — internal only, never printed on the customer invoice */}
+      <div className="card-3d overflow-hidden">
+        <div className="px-5 py-3.5 border-b border-border flex items-center justify-between gap-3">
+          <h2 className="text-sm font-semibold text-foreground">Commission</h2>
+          <span className="text-[10px] uppercase tracking-wider text-muted-foreground">Internal</span>
+        </div>
+        {commissionQ.isLoading ? (
+          <div className="px-5 py-4 text-xs text-muted-foreground">Loading commission detail…</div>
+        ) : !commissionQ.data || commissionQ.data.error || !commissionQ.data.available ? (
+          <div className="px-5 py-4 text-xs text-amber-700 bg-amber-50/60">
+            {commissionQ.data?.reason ?? 'Commission detail is unavailable for this invoice.'}
+          </div>
+        ) : commissionQ.data.rows.length === 0 ? (
+          <div className="px-5 py-4 text-xs text-muted-foreground">No commission entries on this invoice.</div>
+        ) : (
+          <>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead><tr className="border-b border-border text-[11px] uppercase tracking-wider text-muted-foreground bg-muted/40">
+                  <th className="text-left p-3.5 font-medium">Product</th><th className="text-left p-3.5 font-medium">Seller</th><th className="text-right p-3.5 font-medium">Sold</th><th className="text-right p-3.5 font-medium">Returned</th><th className="text-right p-3.5 font-medium">Net</th><th className="text-right p-3.5 font-medium">Rate/pc</th><th className="text-right p-3.5 font-medium">Commission</th><th className="text-left p-3.5 font-medium">Status</th>
+                </tr></thead>
+                <tbody>
+                  {commissionQ.data.rows.map((row, i) => (
+                    <tr key={`${row.invoiceItemId}-${row.eventType}-${i}`} className="border-b border-border/60 last:border-0">
+                      <td className="p-3.5 text-foreground">{row.productName}</td>
+                      <td className="p-3.5">
+                        <div className="text-foreground">{row.sellerName ?? (row.sellerRole === 'OWNER' ? 'Owner' : 'Salesman')}</div>
+                        <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{row.sellerRole === 'OWNER' ? 'Owner' : 'Salesman'}</div>
+                      </td>
+                      <td className="p-3.5 text-right" data-num>{row.soldQty}</td>
+                      <td className="p-3.5 text-right" data-num>{row.returnedQty}</td>
+                      <td className="p-3.5 text-right font-medium" data-num>{row.netEligibleQty}</td>
+                      <td className="p-3.5 text-right" data-num>{formatMoney(BigInt(row.ratePaisas), false)}</td>
+                      <td className="p-3.5 text-right font-medium" data-num>{formatMoney(BigInt(row.commissionPaisas), false)}</td>
+                      <td className="p-3.5">
+                        <div className="text-xs text-foreground">{EVENT_LABEL[row.eventType] ?? row.eventType}</div>
+                        <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{row.status}{row.paymentReference ? ` · ${row.paymentReference}` : ''}</div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="px-5 py-3 border-t border-border bg-muted/30 flex items-center justify-between text-sm">
+              <span className="text-muted-foreground">Total commission on this invoice</span>
+              <span className="font-semibold text-foreground" data-num>{formatMoney(BigInt(commissionQ.data.totalPaisas))}</span>
+            </div>
+          </>
+        )}
+      </div>
+
       {/* Return modal */}
       {returnOpen && (
         <div className="fixed inset-0 z-50 bg-foreground/30 backdrop-blur-sm flex items-end sm:items-center justify-center p-4" onClick={() => setReturnOpen(false)}>
@@ -257,25 +382,27 @@ export function InvoiceDetailView({ invoiceId }: { invoiceId: string }) {
         </div>
       )}
 
-      {/* ─── PRINT-ONLY INVOICE (half-A4/A5) ─── */}
+      {/* ─── PRINT-ONLY INVOICE (half-A4/A5, browser print) ─── */}
       {/* Hidden on screen via offscreen positioning; shown only during print via @media print CSS */}
       <div className="print-invoice" style={{ position: 'absolute', left: '-9999px', top: 0, width: '100%' }}>
         <div style={{ fontFamily: 'Arial, sans-serif', color: '#000', padding: '6mm', maxWidth: '140mm', margin: '0 auto' }}>
           {/* Header */}
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '2px solid #000', paddingBottom: '6px', marginBottom: '8px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: '2px solid #000', paddingBottom: '6px', marginBottom: '8px' }}>
             <div>
-              <div style={{ fontSize: '18px', fontWeight: 'bold', color: '#000' }}>KhataPro ERP</div>
-              <div style={{ fontSize: '8px', color: '#666' }}>Accounting-First Garments ERP</div>
+              <div style={{ fontSize: '18px', fontWeight: 'bold', color: '#000' }}>{business?.name ?? 'Invoice'}</div>
+              {business?.phone && <div style={{ fontSize: '8px', color: '#666' }}>{business.phone}</div>}
+              {business?.address && <div style={{ fontSize: '8px', color: '#666' }}>{business.address}</div>}
             </div>
             <div style={{ textAlign: 'right' }}>
+              <div style={{ fontSize: '11px', fontWeight: 'bold', letterSpacing: '0.5px' }}>{printModel.documentTitle}</div>
               <div style={{ fontSize: '14px', fontWeight: 'bold' }}>{inv.invoiceNo}</div>
-              <div style={{ fontSize: '9px', color: '#666' }}>{inv.invoiceType} · {bizDate(inv.invoiceDate)}</div>
+              <div style={{ fontSize: '9px', color: '#666' }}>{printModel.channelLabel} · {bizFormat(inv.invoiceDate, 'datetime')}</div>
             </div>
           </div>
           {/* Meta */}
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px', fontSize: '9px' }}>
             <div>
-              {inv.salesmanName && <div><strong>Salesman:</strong> {inv.salesmanName}</div>}
+              {printModel.sellerName && <div><strong>Seller:</strong> {printModel.sellerName}{printModel.sellerRoleLabel ? ` (${printModel.sellerRoleLabel})` : ''}</div>}
             </div>
             <div style={{ textAlign: 'right' }}>
               {inv.customerName && <div><strong>Customer:</strong> {inv.customerName}</div>}
@@ -283,51 +410,75 @@ export function InvoiceDetailView({ invoiceId }: { invoiceId: string }) {
               {inv.customerAddress && <div style={{ fontSize: '8px' }}>{inv.customerAddress}{inv.customerCity ? `, ${inv.customerCity}` : ''}</div>}
             </div>
           </div>
-          {/* Items */}
+          {/* Items — sold/returned/net columns appear only when the bill has returns */}
           <table style={{ width: '100%', fontSize: '9px', borderCollapse: 'collapse', marginBottom: '6px' }}>
             <thead>
               <tr style={{ background: '#f0f0f0', borderBottom: '1px solid #000' }}>
                 <th style={{ textAlign: 'left', padding: '3px 4px', fontSize: '8px', textTransform: 'uppercase' }}>Item</th>
-                <th style={{ textAlign: 'center', padding: '3px', width: '25px', fontSize: '8px' }}>Qty</th>
-                <th style={{ textAlign: 'right', padding: '3px 4px', width: '50px', fontSize: '8px' }}>Price</th>
+                <th style={{ textAlign: 'right', padding: '3px', width: '28px', fontSize: '8px' }}>{printModel.hasReturns ? 'Sold' : 'Qty'}</th>
+                {printModel.hasReturns && <th style={{ textAlign: 'right', padding: '3px', width: '28px', fontSize: '8px' }}>Ret.</th>}
+                {printModel.hasReturns && <th style={{ textAlign: 'right', padding: '3px', width: '28px', fontSize: '8px' }}>Net</th>}
+                <th style={{ textAlign: 'right', padding: '3px 4px', width: '50px', fontSize: '8px' }}>Rate</th>
                 <th style={{ textAlign: 'right', padding: '3px 4px', width: '60px', fontSize: '8px' }}>Total</th>
               </tr>
             </thead>
             <tbody>
-              {inv.items?.map((it, i) => (
-                <tr key={it.id} style={{ borderBottom: '1px solid #ddd' }}>
-                  <td style={{ padding: '3px 4px' }}>{it.productName}{it.isTemporary ? ' *' : ''}</td>
-                  <td style={{ textAlign: 'center', padding: '3px' }}>{it.qty}</td>
-                  <td style={{ textAlign: 'right', padding: '3px 4px', fontFamily: 'monospace' }}>{formatMoney(BigInt(it.unitPrice), false)}</td>
-                  <td style={{ textAlign: 'right', padding: '3px 4px', fontFamily: 'monospace', fontWeight: 'bold' }}>{formatMoney(BigInt(it.lineTotal), false)}</td>
+              {printModel.lines.map((line, i) => (
+                <tr key={i} style={{ borderBottom: '1px solid #ddd' }}>
+                  <td style={{ padding: '3px 4px' }}>{line.productName}</td>
+                  <td style={{ textAlign: 'right', padding: '3px' }}>{line.soldQty}</td>
+                  {printModel.hasReturns && <td style={{ textAlign: 'right', padding: '3px' }}>{line.returnedQty}</td>}
+                  {printModel.hasReturns && <td style={{ textAlign: 'right', padding: '3px', fontWeight: 'bold' }}>{line.netQty}</td>}
+                  <td style={{ textAlign: 'right', padding: '3px 4px', fontFamily: 'monospace' }}>{formatMoney(BigInt(line.unitPricePaisas), false)}</td>
+                  <td style={{ textAlign: 'right', padding: '3px 4px', fontFamily: 'monospace', fontWeight: 'bold' }}>{formatMoney(BigInt(line.lineTotalPaisas), false)}</td>
                 </tr>
               ))}
             </tbody>
           </table>
           {/* Totals */}
           <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '8px' }}>
-            <div style={{ minWidth: '140px', fontSize: '10px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0', borderTop: '1px solid #000', fontWeight: 'bold' }}>
-                <span>Total</span><span style={{ fontFamily: 'monospace' }}>{formatMoney(BigInt(inv.total))}</span>
-              </div>
+            <div style={{ minWidth: '150px', fontSize: '10px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0' }}>
-                <span>Paid</span><span style={{ fontFamily: 'monospace' }}>{formatMoney(BigInt(inv.paidAmount))}</span>
+                <span>Subtotal</span><span style={{ fontFamily: 'monospace' }}>{formatMoney(BigInt(printModel.subtotalPaisas), false)}</span>
               </div>
-              {outstanding > 0n && (
-                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0', color: '#c00' }}>
-                  <span>Outstanding</span><span style={{ fontFamily: 'monospace' }}>{formatMoney(outstanding)}</span>
+              {BigInt(printModel.returnDeductionPaisas) > 0n && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0' }}>
+                  <span>Less returns</span><span style={{ fontFamily: 'monospace' }}>-{formatMoney(BigInt(printModel.returnDeductionPaisas), false)}</span>
                 </div>
               )}
-              {inv.payments?.filter(p => p.isChange).map(p => (
-                <div key={p.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0' }}>
-                  <span>Change ({p.accountName})</span><span style={{ fontFamily: 'monospace' }}>{formatMoney(BigInt(p.amount))}</span>
+              {BigInt(printModel.discountPaisas) > 0n && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0' }}>
+                  <span>Discount</span><span style={{ fontFamily: 'monospace' }}>-{formatMoney(BigInt(printModel.discountPaisas), false)}</span>
+                </div>
+              )}
+              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0', borderTop: '1px solid #000', fontWeight: 'bold' }}>
+                <span>Net Payable</span><span style={{ fontFamily: 'monospace' }}>{formatMoney(BigInt(printModel.netPayablePaisas))}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0' }}>
+                <span>Paid</span><span style={{ fontFamily: 'monospace' }}>{formatMoney(BigInt(printModel.paidPaisas))}</span>
+              </div>
+              {BigInt(printModel.balancePaisas) > 0n && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0', color: '#c00' }}>
+                  <span>Balance</span><span style={{ fontFamily: 'monospace' }}>{formatMoney(BigInt(printModel.balancePaisas))}</span>
+                </div>
+              )}
+              {printModel.payments.filter(p => p.isChange).map((p, i) => (
+                <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0' }}>
+                  <span>Change ({p.accountName})</span><span style={{ fontFamily: 'monospace' }}>{formatMoney(BigInt(p.amountPaisas))}</span>
                 </div>
               ))}
             </div>
           </div>
+          {/* Payment method */}
+          {printModel.payments.length > 0 && (
+            <div style={{ fontSize: '8px', marginBottom: '6px' }}>
+              <strong>Payment:</strong>{' '}
+              {printModel.payments.map(p => `${p.accountName}${p.isChange ? ' (change)' : ''} ${formatMoney(BigInt(p.amountPaisas), false)}`).join(' · ')}
+            </div>
+          )}
           {/* Footer */}
           <div style={{ textAlign: 'center', fontSize: '7px', color: '#999', borderTop: '1px solid #ccc', paddingTop: '4px' }}>
-            KhataPro ERP · PKR · Asia/Karachi · * = temporary item
+            {business?.name ?? 'Invoice'} · PKR · Asia/Karachi · * = temporary item
           </div>
           {inv.memo && <div style={{ fontSize: '8px', color: '#666', marginTop: '4px' }}><strong>Note:</strong> {inv.memo}</div>}
         </div>
