@@ -6,6 +6,7 @@ export type AccountSubcategory = {
 export type AccountCategoryDefinition = {
   id: string
   label: string
+  code: string
   subcategories: readonly AccountSubcategory[]
 }
 
@@ -14,17 +15,17 @@ export type AccountCategoryDefinition = {
  * separate from display labels; this layer never writes accounting records.
  */
 export const ACCOUNT_CATEGORY_DEFINITIONS = [
-  { id: 'sales', label: 'Sales', subcategories: [{ id: 'counter-sale', label: 'Counter Sale' }, { id: 'online-sale', label: 'Online Sale' }, { id: 'ofc-sale', label: 'OFC Sale' }] },
-  { id: 'expenses', label: 'Expenses', subcategories: [{ id: 'rent', label: 'Rent' }, { id: 'salary', label: 'Salary' }, { id: 'utilities', label: 'Utilities' }, { id: 'delivery', label: 'Delivery' }, { id: 'marketing', label: 'Marketing' }, { id: 'miscellaneous', label: 'Miscellaneous' }] },
-  { id: 'accounts-receivable', label: 'Accounts Receivable', subcategories: [{ id: 'customer-collections', label: 'Customer Collections' }] },
-  { id: 'accounts-payable', label: 'Accounts Payable', subcategories: [{ id: 'vendor-payments', label: 'Vendor Payments' }] },
-  { id: 'purchases', label: 'Purchases', subcategories: [{ id: 'stock-purchases', label: 'Stock Purchases' }, { id: 'purchase-returns', label: 'Purchase Returns' }] },
-  { id: 'capital', label: 'Capital', subcategories: [{ id: 'owner-capital', label: 'Owner Capital' }, { id: 'drawings', label: 'Drawings' }] },
-  { id: 'current-assets', label: 'Current Assets', subcategories: [{ id: 'cash', label: 'Cash' }, { id: 'bank', label: 'Bank' }, { id: 'wallet', label: 'Wallet' }, { id: 'petty-cash', label: 'Petty Cash' }] },
-  { id: 'salesman', label: 'Salesman', subcategories: [{ id: 'commissions', label: 'Commissions' }, { id: 'payouts', label: 'Payouts' }] },
+  { id: 'sales', code: 'INCOME', label: 'Sales', subcategories: [{ id: 'counter-sale', label: 'Counter Sale' }, { id: 'online-sale', label: 'Online Sale' }, { id: 'ofc-sale', label: 'OFC Sale' }] },
+  { id: 'expenses', code: 'EXP', label: 'Expenses', subcategories: [{ id: 'rent', label: 'Rent' }, { id: 'salary', label: 'Salary' }, { id: 'utilities', label: 'Utilities' }, { id: 'delivery', label: 'Delivery' }, { id: 'marketing', label: 'Marketing' }, { id: 'miscellaneous', label: 'Miscellaneous' }] },
+  { id: 'accounts-receivable', code: 'AR', label: 'Accounts Receivable', subcategories: [{ id: 'customer-collections', label: 'Customer Collections' }] },
+  { id: 'accounts-payable', code: 'LIAB', label: 'Accounts Payable', subcategories: [{ id: 'vendor-payments', label: 'Vendor Payments' }] },
+  { id: 'purchases', code: 'PUR', label: 'Purchases', subcategories: [{ id: 'stock-purchases', label: 'Stock Purchases' }, { id: 'purchase-returns', label: 'Purchase Returns' }] },
+  { id: 'capital', code: 'EQUITY', label: 'Capital', subcategories: [{ id: 'owner-capital', label: 'Owner Capital' }, { id: 'drawings', label: 'Drawings' }] },
+  { id: 'current-assets', code: 'ASSET', label: 'Current Assets', subcategories: [{ id: 'cash', label: 'Cash' }, { id: 'bank', label: 'Bank' }, { id: 'wallet', label: 'Wallet' }, { id: 'petty-cash', label: 'Petty Cash' }] },
+  { id: 'salesman', code: 'COMM', label: 'Salesman', subcategories: [{ id: 'commissions', label: 'Commissions' }, { id: 'payouts', label: 'Payouts' }] },
 ] as const satisfies readonly AccountCategoryDefinition[]
 
-export const UNCATEGORIZED_CATEGORY = { id: 'uncategorized', label: 'Uncategorized', subcategories: [] } as const
+export const UNCATEGORIZED_CATEGORY = { id: 'uncategorized', code: 'UNCAT', label: 'Uncategorized', subcategories: [] } as const
 
 export type MoneyActivity = {
   voucherId: string

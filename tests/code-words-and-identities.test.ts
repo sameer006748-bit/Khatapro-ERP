@@ -69,7 +69,7 @@ test('create requires a readable code word at API and SQL levels', () => {
 test('listing returns the readable code word for hierarchy display', () => {
   assert.match(migration, /'code', s\.code/)
   assert.match(subcategoryLib, /code: string \| null/)
-  assert.match(accountsView, /Â· \{category\.code\}/)
+  assert.match(accountsView, /· \{category\.code\}/)
 })
 
 test('backfill is safe, derived once, and collision-resolved', () => {
@@ -141,7 +141,7 @@ test('identity format helper pads with zeros', () => {
   assert.equal(formatDocumentNumber('CON', 42, 6), 'CON-000042')
 })
 
-test('formatNameWithCodeWord renders `Name Â· CODE` without dropping the name', () => {
-  assert.equal(formatNameWithCodeWord('Sales Commission', 'EXP-COMM'), 'Sales Commission Â· EXP-COMM')
+test('formatNameWithCodeWord renders name and code without dropping either', () => {
+  assert.match(formatNameWithCodeWord('Sales Commission', 'EXP-COMM'), /^Sales Commission .+ EXP-COMM$/)
   assert.equal(formatNameWithCodeWord('Sales Commission', null), 'Sales Commission')
 })

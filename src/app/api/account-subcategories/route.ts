@@ -9,6 +9,7 @@ import {
   CodeWordSchemaRequiredError,
 } from '@/lib/money/persisted-account-subcategories'
 import { normalizeCodeWord } from '@/lib/accounting/code-words'
+import { ACCOUNT_CATEGORY_DEFINITIONS } from '@/lib/money/account-subcategories'
 import { getAccountingAvailability, unavailableAccountingPayload } from '@/lib/accounting/availability'
 import { resolveRequestId, safeApiError, safeMutationError } from '@/lib/observability'
 
@@ -31,6 +32,12 @@ async function sessionUser() {
   return loadSessionUser((session.user as any).id)
 }
 
+const parentCategories = ACCOUNT_CATEGORY_DEFINITIONS.map(({ id, code, label }) => ({ id, code, label }))
+
+function withParentCategories<T extends object>(payload: T) {
+  return { ...payload, parentCategories }
+}
+
 export async function GET(req: Request) {
   const requestId = resolveRequestId(req)
   const loaded = await sessionUser()
@@ -41,12 +48,12 @@ export async function GET(req: Request) {
   try {
     const capability = await getAccountingAvailability(loaded.businessId)
     if (capability.path === 'operational-fallback' || capability.path === 'legacy-local') {
-      return NextResponse.json(unavailableAccountingPayload(
+      return NextResponse.json(withParentCategories(unavailableAccountingPayload(
         { categories: [], assignments: [] },
         capability.reason,
-      ))
+      )))
     }
-    return NextResponse.json(await listPersistedAccountSubcategories(loaded.businessId, loaded.userId))
+    return NextResponse.json(withParentCategories(await listPersistedAccountSubcategories(loaded.businessId, loaded.userId)))
   } catch (error) {
     // Local Prisma preview and production databases before the additive
     // account-subcategory/code-word migrations have no RPC to call. The
@@ -54,10 +61,10 @@ export async function GET(req: Request) {
     // rather than failing its whole query with a 500.
     if (error instanceof CodeWordSchemaRequiredError
       || error instanceof Error && /Server-attributed category actor is unavailable|list_account_subcategories|function .* does not exist|relation .* does not exist|schema cache/i.test(error.message)) {
-      return NextResponse.json(unavailableAccountingPayload(
+      return NextResponse.json(withParentCategories(unavailableAccountingPayload(
         { categories: [], assignments: [] },
         'missing-table',
-      ))
+      )))
     }
     return safeApiError({ route: '/api/account-subcategories', requestId, errorCode: 'CATEGORY_LOAD_FAILED', userMessage: 'Account categories could not be loaded.', error })
   }
