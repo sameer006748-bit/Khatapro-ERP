@@ -6,6 +6,8 @@ export type PersistedSubcategory = {
   id: string
   parentCode: string
   name: string
+  /** Readable code word (e.g. `EXP-COMM`); null until migration 00034 backfill. */
+  code: string | null
   reportClass: 'Income' | 'Expense' | 'Asset' | 'Liability' | 'Equity'
   isActive: boolean
   archivedAt: string | null
@@ -40,6 +42,9 @@ export async function managePersistedAccountSubcategory(input: {
   subcategoryId?: string | null
   name?: string | null
   accountId?: string | null
+  /** Readable code word; passed as p_code only when provided so the RPC call
+   * stays compatible with databases where migration 00034 is not applied yet. */
+  code?: string | null
 }) {
   const admin = getAdminSupabase()
   const profileId = await resolveSupabaseUuid(input.actorId)
@@ -52,7 +57,31 @@ export async function managePersistedAccountSubcategory(input: {
     p_subcategory_id: input.subcategoryId ?? null,
     p_name: input.name ?? null,
     p_account_id: input.accountId ?? null,
+    ...(input.code ? { p_code: input.code } : {}),
   })
-  if (error) throw new Error(`manage_account_subcategory: ${error.message}`)
+  if (error) {
+    if (isMissingCodeWordSignature(error)) {
+      throw new CodeWordSchemaRequiredError()
+    }
+    throw new Error(`manage_account_subcategory: ${error.message}`)
+  }
   return data as { ok: boolean; action: string; subcategoryId: string | null }
+}
+
+/** True when the deployed manage_account_subcategory signature predates the
+ * optional p_code parameter (migration 00034 absent). */
+function isMissingCodeWordSignature(error: { message: string; code?: string }): boolean {
+  return error.code === 'PGRST202'
+    || /p_code/i.test(error.message)
+    || /Could not find the function/i.test(error.message)
+    || /function .* does not exist/i.test(error.message)
+}
+
+/** Raised when the readable code-word schema (migration 00034) is absent —
+ * callers must degrade gracefully instead of surfacing a 500. */
+export class CodeWordSchemaRequiredError extends Error {
+  constructor() {
+    super('Readable code words are not available until migration 00034 is applied')
+    this.name = 'CodeWordSchemaRequiredError'
+  }
 }

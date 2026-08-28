@@ -20,6 +20,25 @@ test('all required transaction types have explicit non-uniform prefixes', () => 
   assert.ok(new Set(Object.values(expected)).size > 10)
 })
 
+test('migration 00034 re-issues the readable docs registry without erasing legacy mappings', async () => {
+  const registry = await readFile('supabase/migrations/00034_code_words_and_prefix_registry.sql', 'utf8')
+  const readable: Record<string, string> = {
+    SALE_RETURN: 'SRT', PURCHASE_RETURN: 'PRT', RECEIPT_VOUCHER: 'REC',
+    PAYMENT_VOUCHER: 'PAY', JOURNAL_VOUCHER: 'JRV', CONTRA_BATCH: 'CON',
+    STOCK_ADJUSTMENT: 'STA', OPENING_STOCK: 'OPS',
+    RIDER_COD_SETTLEMENT: 'RDS', COMMISSION_SETTLEMENT: 'COM',
+  }
+  for (const [type, prefix] of Object.entries(readable)) {
+    assert.match(registry, new RegExp(`when '${type}' then '${prefix}'`, 'i'))
+  }
+  // Legacy prefixes stay accepted by the allocator — historical identities and
+  // replays must never fail after the registry upgrade.
+  for (const legacy of ['SR', 'PRN', 'RV', 'PV', 'JV', 'CTB', 'SA', 'OS', 'RCS', 'CMS', 'CAP', 'DRW', 'CS', 'DO']) {
+    assert.ok(registry.includes(`'${legacy}'`), `legacy prefix ${legacy} must remain accepted`)
+  }
+  assert.match(registry, /when 'RC' then 'REC'[\s\S]*when 'PM' then 'PAY'[\s\S]*when 'CT' then 'CON'/)
+})
+
 test('allocator is row-locking, business-scoped and rollback-safe', () => {
   assert.match(migration, /insert into public\.identity_sequences \(business_id, prefix, last_seq\)/i)
   assert.match(migration, /on conflict \(business_id, prefix\)[\s\S]{0,100}last_seq \+ 1/i)

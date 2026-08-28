@@ -6,7 +6,9 @@ import { hasPermission, loadSessionUser } from '@/lib/auth/permissions'
 import {
   listPersistedAccountSubcategories,
   managePersistedAccountSubcategory,
+  CodeWordSchemaRequiredError,
 } from '@/lib/money/persisted-account-subcategories'
+import { normalizeCodeWord } from '@/lib/accounting/code-words'
 import { getAccountingAvailability, unavailableAccountingPayload } from '@/lib/accounting/availability'
 import { resolveRequestId, safeApiError, safeMutationError } from '@/lib/observability'
 
@@ -18,6 +20,8 @@ const ActionSchema = z.object({
   ]).optional(),
   subcategoryId: z.string().uuid().nullable().optional(),
   name: z.string().trim().min(1).max(80).optional(),
+  // Readable code word (e.g. EXP-COMM). Uppercase-canonical; validated below.
+  code: z.string().max(40).optional(),
   accountId: z.string().uuid().optional(),
 })
 
@@ -36,7 +40,7 @@ export async function GET(req: Request) {
   }
   try {
     const capability = await getAccountingAvailability(loaded.businessId)
-    if (capability.path === 'operational-fallback') {
+    if (capability.path === 'operational-fallback' || capability.path === 'legacy-local') {
       return NextResponse.json(unavailableAccountingPayload(
         { categories: [], assignments: [] },
         capability.reason,
@@ -44,6 +48,17 @@ export async function GET(req: Request) {
     }
     return NextResponse.json(await listPersistedAccountSubcategories(loaded.businessId, loaded.userId))
   } catch (error) {
+    // Local Prisma preview and production databases before the additive
+    // account-subcategory/code-word migrations have no RPC to call. The
+    // Accounts screen must remain usable and explicitly show setup status,
+    // rather than failing its whole query with a 500.
+    if (error instanceof CodeWordSchemaRequiredError
+      || error instanceof Error && /Server-attributed category actor is unavailable|list_account_subcategories|function .* does not exist|relation .* does not exist|schema cache/i.test(error.message)) {
+      return NextResponse.json(unavailableAccountingPayload(
+        { categories: [], assignments: [] },
+        'missing-table',
+      ))
+    }
     return safeApiError({ route: '/api/account-subcategories', requestId, errorCode: 'CATEGORY_LOAD_FAILED', userMessage: 'Account categories could not be loaded.', error })
   }
 }
@@ -53,18 +68,51 @@ export async function POST(req: Request) {
   const loaded = await sessionUser()
   if (!loaded) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
   const canManage = loaded.roleName === 'Owner' || loaded.roleName === 'Admin'
+    || loaded.roleName === 'Owner/Admin'
+    || hasPermission(loaded, 'can_manage_setup')
     || hasPermission(loaded, 'can_manage_account_categories')
     || hasPermission(loaded, 'can_manage_chart_of_accounts')
   if (!canManage) return NextResponse.json({ error: 'FORBIDDEN' }, { status: 403 })
+  const capability = await getAccountingAvailability(loaded.businessId)
+  if (capability.path === 'operational-fallback' || capability.path === 'legacy-local') {
+    return NextResponse.json(unavailableAccountingPayload(
+      { error: 'CODE_WORD_SCHEMA_REQUIRED' },
+      capability.reason,
+    ), { status: 409 })
+  }
   const parsed = ActionSchema.safeParse(await req.json().catch(() => null))
   if (!parsed.success) return NextResponse.json({ error: 'INVALID_INPUT' }, { status: 400 })
+  // Every subcategory needs a readable code word. For `create` it is required;
+  // for `rename` it is optional and only updates the code when supplied.
+  let code: string | undefined
+  if (parsed.data.code !== undefined || parsed.data.action === 'create') {
+    const codeWord = normalizeCodeWord(parsed.data.code)
+    if (!codeWord.ok) {
+      return NextResponse.json({ error: 'INVALID_CODE_WORD', message: codeWord.error }, { status: 400 })
+    }
+    code = codeWord.code
+  }
   try {
     return NextResponse.json(await managePersistedAccountSubcategory({
       businessId: loaded.businessId,
       actorId: loaded.userId,
       ...parsed.data,
+      code,
     }))
   } catch (error) {
+    if (error instanceof CodeWordSchemaRequiredError) {
+      // Optional code-word schema absent — degrade clearly, never a 500.
+      return NextResponse.json({
+        error: 'CODE_WORD_SCHEMA_REQUIRED',
+        message: error.message,
+      }, { status: 409 })
+    }
+    if (error instanceof Error && /DUPLICATE_CODE_WORD/i.test(error.message)) {
+      return NextResponse.json({
+        error: 'DUPLICATE_CODE_WORD',
+        message: 'This code word is already used in this business. Choose a different code word.',
+      }, { status: 400 })
+    }
     return safeMutationError({ route: '/api/account-subcategories', requestId, errorCode: 'CATEGORY_MUTATION_FAILED', userMessage: 'Account category change could not be saved.', error })
   }
 }

@@ -6,9 +6,12 @@ const DATA_ACCESS = readFile('src/lib/sales/data-access.ts', 'utf8')
 const PRISMA_SCHEMA = readFile('prisma/schema.prisma', 'utf8')
 const MIGRATIONS = readFile('supabase/migrations/00014_phase1_foundation.sql', 'utf8')
 
-test('postSaleViaPrisma allocates invoice numbers via IdentitySequence', async () => {
-  const src = await DATA_ACCESS
-  assert.ok(src.includes('identitySequence'), 'Prisma path must use identitySequence')
+const GENERATOR = readFile('src/lib/identity/generate.ts', 'utf8')
+
+test('postSaleViaPrisma allocates invoice numbers via the shared identity allocator', async () => {
+  const [src, generator] = await Promise.all([DATA_ACCESS, GENERATOR])
+  assert.ok(src.includes('allocateDocumentNumber(tx, input.businessId, \'INV\')'), 'Prisma path must use the shared identity allocator')
+  assert.ok(generator.includes('identitySequence.upsert'), 'shared allocator must use identitySequence')
   assert.ok(!src.includes("findFirst({ where: { businessId: input.businessId }, orderBy: { invoiceNo: 'desc' } })"),
     'Unsafe last-row+1 allocation must be removed from postSaleViaPrisma')
 })

@@ -301,10 +301,11 @@ function AccountSubcategoryPanel({ activities, accounts, user }: { activities: M
   const [filter, setFilter] = useState<{ parentId: string; subcategoryId?: string } | null>(null)
   const [parentCode, setParentCode] = useState('expenses')
   const [newName, setNewName] = useState('')
+  const [newCode, setNewCode] = useState('')
   const [accountId, setAccountId] = useState('')
   const [subcategoryId, setSubcategoryId] = useState('uncategorized')
   const categoryQ = useQuery<{
-    categories: Array<{ id: string; parentCode: string; name: string; reportClass: string; isActive: boolean; archivedAt: string | null }>
+    categories: Array<{ id: string; parentCode: string; name: string; code: string | null; reportClass: string; isActive: boolean; archivedAt: string | null }>
     assignments: Array<{ accountId: string; parentCode: string; subcategoryId: string | null }>
   }>({
     queryKey: ['account-subcategories'],
@@ -320,13 +321,14 @@ function AccountSubcategoryPanel({ activities, accounts, user }: { activities: M
         method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
       })
       const result = await response.json()
-      if (!response.ok) throw new Error(result?.error ?? 'Category change failed')
+      if (!response.ok) throw new Error(result?.message ?? result?.error ?? 'Category change failed')
       return result
     },
     onSuccess: () => {
       toast.success('Account classification saved.')
       void categoryQ.refetch()
       setNewName('')
+      setNewCode('')
     },
     onError: (error: Error) => toast.error(error.message),
   })
@@ -344,7 +346,8 @@ function AccountSubcategoryPanel({ activities, accounts, user }: { activities: M
       <div className="grid grid-cols-1 sm:grid-cols-[180px_1fr_auto] gap-2 items-end">
         <div><Label className="text-[10px]">Approved parent</Label><Select value={parentCode} onValueChange={value => { setParentCode(value); setSubcategoryId('uncategorized') }}><SelectTrigger className="h-8 bg-background"><SelectValue /></SelectTrigger><SelectContent>{ACCOUNT_CATEGORY_DEFINITIONS.map(parent => <SelectItem key={parent.id} value={parent.id}>{parent.label}</SelectItem>)}</SelectContent></Select></div>
         <div><Label className="text-[10px]">New subcategory</Label><Input value={newName} onChange={event => setNewName(event.target.value)} className="h-8 bg-background" placeholder="One level only" /></div>
-        <Button size="sm" className="h-8" disabled={!newName.trim() || categoryMutation.isPending} onClick={() => categoryMutation.mutate({ action: 'create', parentCode, name: newName })}>Create</Button>
+        <div><Label className="text-[10px]">Code Word</Label><Input value={newCode} onChange={event => setNewCode(event.target.value)} className="h-8 bg-background uppercase" placeholder="EXP-COMM" maxLength={40} /></div>
+        <Button size="sm" className="h-8" disabled={!newName.trim() || !newCode.trim() || categoryMutation.isPending} onClick={() => categoryMutation.mutate({ action: 'create', parentCode, name: newName, code: newCode })}>Create</Button>
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-[1fr_180px_180px_auto] gap-2 items-end">
         <div><Label className="text-[10px]">Account</Label><Select value={accountId} onValueChange={setAccountId}><SelectTrigger className="h-8 bg-background"><SelectValue placeholder="Select account" /></SelectTrigger><SelectContent>{accounts.map(account => <SelectItem key={account.id} value={account.id}>{account.code} · {account.name}</SelectItem>)}</SelectContent></Select></div>
@@ -353,7 +356,7 @@ function AccountSubcategoryPanel({ activities, accounts, user }: { activities: M
         <Button size="sm" className="h-8" disabled={!accountId || categoryMutation.isPending} onClick={() => categoryMutation.mutate({ action: subcategoryId === 'uncategorized' ? 'uncategorize' : 'move', parentCode, accountId, subcategoryId: subcategoryId === 'uncategorized' ? null : subcategoryId })}>Assign</Button>
       </div>
       {categoryQ.isError && <p className="text-[10px] text-amber-700">Persistence is unavailable until migration 00021 is inspected and applied.</p>}
-      {categoryQ.data && <div className="flex flex-wrap gap-1.5">{categoryQ.data.categories.map(category => <span key={category.id} className={`inline-flex items-center gap-1 rounded border px-2 py-1 text-[10px] ${category.isActive ? 'border-border bg-background' : 'border-border text-muted-foreground line-through'}`}>{ACCOUNT_CATEGORY_DEFINITIONS.find(parent => parent.id === category.parentCode)?.label}: {category.name}{category.isActive && <><button className="text-primary hover:underline" onClick={() => { const name = window.prompt('Rename subcategory', category.name); if (name?.trim()) categoryMutation.mutate({ action: 'rename', subcategoryId: category.id, name }) }}>Rename</button><button className="text-destructive hover:underline" onClick={() => categoryMutation.mutate({ action: 'archive', subcategoryId: category.id })}>Archive</button></>}</span>)}</div>}
+      {categoryQ.data && <div className="flex flex-wrap gap-1.5">{categoryQ.data.categories.map(category => <span key={category.id} className={`inline-flex items-center gap-1 rounded border px-2 py-1 text-[10px] ${category.isActive ? 'border-border bg-background' : 'border-border text-muted-foreground line-through'}`}>{ACCOUNT_CATEGORY_DEFINITIONS.find(parent => parent.id === category.parentCode)?.label}: {category.name}{category.code ? <span className="font-medium tracking-wide"> · {category.code}</span> : null}{category.isActive && <><button className="text-primary hover:underline" onClick={() => { const name = window.prompt('Rename subcategory', category.name); if (name?.trim()) categoryMutation.mutate({ action: 'rename', subcategoryId: category.id, name }) }}>Rename</button><button className="text-primary hover:underline" onClick={() => { const raw = window.prompt('Edit code word (letters, numbers, hyphens — e.g. EXP-COMM)', category.code ?? ''); if (raw?.trim()) categoryMutation.mutate({ action: 'rename', subcategoryId: category.id, name: category.name, code: raw }) }}>Edit code</button><button className="text-destructive hover:underline" onClick={() => categoryMutation.mutate({ action: 'archive', subcategoryId: category.id })}>Archive</button></>}</span>)}</div>}
     </div>}
     <div className="divide-y divide-border/50">
       {parents.map(parent => {

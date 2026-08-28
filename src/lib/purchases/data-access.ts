@@ -7,6 +7,7 @@ import { db } from '@/lib/db'
 import { getAdminSupabase } from '@/lib/supabase/admin'
 import { bizDateString } from '@/lib/dates'
 import { getAccountByCode } from '@/lib/accounting/data-access'
+import { allocateDocumentNumber } from '@/lib/identity/generate'
 import { resolveSupabaseUuid } from '@/lib/accounting/voucher-supabase'
 import { writeAudit } from '@/lib/auth/permissions'
 import { probeTable } from '@/lib/supabase/phase-probe'
@@ -112,12 +113,7 @@ async function postPurchaseViaPrisma(input: typeof postPurchase extends (x: infe
   if (!payableAcct) throw new Error('Vendors Payable account (2010) not found')
 
   const result = await db.$transaction(async (tx) => {
-    const seq = await tx.identitySequence.upsert({
-      where: { businessId_prefix: { businessId: input.businessId, prefix: 'PUR' } },
-      create: { businessId: input.businessId, prefix: 'PUR', lastSeq: 1 },
-      update: { lastSeq: { increment: 1 } },
-    })
-    const purchaseNo = `PUR-${String(seq.lastSeq).padStart(4, '0')}`
+    const purchaseNo = await allocateDocumentNumber(tx, input.businessId, 'PUR')
 
     const voucherLines: Array<{ accountId: string; debit: bigint; credit: bigint; memo?: string }> = [
       { accountId: purchasesAcct.id, debit: total, credit: 0n, memo: `Purchase ${purchaseNo}` }
@@ -267,12 +263,7 @@ export async function postPurchaseReturn(input: {
   }
 
   const result = await db.$transaction(async (tx) => {
-    const seq = await tx.identitySequence.upsert({
-      where: { businessId_prefix: { businessId: input.businessId, prefix: 'PRN' } },
-      create: { businessId: input.businessId, prefix: 'PRN', lastSeq: 1 },
-      update: { lastSeq: { increment: 1 } },
-    })
-    const returnNo = `PRN-${String(seq.lastSeq).padStart(4, '0')}`
+    const returnNo = await allocateDocumentNumber(tx, input.businessId, 'PRT')
 
     // 1. Create reversal voucher
     const vch = await tx.voucher.create({

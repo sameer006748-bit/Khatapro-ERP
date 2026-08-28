@@ -12,6 +12,7 @@ import { db } from '@/lib/db'
 import { getAdminSupabase } from '@/lib/supabase/admin'
 import { bizDateString } from '@/lib/dates'
 import { getAccountByCode } from '@/lib/accounting/data-access'
+import { allocateDocumentNumber } from '@/lib/identity/generate'
 import {
   assertPhase9SaleFeatures,
   assertMixedSaleReturnSupport,
@@ -385,12 +386,7 @@ async function postSaleViaPrisma(
       }
     }
 
-    const seq = await tx.identitySequence.upsert({
-      where: { businessId_prefix: { businessId: input.businessId, prefix: 'INV' } },
-      create: { businessId: input.businessId, prefix: 'INV', lastSeq: 1 },
-      update: { lastSeq: { increment: 1 } },
-    })
-    const invoiceNo = `INV-${String(seq.lastSeq).padStart(4, '0')}`
+    const invoiceNo = await allocateDocumentNumber(tx, input.businessId, 'INV')
 
     const vch = await tx.voucher.create({
       data: { businessId: input.businessId, voucherType: 'SI', voucherDate: input.invoiceDate, memo: input.memo ?? `Sale ${invoiceNo}`, postedBy: input.createdBy ?? null, totalDebit: total, totalCredit: total },
