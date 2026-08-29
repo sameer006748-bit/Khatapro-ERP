@@ -27,6 +27,7 @@ import {
   computeStockEffects,
   resolveSellerAttribution,
   computeEarnedCommission,
+  computeHistoricalReturnCommissionAdjustment,
   SaleLineError,
   type NormalizedSaleLine,
   type SellerRole,
@@ -53,7 +54,8 @@ export type CustomerRow = {
   city: string | null
   isActive: boolean
 }
-export type InvoiceRow = { id: string; invoiceNo: string; invoiceType: string; invoiceDate: string; customerName: string | null; customerPhone?: string | null; customerAddress?: string | null; customerCity?: string | null; salesmanName: string | null; subtotal: string; discount?: string; total: string; paidAmount: string; status?: string; isCancelled: boolean; isReturned: boolean; memo?: string | null; items?: InvoiceItemRow[]; payments?: PaymentAllocationRow[] }
+export type InvoiceReturnRow = { returnNo: string; returnDate: string; total: string; settlementStatus: string }
+export type InvoiceRow = { id: string; invoiceNo: string; invoiceType: string; invoiceDate: string; customerName: string | null; customerPhone?: string | null; customerAddress?: string | null; customerCity?: string | null; salesmanName: string | null; subtotal: string; discount?: string; total: string; paidAmount: string; status?: string; isCancelled: boolean; isReturned: boolean; memo?: string | null; items?: InvoiceItemRow[]; payments?: PaymentAllocationRow[]; returns?: InvoiceReturnRow[] }
 export type InvoiceItemRow = { id: string; productId: string | null; productName: string; qty: number; returnedQty?: number; unitPrice: string; lineTotal: string; isTemporary: boolean }
 export type InvoiceCommissionRow = {
   invoiceItemId: string
@@ -702,11 +704,13 @@ export async function getInvoice(businessId: string, invoiceId: string): Promise
     const r = inv as any
     const { data: payments, error: paymentError } = await admin.from('payments').select('id, amount, direction, payment_mode').eq('business_id', businessId).eq('invoice_id', invoiceId).order('created_at')
     if (paymentError) throw new Error(`Supabase invoice payments: ${paymentError.message}`)
-    return { id: r.id, invoiceNo: r.invoice_no, invoiceType: r.invoice_type, invoiceDate: r.invoice_date, customerName: r.customer_name, customerPhone: r.customer_phone, customerAddress: r.customer_address, customerCity: r.customer_city, salesmanName: r.salesmen?.name ?? null, subtotal: String(r.subtotal), discount: String(r.discount ?? 0), total: String(r.total), paidAmount: String(r.paid), status: r.status, isCancelled: r.status === 'Cancelled', isReturned: r.status === 'Returned', memo: r.memo, items: (r.invoice_items ?? []).map((it: any) => ({ id: it.id, productId: it.product_id, productName: it.product_name, qty: it.qty, returnedQty: it.returned_qty, unitPrice: String(it.unit_price), lineTotal: String(it.line_total), isTemporary: it.is_temporary })), payments: (payments ?? []).map((p: any) => ({ id: p.id, accountName: p.payment_mode ?? 'Payment', amount: String(p.amount), direction: p.direction, paymentMode: p.payment_mode })) }
+    const { data: returns, error: returnError } = await admin.from('sales_returns').select('*').eq('business_id', businessId).eq('original_invoice_id', invoiceId).order('return_date')
+    if (returnError) throw new Error(`Supabase invoice returns: ${returnError.message}`)
+    return { id: r.id, invoiceNo: r.invoice_no, invoiceType: r.invoice_type, invoiceDate: r.invoice_date, customerName: r.customer_name, customerPhone: r.customer_phone, customerAddress: r.customer_address, customerCity: r.customer_city, salesmanName: r.salesmen?.name ?? null, subtotal: String(r.subtotal), discount: String(r.discount ?? 0), total: String(r.total), paidAmount: String(r.paid), status: r.status, isCancelled: r.status === 'Cancelled', isReturned: r.status === 'Returned', memo: r.memo, items: (r.invoice_items ?? []).map((it: any) => ({ id: it.id, productId: it.product_id, productName: it.product_name, qty: it.qty, returnedQty: it.returned_qty, unitPrice: String(it.unit_price), lineTotal: String(it.line_total), isTemporary: it.is_temporary })), payments: (payments ?? []).map((p: any) => ({ id: p.id, accountName: p.payment_mode ?? 'Payment', amount: String(p.amount), direction: p.direction, paymentMode: p.payment_mode })), returns: (returns ?? []).map((sr: any) => ({ returnNo: sr.return_no, returnDate: sr.return_date, total: String(sr.total), settlementStatus: sr.settlement_status ?? 'POSTED' })) }
   }
-  const inv = await db.invoice.findFirst({ where: { id: invoiceId, businessId }, include: { salesman: true, items: true, paymentAllocations: { include: { account: true } } } })
+  const inv = await db.invoice.findFirst({ where: { id: invoiceId, businessId }, include: { salesman: true, items: true, paymentAllocations: { include: { account: true } }, salesReturns: true } })
   if (!inv) return null
-  return { id: inv.id, invoiceNo: inv.invoiceNo, invoiceType: inv.invoiceType, invoiceDate: inv.invoiceDate.toISOString(), customerName: inv.customerName, customerPhone: inv.customerPhone, customerAddress: inv.customerAddress, customerCity: inv.customerCity, salesmanName: inv.salesman?.name ?? null, subtotal: inv.subtotal.toString(), discount: inv.discount.toString(), total: inv.total.toString(), paidAmount: inv.paidAmount.toString(), isCancelled: inv.isCancelled, isReturned: inv.isReturned, memo: inv.memo, items: inv.items.map((it) => ({ id: it.id, productId: it.productId, productName: it.productName, qty: it.qty, returnedQty: it.returnedQty, unitPrice: it.unitPrice.toString(), lineTotal: it.lineTotal.toString(), isTemporary: it.isTemporary })), payments: inv.paymentAllocations.map((pa) => ({ id: pa.id, accountId: pa.accountId, accountCode: pa.account.code, accountName: pa.account.name, amount: pa.amount.toString(), isChange: pa.isChange })) }
+  return { id: inv.id, invoiceNo: inv.invoiceNo, invoiceType: inv.invoiceType, invoiceDate: inv.invoiceDate.toISOString(), customerName: inv.customerName, customerPhone: inv.customerPhone, customerAddress: inv.customerAddress, customerCity: inv.customerCity, salesmanName: inv.salesman?.name ?? null, subtotal: inv.subtotal.toString(), discount: inv.discount.toString(), total: inv.total.toString(), paidAmount: inv.paidAmount.toString(), isCancelled: inv.isCancelled, isReturned: inv.isReturned, memo: inv.memo, items: inv.items.map((it) => ({ id: it.id, productId: it.productId, productName: it.productName, qty: it.qty, returnedQty: it.returnedQty, unitPrice: it.unitPrice.toString(), lineTotal: it.lineTotal.toString(), isTemporary: it.isTemporary })), payments: inv.paymentAllocations.map((pa) => ({ id: pa.id, accountId: pa.accountId, accountCode: pa.account.code, accountName: pa.account.name, amount: pa.amount.toString(), isChange: pa.isChange })), returns: inv.salesReturns.map((sr) => ({ returnNo: sr.returnNo, returnDate: sr.returnDate.toISOString(), total: sr.total.toString(), settlementStatus: sr.status === 'refunded' ? 'REFUNDED' : sr.status === 'credit_due' ? 'CREDIT_DUE' : 'POSTED' })) }
 }
 
 /**
@@ -943,45 +947,57 @@ export type LinkedReturnInput = {
   invoiceId: string
   items: Array<{ invoiceItemId: string; qty: number }>
   refundMode: 'CREDIT' | 'CASH' | 'BANK'
+  /** Required for an immediate refund; this is a ledger Account ID, not a label. */
+  refundAccountId?: string | null
   reason?: string | null
   idempotencyKey: string
   actorId: string
 }
 
-export async function postLinkedSaleReturn(input: LinkedReturnInput): Promise<{ returnId: string; returnNo: string; total: string; status: string; idempotent: boolean }> {
+export type LinkedReturnResult = {
+  returnId: string
+  returnNo: string
+  total: string
+  status: string
+  settlementStatus: 'CREDIT_DUE' | 'REFUNDED'
+  idempotent: boolean
+}
+
+export async function postLinkedSaleReturn(input: LinkedReturnInput): Promise<LinkedReturnResult> {
+  if (input.items.length === 0) throw new Error('At least one return item is required')
+  if (input.items.some((item) => !Number.isInteger(item.qty) || item.qty <= 0)) {
+    throw new Error('Return quantities must be positive whole numbers')
+  }
+  const requestedIds = input.items.map((item) => item.invoiceItemId)
+  if (new Set(requestedIds).size !== requestedIds.length) {
+    throw new Error('A duplicate invoice item cannot be returned twice in one request')
+  }
+  if (input.refundMode !== 'CREDIT' && !input.refundAccountId) {
+    throw new Error('A refund account is required for an immediate refund')
+  }
+
   if (await isPhase4Live()) {
     const admin = getAdminSupabase()
     const actorId = await resolveSupabaseUuid(input.actorId)
     if (!actorId) throw new Error('Server-attributed return actor is unavailable')
     if (await usesLegacyTransactionSchema()) {
-      // The original RPC supports whole-invoice reversal only. Verify the UI
-      // request is exactly that shape before invoking it; never silently turn a
-      // partial request into a full return.
-      const { data: originalItems, error: itemError } = await admin.from('invoice_items')
-        .select('id,qty')
-        .eq('invoice_id', input.invoiceId)
-      if (itemError) throw new Error(`Supabase sales return validation: ${itemError.message}`)
-      const requested = new Map(input.items.map(item => [item.invoiceItemId, item.qty]))
-      const wholeInvoice = Array.isArray(originalItems)
-        && originalItems.length === requested.size
-        && originalItems.every((item: any) => requested.get(item.id) === Number(item.qty))
-      if (!wholeInvoice) {
-        throw new Error('The legacy database supports whole-invoice sales returns only; no return was posted.')
-      }
-
       const data = await callRequiredLegacyIdentityRpc('post_sales_return', {
         p_business_id: input.businessId,
         p_invoice_id: input.invoiceId,
         p_return_date: bizDateString(new Date()),
+        p_return_items: input.items.map((item) => ({ invoice_item_id: item.invoiceItemId, qty: item.qty })),
+        p_refund_mode: input.refundMode,
+        p_refund_account_id: input.refundAccountId ?? null,
         p_reason: input.reason ?? null,
         p_created_by: actorId,
-      }, input.idempotencyKey, 'Sales Return')
+      }, input.idempotencyKey, 'Historical Sales Return', '00037_legacy_historical_sales_returns.sql')
       const result = data as any
       return {
         returnId: result.return_id,
         returnNo: result.return_no,
         total: String(result.total),
         status: result.status,
+        settlementStatus: result.settlement_status ?? (input.refundMode === 'CREDIT' ? 'CREDIT_DUE' : 'REFUNDED'),
         idempotent: Boolean(result.idempotent),
       }
     }
@@ -996,9 +1012,280 @@ export async function postLinkedSaleReturn(input: LinkedReturnInput): Promise<{ 
     })
     if (error) throw new Error(`Supabase post_sale_return_ledger: ${error.message}`)
     const result = data as any
-    return { returnId: result.return_id, returnNo: result.return_no, total: String(result.total), status: result.status, idempotent: Boolean(result.idempotent) }
+    return {
+      returnId: result.return_id,
+      returnNo: result.return_no,
+      total: String(result.total),
+      status: result.status,
+      settlementStatus: input.refundMode === 'CREDIT' ? 'CREDIT_DUE' : 'REFUNDED',
+      idempotent: Boolean(result.idempotent),
+    }
   }
-  throw new Error('Linked sales returns require the Phase 2 database migration.')
+  return postLinkedSaleReturnViaPrisma(input)
+}
+
+/**
+ * Transactional local/runtime adapter for a pure historical return.
+ *
+ * The original invoice and its sold quantities are immutable. The auditable
+ * return line is the source of truth; InvoiceItem.returnedQty is only updated as
+ * a guarded cache after the exact line is recorded.
+ */
+async function postLinkedSaleReturnViaPrisma(input: LinkedReturnInput): Promise<LinkedReturnResult> {
+  const requestedIds = input.items.map((item) => item.invoiceItemId)
+  return db.$transaction(async (tx) => {
+    const replay = await tx.salesReturn.findUnique({
+      where: { businessId_idempotencyKey: { businessId: input.businessId, idempotencyKey: input.idempotencyKey } },
+      include: { lines: true },
+    })
+    if (replay) {
+      const sameInvoice = replay.originalInvoiceId === input.invoiceId
+      const replayLines = new Map(replay.lines.map((line) => [line.originalInvoiceItemId, line.returnedQty]))
+      const sameLines = replayLines.size === input.items.length
+        && input.items.every((item) => replayLines.get(item.invoiceItemId) === item.qty)
+      if (!sameInvoice || !sameLines) throw new Error('The idempotency key was already used for a different sales return')
+      return {
+        returnId: replay.id,
+        returnNo: replay.returnNo,
+        total: replay.total.toString(),
+        status: replay.status,
+        settlementStatus: replay.status === 'refunded' ? 'REFUNDED' : 'CREDIT_DUE',
+        idempotent: true,
+      }
+    }
+
+    const invoice = await tx.invoice.findFirst({
+      where: { id: input.invoiceId, businessId: input.businessId },
+      select: { id: true, invoiceNo: true, isCancelled: true },
+    })
+    if (!invoice) throw new Error('Original invoice not found for this business')
+    if (invoice.isCancelled) throw new Error('A cancelled invoice cannot be returned')
+
+    const sourceItems = await tx.invoiceItem.findMany({
+      where: { id: { in: requestedIds }, invoiceId: invoice.id, businessId: input.businessId },
+      select: {
+        id: true, productId: true, productName: true, qty: true, returnedQty: true,
+        unitPrice: true,
+      },
+    })
+    if (sourceItems.length !== input.items.length) {
+      throw new Error('A referenced invoice item was not found or does not belong to the original invoice and business')
+    }
+    const sourceById = new Map(sourceItems.map((item) => [item.id, item]))
+    let total = 0n
+    for (const requested of input.items) {
+      const source = sourceById.get(requested.invoiceItemId)!
+      const remaining = source.qty - source.returnedQty
+      if (requested.qty > remaining) {
+        throw new Error(`${source.productName}: return quantity exceeds remaining returnable quantity (${remaining})`)
+      }
+      total += source.unitPrice * BigInt(requested.qty)
+    }
+
+    const salesAccount = await tx.account.findFirst({
+      where: { businessId: input.businessId, code: '4010', isActive: true },
+      select: { id: true, balanceCache: true },
+    })
+    if (!salesAccount) throw new Error('Sales account (4010) not found')
+
+    const settlementAccount = input.refundMode === 'CREDIT'
+      ? await tx.account.findFirst({
+          where: { businessId: input.businessId, code: '1200', isActive: true },
+          select: { id: true, balanceCache: true },
+        })
+      : await tx.account.findFirst({
+          where: {
+            id: input.refundAccountId!, businessId: input.businessId,
+            isActive: true, isBusinessAccount: true,
+          },
+          select: { id: true, balanceCache: true },
+        })
+    if (!settlementAccount) {
+      throw new Error(input.refundMode === 'CREDIT'
+        ? 'Accounts Receivable (1200) is required to record customer credit'
+        : 'The selected refund account was not found or is inactive')
+    }
+
+    const returnNo = await allocateDocumentNumber(tx, input.businessId, 'SRT')
+    const settlementStatus = input.refundMode === 'CREDIT' ? 'CREDIT_DUE' : 'REFUNDED'
+    const doc = await tx.salesReturn.create({
+      data: {
+        businessId: input.businessId,
+        originalInvoiceId: invoice.id,
+        returnDate: new Date(),
+        total,
+        returnNo,
+        status: settlementStatus === 'REFUNDED' ? 'refunded' : 'credit_due',
+        reason: input.reason ?? null,
+        createdBy: input.actorId,
+        idempotencyKey: input.idempotencyKey,
+      },
+    })
+
+    const voucher = await tx.voucher.create({
+      data: {
+        businessId: input.businessId,
+        voucherType: 'SR',
+        voucherDate: new Date(),
+        memo: `Historical return ${returnNo} against ${invoice.invoiceNo}`,
+        referenceId: doc.id,
+        referenceType: 'sales_return',
+        postedBy: input.actorId,
+        totalDebit: total,
+        totalCredit: total,
+      },
+    })
+    await tx.voucherLine.createMany({ data: [
+      { businessId: input.businessId, voucherId: voucher.id, accountId: salesAccount.id, debit: total, credit: 0n, memo: `Return ${returnNo}`, lineOrder: 0 },
+      { businessId: input.businessId, voucherId: voucher.id, accountId: settlementAccount.id, debit: 0n, credit: total, memo: settlementStatus === 'REFUNDED' ? `Refund ${returnNo}` : `Customer credit ${returnNo}`, lineOrder: 1 },
+    ] })
+    await tx.account.update({ where: { id: salesAccount.id }, data: { balanceCache: salesAccount.balanceCache + total } })
+    await tx.account.update({ where: { id: settlementAccount.id }, data: { balanceCache: settlementAccount.balanceCache - total } })
+    await tx.salesReturn.update({ where: { id: doc.id }, data: { returnVoucherId: voucher.id } })
+
+    for (const requested of input.items) {
+      const source = sourceById.get(requested.invoiceItemId)!
+      await tx.saleReturnLine.create({
+        data: {
+          businessId: input.businessId,
+          saleReturnId: doc.id,
+          originalInvoiceItemId: source.id,
+          returnedQty: requested.qty,
+          reason: input.reason ?? null,
+        },
+      })
+      const guarded = await tx.invoiceItem.updateMany({
+        where: { id: source.id, businessId: input.businessId, returnedQty: source.returnedQty },
+        data: { returnedQty: { increment: requested.qty } },
+      })
+      if (guarded.count !== 1) throw new Error(`${source.productName}: return quantity changed concurrently; retry the return`)
+
+      if (source.productId) {
+        const product = await tx.product.findFirst({
+          where: { id: source.productId, businessId: input.businessId },
+          select: { currentStock: true },
+        })
+        if (!product) throw new Error(`Product not found: ${source.productName}`)
+        const balanceAfter = product.currentStock + requested.qty
+        await tx.stockMovement.create({
+          data: {
+            businessId: input.businessId,
+            productId: source.productId,
+            movementType: 'adjustment_in',
+            quantity: requested.qty,
+            balanceAfter,
+            reason: `Historical return ${returnNo} against ${invoice.invoiceNo}`,
+            createdBy: input.actorId,
+          },
+        })
+        await tx.product.update({ where: { id: source.productId }, data: { currentStock: { increment: requested.qty } } })
+      }
+
+      const eligibility = await tx.commissionEvent.findFirst({
+        where: { businessId: input.businessId, invoiceId: invoice.id, invoiceItemId: source.id, eventType: 'calculated' },
+      })
+      if (eligibility) {
+        const earned = await tx.commissionEvent.aggregate({
+          where: {
+            businessId: input.businessId,
+            invoiceId: invoice.id,
+            invoiceItemId: source.id,
+            eventType: { in: ['collection', 'reversal'] },
+          },
+          _sum: { payableAmount: true },
+        })
+        const earnedRemaining = earned._sum.payableAmount ?? 0n
+        const adjustment = computeHistoricalReturnCommissionAdjustment({
+          ratePaisas: eligibility.ratePaisas,
+          returnedQty: requested.qty,
+          earnedRemainingPaisas: earnedRemaining,
+        })
+        await tx.commissionEvent.create({
+          data: {
+            businessId: input.businessId,
+            salesmanId: eligibility.salesmanId,
+            invoiceId: invoice.id,
+            invoiceItemId: source.id,
+            originalInvoiceItemId: source.id,
+            returnEventId: doc.id,
+            eventType: 'reversal',
+            quantity: -requested.qty,
+            ratePaisas: eligibility.ratePaisas,
+            grossAmount: -(source.unitPrice * BigInt(requested.qty)),
+            eligibleAmount: -adjustment.eligibleReversalPaisas,
+            payableAmount: -adjustment.payableReversalPaisas,
+            paidAmount: 0n,
+            status: 'reversed',
+            idempotencyKey: `return-${doc.id}-${source.id}`,
+            isOwnerOnly: eligibility.isOwnerOnly,
+          },
+        })
+      }
+    }
+
+    // Prisma cannot compare two columns in SQLite. Re-read the small invoice
+    // item set and update only the status cache; sold quantities stay immutable.
+    const updatedItems = await tx.invoiceItem.findMany({
+      where: { invoiceId: invoice.id, businessId: input.businessId },
+      select: { qty: true, returnedQty: true },
+    })
+    const allReturned = updatedItems.every((item) => item.returnedQty >= item.qty)
+    await tx.invoice.update({ where: { id: invoice.id }, data: { isReturned: allReturned } })
+
+    const refundAllocation = await tx.paymentAllocation.create({
+      data: {
+        businessId: input.businessId,
+        invoiceId: invoice.id,
+        accountId: settlementAccount.id,
+        amount: total,
+        isChange: true,
+        voucherId: voucher.id,
+        createdBy: input.actorId,
+      },
+    })
+
+    // Older local invoices can use percentage-on-collection commission instead
+    // of per-product events. Preserve those original rows and add a capped
+    // negative adjustment through the existing allocation-linked model.
+    const legacyCommissions = await tx.salesmanCommission.findMany({
+      where: { businessId: input.businessId, invoiceId: invoice.id },
+      select: { salesmanId: true, commissionPct: true, commissionAmount: true },
+    })
+    const legacyBySalesman = new Map<string, { commissionPct: number; earnedRemaining: bigint }>()
+    for (const commission of legacyCommissions) {
+      const current = legacyBySalesman.get(commission.salesmanId)
+      legacyBySalesman.set(commission.salesmanId, {
+        commissionPct: commission.commissionPct,
+        earnedRemaining: (current?.earnedRemaining ?? 0n) + commission.commissionAmount,
+      })
+    }
+    for (const [salesmanId, commission] of legacyBySalesman) {
+      if (commission.earnedRemaining <= 0n) continue
+      const eligible = (total * BigInt(Math.round(commission.commissionPct * 100))) / 10000n
+      const reversal = commission.earnedRemaining < eligible ? commission.earnedRemaining : eligible
+      if (reversal <= 0n) continue
+      await tx.salesmanCommission.create({
+        data: {
+          businessId: input.businessId,
+          salesmanId,
+          invoiceId: invoice.id,
+          allocationId: refundAllocation.id,
+          collectedAmount: -total,
+          commissionPct: commission.commissionPct,
+          commissionAmount: -reversal,
+        },
+      })
+    }
+
+    return {
+      returnId: doc.id,
+      returnNo,
+      total: total.toString(),
+      status: allReturned ? 'Returned' : 'Partially Returned',
+      settlementStatus,
+      idempotent: false,
+    }
+  })
 }
 
 export async function receiveInvoicePayment(input: { businessId: string; invoiceId: string; amount: bigint; mode: string; idempotencyKey: string; actorId: string }): Promise<{ paymentId: string; amount: string; idempotent: boolean }> {

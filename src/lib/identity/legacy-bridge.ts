@@ -32,10 +32,12 @@ export async function usesLegacyTransactionSchema(now = Date.now()): Promise<boo
 
 export class LegacyIdentityMigrationRequiredError extends Error {
   readonly code = 'LEGACY_IDENTITY_MIGRATION_REQUIRED'
+  readonly migration: string
 
-  constructor(entity: string) {
-    super(`${entity} requires database migration 00036_legacy_transaction_identity_bridge.sql before it can be posted safely.`)
+  constructor(entity: string, migration = '00036_legacy_transaction_identity_bridge.sql') {
+    super(`${entity} requires database migration ${migration} before it can be posted safely.`)
     this.name = 'LegacyIdentityMigrationRequiredError'
+    this.migration = migration
   }
 }
 
@@ -75,6 +77,7 @@ export async function callRequiredLegacyIdentityRpc(
   args: Record<string, unknown>,
   idempotencyKey: string,
   entity: string,
+  migration?: string,
 ): Promise<unknown> {
   const { data, error } = await getAdminSupabase().rpc(name, {
     ...args,
@@ -82,7 +85,7 @@ export async function callRequiredLegacyIdentityRpc(
   }) as RpcResponse
   if (!error) return data
   if (classifyPostgrestCompatibilityError(error) === 'missing-rpc') {
-    throw new LegacyIdentityMigrationRequiredError(entity)
+    throw new LegacyIdentityMigrationRequiredError(entity, migration)
   }
   throw rpcError(name, error)
 }

@@ -6,7 +6,7 @@ import { formatMoney } from '@/lib/format'
 import { bizDate, bizFormat } from '@/lib/dates'
 import { ArrowLeft, Printer, RotateCcw, CheckCircle2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { motion } from 'framer-motion'
 import { toast } from 'sonner'
 import { PrintInvoiceButton } from '@/components/invoice/print-invoice-button'
@@ -32,6 +32,7 @@ type Invoice = {
   memo: string | null
   items?: Array<{ id: string; productId: string | null; productName: string; qty: number; returnedQty?: number; unitPrice: string; lineTotal: string; isTemporary: boolean }>
   payments?: Array<{ id: string; accountId?: string; accountCode?: string; accountName: string; amount: string; isChange?: boolean; direction?: string | null; paymentMode?: string | null }>
+  returns?: Array<{ returnNo: string; returnDate: string; total: string; settlementStatus: string }>
 }
 
 /** One commission entry as returned by GET /api/sales/:id/commission. */
@@ -72,12 +73,13 @@ const TYPE_BADGE: Record<string, string> = {
   OFC: 'bg-violet-100 text-violet-700',
 }
 
-export function InvoiceDetailView({ invoiceId }: { invoiceId: string }) {
+export function InvoiceDetailView({ invoiceId, openReturn = false }: { invoiceId: string; openReturn?: boolean }) {
   const router = useRouter()
   const qc = useQueryClient()
-  const [returnOpen, setReturnOpen] = useState(false)
+  const [returnOpen, setReturnOpen] = useState(openReturn)
   const [returnReason, setReturnReason] = useState('')
   const [refundMode, setRefundMode] = useState<'CREDIT' | 'CASH' | 'BANK'>('CREDIT')
+  const [refundAccountId, setRefundAccountId] = useState('')
   const [returnQty, setReturnQty] = useState<Record<string, number>>({})
   const [returnIdempotencyKey, setReturnIdempotencyKey] = useState(() => crypto.randomUUID())
   const [paymentOpen, setPaymentOpen] = useState(false)
@@ -102,21 +104,42 @@ export function InvoiceDetailView({ invoiceId }: { invoiceId: string }) {
     retry: 0,
   })
 
+  const accountsQ = useQuery<any>({
+    queryKey: ['coa'],
+    queryFn: () => fetch('/api/setup/coa').then(r => r.json()),
+    enabled: returnOpen,
+    staleTime: 300_000,
+  })
+  const refundAccounts = useMemo(() => {
+    const categories = accountsQ.data?.categories ?? []
+    return categories
+      .flatMap((category: any) => category.accounts ?? [])
+      .filter((account: any) => account.isBusinessAccount && account.isActive !== false)
+      .map((account: any) => ({ id: String(account.id), code: String(account.code), name: String(account.name) }))
+  }, [accountsQ.data])
+
   const returnMut = useMutation({
     mutationFn: async () => {
       const r = await fetch(`/api/sales/${invoiceId}/return`, {
         method: 'POST', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
           items: Object.entries(returnQty).filter(([, qty]) => qty > 0).map(([invoiceItemId, qty]) => ({ invoiceItemId, qty })),
-          refundMode, reason: returnReason || undefined, idempotencyKey: returnIdempotencyKey,
+          refundMode,
+          ...(refundMode === 'CREDIT' ? {} : { refundAccountId }),
+          reason: returnReason || undefined,
+          idempotencyKey: returnIdempotencyKey,
         }),
       })
       const j = await r.json()
-      if (!r.ok) throw new Error(j?.error ?? 'RETURN_FAILED')
+      if (!r.ok) throw new Error(j?.message ?? j?.error ?? 'RETURN_FAILED')
       return j
     },
     onSuccess: (result) => {
-      toast.success(`Return ${result.returnNo ?? ''} posted. Stock restored once.`)
+      toast.success(
+        result.settlementStatus === 'REFUNDED'
+          ? `Return ${result.returnNo ?? ''} posted and refunded. Stock restored once.`
+          : `Return ${result.returnNo ?? ''} posted as customer credit. Stock restored once.`,
+      )
       void qc.invalidateQueries({ queryKey: ['invoice', invoiceId] })
       void qc.invalidateQueries({ queryKey: ['invoice-commission', invoiceId] })
       void qc.invalidateQueries({ queryKey: ['invoices'] })
@@ -125,6 +148,7 @@ export function InvoiceDetailView({ invoiceId }: { invoiceId: string }) {
       setReturnOpen(false)
       setReturnReason('')
       setReturnQty({})
+      setRefundAccountId('')
       setReturnIdempotencyKey(crypto.randomUUID())
     },
     onError: (e: Error) => toast.error(`Return failed: ${e.message}`),
@@ -165,7 +189,9 @@ export function InvoiceDetailView({ invoiceId }: { invoiceId: string }) {
   }
 
   const inv = q.data.invoice
-  const outstanding = BigInt(inv.total) - BigInt(inv.paidAmount)
+  const returnedTotal = (inv.returns ?? []).reduce((sum, item) => sum + BigInt(item.total), 0n)
+  const outstandingBeforeFloor = BigInt(inv.total) - returnedTotal - BigInt(inv.paidAmount)
+  const outstanding = outstandingBeforeFloor > 0n ? outstandingBeforeFloor : 0n
   const business = q.data.business ?? null
   // The browser-print block below renders from the same engine serialization
   // the print dialog uses, so the two documents cannot show different figures.
@@ -279,7 +305,7 @@ export function InvoiceDetailView({ invoiceId }: { invoiceId: string }) {
               {inv.payments.map(p => (
                 <tr key={p.id} className="border-b border-border/60 last:border-0">
                   <td className="p-3.5 text-foreground">{p.accountName} {p.accountCode && <span className="text-xs text-muted-foreground" data-num>({p.accountCode})</span>}</td>
-                  <td className="p-3.5">{p.direction === 'Paid' ? <span className="text-[10px] uppercase bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded">Refund</span> : <span className="text-[10px] uppercase bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded">Collection</span>}</td>
+                  <td className="p-3.5">{p.isChange && p.accountCode === '1200' ? <span className="text-[10px] uppercase bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded">Customer credit</span> : p.direction === 'Paid' || p.isChange ? <span className="text-[10px] uppercase bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded">Refund</span> : <span className="text-[10px] uppercase bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded">Collection</span>}</td>
                   <td className="p-3.5 text-right font-medium" data-num>{formatMoney(BigInt(p.amount))}</td>
                 </tr>
               ))}
@@ -290,6 +316,21 @@ export function InvoiceDetailView({ invoiceId }: { invoiceId: string }) {
             <div><div className="text-[10px] uppercase text-muted-foreground">Paid</div><div className="font-semibold text-primary" data-num>{formatMoney(BigInt(inv.paidAmount))}</div></div>
             <div className="text-right"><div className="text-[10px] uppercase text-muted-foreground">Outstanding</div><div className={`font-semibold ${outstanding > 0n ? 'text-amber-600' : 'text-primary'}`} data-num>{formatMoney(outstanding)}</div></div>
           </div>
+        </div>
+      )}
+
+      {inv.returns && inv.returns.length > 0 && (
+        <div className="card-3d overflow-hidden">
+          <div className="px-5 py-3.5 border-b border-border"><h2 className="text-sm font-semibold text-foreground">Historical returns</h2></div>
+          <div className="divide-y divide-border/60">
+            {inv.returns.map(item => (
+              <div key={item.returnNo} className="flex items-center justify-between gap-4 px-5 py-3 text-sm">
+                <div><div className="font-medium text-foreground" data-num>{item.returnNo}</div><div className="text-xs text-muted-foreground">Original invoice {inv.invoiceNo} · {bizDate(item.returnDate)}</div></div>
+                <div className="text-right"><div className="font-medium text-foreground" data-num>{formatMoney(BigInt(item.total))}</div><div className={`text-[10px] uppercase ${item.settlementStatus === 'REFUNDED' ? 'text-emerald-700' : 'text-amber-700'}`}>{item.settlementStatus === 'REFUNDED' ? 'Refunded' : item.settlementStatus === 'CREDIT_DUE' ? 'Customer credit due' : 'Posted'}</div></div>
+              </div>
+            ))}
+          </div>
+          <div className="px-5 py-3 border-t border-border bg-muted/30 flex items-center justify-between text-sm"><span className="text-muted-foreground">Total returned</span><span className="font-semibold text-foreground" data-num>{formatMoney(returnedTotal)}</span></div>
         </div>
       )}
 
@@ -348,23 +389,34 @@ export function InvoiceDetailView({ invoiceId }: { invoiceId: string }) {
       {returnOpen && (
         <div className="fixed inset-0 z-50 bg-foreground/30 backdrop-blur-sm flex items-end sm:items-center justify-center p-4" onClick={() => setReturnOpen(false)}>
           <div className="card-3d p-6 w-full max-w-md sheet-enter" onClick={e => e.stopPropagation()}>
-            <h3 className="text-base font-semibold text-foreground mb-2">Create linked return</h3>
-            <p className="text-xs text-muted-foreground mb-4">Select remaining quantities by original invoice item. This creates a partial or full return and adjusts collection-based commission.</p>
+            <h3 className="text-base font-semibold text-foreground mb-1">Create historical return</h3>
+            <p className="text-xs font-medium text-foreground mb-1">Original invoice: <span data-num>{inv.invoiceNo}</span> · {inv.invoiceType}</p>
+            <p className="text-xs text-muted-foreground mb-4">Select an original invoice line. The return posts Sold 0, restores stock, and adjusts only commission earned for eligible returned units.</p>
             <div className="space-y-2 mb-4 max-h-52 overflow-auto">
               {inv.items?.map(item => {
                 const remaining = item.qty - (item.returnedQty ?? 0)
-                return <div key={item.id} className="grid grid-cols-[1fr_72px] gap-3 items-center text-xs">
-                  <div><div className="text-foreground">{item.productName}</div><div className="text-muted-foreground">Sold {item.qty} · returned {item.returnedQty ?? 0} · remaining {remaining}</div></div>
-                  <input type="number" min="0" max={remaining} value={returnQty[item.id] ?? 0} onChange={e => setReturnQty(q => ({ ...q, [item.id]: Math.max(0, Math.min(remaining, Number.parseInt(e.target.value || '0', 10) || 0)) }))} className="bg-background border border-border rounded px-2 py-1.5 text-sm" />
+                return <div key={item.id} className="grid grid-cols-[1fr_84px] gap-3 items-center rounded-md border border-border/70 p-2 text-xs">
+                  <div><div className="text-foreground">{item.productName}</div><div className="text-muted-foreground">Original sold {item.qty} · previously returned {item.returnedQty ?? 0} · returnable {remaining}</div></div>
+                  <div><label htmlFor={`return-${item.id}`} className="block text-[10px] uppercase text-muted-foreground mb-1">Return qty</label><input id={`return-${item.id}`} aria-label={`Return quantity for ${item.productName}`} type="number" min="0" max={remaining} disabled={remaining === 0} value={returnQty[item.id] ?? 0} onChange={e => setReturnQty(q => ({ ...q, [item.id]: Math.max(0, Math.min(remaining, Number.parseInt(e.target.value || '0', 10) || 0)) }))} className="w-full bg-background border border-border rounded px-2 py-1.5 text-sm disabled:opacity-50" /></div>
                 </div>
               })}
             </div>
-            <label className="block text-xs text-muted-foreground mb-1">Refund mode</label>
-            <select value={refundMode} onChange={e => setRefundMode(e.target.value as typeof refundMode)} className="w-full bg-background border border-border rounded-lg p-2 text-sm mb-3"><option value="CREDIT">Customer credit (no cash movement)</option><option value="CASH">Cash refund</option><option value="BANK">Bank refund</option></select>
+            <label className="block text-xs text-muted-foreground mb-1">Settlement</label>
+            <select value={refundMode} onChange={e => { setRefundMode(e.target.value as typeof refundMode); setRefundAccountId('') }} className="w-full bg-background border border-border rounded-lg p-2 text-sm mb-3"><option value="CREDIT">Customer credit (refund remains due)</option><option value="CASH">Refund now from a business account</option></select>
+            {refundMode !== 'CREDIT' && (
+              <div className="mb-3">
+                <label className="block text-xs text-muted-foreground mb-1">Refund account</label>
+                <select value={refundAccountId} onChange={e => setRefundAccountId(e.target.value)} className="w-full bg-background border border-border rounded-lg p-2 text-sm">
+                  <option value="">Select active business account</option>
+                  {refundAccounts.map((account) => <option key={account.id} value={account.id}>{account.name} ({account.code})</option>)}
+                </select>
+                {!accountsQ.isLoading && refundAccounts.length === 0 && <p className="mt-1 text-[11px] text-amber-700">No active refund account is available. Record customer credit or ask an Owner to add a business account.</p>}
+              </div>
+            )}
             <textarea value={returnReason} onChange={e => setReturnReason(e.target.value)} placeholder="Reason (optional)" className="w-full bg-background border border-border rounded-lg p-3 text-sm mb-4 min-h-[60px]" />
             <div className="flex justify-end gap-2">
               <Button variant="outline" className="press-sm" onClick={() => setReturnOpen(false)}>Cancel</Button>
-              <Button className="press-md shadow-sm" disabled={returnMut.isPending || !Object.values(returnQty).some(q => q > 0)} onClick={() => returnMut.mutate()}>{returnMut.isPending ? 'Posting…' : 'Confirm return'}</Button>
+              <Button className="press-md shadow-sm" disabled={returnMut.isPending || !Object.values(returnQty).some(q => q > 0) || (refundMode !== 'CREDIT' && !refundAccountId)} onClick={() => returnMut.mutate()}>{returnMut.isPending ? 'Posting…' : 'Confirm return'}</Button>
             </div>
           </div>
         </div>

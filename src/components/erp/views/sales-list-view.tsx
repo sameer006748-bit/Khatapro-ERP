@@ -28,6 +28,7 @@ const TYPE_BADGE: Record<string, string> = {
   COUNTER: 'bg-emerald-100 text-emerald-700',
   ONLINE: 'bg-sky-100 text-sky-700',
   OFC: 'bg-violet-100 text-violet-700',
+  OTHER: 'bg-amber-100 text-amber-700',
 }
 
 export function SalesListView() {
@@ -36,6 +37,7 @@ export function SalesListView() {
   const [typeFilter, setTypeFilter] = useState<string>('')
   const [selected, setSelected] = useState<string[]>([])
   const [selectMode, setSelectMode] = useState(false)
+  const [returnMode, setReturnMode] = useState(false)
 
   const q = useQuery<{ rows: Invoice[] }>({
     queryKey: ['invoices', typeFilter],
@@ -119,10 +121,22 @@ export function SalesListView() {
         <Button variant="outline" size="sm" className="h-10 press-sm" onClick={() => router.push('/?page=ofc-sale')}>
           <ShoppingCart className="size-4 mr-1.5" /> OFC Sale
         </Button>
+        <Button variant="outline" size="sm" className="h-10 press-sm" onClick={() => router.push('/?page=other-sale')}>
+          <ShoppingCart className="size-4 mr-1.5" /> Other Sale
+        </Button>
+        <Button variant={returnMode ? 'default' : 'outline'} size="sm" className="h-10 press-sm" onClick={() => { setReturnMode(value => !value); setSelectMode(false); setSelected([]) }}>
+          <RotateCcw className="size-4 mr-1.5" /> Historical Return
+        </Button>
         <Button variant="outline" size="sm" className="h-10 press-sm" onClick={() => router.push('/?page=receipt-voucher')}>
           <ArrowDownToLine className="size-4 mr-1.5" /> Receive Payment
         </Button>
       </div>
+
+      {returnMode && (
+        <div className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          Search or filter the original invoice, then select it to choose the original line and remaining returnable quantity.
+        </div>
+      )}
 
       {/* Filters */}
       <div className="flex gap-2 flex-wrap">
@@ -134,6 +148,7 @@ export function SalesListView() {
         <Button variant={typeFilter === 'COUNTER' ? 'default' : 'outline'} size="sm" className="h-10 press-sm" onClick={() => setTypeFilter('COUNTER')}>Counter</Button>
         <Button variant={typeFilter === 'ONLINE' ? 'default' : 'outline'} size="sm" className="h-10 press-sm" onClick={() => setTypeFilter('ONLINE')}>Online</Button>
         <Button variant={typeFilter === 'OFC' ? 'default' : 'outline'} size="sm" className="h-10 press-sm" onClick={() => setTypeFilter('OFC')}>OFC</Button>
+        <Button variant={typeFilter === 'OTHER' ? 'default' : 'outline'} size="sm" className="h-10 press-sm" onClick={() => setTypeFilter('OTHER')}>Other</Button>
         <Button
           variant={selectMode ? 'default' : 'outline'}
           size="sm"
@@ -206,7 +221,7 @@ export function SalesListView() {
                           e.stopPropagation()
                           toggleSelect(r.id)
                         } else {
-                          router.push(`/?invoice=${r.id}`)
+                          router.push(`/?invoice=${r.id}${returnMode ? '&return=1' : ''}`)
                         }
                       }}
                       className={`border-b border-border/60 last:border-0 hover:bg-accent/30 transition-colors cursor-pointer ${isSelected ? 'bg-primary/5' : ''}`}
@@ -254,7 +269,7 @@ export function SalesListView() {
                   key={r.id}
                   onClick={() => {
                     if (selectMode) toggleSelect(r.id)
-                    else router.push(`/?invoice=${r.id}`)
+                    else router.push(`/?invoice=${r.id}${returnMode ? '&return=1' : ''}`)
                   }}
                   className={`card-3d card-3d-hover p-4 w-full text-left ${isSelected ? 'border-primary ring-2 ring-primary/20' : ''}`}
                 >

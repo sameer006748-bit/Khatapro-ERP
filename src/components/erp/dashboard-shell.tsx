@@ -279,6 +279,7 @@ export function DashboardShell({ user, onSignOut }: { user: MeUser; onSignOut: (
   const queryString = searchParams.toString()
   const ledgerAccountId = searchParams.get('ledger')
   const invoiceId = searchParams.get('invoice')
+  const returnRequested = searchParams.get('return') === '1'
   const voucherId = searchParams.get('voucher')
 
   const active = resolveInitialPage(searchParams, user)
@@ -455,7 +456,7 @@ export function DashboardShell({ user, onSignOut }: { user: MeUser; onSignOut: (
                 exit={{ opacity: 0, y: -4 }}
                 transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
               >
-                <ViewRouter user={user} active={effectiveActive} ledgerAccountId={ledgerAccountId} invoiceId={invoiceId} voucherId={voucherId} />
+                <ViewRouter user={user} active={effectiveActive} ledgerAccountId={ledgerAccountId} invoiceId={invoiceId} returnRequested={returnRequested} voucherId={voucherId} />
               </motion.div>
             </AnimatePresence>
           </div>
@@ -781,12 +782,14 @@ function ViewRouter({
   active,
   ledgerAccountId,
   invoiceId,
+  returnRequested,
   voucherId,
 }: {
   user: MeUser
   active: string
   ledgerAccountId: string | null
   invoiceId: string | null
+  returnRequested: boolean
   voucherId: string | null
 }) {
   // Ledger drill-down takes precedence when ?ledger= is set.
@@ -795,7 +798,7 @@ function ViewRouter({
   }
   // Invoice detail when ?invoice= is set.
   if (active === 'invoice-detail' && invoiceId) {
-    return <InvoiceDetailView invoiceId={invoiceId} />
+    return <InvoiceDetailView invoiceId={invoiceId} openReturn={returnRequested} />
   }
   // Voucher detail when ?voucher= is set.
   if (active === 'voucher-detail' && voucherId) {

@@ -15,12 +15,12 @@ test('linked return locks source invoice and item rows before mutable work', () 
   assert.match(migration, /v_requested \+ v_line\.prior_returned > v_line\.qty/)
 })
 
-test('linked returns use invoice-item UUID identity, idempotency, and exact-once stock', () => {
+test('linked returns use durable invoice-item identity, idempotency, and exact-once stock', () => {
   assert.match(migration, /\(v_item->>'invoice_item_id'\)::uuid/)
   assert.match(migration, /sale_return_documents[\s\S]{0,240}idempotency_key/i)
   assert.match(migration, /update public\.products set stock = stock \+ v_requested/i)
   assert.match(migration, /post_sale_return\(\n  p_business_id uuid, p_original_invoice_id text, p_items jsonb/i)
-  assert.match(returnRoute, /invoiceItemId: z\.string\(\)\.uuid\(\)/)
+  assert.match(returnRoute, /invoiceItemId: z\.string\(\)\.min\(1\)\.max\(80\)/)
 })
 
 test('return money, refund mode, customer balances, and statuses are production based', () => {

@@ -1,7 +1,7 @@
 /**
  * POST /api/sales/[id]/return — post a sales return for the given invoice.
- * Reverses the original sale: posts reversing voucher, restores stock,
- * does NOT reverse already-accrued commission.
+ * Posts a line-linked historical return, restores stock, and adjusts only the
+ * commission earned for the eligible returned units.
  */
 import { NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
@@ -12,10 +12,19 @@ import { postLinkedSaleReturn } from '@/lib/sales/data-access'
 import { LegacyIdentityMigrationRequiredError } from '@/lib/identity/legacy-bridge'
 
 const ReturnSchema = z.object({
-  items: z.array(z.object({ invoiceItemId: z.string().uuid(), qty: z.number().int().positive() })).min(1),
+  items: z.array(z.object({ invoiceItemId: z.string().min(1).max(80), qty: z.number().int().positive() })).min(1),
   refundMode: z.enum(['CREDIT', 'CASH', 'BANK']),
+  refundAccountId: z.string().min(1).max(80).optional(),
   reason: z.string().max(200).optional(),
   idempotencyKey: z.string().uuid(),
+}).superRefine((value, ctx) => {
+  if (value.refundMode !== 'CREDIT' && !value.refundAccountId) {
+    ctx.addIssue({ code: 'custom', path: ['refundAccountId'], message: 'A refund account is required.' })
+  }
+  const ids = value.items.map((item) => item.invoiceItemId)
+  if (new Set(ids).size !== ids.length) {
+    ctx.addIssue({ code: 'custom', path: ['items'], message: 'Each invoice item may appear only once.' })
+  }
 })
 
 export async function POST(
@@ -39,6 +48,7 @@ export async function POST(
     const result = await postLinkedSaleReturn({
       businessId: su.businessId, invoiceId: id, items: parsed.data.items,
       refundMode: parsed.data.refundMode, reason: parsed.data.reason,
+      refundAccountId: parsed.data.refundAccountId,
       idempotencyKey: parsed.data.idempotencyKey,
       actorId: su.userId,
     })
@@ -48,11 +58,15 @@ export async function POST(
       return NextResponse.json({
         error: e.code,
         message: e.message,
-        migration: '00036_legacy_transaction_identity_bridge.sql',
+        migration: e.migration,
       }, { status: 409 })
     }
     const msg = (e as Error).message
-    const status = msg.includes('not found') || msg.includes('exceeds') || msg.includes('cannot') || msg.includes('whole-invoice') ? 400 : 500
+    const status = msg.includes('idempotency key')
+      ? 409
+      : msg.includes('not found') || msg.includes('does not belong') || msg.includes('exceeds') || msg.includes('cannot') || msg.includes('required') || msg.includes('positive') || msg.includes('duplicate')
+        ? 400
+        : 500
     return NextResponse.json({ error: msg }, { status })
   }
 }

@@ -426,6 +426,27 @@ export function computeEarnedCommission(input: {
   return incremental > 0n ? incremental : 0n
 }
 
+/**
+ * A historical return removes eligibility for the returned units and claws
+ * back no more than commission already earned and not previously reversed.
+ */
+export function computeHistoricalReturnCommissionAdjustment(input: {
+  ratePaisas: bigint
+  returnedQty: number
+  earnedRemainingPaisas: bigint
+}): { eligibleReversalPaisas: bigint; payableReversalPaisas: bigint } {
+  if (input.ratePaisas < 0n) throw new Error('Commission rate cannot be negative')
+  if (!Number.isInteger(input.returnedQty) || input.returnedQty <= 0) {
+    throw new Error('Returned quantity must be a positive whole number')
+  }
+  const eligibleReversalPaisas = input.ratePaisas * BigInt(input.returnedQty)
+  const earned = input.earnedRemainingPaisas > 0n ? input.earnedRemainingPaisas : 0n
+  return {
+    eligibleReversalPaisas,
+    payableReversalPaisas: earned < eligibleReversalPaisas ? earned : eligibleReversalPaisas,
+  }
+}
+
 // ─────────────────────────────────────────────────────────────
 // Seller attribution
 // ─────────────────────────────────────────────────────────────
