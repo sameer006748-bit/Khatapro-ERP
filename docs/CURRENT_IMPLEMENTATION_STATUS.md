@@ -415,11 +415,14 @@ row on the live `post_contra_entry` path; a multi-row batch or any drawings row 
 `post_contra_batch` and therefore fails closed (HTTP 409 migration-required) until 00038 is
 applied.
 
-Verification: focused `tests/contra-batch.test.ts` (13 assertions) passes; existing
-`tests/contra-drawings.test.ts` (11) and `tests/historical-sales-return.test.ts` (11) pass.
-`node --check` passes on the changed `.ts` files. `tsc --noEmit`, ESLint, and `npm run build`
-could not complete inside this sandbox's 30s command timeout (large project), so they must
-run outside the sandbox before production application.
+Verification: focused `tests/contra-batch.test.ts` (13 assertions), `tests/contra-drawings.test.ts`
+(11) and `tests/historical-sales-return.test.ts` (11) all pass (35 total). `node --check` passes on
+the changed `.ts` files. `npx tsc --noEmit` passes clean. ESLint on the changed Contra/app files
+passes clean. `npx eslint .` and `npm run build` (`next build`) could not complete inside this
+sandbox's 30s command window (environmental, large project), so those two still need to be run in
+a normal terminal before final close-out. A real Contra-related type error
+(`src/lib/money/operational-money.ts` — destructured `data` from `Promise<unknown>`) was found and
+fixed with a one-line change; the migration and schema are unaffected.
 
 Application: APPLIED to production (2026-08-29) via exact-file `psql`, after a one-line
 signature fix (all `post_contra_batch` parameters made required — PostgreSQL rejects a

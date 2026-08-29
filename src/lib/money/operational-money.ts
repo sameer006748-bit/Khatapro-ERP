@@ -143,7 +143,7 @@ export async function postContraBatch(
     .eq('business_id', input.businessId)
     .single()
   if (actorError || !actor?.user_id) throw new Error('Server-attributed contra actor is unavailable')
-  const { data } = await callRequiredLegacyIdentityRpc(
+  const data = await callRequiredLegacyIdentityRpc(
     'post_contra_batch',
     {
       p_business_id: input.businessId,
