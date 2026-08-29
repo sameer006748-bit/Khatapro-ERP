@@ -12,6 +12,10 @@ import { createAuthClient } from '@/lib/supabase/auth'
 import { loadSessionUser } from '@/lib/auth/permissions'
 
 export const authOptions: NextAuthOptions = {
+  // Explicit secret from .env.local so NextAuth never falls into the
+  // NO_SECRET "server configuration" error (v4 requires it when the
+  // runtime reports NODE_ENV=production, e.g. inherited by `next dev`).
+  secret: process.env.NEXTAUTH_SECRET,
   session: { strategy: 'jwt' },
   pages: { signIn: '/' }, // we render the login form inline at /
   providers: [

@@ -6,11 +6,14 @@ import { loadSessionUser, requirePermission } from '@/lib/auth/permissions'
 import { postOperationalContra } from '@/lib/money/operational-money'
 import { parseMoney } from '@/lib/format'
 import { resolveRequestId, safeMutationError } from '@/lib/observability'
+import { isSupabaseConfigured } from '@/lib/supabase/config'
+
+const isUuid = (s: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s)
 
 const Schema = z.object({
   contraDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  fromAccountId: z.string().uuid(),
-  toAccountId: z.string().uuid(),
+  fromAccountId: z.string().min(1),
+  toAccountId: z.string().min(1),
   amount: z.string().min(1),
   notes: z.string().max(500).optional(),
   idempotencyKey: z.string().uuid(),
@@ -29,6 +32,11 @@ export async function POST(req: Request) {
   if (parsed.data.fromAccountId === parsed.data.toAccountId) return NextResponse.json({ error: 'From and To accounts must differ' }, { status: 400 })
   const amountPaisas = parseMoney(parsed.data.amount)
   if (amountPaisas === null || amountPaisas <= 0n) return NextResponse.json({ error: 'Invalid amount' }, { status: 400 })
+  if (isSupabaseConfigured()) {
+    if (!isUuid(parsed.data.fromAccountId) || !isUuid(parsed.data.toAccountId)) {
+      return NextResponse.json({ error: 'Invalid account ID (not UUID)' }, { status: 400 })
+    }
+  }
   try {
     const result = await postOperationalContra({
       businessId: su.businessId,
