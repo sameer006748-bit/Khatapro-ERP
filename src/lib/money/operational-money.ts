@@ -1,11 +1,11 @@
 import 'server-only'
 
 import { getAdminSupabase } from '@/lib/supabase/admin'
-import { callLegacyIdentityRpc, usesLegacyTransactionSchema } from '@/lib/identity/legacy-bridge'
+import { callLegacyIdentityRpc, callRequiredLegacyIdentityRpc, usesLegacyTransactionSchema } from '@/lib/identity/legacy-bridge'
 
 export type OperationalMoneyAccount = {
   id: string
-  key: 'cash' | 'bank' | 'wallet'
+  key: 'cash' | 'bank' | 'wallet' | 'petty'
   name: string
   balancePaisas: string
   isActive: boolean
@@ -107,6 +107,70 @@ export async function postOperationalContra(input: MutationInput & { sourceAccou
   })
   if (error) throw new Error(`post_contra_transfer: ${error.message}`)
   return data as { transaction_id: string; reference: string; amount_paisas: string; idempotent: boolean }
+}
+
+export type ContraBatchLine = {
+  kind: 'contra' | 'drawings'
+  fromAccountId: string
+  toAccountId?: string | null
+  amountPaisas: bigint
+  notes?: string | null
+}
+
+export type ContraBatchResult = {
+  batchId: string
+  batchNo: string
+  voucherId: string
+  total: string
+  idempotent: boolean
+}
+
+export async function postContraBatch(
+  input: {
+    businessId: string
+    actorProfileId: string
+    date: string
+    lines: ContraBatchLine[]
+    reference?: string | null
+    note?: string | null
+    idempotencyKey: string
+  },
+): Promise<ContraBatchResult> {
+  const admin = getAdminSupabase()
+  const { data: actor, error: actorError } = await admin.from('profiles')
+    .select('user_id')
+    .eq('id', input.actorProfileId)
+    .eq('business_id', input.businessId)
+    .single()
+  if (actorError || !actor?.user_id) throw new Error('Server-attributed contra actor is unavailable')
+  const { data } = await callRequiredLegacyIdentityRpc(
+    'post_contra_batch',
+    {
+      p_business_id: input.businessId,
+      p_contra_date: input.date,
+      p_lines: input.lines.map((l) => ({
+        kind: l.kind,
+        from_account_id: l.fromAccountId,
+        to_account_id: l.toAccountId ?? null,
+        amount_paisas: l.amountPaisas.toString(),
+        notes: l.notes ?? null,
+      })),
+      p_reference: input.reference ?? null,
+      p_notes: input.note ?? null,
+      p_created_by: actor.user_id,
+    },
+    input.idempotencyKey,
+    'Contra batch',
+    '00038_legacy_contra_batch.sql',
+  )
+  const result = data as { batch_id: string; batch_no: string; voucher_id: string; total: string; idempotent: boolean }
+  return {
+    batchId: result.batch_id,
+    batchNo: result.batch_no,
+    voucherId: result.voucher_id,
+    total: String(result.total),
+    idempotent: Boolean(result.idempotent),
+  }
 }
 
 export async function postOwnerCapital(input: MutationInput & { destinationAccountId: string }) {

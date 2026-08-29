@@ -320,3 +320,22 @@ Agents must update this file when a requirement changes status.
 Top-level fixed category families now expose canonical readable code words through the existing architecture. Persisted subcategories require normalized readable code words, with business-scoped uniqueness, duplicate validation, editable codes, and relational IDs preserved. Migration 00035 adds the fixed-parent mapping and does not add a parallel category table.
 
 Focused tests pass against an isolated disposable SQLite copy. The localhost app shell returned 200 and the protected category API returned 401 without a session. Authenticated schema-backed CRUD and migration application remain pending because no project-configured local PostgreSQL endpoint was available; the non-local disposable URL was not used.
+
+## Multi-row Contra / Internal Transfer + Owner Drawings — implementation update (2026-08-29)
+
+Implemented in source and locally focused-test-verified: an expandable multi-row Contra
+workflow that supports pure internal transfers (Bank/Cash/Petty Cash and business-account
+moves; asset-to-asset with no income/expense/equity effect) and Owner Drawings (debit
+Owner Drawings 3020, credit the selected source asset; never faked as an asset-to-asset
+contra).
+
+Additive migration `00038_legacy_contra_batch.sql` is prepared but deliberately NOT applied.
+It adds one readable CON batch identity per batch, an atomic multi-row posting RPC
+(`post_contra_batch`), one balanced voucher per batch, server-side validation and business
+isolation, and service_role-only grants; it also adds the legacy operational-money list
+RPCs so the Contra screen can load accounts in production. The existing single-row contra
+path (`post_contra_entry`) and all historic entries remain untouched.
+
+Browser/runtime verification of a real multi-row / drawings batch in production remains
+pending (no safe isolated test business; the migration is not applied in this task).
+

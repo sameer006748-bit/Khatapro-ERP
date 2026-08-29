@@ -389,3 +389,38 @@ Production schema verified read-only after application:
 Runtime/UAT: NOT performed against production because only the real business
 `biz-default` exists and no safe isolated test business is available. Browser workflow
 verification for a real historical/partial sales return remains pending manual sign-off.
+
+## Migration 00038 (legacy multi-row Contra + Owner Drawings) prepared — 2026-08-29
+
+`00038_legacy_contra_batch.sql` was added to the repository but deliberately NOT applied in
+this task. It is additive and scoped to the verified legacy production schema.
+
+What it adds:
+
+- `contra_batches` (one readable CON identity per batch) and `contra_batch_entries` (one row
+  per contra/drawings leg), both RLS-enabled with service_role-only grants;
+- `post_contra_batch(text,date,jsonb,text,text,uuid,text)` — SECURITY DEFINER,
+  `SET search_path = public`, service_role-only EXECUTE. It validates every line before the
+  first business write (so one invalid line rolls the whole batch back), posts ONE balanced
+  voucher for the batch, allocates ONE `CON` identity via the shared allocator, and is
+  idempotent via `claim_legacy_transaction_request(..., 'contra_batch', ...)`.
+  - pure contra: debit destination asset, credit source asset (no P&L/equity effect);
+  - drawings: debit Owner Drawings (3020), credit source asset.
+- legacy `list_business_money_accounts` / `list_business_money_activity` RPCs (read from
+  `accounts` / `contra_entries` / batch rows) so the Contra screen loads in production.
+
+Backward compatibility: the existing `post_contra_entry` (single row) and every historic
+`contra_entries` row are untouched. The `/api/contra-entry` route keeps a single pure contra
+row on the live `post_contra_entry` path; a multi-row batch or any drawings row uses
+`post_contra_batch` and therefore fails closed (HTTP 409 migration-required) until 00038 is
+applied.
+
+Verification: focused `tests/contra-batch.test.ts` (13 assertions) passes; existing
+`tests/contra-drawings.test.ts` (11) and `tests/historical-sales-return.test.ts` (11) pass.
+`node --check` passes on the changed `.ts` files. `tsc --noEmit`, ESLint, and `npm run build`
+could not complete inside this sandbox's 30s command timeout (large project), so they must
+run outside the sandbox before production application.
+
+Application: NOT applied to production in this task (requires separate explicit preflight
+and approval, like 00037).
+

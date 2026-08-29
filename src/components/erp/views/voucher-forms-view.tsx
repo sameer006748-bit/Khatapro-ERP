@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { toast } from 'sonner'
-import { ArrowRight, AlertCircle, CheckCircle2, ChevronRight, BookOpen } from 'lucide-react'
+import { ArrowRight, AlertCircle, CheckCircle2, ChevronRight, BookOpen, Plus, Trash2 } from 'lucide-react'
 import { formatMoney, parseMoney } from '@/lib/format'
 import { motion } from 'framer-motion'
 import type { MeUser } from '@/components/erp/erp-app'
@@ -252,38 +252,61 @@ function RecentOperationalMoney({ activity }: { activity: OperationalMoneyActivi
   </div>
 }
 
+type ContraRow = { fromAccountId: string; toAccountId: string; amount: string; notes: string }
+
 export function ContraEntryView({ user }: { user: MeUser }) {
   const qc = useQueryClient()
   const [date, setDate] = useState(bizDateString(new Date()))
-  const [fromAccountId, setFromAccountId] = useState('')
-  const [toAccountId, setToAccountId] = useState('')
-  const [amount, setAmount] = useState('')
-  const [note, setNote] = useState('')
+  const [kind, setKind] = useState<'contra' | 'drawings'>('contra')
+  const [rows, setRows] = useState<ContraRow[]>([{ fromAccountId: '', toAccountId: '', amount: '', notes: '' }])
   const [idempotencyKey, setIdempotencyKey] = useState(() => crypto.randomUUID())
   const [result, setResult] = useState<{ reference?: string; error?: string } | null>(null)
   const moneyQ = useQuery<OperationalMoneyData>({ queryKey: ['operational-money'], queryFn: async () => {
     const r = await fetch('/api/operational-money'); const j = await r.json(); if (!r.ok) throw new Error(j?.error ?? 'Failed'); return j
   } })
   const accounts = (moneyQ.data?.accounts ?? []).filter(a => a.isActive)
-  const amountPaisas = parseMoney(amount) ?? 0n
-  const canPost = user.permissions.includes('can_create_contra') && fromAccountId && toAccountId && fromAccountId !== toAccountId && amountPaisas > 0n
+  const update = (i: number, patch: Partial<ContraRow>) => setRows(rs => rs.map((r, idx) => idx === i ? { ...r, ...patch } : r))
+  const remove = (i: number) => setRows(rs => rs.length > 1 ? rs.filter((_, idx) => idx !== i) : rs)
+  const add = () => setRows(rs => [...rs, { fromAccountId: '', toAccountId: '', amount: '', notes: '' }])
+  const switchKind = (k: 'contra' | 'drawings') => { setKind(k); setResult(null); setIdempotencyKey(crypto.randomUUID()); if (k === 'drawings') setRows(rs => rs.map(r => ({ ...r, toAccountId: '' }))) }
+  const total = rows.reduce((acc, r) => acc + (parseMoney(r.amount) ?? 0n), 0n)
+  const selfTransfer = rows.some(r => r.fromAccountId && r.fromAccountId === r.toAccountId)
+  const rowOk = (r: ContraRow) => { const a = parseMoney(r.amount); return !!r.fromAccountId && a !== null && a > 0n && (kind === 'drawings' || (!!r.toAccountId && r.fromAccountId !== r.toAccountId)) }
+  const canPost = user.permissions.includes('can_create_contra') && rows.length > 0 && rows.every(rowOk) && !selfTransfer && total > 0n
   const mut = useMutation({ mutationFn: async () => {
-    const r = await fetch('/api/contra-entry', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ contraDate: date, fromAccountId, toAccountId, amount, notes: note || undefined, idempotencyKey }) })
+    const r = await fetch('/api/contra-entry', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({
+      contraDate: date,
+      lines: rows.map(r => ({ kind, fromAccountId: r.fromAccountId, toAccountId: kind === 'contra' ? r.toAccountId : null, amount: r.amount, notes: r.notes || undefined })),
+      idempotencyKey,
+    }) })
     const j = await r.json(); if (!r.ok) throw new Error(j?.error ?? 'Failed'); return j
-  }, onSuccess: (j) => { setResult({ reference: j.reference }); setIdempotencyKey(crypto.randomUUID()); toast.success(`Transfer posted: ${j.reference}`); void qc.invalidateQueries({ queryKey: ['operational-money'] }) }, onError: (error: Error) => setResult({ error: error.message }) })
-  const from = accounts.find(a => a.id === fromAccountId)
-  const to = accounts.find(a => a.id === toAccountId)
+  }, onSuccess: (j) => { setResult({ reference: j.reference }); setIdempotencyKey(crypto.randomUUID()); toast.success('Transfer posted: ' + j.reference); void qc.invalidateQueries({ queryKey: ['operational-money'] }) }, onError: (error: Error) => setResult({ error: error.message }) })
+  const src = accounts.find(a => a.id === rows[0]?.fromAccountId)
+  const dst = accounts.find(a => a.id === rows[0]?.toAccountId)
+  const impact = kind === 'contra'
+    ? <OperationalImpact kind="contra" source={src?.name} destination={dst?.name} amount={total} />
+    : <OperationalImpact kind="drawings" source={src?.name} amount={total} />
   return <div className="space-y-4 max-w-2xl">
-    <div><h1 className="text-xl font-semibold tracking-tight text-foreground">Transfer Money</h1><p className="text-xs text-muted-foreground mt-0.5">Move funds only between business Cash, Bank and Wallet accounts.</p></div>
+    <div><h1 className="text-xl font-semibold tracking-tight text-foreground">Contra / Internal Transfer</h1><p className="text-xs text-muted-foreground mt-0.5">Move money between business accounts, or record an owner withdrawal.</p></div>
     <div className="card-3d p-4 sm:p-5 space-y-3">
-      <div className="grid sm:grid-cols-2 gap-3"><div><Label className="text-xs text-muted-foreground">From account</Label><Select value={fromAccountId} onValueChange={setFromAccountId}><SelectTrigger className="h-10 bg-background"><SelectValue placeholder="Select account…" /></SelectTrigger><SelectContent>{accounts.map(a => <SelectItem key={a.id} value={a.id}>{a.name} · {formatMoney(BigInt(a.balancePaisas))}</SelectItem>)}</SelectContent></Select></div><div><Label className="text-xs text-muted-foreground">To account</Label><Select value={toAccountId} onValueChange={setToAccountId}><SelectTrigger className="h-10 bg-background"><SelectValue placeholder="Select account…" /></SelectTrigger><SelectContent>{accounts.map(a => <SelectItem key={a.id} value={a.id}>{a.name} · {formatMoney(BigInt(a.balancePaisas))}</SelectItem>)}</SelectContent></Select></div></div>
-      <div className="grid sm:grid-cols-2 gap-3"><div><Label className="text-xs text-muted-foreground">Amount (Rs)</Label><Input value={amount} onChange={e => setAmount(e.target.value)} inputMode="decimal" placeholder="0.00" className="h-10 bg-background" data-num /></div><div><Label className="text-xs text-muted-foreground">Date</Label><Input type="date" value={date} onChange={e => setDate(e.target.value)} className="h-10 bg-background" data-num /></div></div>
-      <div><Label className="text-xs text-muted-foreground">Note <span className="text-muted-foreground/70">(optional)</span></Label><Input value={note} onChange={e => setNote(e.target.value)} maxLength={500} className="h-10 bg-background" /></div>
-      {fromAccountId === toAccountId && fromAccountId && <p className="text-xs text-destructive">Source and destination accounts must differ.</p>}
-      {amountPaisas > 0n && from && to && <OperationalImpact kind="contra" source={from.name} destination={to.name} amount={amountPaisas} />}
+      <div className="flex gap-2 overflow-x-auto">
+        <Button type="button" size="sm" variant={kind === 'contra' ? 'default' : 'outline'} onClick={() => switchKind('contra')}>Internal Transfer</Button>
+        <Button type="button" size="sm" variant={kind === 'drawings' ? 'default' : 'outline'} onClick={() => switchKind('drawings')}>Owner Drawings</Button>
+      </div>
+      <div className="grid sm:grid-cols-2 gap-3"><div><Label className="text-xs text-muted-foreground">Date</Label><Input type="date" value={date} onChange={e => setDate(e.target.value)} className="h-10 bg-background" data-num /></div><div><Label className="text-xs text-muted-foreground">Total</Label><div className="h-10 flex items-center font-medium" data-num>{formatMoney(total)}</div></div></div>
+      {rows.map((r, i) => { const lineAmt = parseMoney(r.amount ?? '') ?? 0n; return (
+        <div key={i} className="border border-border rounded-lg p-3 space-y-2">
+          <div className="flex items-center justify-between"><p className="text-xs font-medium">{'Row ' + (i + 1)}{kind === 'drawings' ? ' · Owner Drawings' : ' · Internal Transfer'}</p><div className="flex items-center gap-1"><span data-num className="text-xs text-muted-foreground">{formatMoney(lineAmt)}</span>{rows.length > 1 && <Button type="button" size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => remove(i)} aria-label="Remove row"><Trash2 className="size-3.5" /></Button>}</div></div>
+          <div className="grid sm:grid-cols-2 gap-3"><div><Label className="text-xs text-muted-foreground">From account</Label><Select value={r.fromAccountId} onValueChange={(v) => update(i, { fromAccountId: v })}><SelectTrigger className="h-10 bg-background"><SelectValue placeholder="Select account…" /></SelectTrigger><SelectContent>{accounts.map(x => <SelectItem key={x.id} value={x.id}>{x.name} · {formatMoney(BigInt(x.balancePaisas))}</SelectItem>)}</SelectContent></Select></div>{kind === 'contra' ? <div><Label className="text-xs text-muted-foreground">To account</Label><Select value={r.toAccountId} onValueChange={(v) => update(i, { toAccountId: v })}><SelectTrigger className="h-10 bg-background"><SelectValue placeholder="Select account…" /></SelectTrigger><SelectContent>{accounts.map(x => <SelectItem key={x.id} value={x.id}>{x.name} · {formatMoney(BigInt(x.balancePaisas))}</SelectItem>)}</SelectContent></Select></div> : <div><Label className="text-xs text-muted-foreground">To account</Label><div className="h-10 flex items-center text-xs text-muted-foreground">Owner Drawings (3020)</div></div>}</div>
+          <div className="grid sm:grid-cols-2 gap-3"><div><Label className="text-xs text-muted-foreground">Amount (Rs)</Label><Input value={r.amount} onChange={e => update(i, { amount: e.target.value })} inputMode="decimal" placeholder="0.00" className="h-10 bg-background" data-num /></div><div><Label className="text-xs text-muted-foreground">Note <span className="text-muted-foreground/70">(optional)</span></Label><Input value={r.notes} onChange={e => update(i, { notes: e.target.value })} maxLength={500} className="h-10 bg-background" /></div></div>
+        </div>
+      ) })}
+      <Button type="button" size="sm" variant="outline" className="w-full" onClick={add}><Plus className="size-3.5" /> Add Row</Button>
+      {selfTransfer && <p className="text-xs text-destructive">A source and destination account cannot be the same.</p>}
+      {impact}
       {result?.error && <p className="text-xs text-destructive">{result.error}</p>}
       {result?.reference && <p className="text-xs text-primary">Transfer posted: <span data-num>{result.reference}</span></p>}
-      <Button className="w-full" disabled={!canPost || mut.isPending} onClick={() => mut.mutate()}>{mut.isPending ? 'Posting…' : 'Transfer Money'}</Button>
+      <Button className="w-full" disabled={!canPost || mut.isPending} onClick={() => mut.mutate()}>{mut.isPending ? 'Posting…' : (kind === 'drawings' ? 'Save Drawings' : 'Save Contra')}</Button>
     </div>
     <div className="card-3d p-4"><h2 className="text-sm font-semibold mb-2">Recent transfers</h2><RecentOperationalMoney activity={(moneyQ.data?.activity ?? []).filter(a => a.kind === 'contra')} /></div>
   </div>
