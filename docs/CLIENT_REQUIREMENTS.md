@@ -329,13 +329,16 @@ moves; asset-to-asset with no income/expense/equity effect) and Owner Drawings (
 Owner Drawings 3020, credit the selected source asset; never faked as an asset-to-asset
 contra).
 
-Additive migration `00038_legacy_contra_batch.sql` is prepared but deliberately NOT applied.
+Additive migration `00038_legacy_contra_batch.sql` is APPLIED to production (2026-08-29) after
+a one-line signature correction (all parameters are now required, matching the 00036 pattern).
 It adds one readable CON batch identity per batch, an atomic multi-row posting RPC
 (`post_contra_batch`), one balanced voucher per batch, server-side validation and business
 isolation, and service_role-only grants; it also adds the legacy operational-money list
 RPCs so the Contra screen can load accounts in production. The existing single-row contra
 path (`post_contra_entry`) and all historic entries remain untouched.
 
-Browser/runtime verification of a real multi-row / drawings batch in production remains
-pending (no safe isolated test business; the migration is not applied in this task).
+Production schema verified read-only after application. Read-only screen loading verified
+(accounts + historic activity resolve). A real multi-row / drawings batch remains unverified
+in a browser because no safe isolated test business exists and no financial transaction was
+created for testing.
 

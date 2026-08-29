@@ -92,9 +92,9 @@ create or replace function public.post_contra_batch(
   p_business_id text,
   p_contra_date date,
   p_lines jsonb,
-  p_reference text default null,
-  p_notes text default null,
-  p_created_by uuid default null,
+  p_reference text,
+  p_notes text,
+  p_created_by uuid,
   p_idempotency_key text
 )
 returns jsonb

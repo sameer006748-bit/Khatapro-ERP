@@ -390,10 +390,10 @@ Runtime/UAT: NOT performed against production because only the real business
 `biz-default` exists and no safe isolated test business is available. Browser workflow
 verification for a real historical/partial sales return remains pending manual sign-off.
 
-## Migration 00038 (legacy multi-row Contra + Owner Drawings) prepared — 2026-08-29
+## Migration 00038 (legacy multi-row Contra + Owner Drawings) — 2026-08-29
 
-`00038_legacy_contra_batch.sql` was added to the repository but deliberately NOT applied in
-this task. It is additive and scoped to the verified legacy production schema.
+`00038_legacy_contra_batch.sql` was added to the repository and is APPLIED to production
+(2026-08-29). It is additive and scoped to the verified legacy production schema.
 
 What it adds:
 
@@ -421,6 +421,35 @@ Verification: focused `tests/contra-batch.test.ts` (13 assertions) passes; exist
 could not complete inside this sandbox's 30s command timeout (large project), so they must
 run outside the sandbox before production application.
 
-Application: NOT applied to production in this task (requires separate explicit preflight
-and approval, like 00037).
+Application: APPLIED to production (2026-08-29) via exact-file `psql`, after a one-line
+signature fix (all `post_contra_batch` parameters made required — PostgreSQL rejects a
+non-default parameter that follows a defaulted one). Preflight passed; the first attempt
+failed that signature rule and was fully rolled back (no partial objects remained), then the
+corrected file applied cleanly.
+
+## Migration 00038 production verification — 2026-08-29
+
+Read-only verification after application:
+
+- `contra_batches` exists: PK, UNIQUE(business_id, batch_no), FK business CASCADE, FK vouchers
+  SET NULL, `(business_id, batch_date desc)` index, RLS enabled, service_role-only grants
+  (no anon/authenticated/public).
+- `contra_batch_entries` exists: PK, FK business CASCADE, FK contra_batch CASCADE, FK
+  from/to accounts RESTRICT, CHECK amount>0, CHECK entry_kind in ('contra','drawings'),
+  UNIQUE(contra_batch_id, line_no), CHECK from<>to, `(contra_batch_id)` index, RLS enabled.
+- `post_contra_batch(text,date,jsonb,text,text,uuid,text) → jsonb`: SECURITY DEFINER,
+  `SET search_path = public`, owner postgres, EXECUTE only to service_role (+ owner). Body
+  confirmed to: allocate `CON` via `allocate_legacy_transaction_identity`, be idempotent via
+  `claim_legacy_transaction_request(..., 'contra_batch', ...)`, resolve Owner Drawings by
+  `code = '3020'`, post voucher type `CT`, and write the batch header + rows.
+- `list_business_money_accounts(text,uuid)` / `list_business_money_activity(text,uuid)`
+  created (SECURITY DEFINER, search_path=public).
+- Existing `post_contra_entry` (6-arg base + 7-arg idempotent) and the single historic
+  `contra_entries` row (CV-0001, Cash→Petty Cash) remain unchanged (count=1).
+- Read-only screen-loading verified: `list_business_money_accounts('biz-default', NULL)`
+  returns all 5 money accounts (Bank/Cash/Easypaisa/JazzCash/Petty Cash);
+  `list_business_money_activity` returns the historic CV-0001 row.
+
+No financial transaction was created (no safe isolated test business).
+
 
