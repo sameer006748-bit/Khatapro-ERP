@@ -148,7 +148,7 @@ begin
   where id = p_invoice_id and business_id = p_business_id
   for update;
   if not found then raise exception 'Original invoice not found for this business'; end if;
-  if v_invoice.status = 'Cancelled' then raise exception 'A cancelled invoice cannot be returned'; end if;
+  if v_invoice.is_cancelled then raise exception 'A cancelled invoice cannot be returned'; end if;
 
   select id into v_sales_account_id from public.accounts
   where business_id = p_business_id and code = '4010' and is_active = true;

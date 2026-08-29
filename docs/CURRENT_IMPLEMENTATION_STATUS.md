@@ -55,7 +55,7 @@ Known migration notes:
   to the verified legacy production schema;
 - migration `00036_legacy_transaction_identity_bridge.sql` is the additive
   legacy-compatible identity bridge and is **APPLIED** in production;
-- migration `00037_legacy_historical_sales_returns.sql` is prepared but **NOT APPLIED**;
+- migration `00037_legacy_historical_sales_returns.sql` is **APPLIED** in production (2026-08-29);
 - do not use a broad migration command that may unintentionally apply unrelated pending versions.
 
 ## Legacy Transaction Identity Bridge
@@ -173,9 +173,7 @@ Implemented in source and locally runtime-verified:
 - focused historical, mixed-return, and commission tests pass;
 - disposable-database runtime verification created `SRT-0001`, preserved original Sold 10, increased Returned and stock by exactly 1, and replayed the same SRT on retry.
 
-Production activation is pending. Migration `00037_legacy_historical_sales_returns.sql` adds the narrow legacy-schema return-line/returned-quantity foundation and atomic partial-return RPC while preserving migration 00036 and historical identities. It was deliberately NOT applied. The API returns an actionable HTTP 409 until 00037 is explicitly applied; it never degrades a requested partial return into the old whole-invoice reversal.
-
-This is a required next implementation item.
+Production activation: migration `00037_legacy_historical_sales_returns.sql` was applied to production (2026-08-29) after a one-line schema correction (`v_invoice.status` → `v_invoice.is_cancelled`, because production `invoices` has no `status` column). Production schema was verified read-only: `returned_qty`, `sales_return_lines`, new `sales_returns` columns, `request_fingerprint`, and the 9-argument `post_sales_return` (SECURITY DEFINER, `search_path = public`, service_role-only grants) all present; 5-arg/6-arg overloads intact. Production browser/UAT runtime verification of a real historical return remains pending (no safe isolated test business exists).
 
 ## Payment UI / Business Accounts — Uncommitted Local Work
 
@@ -361,3 +359,33 @@ customer-impacting transaction was created.
 
 Migration history: `supabase_migrations.schema_migrations` does not exist (unmanaged);
 00036 applied directly, history reconciliation pending separately, no mass repair.
+
+## Migration 00037 applied to production — 2026-08-29
+
+`00037_legacy_historical_sales_returns.sql` was applied directly to production ref
+`ebcebxwpddltiwrqybqc` via exact-file `psql` (no db push, no migration up, no repair).
+Only 00037 was executed; the file's own `begin;`/`commit;` provided the single transaction.
+
+Preflight correction applied before application: `if v_invoice.status = 'Cancelled'` was
+changed to `if v_invoice.is_cancelled` because production `invoices` has no `status` column.
+
+Production schema verified read-only after application:
+
+- `invoice_items.returned_qty` integer NOT NULL default 0 with check
+  `returned_qty >= 0 and returned_qty <= qty`;
+- `sales_returns.refund_mode`, `refund_account_id` (FK to accounts, restrict),
+  `settlement_status` added;
+- `legacy_transaction_identity_requests.request_fingerprint` added;
+- `sales_return_lines` created (PK, FKs cascade/restrict, `returned_qty > 0` check,
+  unique `(sales_return_id, original_invoice_item_id)`, business+item index, RLS enabled);
+- 9-argument `post_sales_return(text,text,date,jsonb,text,text,text,uuid,text) → jsonb`
+  created as SECURITY DEFINER, `SET search_path = public`, EXECUTE granted only to
+  `service_role` (and owner `postgres`); anon/authenticated/public revoked;
+- existing 5-arg and 6-arg `post_sales_return` overloads remain intact;
+- the 9-arg body references `v_invoice.is_cancelled` (verified, not `status`);
+- production data unchanged: 1 business, 6 invoices, 11 invoice_items, 0 sales_returns,
+  0 sales_return_lines, 0 historical-return identity rows.
+
+Runtime/UAT: NOT performed against production because only the real business
+`biz-default` exists and no safe isolated test business is available. Browser workflow
+verification for a real historical/partial sales return remains pending manual sign-off.

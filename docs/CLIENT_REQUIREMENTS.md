@@ -70,7 +70,7 @@ Implemented safety and accounting behavior:
 
 Local disposable-database runtime verification posted `SRT-0001`, preserved original Sold 10, increased Returned by 1, restored stock by 1, and replayed the same SRT for the same idempotency key.
 
-Production activation remains pending: additive migration `00037_legacy_historical_sales_returns.sql` is prepared but was deliberately NOT applied. Until an owner explicitly applies 00037, the production API fails closed with HTTP 409 rather than falling back to the legacy whole-invoice return.
+Production activation: additive migration `00037_legacy_historical_sales_returns.sql` was applied to production (2026-08-29) after a one-line schema correction (`v_invoice.status` → `v_invoice.is_cancelled`, because production `invoices` has no `status` column). The production schema was verified read-only. Production browser/UAT runtime verification of a real historical return remains pending (no safe isolated test business exists).
 
 ## Product-Wise Commission
 
@@ -289,7 +289,7 @@ Internal commission details must not appear on the customer copy unless explicit
 - Migration `00013` is already applied. Do not treat it as pending.
 - `00033_mixed_sale_returns.sql` is prepared but NOT applied.
 - `00036_legacy_transaction_identity_bridge.sql` is applied in production.
-- `00037_legacy_historical_sales_returns.sql` is prepared but NOT applied; it is the scoped legacy-schema activation for partial/historical sales returns.
+- `00037_legacy_historical_sales_returns.sql` is APPLIED in production (2026-08-29); it is the scoped legacy-schema activation for partial/historical sales returns.
 - Do not broadly apply pending migrations without explicit preflight and approval.
 - Production Supabase project ref used by current project: `ebcebxwpddltiwrqybqc`.
 
