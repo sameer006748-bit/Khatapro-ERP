@@ -8,6 +8,7 @@ import { getAdminSupabase } from '@/lib/supabase/admin'
 import { resolveSupabaseUuid } from '@/lib/accounting/voucher-supabase'
 import { bizDateString } from '@/lib/dates'
 import { probeTable } from '@/lib/supabase/phase-probe'
+import { callLegacyIdentityRpc, usesLegacyTransactionSchema } from '@/lib/identity/legacy-bridge'
 
 const _p6cache = { lastChecked: 0, lastResult: false }
 
@@ -59,6 +60,21 @@ export async function postPaymentVoucher(input: {
   amountPaisas: bigint; vendorId?: string | null; reference?: string | null; notes?: string | null; createdBy?: string | null
   idempotencyKey?: string | null
 }): Promise<{ paymentId: string; paymentNo: string; voucherId: string }> {
+  if (await usesLegacyTransactionSchema()) {
+    const { data } = await callLegacyIdentityRpc('post_payment_voucher', {
+      p_business_id: input.businessId,
+      p_payment_date: bizDateString(input.paymentDate),
+      p_paid_from_account_id: input.paidFromAccountId,
+      p_debit_account_id: input.debitAccountId,
+      p_amount_paisas: input.amountPaisas.toString(),
+      p_vendor_id: input.vendorId ?? null,
+      p_reference: input.reference ?? null,
+      p_notes: input.notes ?? null,
+      p_created_by: await resolveSupabaseUuid(input.createdBy),
+    }, input.idempotencyKey)
+    const result = data as any
+    return { paymentId: result.payment_id, paymentNo: result.payment_no, voucherId: result.voucher_id }
+  }
   const result = await postCanonicalVoucher({
     businessId: input.businessId,
     voucherType: 'PV',
@@ -94,6 +110,21 @@ export async function postReceiptVoucher(input: {
   if (input.allocations?.length) {
     throw new Error('Receipt allocations require the invoice-specific collection workflow')
   }
+  if (await usesLegacyTransactionSchema()) {
+    const { data } = await callLegacyIdentityRpc('post_receipt_voucher', {
+      p_business_id: input.businessId,
+      p_receipt_date: bizDateString(input.receiptDate),
+      p_received_into_account_id: input.receivedIntoAccountId,
+      p_credit_account_id: input.creditAccountId,
+      p_amount_paisas: input.amountPaisas.toString(),
+      p_customer_id: input.customerId ?? null,
+      p_reference: input.reference ?? null,
+      p_notes: input.notes ?? null,
+      p_created_by: await resolveSupabaseUuid(input.createdBy),
+    }, input.idempotencyKey)
+    const result = data as any
+    return { receiptId: result.receipt_id, receiptNo: result.receipt_no, voucherId: result.voucher_id }
+  }
   const result = await postCanonicalVoucher({
     businessId: input.businessId,
     voucherType: 'RV',
@@ -123,6 +154,23 @@ export async function postJournalVoucher(input: {
   reference?: string | null; createdBy?: string | null
   idempotencyKey?: string | null
 }): Promise<{ voucherId: string; voucherNo: string }> {
+  if (await usesLegacyTransactionSchema()) {
+    const { data } = await callLegacyIdentityRpc('post_journal_voucher', {
+      p_business_id: input.businessId,
+      p_jv_date: bizDateString(input.jvDate),
+      p_memo: input.memo,
+      p_lines: input.lines.map(line => ({
+        account_id: line.accountId,
+        debit: line.debit.toString(),
+        credit: line.credit.toString(),
+        memo: line.memo ?? null,
+      })),
+      p_reference: input.reference ?? null,
+      p_created_by: await resolveSupabaseUuid(input.createdBy),
+    }, input.idempotencyKey)
+    const result = data as any
+    return { voucherId: result.voucher_id, voucherNo: result.voucher_no }
+  }
   const result = await postCanonicalVoucher({
     businessId: input.businessId,
     voucherType: 'JV',
@@ -147,6 +195,20 @@ export async function postContraEntry(input: {
   amountPaisas: bigint; reference?: string | null; notes?: string | null; createdBy?: string | null
   idempotencyKey?: string | null
 }): Promise<{ contraId: string; contraNo: string; voucherId: string }> {
+  if (await usesLegacyTransactionSchema()) {
+    const { data } = await callLegacyIdentityRpc('post_contra_entry', {
+      p_business_id: input.businessId,
+      p_contra_date: bizDateString(input.contraDate),
+      p_from_account_id: input.fromAccountId,
+      p_to_account_id: input.toAccountId,
+      p_amount_paisas: input.amountPaisas.toString(),
+      p_reference: input.reference ?? null,
+      p_notes: input.notes ?? null,
+      p_created_by: await resolveSupabaseUuid(input.createdBy),
+    }, input.idempotencyKey)
+    const result = data as any
+    return { contraId: result.contra_id, contraNo: result.contra_no, voucherId: result.voucher_id }
+  }
   const result = await postCanonicalVoucher({
     businessId: input.businessId,
     voucherType: 'CT',
@@ -174,6 +236,23 @@ export async function postExpenseBatch(input: {
   reference?: string | null; notes?: string | null; createdBy?: string | null
   idempotencyKey?: string | null
 }): Promise<{ expenseId: string; expenseNo: string; voucherId: string }> {
+  if (await usesLegacyTransactionSchema()) {
+    const { data } = await callLegacyIdentityRpc('post_expense_batch', {
+      p_business_id: input.businessId,
+      p_expense_date: bizDateString(input.expenseDate),
+      p_payment_account_id: input.paymentAccountId,
+      p_lines: input.lines.map(line => ({
+        expense_account_id: line.expenseAccountId,
+        description: line.description ?? null,
+        amount_paisas: line.amountPaisas.toString(),
+      })),
+      p_reference: input.reference ?? null,
+      p_notes: input.notes ?? null,
+      p_created_by: await resolveSupabaseUuid(input.createdBy),
+    }, input.idempotencyKey)
+    const result = data as any
+    return { expenseId: result.expense_id, expenseNo: result.expense_no, voucherId: result.voucher_id }
+  }
   const total = input.lines.reduce((sum, line) => sum + line.amountPaisas, 0n)
   const result = await postCanonicalVoucher({
     businessId: input.businessId,

@@ -32,6 +32,11 @@ import {
   type SellerRole,
 } from '@/lib/sales/sale-engine'
 import { missingProductOptionalColumn } from '@/lib/products/schema-compatibility'
+import {
+  callLegacyIdentityRpc,
+  callRequiredLegacyIdentityRpc,
+  usesLegacyTransactionSchema,
+} from '@/lib/identity/legacy-bridge'
 
 const _p4cache = { lastChecked: 0, lastResult: false }
 
@@ -329,6 +334,36 @@ async function postSaleViaSupabase(
   // so netQty === soldQty and the extra key is ignored by the older function.
   const itemsJson = lines.map((i) => ({ product_id: i.productId, product_name: i.productName, qty: i.soldQty, returned_qty: i.returnedQty, unit_price: i.unitPricePaisas.toString(), is_temporary: i.isTemporary }))
   const paymentsJson = input.payments.map((p) => ({ account_id: p.accountId, amount: p.amount.toString(), is_change: p.isChange ?? false }))
+  if (await usesLegacyTransactionSchema()) {
+    const { data, bridgeApplied } = await callLegacyIdentityRpc('post_sale', {
+      p_business_id: input.businessId,
+      p_invoice_type: input.invoiceType,
+      p_invoice_date: bizDateString(input.invoiceDate),
+      p_items: lines.map(item => ({
+        product_id: item.productId,
+        product_name: item.productName,
+        qty: item.soldQty,
+        unit_price: item.unitPricePaisas.toString(),
+        is_temporary: item.isTemporary,
+      })),
+      p_payments: paymentsJson,
+      p_salesman_id: input.salesmanId ?? null,
+      p_customer_id: input.customerId ?? null,
+      p_customer_name: input.customerName ?? null,
+      p_customer_phone: input.customerPhone ?? null,
+      p_customer_address: input.customerAddress ?? null,
+      p_customer_city: input.customerCity ?? null,
+      p_memo: input.memo ?? null,
+      p_created_by: supabaseCreatedBy,
+    }, input.idempotencyKey)
+    const invoiceId = bridgeApplied ? (data as any).invoice_id : data as string
+    const invoiceNo = bridgeApplied ? (data as any).invoice_no : null
+    if (invoiceNo) return { invoiceId, invoiceNo }
+    const { data: inv, error: invErr } = await admin.from('invoices')
+      .select('invoice_no').eq('id', invoiceId).eq('business_id', input.businessId).single()
+    if (invErr) throw new Error(`Supabase fetch invoice_no: ${invErr.message}`)
+    return { invoiceId, invoiceNo: (inv as { invoice_no: string }).invoice_no }
+  }
   const payload = { p_business_id: input.businessId, p_invoice_type: input.invoiceType, p_invoice_date: bizDateString(input.invoiceDate), p_items: itemsJson, p_payments: paymentsJson, p_salesman_id: input.salesmanId ?? null, p_customer_id: input.customerId ?? null, p_customer_name: input.customerName ?? null, p_customer_phone: input.customerPhone ?? null, p_customer_address: input.customerAddress ?? null, p_customer_city: input.customerCity ?? null, p_memo: input.memo ?? null, p_created_by: supabaseCreatedBy, p_idempotency_key: input.idempotencyKey ?? randomUUID() }
   const rpcName = salePostingRpcName()
   const { data, error } = await admin.rpc(rpcName, payload)
@@ -918,6 +953,38 @@ export async function postLinkedSaleReturn(input: LinkedReturnInput): Promise<{ 
     const admin = getAdminSupabase()
     const actorId = await resolveSupabaseUuid(input.actorId)
     if (!actorId) throw new Error('Server-attributed return actor is unavailable')
+    if (await usesLegacyTransactionSchema()) {
+      // The original RPC supports whole-invoice reversal only. Verify the UI
+      // request is exactly that shape before invoking it; never silently turn a
+      // partial request into a full return.
+      const { data: originalItems, error: itemError } = await admin.from('invoice_items')
+        .select('id,qty')
+        .eq('invoice_id', input.invoiceId)
+      if (itemError) throw new Error(`Supabase sales return validation: ${itemError.message}`)
+      const requested = new Map(input.items.map(item => [item.invoiceItemId, item.qty]))
+      const wholeInvoice = Array.isArray(originalItems)
+        && originalItems.length === requested.size
+        && originalItems.every((item: any) => requested.get(item.id) === Number(item.qty))
+      if (!wholeInvoice) {
+        throw new Error('The legacy database supports whole-invoice sales returns only; no return was posted.')
+      }
+
+      const data = await callRequiredLegacyIdentityRpc('post_sales_return', {
+        p_business_id: input.businessId,
+        p_invoice_id: input.invoiceId,
+        p_return_date: bizDateString(new Date()),
+        p_reason: input.reason ?? null,
+        p_created_by: actorId,
+      }, input.idempotencyKey, 'Sales Return')
+      const result = data as any
+      return {
+        returnId: result.return_id,
+        returnNo: result.return_no,
+        total: String(result.total),
+        status: result.status,
+        idempotent: Boolean(result.idempotent),
+      }
+    }
     const { data, error } = await admin.rpc('post_sale_return_ledger', {
       p_business_id: input.businessId,
       p_original_invoice_id: input.invoiceId,

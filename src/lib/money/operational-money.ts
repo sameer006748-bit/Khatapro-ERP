@@ -1,6 +1,7 @@
 import 'server-only'
 
 import { getAdminSupabase } from '@/lib/supabase/admin'
+import { callLegacyIdentityRpc, usesLegacyTransactionSchema } from '@/lib/identity/legacy-bridge'
 
 export type OperationalMoneyAccount = {
   id: string
@@ -68,6 +69,32 @@ export async function listOperationalMoney(input: { businessId: string; actorPro
 }
 
 export async function postOperationalContra(input: MutationInput & { sourceAccountId: string; destinationAccountId: string }) {
+  if (await usesLegacyTransactionSchema()) {
+    const admin = getAdminSupabase()
+    const { data: actor, error: actorError } = await admin.from('profiles')
+      .select('user_id')
+      .eq('id', input.actorProfileId)
+      .eq('business_id', input.businessId)
+      .single()
+    if (actorError || !actor?.user_id) throw new Error('Server-attributed contra actor is unavailable')
+    const { data } = await callLegacyIdentityRpc('post_contra_entry', {
+      p_business_id: input.businessId,
+      p_contra_date: input.date,
+      p_from_account_id: input.sourceAccountId,
+      p_to_account_id: input.destinationAccountId,
+      p_amount_paisas: input.amountPaisas.toString(),
+      p_reference: null,
+      p_notes: input.note ?? null,
+      p_created_by: actor.user_id,
+    }, input.idempotencyKey)
+    const result = data as any
+    return {
+      transaction_id: result.contra_id,
+      reference: result.contra_no,
+      amount_paisas: input.amountPaisas.toString(),
+      idempotent: Boolean(result.idempotent),
+    }
+  }
   const { data, error } = await getAdminSupabase().rpc('post_contra_transfer', {
     p_business_id: input.businessId,
     p_source_account_id: input.sourceAccountId,

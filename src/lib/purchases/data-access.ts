@@ -11,6 +11,7 @@ import { allocateDocumentNumber } from '@/lib/identity/generate'
 import { resolveSupabaseUuid } from '@/lib/accounting/voucher-supabase'
 import { writeAudit } from '@/lib/auth/permissions'
 import { probeTable } from '@/lib/supabase/phase-probe'
+import { callLegacyIdentityRpc, usesLegacyTransactionSchema } from '@/lib/identity/legacy-bridge'
 
 const _p5cache = { lastChecked: 0, lastResult: false }
 
@@ -238,6 +239,27 @@ export async function postPurchaseReturn(input: {
     const admin = getAdminSupabase()
     const supabaseCreatedBy = await resolveSupabaseUuid(input.createdBy)
     const itemsJson = input.returnItems.map(i => ({ purchase_item_id: i.purchaseItemId, product_id: i.productId ?? null, product_name: i.productName, quantity: i.quantity, unit_cost_paisas: i.unitCostPaisas.toString() }))
+    if (await usesLegacyTransactionSchema()) {
+      const { data, bridgeApplied } = await callLegacyIdentityRpc('post_purchase_return', {
+        p_business_id: input.businessId,
+        p_purchase_id: input.purchaseId,
+        p_return_items: itemsJson,
+        p_settlement_type: input.settlementType,
+        p_settlement_account_id: input.settlementAccountId ?? null,
+        p_return_date: input.returnDate ? bizDateString(input.returnDate) : null,
+        p_notes: input.notes ?? null,
+        p_created_by: supabaseCreatedBy,
+      }, input.idempotencyKey)
+      if (bridgeApplied) {
+        const result = data as any
+        return { returnId: result.return_id, returnNo: result.return_no }
+      }
+      const returnId = data as string
+      const { data: ret, error: returnError } = await admin.from('purchase_returns')
+        .select('return_no').eq('id', returnId).eq('business_id', input.businessId).single()
+      if (returnError) throw new Error(`Supabase purchase return lookup: ${returnError.message}`)
+      return { returnId, returnNo: (ret as any).return_no }
+    }
     const { data, error } = await admin.rpc('post_purchase_return', { p_business_id: input.businessId, p_purchase_id: input.purchaseId, p_return_items: itemsJson, p_settlement_type: input.settlementType, p_settlement_account_id: input.settlementAccountId ?? null, p_return_date: input.returnDate ? bizDateString(input.returnDate) : null, p_notes: input.notes ?? null, p_created_by: supabaseCreatedBy, p_idempotency_key: input.idempotencyKey })
     if (error) throw new Error(`Supabase: ${error.message}`)
     const returnId = data as string

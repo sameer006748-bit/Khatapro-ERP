@@ -9,6 +9,7 @@ import { z } from 'zod'
 import { authOptions } from '@/lib/auth/authOptions'
 import { loadSessionUser, requirePermission } from '@/lib/auth/permissions'
 import { postLinkedSaleReturn } from '@/lib/sales/data-access'
+import { LegacyIdentityMigrationRequiredError } from '@/lib/identity/legacy-bridge'
 
 const ReturnSchema = z.object({
   items: z.array(z.object({ invoiceItemId: z.string().uuid(), qty: z.number().int().positive() })).min(1),
@@ -43,8 +44,15 @@ export async function POST(
     })
     return NextResponse.json({ ok: true, ...result })
   } catch (e) {
+    if (e instanceof LegacyIdentityMigrationRequiredError) {
+      return NextResponse.json({
+        error: e.code,
+        message: e.message,
+        migration: '00036_legacy_transaction_identity_bridge.sql',
+      }, { status: 409 })
+    }
     const msg = (e as Error).message
-    const status = msg.includes('not found') || msg.includes('exceeds') || msg.includes('cannot') ? 400 : 500
+    const status = msg.includes('not found') || msg.includes('exceeds') || msg.includes('cannot') || msg.includes('whole-invoice') ? 400 : 500
     return NextResponse.json({ error: msg }, { status })
   }
 }
