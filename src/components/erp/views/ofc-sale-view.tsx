@@ -15,6 +15,8 @@ import { PrintInvoiceButton } from '@/components/invoice/print-invoice-button'
 import { CURRENT_DATABASE_CAPABILITIES } from '@/lib/supabase/rpc-compatibility'
 import type { MeUser } from '@/components/erp/erp-app'
 import { apiFetchJson } from '@/lib/api-client'
+import { PaymentPanel } from '@/components/erp/sales/payment-panel'
+import { usePaymentDraft } from '@/components/erp/sales/use-payment-draft'
 
 type Product = { id: string; name: string; salePrice: number }
 type Account = { id: string; code: string; name: string }
@@ -29,11 +31,10 @@ export function OfcSaleView({ user }: { user: MeUser }) {
   const [salesmanId, setSalesmanId] = useState('')
   const [form, setForm] = useState({
     customerName: '', customerPhone: '', customerCity: '', customerAddress: '',
-    courierNote: '', advanceReceived: '', discountRupees: '',
+    courierNote: '', discountRupees: '',
     invoiceDate: bizDateString(new Date()),
   })
   const [items, setItems] = useState<Item[]>([{ key: '1', productId: '', productName: '', qty: '1', unitPrice: '' }])
-  const [paymentAccountId, setPaymentAccountId] = useState('')
   const [result, setResult] = useState<{ ok: boolean; invoiceNo?: string; invoiceId?: string; error?: string } | null>(null)
   const [idempotencyKey, setIdempotencyKey] = useState(() => crypto.randomUUID())
 
@@ -51,15 +52,6 @@ export function OfcSaleView({ user }: { user: MeUser }) {
     return coaQ.data.categories.flatMap((c: any) => c.accounts).filter((a: any) => a.isBusinessAccount && a.isActive).map((a: any) => ({ id: a.id, code: a.code, name: a.name }))
   }, [coaQ.data])
 
-  const effectivePaymentAccountId = useMemo(() => {
-    if (paymentAccountId) return paymentAccountId
-    if (businessAccounts.length > 0) {
-      const bank = businessAccounts.find(a => a.name === 'Bank' || a.code === '1030') ?? businessAccounts[0]
-      return bank.id
-    }
-    return ''
-  }, [paymentAccountId, businessAccounts])
-
   // ── Phase 9.1 totals with discount ──
   const subtotal = items.reduce((acc, it) => acc + (parseMoney(it.unitPrice) ?? 0n) * BigInt(parseInt(it.qty) || 0), 0n)
   const discountPaisas = useMemo(() => {
@@ -70,9 +62,15 @@ export function OfcSaleView({ user }: { user: MeUser }) {
   const discountError = discountPaisas < 0n ? 'Discount cannot be negative' : discountPaisas > subtotal ? 'Discount exceeds subtotal' : null
   const finalTotal = subtotal - discountPaisas
 
-  // Advance
-  const advanceReceived = parseMoney(form.advanceReceived) ?? 0n
-  const changeAmount = advanceReceived > finalTotal ? advanceReceived - finalTotal : 0n
+  // Advance — the same shared payment implementation every channel uses; OFC's
+  // own rule (full advance) is applied below, not inside the payment engine.
+  const advance = usePaymentDraft({
+    accounts: businessAccounts,
+    netPayablePaisas: finalTotal,
+    requirePayment: true,
+  })
+  const advanceReceived = advance.paidPaisas
+  const changeAmount = advance.changePaisas
   const netCollected = advanceReceived - changeAmount
   const outstanding = finalTotal > netCollected ? finalTotal - netCollected : 0n
 
@@ -82,12 +80,7 @@ export function OfcSaleView({ user }: { user: MeUser }) {
 
   const postMut = useMutation({
     mutationFn: async () => {
-      const payments: Array<{ accountId: string; amount: string; isChange?: boolean }> = [
-        { accountId: effectivePaymentAccountId, amount: advanceReceived.toString() },
-      ]
-      if (changeAmount > 0n) {
-        payments.push({ accountId: effectivePaymentAccountId, amount: changeAmount.toString(), isChange: true })
-      }
+      const payments = advance.serializedPayments
 
       const r = await fetch('/api/sales/ofc', {
         method: 'POST', headers: { 'content-type': 'application/json' },
@@ -159,7 +152,8 @@ export function OfcSaleView({ user }: { user: MeUser }) {
             <Button variant="ghost" className="press-sm" onClick={() => {
               setResult(null)
               setItems([{ key: String(Date.now()), productId: '', productName: '', qty: '1', unitPrice: '' }])
-              setForm({ customerName: '', customerPhone: '', customerCity: '', customerAddress: '', courierNote: '', advanceReceived: '', discountRupees: '', invoiceDate: bizDateString(new Date()) })
+              setForm({ customerName: '', customerPhone: '', customerCity: '', customerAddress: '', courierNote: '', discountRupees: '', invoiceDate: bizDateString(new Date()) })
+              advance.reset()
               setIdempotencyKey(crypto.randomUUID())
             }}><Truck className="size-4" /> New Sale</Button>
           </div>
@@ -171,6 +165,7 @@ export function OfcSaleView({ user }: { user: MeUser }) {
   const canPost = form.customerName && form.customerPhone && form.customerAddress && form.customerCity &&
     items.some(it => it.productId || it.productName) &&
     (!mustPickSalesman || !!effectiveSalesmanId) &&
+    advance.isValid &&
     !discountError && (form.discountRupees === '' || discountPaisas >= 0n)
 
   return (
@@ -241,22 +236,14 @@ export function OfcSaleView({ user }: { user: MeUser }) {
       </div>
 
       {/* ── Advance ── */}
-      <div className="card-3d p-4 space-y-3">
-        <h2 className="text-sm font-semibold text-foreground">Advance Payment</h2>
-        <div className="grid sm:grid-cols-2 gap-2">
-          <div>
-            <Label className="text-[10px] text-muted-foreground">Advance Received (Rs)</Label>
-            <Input type="text" value={form.advanceReceived} onChange={e => setForm(s => ({ ...s, advanceReceived: e.target.value }))} placeholder="0" className="h-9 bg-background press-sm" data-num />
-          </div>
-          <div>
-            <Label className="text-[10px] text-muted-foreground">Payment Account</Label>
-            <Select value={paymentAccountId} onValueChange={setPaymentAccountId}>
-              <SelectTrigger className="h-9 bg-background press-sm text-sm"><SelectValue /></SelectTrigger>
-              <SelectContent>{businessAccounts.map(a => <SelectItem key={a.id} value={a.id}>{a.name} ({a.code})</SelectItem>)}</SelectContent>
-            </Select>
-          </div>
-        </div>
-      </div>
+      <PaymentPanel
+        accounts={businessAccounts}
+        {...advance.panelProps}
+        error={advance.error}
+        paidLabel="Advance Received (Rs)"
+        paidPlaceholder={formatWholeRupees(finalTotal, false)}
+        idPrefix="ofc-advance"
+      />
 
       {/* ── Totals ── */}
       <div className="card-3d p-4 space-y-1">

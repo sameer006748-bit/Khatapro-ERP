@@ -15,6 +15,8 @@ import { PrintInvoiceButton } from '@/components/invoice/print-invoice-button'
 import { CURRENT_DATABASE_CAPABILITIES } from '@/lib/supabase/rpc-compatibility'
 import type { MeUser } from '@/components/erp/erp-app'
 import { apiFetchJson } from '@/lib/api-client'
+import { PaymentPanel } from '@/components/erp/sales/payment-panel'
+import { usePaymentDraft } from '@/components/erp/sales/use-payment-draft'
 
 type Product = { id: string; name: string; salePrice: number }
 type Account = { id: string; code: string; name: string }
@@ -30,11 +32,10 @@ export function OnlineSaleView({ user }: { user: MeUser }) {
   const [form, setForm] = useState({
     customerName: '', customerPhone: '', customerAddress: '', customerCity: '',
     source: 'WhatsApp', codAmount: '', deliveryFee: '', riderEarning: '',
-    companyDeliveryIncome: '', advanceReceived: '', discountRupees: '',
+    companyDeliveryIncome: '', discountRupees: '',
     invoiceDate: bizDateString(new Date()),
   })
   const [items, setItems] = useState<Item[]>([{ key: '1', productId: '', productName: '', qty: '1', unitPrice: '' }])
-  const [paymentAccountId, setPaymentAccountId] = useState('')
   const [result, setResult] = useState<{ ok: boolean; invoiceNo?: string; invoiceId?: string; error?: string; remainingCod?: string; customerGrandTotal?: string } | null>(null)
   const [idempotencyKey, setIdempotencyKey] = useState(() => crypto.randomUUID())
 
@@ -52,15 +53,6 @@ export function OnlineSaleView({ user }: { user: MeUser }) {
     return coaQ.data.categories.flatMap((c: any) => c.accounts).filter((a: any) => a.isBusinessAccount && a.isActive).map((a: any) => ({ id: a.id, code: a.code, name: a.name }))
   }, [coaQ.data])
 
-  const effectivePaymentAccountId = useMemo(() => {
-    if (paymentAccountId) return paymentAccountId
-    if (businessAccounts.length > 0) {
-      const cash = businessAccounts.find(a => a.name === 'Cash' || a.code === '1010')
-      return cash?.id ?? businessAccounts[0].id
-    }
-    return ''
-  }, [paymentAccountId, businessAccounts])
-
   const subtotal = items.reduce((acc, it) => acc + (parseMoney(it.unitPrice) ?? 0n) * BigInt(parseInt(it.qty) || 0), 0n)
   const discountPaisas = useMemo(() => {
     const v = parseMoney(form.discountRupees)
@@ -74,21 +66,23 @@ export function OnlineSaleView({ user }: { user: MeUser }) {
   const companyDeliveryIncomePaisas = parseMoney(form.companyDeliveryIncome) ?? 0n
   const customerGrandTotal = netProductTotal + deliveryFeePaisas
 
-  const advanceReceived = parseMoney(form.advanceReceived) ?? 0n
-  const changeAmount = advanceReceived > customerGrandTotal ? advanceReceived - customerGrandTotal : 0n
+  // ── Advance payment uses the shared payment implementation: single account by
+  //    default, split on request. COD, rider earning and delivery income stay
+  //    channel-specific below. ──
+  const advance = usePaymentDraft({
+    accounts: businessAccounts,
+    netPayablePaisas: customerGrandTotal,
+  })
+
+  const advanceReceived = advance.paidPaisas
+  const changeAmount = advance.changePaisas
   const netAdvance = advanceReceived - changeAmount
   const outstanding = customerGrandTotal > netAdvance ? customerGrandTotal - netAdvance : 0n
   const codExpected = outstanding
 
   const postMut = useMutation({
     mutationFn: async () => {
-      const payments: Array<{ accountId: string; amount: string; isChange?: boolean }> = []
-      if (advanceReceived > 0n) {
-        payments.push({ accountId: effectivePaymentAccountId, amount: advanceReceived.toString() })
-      }
-      if (changeAmount > 0n) {
-        payments.push({ accountId: effectivePaymentAccountId, amount: changeAmount.toString(), isChange: true })
-      }
+      const payments = advance.serializedPayments
 
       const r = await fetch('/api/sales/online', {
         method: 'POST', headers: { 'content-type': 'application/json' },
@@ -174,7 +168,8 @@ export function OnlineSaleView({ user }: { user: MeUser }) {
             <Button variant="ghost" className="press-sm" onClick={() => {
               setResult(null)
               setItems([{ key: String(Date.now()), productId: '', productName: '', qty: '1', unitPrice: '' }])
-              setForm({ customerName: '', customerPhone: '', customerAddress: '', customerCity: '', source: 'WhatsApp', codAmount: '', deliveryFee: '', riderEarning: '', companyDeliveryIncome: '', advanceReceived: '', discountRupees: '', invoiceDate: bizDateString(new Date()) })
+              setForm({ customerName: '', customerPhone: '', customerAddress: '', customerCity: '', source: 'WhatsApp', codAmount: '', deliveryFee: '', riderEarning: '', companyDeliveryIncome: '', discountRupees: '', invoiceDate: bizDateString(new Date()) })
+              advance.reset()
               setIdempotencyKey(crypto.randomUUID())
             }}><Globe className="size-4" /> New Order</Button>
           </div>
@@ -186,6 +181,7 @@ export function OnlineSaleView({ user }: { user: MeUser }) {
   const canPost = form.customerName && form.customerPhone && form.customerAddress &&
     items.some(it => it.productId || it.productName) &&
     (!mustPickSalesman || !!effectiveSalesmanId) &&
+    advance.isValid &&
     !discountError && (form.discountRupees === '' || discountPaisas >= 0n)
 
   return (
@@ -282,22 +278,13 @@ export function OnlineSaleView({ user }: { user: MeUser }) {
         )}
       </div>
 
-      <div className="card-3d p-4 space-y-3">
-        <h2 className="text-sm font-semibold text-foreground">Advance Payment</h2>
-        <div className="grid sm:grid-cols-2 gap-2">
-          <div>
-            <Label className="text-[10px] text-muted-foreground">Advance Received (Rs)</Label>
-            <Input type="text" value={form.advanceReceived} onChange={e => setForm(s => ({ ...s, advanceReceived: e.target.value }))} placeholder="0" className="h-9 bg-background press-sm" data-num />
-          </div>
-          <div>
-            <Label className="text-[10px] text-muted-foreground">Payment Account</Label>
-            <Select value={paymentAccountId} onValueChange={setPaymentAccountId}>
-              <SelectTrigger className="h-9 bg-background press-sm text-sm"><SelectValue /></SelectTrigger>
-              <SelectContent>{businessAccounts.map(a => <SelectItem key={a.id} value={a.id}>{a.name} ({a.code})</SelectItem>)}</SelectContent>
-            </Select>
-          </div>
-        </div>
-      </div>
+      <PaymentPanel
+        accounts={businessAccounts}
+        {...advance.panelProps}
+        error={advance.error}
+        paidLabel="Advance Received (Rs)"
+        idPrefix="online-advance"
+      />
 
       <div className="card-3d p-4 space-y-1">
         <h2 className="text-sm font-semibold text-foreground mb-2">Reconciled Totals</h2>

@@ -22,6 +22,8 @@ import { formatWholeRupees, parseMoney } from '@/lib/format'
 import { motion, AnimatePresence } from 'framer-motion'
 import type { MeUser } from '@/components/erp/erp-app'
 import { apiFetchJson } from '@/lib/api-client'
+import { PaymentPanel, type PaymentAccountOption } from '@/components/erp/sales/payment-panel'
+import { usePaymentDraft } from '@/components/erp/sales/use-payment-draft'
 
 type Product = { id: string; name: string; currentStock: number; salePrice: number; unit: string }
 type Salesman = { id: string; name: string; commissionPct: number }
@@ -51,8 +53,6 @@ export function OtherSaleView({ user }: { user: MeUser }) {
   const [tempItemName, setTempItemName] = useState('')
   const [tempItemPrice, setTempItemPrice] = useState('')
   const [showNewCustomer, setShowNewCustomer] = useState(false)
-  const [paymentAccountId, setPaymentAccountId] = useState('')
-  const [paymentAmount, setPaymentAmount] = useState('')
   const [discountRupees, setDiscountRupees] = useState('')
   const [result, setResult] = useState<{ ok: boolean; invoiceNo?: string; invoiceId?: string; error?: string } | null>(null)
   const [sessionKey] = useState(() => crypto.randomUUID())
@@ -80,11 +80,12 @@ export function OtherSaleView({ user }: { user: MeUser }) {
     staleTime: 60_000,
   })
 
-  const accounts = useMemo(() => {
+  const accounts = useMemo<PaymentAccountOption[]>(() => {
     const categories = (coaQ.data as any)?.categories ?? []
     return categories
       .flatMap((category: any) => category.accounts ?? [])
       .filter((account: Account & { isActive?: boolean }) => account.isBusinessAccount && account.isActive !== false)
+      .map((account: Account) => ({ id: account.id, code: account.code, name: account.name }))
   }, [coaQ.data])
 
   const filteredProducts = useMemo(() => {
@@ -107,10 +108,9 @@ export function OtherSaleView({ user }: { user: MeUser }) {
     return t < 0n ? 0n : t
   }, [subtotal, discount])
 
-  const isPaymentValid = useMemo(() => {
-    const paid = parseMoney(paymentAmount)
-    return paid !== null && paid > 0n
-  }, [paymentAmount])
+  // ── Payment: the same shared implementation every sale channel uses. Other
+  //    Sale allows a fully credit bill, so payment is not required. ──
+  const payment = usePaymentDraft({ accounts, netPayablePaisas: total })
 
   function addToCart(product: Product) {
     const key = crypto.randomUUID()
@@ -159,13 +159,9 @@ export function OtherSaleView({ user }: { user: MeUser }) {
     if (cart.length === 0) { toast.error('Add at least one item'); return }
     if (!customerId && !customerName.trim()) { toast.error('Select or create a customer'); return }
     if (!salesmanId) { toast.error('Select a salesman'); return }
+    if (payment.error) { toast.error(payment.error); return }
 
-    const payments: Array<{ accountId: string; amount: string; isChange: boolean }> = []
-    const paid = parseMoney(paymentAmount)
-    if (paid !== null && paid > 0n) {
-      if (!paymentAccountId) { toast.error('Select a payment account'); return }
-      payments.push({ accountId: paymentAccountId, amount: String(paid), isChange: false })
-    }
+    const payments = payment.serializedPayments
 
     const discountPaisas = discount > 0n ? String(discount) : undefined
 
@@ -211,6 +207,7 @@ export function OtherSaleView({ user }: { user: MeUser }) {
       toast.error((e as Error).message)
     } finally {
       postingRef.current = false
+      setIsPosting(false)
     }
   }
 
@@ -220,8 +217,7 @@ export function OtherSaleView({ user }: { user: MeUser }) {
     setCustomerName('')
     setCustomerPhone('')
     setCustomerCity('')
-    setPaymentAccountId('')
-    setPaymentAmount('')
+    payment.reset()
     setDiscountRupees('')
     setResult(null)
     setShowNewCustomer(false)
@@ -382,29 +378,16 @@ export function OtherSaleView({ user }: { user: MeUser }) {
         ))}
       </div>
 
-      {/* Payment section */}
-      <div className="grid md:grid-cols-2 gap-4 mb-6 p-4 border rounded-xl bg-muted/30">
-        <div>
-          <label className="text-xs font-medium text-muted-foreground mb-1 block">
-            Payment Account {parseMoney(paymentAmount) !== null && parseMoney(paymentAmount)! > 0n ? '*' : '(optional)'}
-          </label>
-          <Select value={paymentAccountId} onValueChange={setPaymentAccountId}>
-            <SelectTrigger><SelectValue placeholder="Select account" /></SelectTrigger>
-            <SelectContent>
-              {accounts.map((a) => (
-                <SelectItem key={a.id} value={a.id}>{a.name} ({a.code})</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-        <div>
-          <label className="text-xs font-medium text-muted-foreground mb-1 block">Paid Amount (Rs)</label>
-          <Input
-            placeholder="0 = fully credit"
-            value={paymentAmount}
-            onChange={(e) => setPaymentAmount(e.target.value)}
-          />
-        </div>
+      {/* Payment section — shared panel: single account by default, split on request */}
+      <div className="mb-6">
+        <PaymentPanel
+          accounts={accounts}
+          {...payment.panelProps}
+          error={payment.error}
+          paidLabel="Paid Amount (Rs)"
+          paidPlaceholder="0 = fully credit"
+          idPrefix="other-payment"
+        />
       </div>
 
       {/* Discount */}
@@ -423,17 +406,20 @@ export function OtherSaleView({ user }: { user: MeUser }) {
         <p className="text-sm text-muted-foreground">Subtotal: Rs {formatWholeRupees(subtotal)}</p>
         {discount > 0n && <p className="text-sm text-green-600">Discount: -Rs {formatWholeRupees(discount)}</p>}
         <p className="text-lg font-bold">Total: Rs {formatWholeRupees(total)}</p>
-        {parseMoney(paymentAmount) !== null && parseMoney(paymentAmount)! > 0n && (
+        {payment.paidPaisas > 0n && (
           <>
-            <p className="text-sm text-green-600">Paid: Rs {formatWholeRupees(parseMoney(paymentAmount)!)}</p>
-            <p className="text-sm text-amber-600">Outstanding: Rs {formatWholeRupees(total - parseMoney(paymentAmount)!)}</p>
+            <p className="text-sm text-green-600">Paid: Rs {formatWholeRupees(payment.paidPaisas)}</p>
+            <p className="text-sm text-amber-600">Outstanding: Rs {formatWholeRupees(total > payment.paidPaisas ? total - payment.paidPaisas : 0n)}</p>
+            {payment.changePaisas > 0n && (
+              <p className="text-sm text-amber-600">Change: Rs {formatWholeRupees(payment.changePaisas)}</p>
+            )}
           </>
         )}
       </div>
 
       {/* Submit */}
       <div className="flex gap-3">
-        <Button className="flex-1" onClick={handleSubmit} disabled={isPosting || cart.length === 0 || !salesmanId}>
+        <Button className="flex-1" onClick={handleSubmit} disabled={isPosting || cart.length === 0 || !salesmanId || !payment.isValid}>
           {isPosting ? 'Posting...' : 'Post Other Sale'}
         </Button>
         <Button variant="outline" onClick={resetForm}>Reset</Button>

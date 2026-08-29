@@ -16,14 +16,15 @@ import { toast } from 'sonner'
 import { PrintInvoiceButton } from '@/components/invoice/print-invoice-button'
 import {
   Plus, Trash2, ShoppingCart, AlertCircle, CheckCircle2,
-  Printer, FileText, Wallet, Banknote, Smartphone, Split,
-  TrendingDown, User, Minus, Search, RotateCcw, PackageX,
+  Printer, FileText, TrendingDown, Minus, Search, RotateCcw, PackageX,
 } from 'lucide-react'
 import { formatWholeRupees, parseMoney } from '@/lib/format'
 import { motion } from 'framer-motion'
 import type { MeUser } from '@/components/erp/erp-app'
 import { apiFetchJson } from '@/lib/api-client'
 import { AiFieldHelp } from '@/components/erp/ai-actions'
+import { PaymentPanel } from '@/components/erp/sales/payment-panel'
+import { usePaymentDraft } from '@/components/erp/sales/use-payment-draft'
 import {
   normalizeSaleLine,
   computeSaleTotals,
@@ -60,10 +61,6 @@ type BillRow = {
   commissionRatePaisas: string | null
 }
 
-type PaymentMode = 'full' | 'partial' | 'change'
-
-const isUuid = (s: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s)
-
 export function CounterSaleView({ user }: { user: MeUser }) {
   const qc = useQueryClient()
   const [sellerRole, setSellerRole] = useState<SellerRole>('SALESMAN')
@@ -79,16 +76,7 @@ export function CounterSaleView({ user }: { user: MeUser }) {
   const [tempItemName, setTempItemName] = useState('')
   const [tempItemPrice, setTempItemPrice] = useState('')
 
-  const [paymentMode, setPaymentMode] = useState<PaymentMode>('full')
-  const [paymentAccountId, setPaymentAccountId] = useState('')
-  const [partialAmount, setPartialAmount] = useState('')
-  const [cashReceivedAmount, setCashReceivedAmount] = useState('')
-  const [changeAccountId, setChangeAccountId] = useState('')
-  const [showAdvanced, setShowAdvanced] = useState(false)
   const [discountRupees, setDiscountRupees] = useState('')
-  const [advPayments, setAdvPayments] = useState<Array<{ key: string; accountId: string; amount: string; isChange: boolean }>>([
-    { key: '1', accountId: '', amount: '', isChange: false },
-  ])
   const [result, setResult] = useState<{ ok: boolean; invoiceNo?: string; invoiceId?: string; error?: string; setupRequired?: boolean } | null>(null)
   const [idempotencyKey, setIdempotencyKey] = useState(() => crypto.randomUUID())
 
@@ -129,6 +117,11 @@ export function CounterSaleView({ user }: { user: MeUser }) {
       .map((a: any) => ({ id: a.id, code: a.code, name: a.name, isBusinessAccount: a.isBusinessAccount }))
   }, [coaQ.data])
 
+  // Active account ids as offered by this screen. Account ids are Supabase
+  // UUIDs in production and Prisma cuids locally, so correctness is checked by
+  // membership in the live list, never by a fixed id format.
+  const activeAccountIdSet = useMemo(() => new Set(businessAccounts.map(a => a.id)), [businessAccounts])
+
   const activeSalesmen = useMemo(
     () => (salesmenQ.data?.rows ?? []).filter(s => s.isActive !== false),
     [salesmenQ.data],
@@ -140,15 +133,6 @@ export function CounterSaleView({ user }: { user: MeUser }) {
     if (sellerRole === 'OWNER') return ''
     return salesmanId || (activeSalesmen.length === 1 ? activeSalesmen[0].id : '')
   }, [sellerRole, salesmanId, activeSalesmen])
-
-  const effectivePaymentAccountId = useMemo(() => {
-    if (paymentAccountId) return paymentAccountId
-    if (businessAccounts.length > 0) {
-      const cash = businessAccounts.find(a => a.name === 'Cash' || a.code === '1010')
-      return cash?.id ?? businessAccounts[0].id
-    }
-    return ''
-  }, [paymentAccountId, businessAccounts])
 
   const categories = useMemo(() => {
     const seen = new Map<string, string>()
@@ -209,25 +193,21 @@ export function CounterSaleView({ user }: { user: MeUser }) {
   )
   const netTotal = previewTotals.netSalePaisas
 
-  const cashReceived = parseMoney(cashReceivedAmount) ?? 0n
-  const changeAmount = cashReceived > netTotal ? cashReceived - netTotal : 0n
-  const changeNeeded = changeAmount > 0n
-  const partialPaid = parseMoney(partialAmount) ?? 0n
-
-  const payments = useMemo(() => {
-    if (showAdvanced) {
-      return advPayments.filter(p => p.accountId && p.amount).map(p => ({
-        accountId: p.accountId, amount: parseMoney(p.amount) ?? 0n, isChange: p.isChange,
-      }))
-    }
-    if (paymentMode === 'full') return [{ accountId: effectivePaymentAccountId, amount: netTotal, isChange: false }]
-    if (paymentMode === 'partial') return [{ accountId: effectivePaymentAccountId, amount: partialPaid, isChange: false }]
-    const ps: Array<{ accountId: string; amount: bigint; isChange: boolean }> = [
-      { accountId: effectivePaymentAccountId, amount: cashReceived, isChange: false },
-    ]
-    if (changeNeeded && changeAccountId) ps.push({ accountId: changeAccountId, amount: changeAmount, isChange: true })
-    return ps
-  }, [showAdvanced, advPayments, paymentMode, effectivePaymentAccountId, netTotal, partialPaid, cashReceived, changeNeeded, changeAccountId, changeAmount])
+  // ── Payment: one shared implementation for every sale channel. Counter Sale
+  //    refuses a fully unpaid bill, so `requirePayment` is on here. ──
+  const payment = usePaymentDraft({
+    accounts: businessAccounts,
+    netPayablePaisas: netTotal,
+    requirePayment: true,
+  })
+  const payments = useMemo(
+    () => payment.allocations.map(a => ({
+      accountId: a.accountId,
+      amount: a.amountPaisas,
+      isChange: a.isChange,
+    })),
+    [payment.allocations],
+  )
 
   const totals = useMemo(
     () => computeSaleTotals(validLines, {
@@ -246,7 +226,7 @@ export function CounterSaleView({ user }: { user: MeUser }) {
   })
 
   const sellerReady = sellerRole === 'OWNER' || Boolean(effectiveSalesmanId)
-  const allAccountsValid = payments.every(p => isUuid(p.accountId))
+  const allAccountsValid = payments.every(p => activeAccountIdSet.has(p.accountId))
   const canPost = Boolean(
     sellerReady &&
     validLines.length === rows.length &&
@@ -254,6 +234,7 @@ export function CounterSaleView({ user }: { user: MeUser }) {
     payments.length > 0 &&
     payments.every(p => p.amount > 0n) &&
     allAccountsValid &&
+    payment.isValid &&
     !totalsError &&
     lineErrors.length === 0,
   )
@@ -263,7 +244,7 @@ export function CounterSaleView({ user }: { user: MeUser }) {
       if (postingRef.current) throw new Error('Submission already in progress')
       postingRef.current = true
       for (const p of payments) {
-        if (!isUuid(p.accountId)) throw new Error(`Invalid account ID (not a UUID): ${p.accountId}. Please refresh the page.`)
+        if (!activeAccountIdSet.has(p.accountId)) throw new Error('Invalid payment account. Please refresh the page and choose an active account.')
       }
       const r = await fetch('/api/sales/counter', {
         method: 'POST', headers: { 'content-type': 'application/json' },
@@ -277,11 +258,7 @@ export function CounterSaleView({ user }: { user: MeUser }) {
             unitPrice: row.unitPrice,
             isTemporary: row.isTemporary,
           })),
-          payments: payments.map(p => ({
-            accountId: p.accountId,
-            amount: p.amount.toString(),
-            isChange: p.isChange,
-          })),
+          payments: payment.serializedPayments,
           sellerRole,
           salesmanId: sellerRole === 'SALESMAN' ? effectiveSalesmanId : null,
           customerId: customerId || undefined,
@@ -314,12 +291,10 @@ export function CounterSaleView({ user }: { user: MeUser }) {
     setCustomerName('')
     setCustomerId('')
     setDiscountRupees('')
-    setPartialAmount('')
-    setCashReceivedAmount('')
-    setPaymentMode('full')
+    payment.reset()
     setResult(null)
     setIdempotencyKey(crypto.randomUUID())
-  }, [])
+  }, [payment.reset])
 
   const addProduct = useCallback((productId: string) => {
     const p = productsQ.data?.rows.find(x => x.id === productId)
@@ -522,97 +497,30 @@ export function CounterSaleView({ user }: { user: MeUser }) {
           />
 
           {rows.length > 0 && (
-            <div className="card-3d p-3">
-              <div className="flex items-center gap-1.5 mb-2">
-                <span className="text-sm font-semibold text-foreground">Payment</span>
+            <PaymentPanel
+              accounts={businessAccounts}
+              {...payment.panelProps}
+              error={payment.error}
+              /* Migration-dependent status stays beside the feature it affects.
+                 The POS workspace itself keeps working, so a workspace-wide
+                 banner would be noise on every sale. */
+              notice={coaQ.data?.availability?.accounting === false ? coaQ.data.availability.message : null}
+              paidPlaceholder={formatWholeRupees(netTotal, false)}
+              idPrefix="counter-payment"
+              headerSlot={
                 <AiFieldHelp fieldName="paymentAccountId" fieldLabel="Payment account and paid amount" currentScreen="counter-sale" role={user.roleName} valueCategory="money allocation" accountingContext="cash versus customer balance" />
-                <button onClick={() => setShowAdvanced(v => !v)} className="ml-auto text-[10px] text-muted-foreground hover:text-foreground press-sm">
-                  {showAdvanced ? '← Simple' : 'Split →'}
-                </button>
+              }
+            >
+              <div className="mt-2">
+                <label htmlFor="counter-discount" className="text-[10px] uppercase tracking-wide text-muted-foreground">Bill discount (Rs)</label>
+                <Input id="counter-discount" value={discountRupees} onChange={e => setDiscountRupees(e.target.value)} placeholder="0" className="h-9 bg-background press-sm text-sm" data-num />
               </div>
-
-              {/* Migration-dependent status stays beside the feature it affects.
-                  The POS workspace itself keeps working, so a workspace-wide
-                  banner would be noise on every sale. */}
-              {coaQ.data?.availability?.accounting === false && (
-                <div className="mb-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1.5 text-[11px] leading-snug text-muted-foreground">
-                  {coaQ.data.availability.message}
-                </div>
-              )}
-
-              {!showAdvanced ? (
-                <>
-                  <div className="grid grid-cols-4 gap-1 mb-2">
-                    <PayBtn icon={Banknote} label="Cash" active={paymentMode === 'full'} onClick={() => { setPaymentMode('full'); const c = businessAccounts.find(a => a.name === 'Cash' || a.code === '1010'); if (c) setPaymentAccountId(c.id) }} />
-                    <PayBtn icon={Smartphone} label="JazzCash" active={paymentMode === 'full'} onClick={() => { setPaymentMode('full'); const jc = businessAccounts.find(a => a.name === 'JazzCash' || a.code === '1050'); if (jc) setPaymentAccountId(jc.id) }} />
-                    <PayBtn icon={Split} label="Partial" active={paymentMode === 'partial'} onClick={() => setPaymentMode('partial')} />
-                    <PayBtn icon={Wallet} label="Change" active={paymentMode === 'change'} onClick={() => setPaymentMode('change')} />
-                  </div>
-
-                  <Select value={paymentAccountId} onValueChange={setPaymentAccountId}>
-                    <SelectTrigger className="h-8 bg-background press-sm text-sm" aria-label="Payment account"><SelectValue placeholder="Payment account…" /></SelectTrigger>
-                    <SelectContent>
-                      {businessAccounts.map(a => <SelectItem key={a.id} value={a.id}>{a.name} ({a.code})</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-
-                  <div className="mt-2 grid sm:grid-cols-2 gap-2">
-                    <div>
-                      <label htmlFor="counter-discount" className="text-[10px] uppercase tracking-wide text-muted-foreground">Bill discount (Rs)</label>
-                      <Input id="counter-discount" value={discountRupees} onChange={e => setDiscountRupees(e.target.value)} placeholder="0" className="h-9 bg-background press-sm text-sm" data-num />
-                    </div>
-                    {paymentMode === 'partial' && (
-                      <div>
-                        <label htmlFor="counter-partial" className="text-[10px] uppercase tracking-wide text-muted-foreground">Amount received (Rs)</label>
-                        <Input id="counter-partial" value={partialAmount} onChange={e => setPartialAmount(e.target.value)} placeholder="0" className="h-9 bg-background press-sm text-sm" data-num />
-                      </div>
-                    )}
-                    {paymentMode === 'change' && (
-                      <div>
-                        <label htmlFor="counter-cash" className="text-[10px] uppercase tracking-wide text-muted-foreground">Cash received (Rs)</label>
-                        <Input id="counter-cash" value={cashReceivedAmount} onChange={e => setCashReceivedAmount(e.target.value)} placeholder="0" className="h-9 bg-background press-sm text-sm" data-num />
-                      </div>
-                    )}
-                  </div>
-
-                  {paymentMode === 'change' && changeNeeded && (
-                    <div className="mt-2">
-                      <Select value={changeAccountId} onValueChange={setChangeAccountId}>
-                        <SelectTrigger className="h-8 bg-background press-sm text-sm" aria-label="Change return account"><SelectValue placeholder="Change return account…" /></SelectTrigger>
-                        <SelectContent>
-                          {businessAccounts.map(a => <SelectItem key={a.id} value={a.id}>{a.name} ({a.code})</SelectItem>)}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  )}
-                </>
-              ) : (
-                <div className="space-y-1.5">
-                  {advPayments.map(p => (
-                    <div key={p.key} className="grid grid-cols-2 gap-1 items-end">
-                      <Select value={p.accountId} onValueChange={v => setAdvPayments(ls => ls.map(x => x.key === p.key ? { ...x, accountId: v } : x))}>
-                        <SelectTrigger className="h-8 bg-background press-sm text-sm" aria-label="Split payment account"><SelectValue placeholder="Account…" /></SelectTrigger>
-                        <SelectContent>{businessAccounts.map(a => <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>)}</SelectContent>
-                      </Select>
-                      <div className="flex gap-1">
-                        <Input value={p.amount} onChange={e => setAdvPayments(ls => ls.map(x => x.key === p.key ? { ...x, amount: e.target.value } : x))} placeholder="Rs" aria-label="Split payment amount" className="h-8 bg-background press-sm text-sm" data-num />
-                        <button onClick={() => setAdvPayments(ls => ls.length <= 1 ? ls : ls.filter(x => x.key !== p.key))} className="text-muted-foreground press-sm" aria-label="Remove split row"><Trash2 className="size-3.5" /></button>
-                      </div>
-                      <label className="col-span-2 flex items-center gap-1 text-[10px] cursor-pointer">
-                        <input type="checkbox" checked={p.isChange} onChange={e => setAdvPayments(ls => ls.map(x => x.key === p.key ? { ...x, isChange: e.target.checked } : x))} className="size-3 rounded border-border" />
-                        <span className="text-muted-foreground">Change/refund</span>
-                      </label>
-                    </div>
-                  ))}
-                  <Button variant="outline" size="sm" className="w-full press-sm" onClick={() => setAdvPayments(ls => [...ls, { key: crypto.randomUUID(), accountId: '', amount: '', isChange: false }])}><Plus className="size-3" /> Row</Button>
-                </div>
-              )}
-            </div>
+            </PaymentPanel>
           )}
 
           <BillSummary
             totals={totals}
-            paymentAccountName={businessAccounts.find(a => a.id === effectivePaymentAccountId)?.name ?? null}
+            paymentAccountName={payment.mode === 'split' ? `${payment.splitRows.length} accounts (split)` : (businessAccounts.find(a => a.id === payment.accountId)?.name ?? null)}
             sellerRole={sellerRole}
             sellerName={sellerRole === 'OWNER' ? 'Owner' : (activeSalesmen.find(s => s.id === effectiveSalesmanId)?.name ?? null)}
             lineErrors={lineErrors}
@@ -953,14 +861,5 @@ function Figure({ label, value, tone }: { label: string; value: string; tone?: '
       <div className="text-[9px] uppercase tracking-wide text-muted-foreground">{label}</div>
       <div className={`text-sm ${toneClass}`} data-num>{value}</div>
     </div>
-  )
-}
-
-function PayBtn({ icon: Icon, label, active, onClick }: { icon: React.ComponentType<{ className?: string }>; label: string; active: boolean; onClick: () => void }) {
-  return (
-    <button onClick={onClick} aria-pressed={active} className={`flex flex-col items-center gap-0.5 p-2 rounded-lg border press-sm ${active ? 'border-primary bg-accent/60' : 'border-border bg-background hover:bg-muted/40'}`}>
-      <Icon className={`size-4 ${active ? 'text-primary' : 'text-muted-foreground'}`} />
-      <span className="text-[9px] font-medium">{label}</span>
-    </button>
   )
 }
