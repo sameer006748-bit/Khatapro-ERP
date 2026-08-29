@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, Fragment } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -15,7 +15,8 @@ import {
 import { formatMoney, formatTableDate } from '@/lib/format'
 import type { MeUser } from '@/components/erp/erp-app'
 import { toast } from 'sonner'
-import { Wallet, Plus, X, ArrowRight } from 'lucide-react'
+import { Wallet, Plus, X, ArrowRight, Pencil, Power, Trash2 } from 'lucide-react'
+import { BUSINESS_ACCOUNT_TYPES } from '@/lib/accounting/business-account-types'
 
 type BusinessAccountRow = {
   id: string
@@ -36,12 +37,23 @@ type BusinessAccountRow = {
   }
 }
 
-const TYPES = ['Cash', 'Petty Cash', 'Bank', 'Easypaisa', 'JazzCash', 'Wallet', 'Custom / Other']
+/**
+ * Only the four generic classes are offered for new accounts. A row saved by an
+ * earlier release may hold a legacy label ('Petty Cash', 'JazzCash', …); the
+ * edit form keeps that value selectable so saving other fields never silently
+ * reclassifies the account.
+ */
+function typeOptions(current?: string): string[] {
+  const options: string[] = [...BUSINESS_ACCOUNT_TYPES]
+  if (current && !options.includes(current)) options.push(current)
+  return options
+}
 
 export function BusinessAccountsView({ user }: { user: MeUser }) {
   const qc = useQueryClient()
   const canManage = user.permissions.includes('can_manage_setup')
   const [open, setOpen] = useState(false)
+  const [editingId, setEditingId] = useState<string | null>(null)
 
   const q = useQuery<{ rows: BusinessAccountRow[]; availability?: { accounting: boolean; message?: string } }>({
     queryKey: ['business-accounts'],
@@ -71,6 +83,59 @@ export function BusinessAccountsView({ user }: { user: MeUser }) {
     onError: (e: Error) => toast.error(`Failed: ${e.message}`),
   })
 
+  // A rename or (de)activation also rewrites the linked ledger account, so the
+  // Chart of Accounts and every sale screen reading it must be refetched too.
+  const updateMut = useMutation({
+    mutationFn: async ({ id, patch }: { id: string; patch: Record<string, unknown> }) => {
+      const r = await fetch(`/api/setup/business-accounts/${id}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(patch),
+      })
+      const j = await r.json().catch(() => ({}))
+      if (!r.ok) throw new Error(j?.message ?? j?.error ?? 'UPDATE_FAILED')
+      return j
+    },
+    onSuccess: (_j, vars) => {
+      toast.success(
+        vars.patch.isActive === false
+          ? 'Account deactivated. It will no longer appear on new sales.'
+          : vars.patch.isActive === true
+            ? 'Account activated.'
+            : 'Account updated.',
+      )
+      void qc.invalidateQueries({ queryKey: ['business-accounts'] })
+      void qc.invalidateQueries({ queryKey: ['coa'] })
+      setEditingId(null)
+    },
+    onError: (e: Error) => toast.error(e.message),
+  })
+
+  const deleteMut = useMutation({
+    mutationFn: async (id: string) => {
+      const r = await fetch(`/api/setup/business-accounts/${id}`, { method: 'DELETE' })
+      const j = await r.json().catch(() => ({}))
+      // The server refuses to delete an account money has moved through and
+      // returns the reason; show that instead of a generic failure.
+      if (!r.ok) throw new Error(j?.message ?? j?.error ?? 'DELETE_FAILED')
+      return j
+    },
+    onSuccess: () => {
+      toast.success('Account deleted.')
+      void qc.invalidateQueries({ queryKey: ['business-accounts'] })
+      void qc.invalidateQueries({ queryKey: ['coa'] })
+      setEditingId(null)
+    },
+    onError: (e: Error) => toast.error(e.message),
+  })
+
+  function askDelete(row: BusinessAccountRow) {
+    const ok = window.confirm(
+      `Delete "${row.name}"? This also removes its ledger account ${row.ledger.code}. Accounts used by posted transactions cannot be deleted — deactivate those instead.`,
+    )
+    if (ok) deleteMut.mutate(row.id)
+  }
+
   return (
     <div className="space-y-6">
       {q.data?.availability?.accounting === false && (
@@ -99,7 +164,7 @@ export function BusinessAccountsView({ user }: { user: MeUser }) {
       {open && canManage && (
         <div className="card-3d p-5 sm:p-6 fade-in">
           <h2 className="text-base font-semibold text-foreground mb-4">Create business account</h2>
-          <CreateForm submitting={createMut.isPending} onSubmit={(v) => createMut.mutate(v)} />
+          <AccountForm submitting={createMut.isPending} onSubmit={(v) => createMut.mutate(v)} />
         </div>
       )}
 
@@ -126,12 +191,13 @@ export function BusinessAccountsView({ user }: { user: MeUser }) {
                     <th className="text-left p-3.5 font-medium">Ledger</th>
                     <th className="text-right p-3.5 font-medium">Balance</th>
                     <th className="text-left p-3.5 font-medium">Created</th>
+                    {canManage && <th className="text-right p-3.5 font-medium">Actions</th>}
                   </tr>
                 </thead>
                 <tbody>
                   {q.data.rows.map((r) => (
+                    <Fragment key={r.id}>
                     <tr
-                      key={r.id}
                       className="border-b border-border/60 last:border-0 hover:bg-accent/30 transition-colors"
                     >
                       <td className="p-3.5">
@@ -163,7 +229,37 @@ export function BusinessAccountsView({ user }: { user: MeUser }) {
                       <td className="p-3.5 text-xs text-muted-foreground" data-num>
                         {formatTableDate(r.createdAt)}
                       </td>
+                      {canManage && (
+                        <td className="p-3.5">
+                          <div className="flex items-center justify-end gap-1">
+                            <RowActions
+                              row={r}
+                              editing={editingId === r.id}
+                              busy={updateMut.isPending || deleteMut.isPending}
+                              onEdit={() => setEditingId(editingId === r.id ? null : r.id)}
+                              onToggleActive={() =>
+                                updateMut.mutate({ id: r.id, patch: { isActive: !r.isActive } })
+                              }
+                              onDelete={() => askDelete(r)}
+                            />
+                          </div>
+                        </td>
+                      )}
                     </tr>
+                    {canManage && editingId === r.id && (
+                      <tr className="border-b border-border/60 bg-muted/30">
+                        <td colSpan={7} className="p-3.5">
+                          <AccountForm
+                            initial={r}
+                            submitting={updateMut.isPending}
+                            submitLabel="Save changes"
+                            onCancel={() => setEditingId(null)}
+                            onSubmit={(v) => updateMut.mutate({ id: r.id, patch: v })}
+                          />
+                        </td>
+                      </tr>
+                    )}
+                    </Fragment>
                   ))}
                 </tbody>
               </table>
@@ -223,6 +319,38 @@ export function BusinessAccountsView({ user }: { user: MeUser }) {
                     </div>
                   )}
                 </div>
+                {canManage && (
+                  <div className="mt-3 pt-3 border-t border-border flex items-center justify-between gap-2">
+                    {!r.isActive ? (
+                      <span className="text-[10px] uppercase tracking-wider text-destructive">Inactive</span>
+                    ) : (
+                      <span className="text-[10px] uppercase tracking-wider text-muted-foreground">Active</span>
+                    )}
+                    <div className="flex items-center gap-1">
+                      <RowActions
+                        row={r}
+                        editing={editingId === r.id}
+                        busy={updateMut.isPending || deleteMut.isPending}
+                        onEdit={() => setEditingId(editingId === r.id ? null : r.id)}
+                        onToggleActive={() =>
+                          updateMut.mutate({ id: r.id, patch: { isActive: !r.isActive } })
+                        }
+                        onDelete={() => askDelete(r)}
+                      />
+                    </div>
+                  </div>
+                )}
+                {canManage && editingId === r.id && (
+                  <div className="mt-3 pt-3 border-t border-border">
+                    <AccountForm
+                      initial={r}
+                      submitting={updateMut.isPending}
+                      submitLabel="Save changes"
+                      onCancel={() => setEditingId(null)}
+                      onSubmit={(v) => updateMut.mutate({ id: r.id, patch: v })}
+                    />
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -251,31 +379,102 @@ export function BusinessAccountsView({ user }: { user: MeUser }) {
   )
 }
 
-function CreateForm({
+function RowActions({
+  row,
+  editing,
+  busy,
+  onEdit,
+  onToggleActive,
+  onDelete,
+}: {
+  row: BusinessAccountRow
+  editing: boolean
+  busy: boolean
+  onEdit: () => void
+  onToggleActive: () => void
+  onDelete: () => void
+}) {
+  return (
+    <>
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        className="press-sm h-8 px-2"
+        title={editing ? 'Close editor' : 'Edit account'}
+        onClick={onEdit}
+      >
+        {editing ? <X className="size-3.5" /> : <Pencil className="size-3.5" />}
+      </Button>
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        disabled={busy}
+        className="press-sm h-8 px-2"
+        title={row.isActive ? 'Deactivate (hides it from new sales)' : 'Activate'}
+        onClick={onToggleActive}
+      >
+        <Power className={`size-3.5 ${row.isActive ? 'text-emerald-600' : 'text-muted-foreground'}`} />
+      </Button>
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        disabled={busy}
+        className="press-sm h-8 px-2 text-destructive hover:text-destructive"
+        title="Delete account"
+        onClick={onDelete}
+      >
+        <Trash2 className="size-3.5" />
+      </Button>
+    </>
+  )
+}
+
+function AccountForm({
   submitting,
   onSubmit,
+  initial,
+  submitLabel,
+  onCancel,
 }: {
   submitting: boolean
   onSubmit: (v: Record<string, unknown>) => void
+  initial?: BusinessAccountRow
+  submitLabel?: string
+  onCancel?: () => void
 }) {
-  const [name, setName] = useState('')
-  const [type, setType] = useState<string>('Cash')
-  const [accountHolder, setAccountHolder] = useState('')
-  const [bankName, setBankName] = useState('')
-  const [accountNumber, setAccountNumber] = useState('')
+  const [name, setName] = useState(initial?.name ?? '')
+  const [type, setType] = useState<string>(initial?.type ?? 'Cash')
+  const [accountHolder, setAccountHolder] = useState(initial?.accountHolder ?? '')
+  const [bankName, setBankName] = useState(initial?.bankName ?? '')
+  const [accountNumber, setAccountNumber] = useState(initial?.accountNumber ?? '')
+  const isEdit = initial !== undefined
 
   return (
     <form
       className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3.5"
       onSubmit={(e) => {
         e.preventDefault()
-        onSubmit({
-          name,
-          type,
-          accountHolder: accountHolder || undefined,
-          bankName: bankName || undefined,
-          accountNumber: accountNumber || undefined,
-        })
+        // Edit sends null to clear an optional field; create simply omits it.
+        onSubmit(
+          isEdit
+            ? {
+                name,
+                type,
+                accountHolder: accountHolder || null,
+                bankName: bankName || null,
+                accountNumber: accountNumber || null,
+              }
+            : {
+                name,
+                type,
+                accountHolder: accountHolder || undefined,
+                bankName: bankName || undefined,
+                accountNumber: accountNumber || undefined,
+              },
+        )
       }}
     >
       <div className="space-y-1.5">
@@ -289,7 +488,7 @@ function CreateForm({
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            {TYPES.map((t) => (
+            {typeOptions(initial?.type).map((t) => (
               <SelectItem key={t} value={t}>
                 {t}
               </SelectItem>
@@ -309,11 +508,16 @@ function CreateForm({
         <Label className="text-xs font-medium text-muted-foreground">Account number</Label>
         <Input value={accountNumber} onChange={(e) => setAccountNumber(e.target.value)} className="h-10 bg-background press-sm" data-num />
       </div>
-      <div className="sm:col-span-2 lg:col-span-3 flex justify-end pt-1">
+      <div className="sm:col-span-2 lg:col-span-3 flex justify-end gap-2 pt-1">
+        {onCancel && (
+          <Button type="button" variant="ghost" className="press-sm" onClick={onCancel}>
+            Cancel
+          </Button>
+        )}
         <Button type="submit" disabled={submitting} className="press-md shadow-sm">
-          {submitting ? 'Creating…' : (
+          {submitting ? 'Saving…' : (
             <>
-              <ArrowRight className="size-4" /> Create account
+              <ArrowRight className="size-4" /> {submitLabel ?? 'Create account'}
             </>
           )}
         </Button>

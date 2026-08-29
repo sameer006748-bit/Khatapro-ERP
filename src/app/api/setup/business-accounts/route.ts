@@ -14,10 +14,7 @@ import { db } from '@/lib/db'
 import { authOptions } from '@/lib/auth/authOptions'
 import { loadSessionUser, requirePermission, writeAudit } from '@/lib/auth/permissions'
 import { getAccountingAvailability, unavailableAccountingPayload } from '@/lib/accounting/availability'
-
-const BUSINESS_ACCOUNT_TYPES = [
-  'Cash', 'Petty Cash', 'Bank', 'Easypaisa', 'JazzCash', 'Wallet', 'Custom / Other',
-] as const
+import { BUSINESS_ACCOUNT_TYPES } from '@/lib/accounting/business-account-types'
 
 const CreateSchema = z.object({
   name: z.string().min(1).max(80),
