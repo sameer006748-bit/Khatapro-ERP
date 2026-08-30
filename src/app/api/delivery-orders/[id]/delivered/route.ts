@@ -50,7 +50,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   }
 
   try {
-    const currentItems = await getDeliveryOrderItems(loaded.businessId, order.invoiceId)
+    const currentItems = await getDeliveryOrderItems(loaded.businessId, order.invoiceId, order.id)
     const items = parsed.data.items ?? currentItems
       .filter(item => item.remainingQty > 0)
       .map(item => ({

@@ -34,7 +34,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   }
 
   try {
-    const result = await startCodDelivery({ businessId: loaded.businessId, invoiceId: order.invoiceId, idempotencyKey: parsed.data.idempotencyKey ?? crypto.randomUUID() })
+    const result = await startCodDelivery({ businessId: loaded.businessId, invoiceId: order.invoiceId, deliveryOrderId: order.id, idempotencyKey: parsed.data.idempotencyKey ?? crypto.randomUUID() })
     return NextResponse.json({ ok: true, ...result })
   } catch (error) {
     return safeMutationError({

@@ -5,8 +5,6 @@
 import 'server-only'
 import { getAdminSupabase } from '@/lib/supabase/admin'
 import { resolveSupabaseUuid } from '@/lib/accounting/voucher-supabase'
-import { bizDateString } from '@/lib/dates'
-import { db } from '@/lib/db'
 
 // ─── Riders ───
 export type RiderRow = {
@@ -82,30 +80,33 @@ export type DeliveryOrderItemRow = {
 export async function getDeliveryOrderItems(
   businessId: string,
   invoiceId: string,
+  deliveryOrderId: string,
 ): Promise<DeliveryOrderItemRow[]> {
   const admin = getAdminSupabase()
   const { data: items, error } = await admin.from('invoice_items')
-    .select('id, product_name, unit_price, qty')
+    .select('id, product_name, unit_price, qty, returned_qty')
     .eq('business_id', businessId)
     .eq('invoice_id', invoiceId)
     .order('created_at')
   if (error) throw new Error(`List delivery items: ${error.message}`)
 
   const { data: progress, error: progressError } = await admin
-    .from('delivery_line_progress')
-    .select('invoice_item_id, delivered_qty, returned_qty')
+    .from('delivery_line_outcomes')
+    .select('invoice_item_id, delivered_qty')
     .eq('business_id', businessId)
-    .eq('invoice_id', invoiceId)
+    .eq('delivery_order_id', deliveryOrderId)
 
-  // Deployment compatibility: before migration 00019 is manually applied,
-  // invoice lines remain readable and show zero operational progress.
+  // Returned qty is authoritative on invoice_items.returned_qty (maintained by
+  // post_sales_return / migration 00037). delivered_qty comes from the
+  // legacy delivery_line_outcomes table (migration 00039). Before 00039 is
+  // applied, lines remain readable with zero delivered progress.
   const progressRows = progressError ? [] : (progress ?? [])
   const byItem = new Map(progressRows.map((row: any) => [row.invoice_item_id, row]))
   return (items ?? []).map((row: any) => {
     const line = byItem.get(row.id) as any
     const orderedQty = Number(row.qty)
     const deliveredQty = Number(line?.delivered_qty ?? 0)
-    const returnedQty = Number(line?.returned_qty ?? 0)
+    const returnedQty = Number(row.returned_qty ?? 0)
     return {
       invoiceItemId: row.id,
       productName: row.product_name,
@@ -235,20 +236,11 @@ export async function markDelivered(businessId: string, orderId: string, collect
 }
 
 // Phase 3 canonical COD mutations.  Invoice IDs are production text IDs; the
-// server never accepts a rider ID for delivery completion.
-export async function completeCodDelivery(input: {
-  businessId: string; invoiceId: string; cashCollected: bigint; idempotencyKey: string
-}): Promise<{ invoice_id: string; delivery_event_id: string; ledger_id: string | null; cash_collected: string; idempotent: boolean }> {
-  const admin = getAdminSupabase()
-  const { data, error } = await admin.rpc('complete_cod_delivery', {
-    p_business_id: input.businessId,
-    p_invoice_id: input.invoiceId,
-    p_cash_collected: input.cashCollected.toString(),
-    p_idempotency_key: input.idempotencyKey,
-  })
-  if (error) throw new Error(`complete_cod_delivery: ${error.message}`)
-  return data as any
-}
+// server never accepts a rider ID for delivery completion.  completeCodDelivery
+// and returnRiderDelivery targeted UUID-lineage RPCs that are absent from the
+// verified legacy production schema and have no callers; they are intentionally
+// omitted.  The delivered/returned/settle flows below run entirely on the
+// legacy delivery_orders lineage (migrations 00007 + 00037 + 00039).
 
 export async function recordDeliveryOutcome(input: {
   businessId: string
@@ -273,7 +265,7 @@ export async function recordDeliveryOutcome(input: {
   const admin = getAdminSupabase()
   const actorId = await resolveSupabaseUuid(input.actorId)
   if (!actorId) throw new Error('Server-attributed delivery actor is unavailable')
-  const { data, error } = await admin.rpc('record_delivery_outcome_ledger', {
+  const { data, error } = await admin.rpc('record_delivery_outcome', {
     p_business_id: input.businessId,
     p_invoice_id: input.invoiceId,
     p_items: input.items.map(item => ({
@@ -286,22 +278,21 @@ export async function recordDeliveryOutcome(input: {
     p_idempotency_key: input.idempotencyKey,
     p_actor_id: actorId,
   })
-  if (error) throw new Error(`record_delivery_outcome_ledger: ${error.message}`)
+  if (error) throw new Error(`record_delivery_outcome: ${error.message}`)
   return data as any
 }
 
-export async function startCodDelivery(input: { businessId: string; invoiceId: string; idempotencyKey: string }): Promise<{ invoice_id: string; status: string; idempotent: boolean }> {
+export async function startCodDelivery(input: { businessId: string; invoiceId: string; deliveryOrderId: string; idempotencyKey: string }): Promise<{ invoice_id: string; status: string; idempotent: boolean }> {
+  // Legacy production has no mark_cod_out_for_delivery RPC.  The verified schema
+  // exposes update_delivery_status(order_id, 'out_for_delivery'), so drive the
+  // transition through it.  idempotencyKey is retained for the route contract.
   const admin = getAdminSupabase()
-  const { data, error } = await admin.rpc('mark_cod_out_for_delivery', { p_business_id: input.businessId, p_invoice_id: input.invoiceId, p_idempotency_key: input.idempotencyKey })
-  if (error) throw new Error(`mark_cod_out_for_delivery: ${error.message}`)
-  return data as any
-}
-
-export async function returnRiderDelivery(input: { businessId: string; invoiceId: string; reason?: string | null; idempotencyKey: string }): Promise<{ invoice_id: string; status: string; idempotent: boolean }> {
-  const admin = getAdminSupabase()
-  const { data, error } = await admin.rpc('return_rider_delivery', { p_business_id: input.businessId, p_invoice_id: input.invoiceId, p_reason: input.reason ?? null, p_idempotency_key: input.idempotencyKey })
-  if (error) throw new Error(`return_rider_delivery: ${error.message}`)
-  return data as any
+  const { error } = await admin.rpc('update_delivery_status', {
+    p_business_id: input.businessId, p_delivery_order_id: input.deliveryOrderId,
+    p_new_status: 'out_for_delivery', p_note: null, p_created_by: null,
+  })
+  if (error) throw new Error(`update_delivery_status: ${error.message}`)
+  return { invoice_id: input.invoiceId, status: 'out_for_delivery', idempotent: false }
 }
 
 export type RiderCodBalance = {
@@ -330,12 +321,12 @@ export async function settleRiderCod(input: {
   const admin = getAdminSupabase()
   const actorId = await resolveSupabaseUuid(input.actorId)
   if (!actorId) throw new Error('Server-attributed settlement actor is unavailable')
-  const { data, error } = await admin.rpc('settle_rider_cod_ledger', {
+  const { data, error } = await admin.rpc('settle_rider_cod', {
     p_business_id: input.businessId, p_rider_id: input.riderId, p_amount: input.amount.toString(),
     p_mode: input.mode, p_note: input.note ?? null, p_idempotency_key: input.idempotencyKey,
     p_actor_id: actorId,
   })
-  if (error) throw new Error(`settle_rider_cod_ledger: ${error.message}`)
+  if (error) throw new Error(`settle_rider_cod: ${error.message}`)
   return data as any
 }
 

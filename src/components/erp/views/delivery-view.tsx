@@ -204,12 +204,13 @@ function AssignModal({ order, onClose }: { order: DeliveryOrder; onClose: () => 
 
 function DeliveredModal({ order, onClose }: { order: DeliveryOrder; onClose: () => void }) {
   const qc = useQueryClient()
+  const [idempotencyKey] = useState(() => crypto.randomUUID())
   const itemsQ = useQuery<{ items: DeliveryItem[] }>({
     queryKey: ['delivery-order', order.id],
     queryFn: () => fetch(`/api/delivery-orders/${order.id}`).then(r => r.json()),
   })
   const [quantities, setQuantities] = useState<Record<string, { deliveredQty: number; returnedQty: number }>>({})
-  const [collectedAmount, setCollectedAmount] = useState('0')
+  const [collectedAmount, setCollectedAmount] = useState<string | null>(null)
   const [recipientName, setRecipientName] = useState('')
   const [deliveryNote, setDeliveryNote] = useState('')
   const submittedItems = (itemsQ.data?.items ?? []).map(item => ({
@@ -221,25 +222,28 @@ function DeliveredModal({ order, onClose }: { order: DeliveryOrder; onClose: () 
     const detail = itemsQ.data?.items.find(line => line.invoiceItemId === item.invoiceItemId)
     return sum + BigInt(detail?.unitPrice ?? '0') * BigInt(item.deliveredQty)
   }, 0n)
+  const remainingOrderCod = BigInt(order.totalCodAmount) - BigInt(order.codCollectedAmount)
   const expected = deliveredValue > 0n
-    ? [BigInt(order.totalCodAmount), deliveredValue + BigInt(order.customerDeliveryCharge)]
+    ? [remainingOrderCod, deliveredValue + BigInt(order.customerDeliveryCharge)]
       .reduce((a, b) => a < b ? a : b)
     : 0n
-  const amt = parseMoney(collectedAmount) ?? 0n
-  const mismatch = amt < 0n || amt > expected
+  const displayedCollectedAmount = collectedAmount ?? formatMoney(expected, false)
+  const amt = parseMoney(displayedCollectedAmount)
+  const mismatch = amt === null || amt !== expected
   const mut = useMutation({
-    mutationFn: async () => { const r = await fetch(`/api/delivery-orders/${order.id}/delivered`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ collectedAmount, recipientName: recipientName || undefined, deliveryNote: deliveryNote || undefined, items: submittedItems }) }); const j = await r.json(); if (!r.ok) throw new Error(j?.error ?? 'Failed'); return j },
+    mutationFn: async () => { const r = await fetch(`/api/delivery-orders/${order.id}/delivered`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ collectedAmount: displayedCollectedAmount, recipientName: recipientName || undefined, deliveryNote: deliveryNote || undefined, items: submittedItems, idempotencyKey }) }); const j = await r.json(); if (!r.ok) throw new Error(j?.error ?? 'Failed'); return j },
     onSuccess: (result) => { toast.success(`Delivery outcome recorded: ${result.outcome_no ?? result.status}`); void qc.invalidateQueries({ queryKey: ['delivery-orders'] }); void qc.invalidateQueries({ queryKey: ['delivery-order', order.id] }); void qc.invalidateQueries({ queryKey: ['trial-balance'] }); onClose() },
     onError: (e: Error) => toast.error(`Failed: ${e.message}`),
   })
-  return <Shell title="Record Delivery Outcome" onClose={onClose} wide><div className="space-y-3">
+  return <Shell title="Delivered / Partial Return" onClose={onClose} wide><div className="space-y-3">
     <div className="text-sm"><span className="text-muted-foreground">Order:</span> <span className="font-medium" data-num>{order.invoiceNo}</span></div>
     <div className="grid grid-cols-2 gap-2 text-xs">
       <div><span className="text-muted-foreground">Product:</span> <span data-num>{formatMoney(BigInt(order.productAmount), false)}</span></div>
       <div><span className="text-muted-foreground">Delivery:</span> <span data-num>{formatMoney(BigInt(order.customerDeliveryCharge), false)}</span></div>
       <div><span className="text-muted-foreground">Rider Earn:</span> <span data-num>{formatMoney(BigInt(order.riderEarningAmount), false)}</span></div>
-      <div><span className="text-muted-foreground">Maximum COD:</span> <span data-num>{formatMoney(expected, false)}</span></div>
+      <div><span className="text-muted-foreground">COD to collect:</span> <span data-num>{formatMoney(expected, false)}</span></div>
     </div>
+    <p className="text-xs text-muted-foreground">Change the quantities below when only part of the order was delivered or returned.</p>
     <div className="border border-border rounded-lg overflow-hidden">
       {(itemsQ.data?.items ?? []).map(item => {
         const value = quantities[item.invoiceItemId] ?? { deliveredQty: item.remainingQty, returnedQty: 0 }
@@ -257,16 +261,17 @@ function DeliveredModal({ order, onClose }: { order: DeliveryOrder; onClose: () 
         </div>
       })}
     </div>
-    <div><Label className="text-xs text-muted-foreground">Collected Amount (Rs)</Label><Input type="text" value={collectedAmount} onChange={e => setCollectedAmount(e.target.value)} className="h-9 bg-background" data-num /></div>
-    {mismatch && <div className="text-xs text-destructive flex items-center gap-1"><AlertCircle className="size-3" /> Collected amount cannot exceed delivered collectible value</div>}
+    <div><Label className="text-xs text-muted-foreground">Cash Collected (Rs)</Label><Input type="text" value={displayedCollectedAmount} onChange={e => setCollectedAmount(e.target.value)} className="h-9 bg-background" data-num /></div>
+    {mismatch && <div className="text-xs text-destructive flex items-center gap-1"><AlertCircle className="size-3" /> Cash collected must equal the COD to collect</div>}
     <div><Label className="text-xs text-muted-foreground">Recipient Name (optional)</Label><Input value={recipientName} onChange={e => setRecipientName(e.target.value)} className="h-9 bg-background" /></div>
     <div><Label className="text-xs text-muted-foreground">Delivery Note (optional)</Label><Input value={deliveryNote} onChange={e => setDeliveryNote(e.target.value)} className="h-9 bg-background" /></div>
-    <Button className="w-full" disabled={submittedItems.length === 0 || mismatch || mut.isPending} onClick={() => mut.mutate()}>{mut.isPending ? 'Posting…' : 'Confirm Outcome'}</Button>
+    <Button className="w-full" disabled={submittedItems.length === 0 || mismatch || mut.isPending} onClick={() => mut.mutate()}>{mut.isPending ? 'Posting…' : 'Confirm Delivery'}</Button>
   </div></Shell>
 }
 
 function ReturnedModal({ order, onClose }: { order: DeliveryOrder; onClose: () => void }) {
   const qc = useQueryClient()
+  const [idempotencyKey] = useState(() => crypto.randomUUID())
   const [reason, setReason] = useState('')
   const itemsQ = useQuery<{ items: DeliveryItem[] }>({
     queryKey: ['delivery-order', order.id],
@@ -279,13 +284,13 @@ function ReturnedModal({ order, onClose }: { order: DeliveryOrder; onClose: () =
     returnedQty: returned[item.invoiceItemId] ?? item.remainingQty,
   })).filter(item => item.returnedQty > 0)
   const mut = useMutation({
-    mutationFn: async () => { const r = await fetch(`/api/delivery-orders/${order.id}/returned`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ returnReason: reason || undefined, items }) }); const j = await r.json(); if (!r.ok) throw new Error(j?.error ?? 'Failed'); return j },
+    mutationFn: async () => { const r = await fetch(`/api/delivery-orders/${order.id}/returned`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ returnReason: reason || undefined, items, idempotencyKey }) }); const j = await r.json(); if (!r.ok) throw new Error(j?.error ?? 'Failed'); return j },
     onSuccess: () => { toast.success('Order returned. Stock restored.'); void qc.invalidateQueries({ queryKey: ['delivery-orders'] }); void qc.invalidateQueries({ queryKey: ['products'] }); void qc.invalidateQueries({ queryKey: ['trial-balance'] }); onClose() },
     onError: (e: Error) => toast.error(`Failed: ${e.message}`),
   })
-  return <Shell title="Mark Returned" onClose={onClose}><div className="space-y-3">
+  return <Shell title="Returned / Partial Return" onClose={onClose}><div className="space-y-3">
     <div className="text-sm"><span className="text-muted-foreground">Order:</span> <span className="font-medium" data-num>{order.invoiceNo}</span></div>
-    <div className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded p-2">This will post a sales return, restore stock, and reverse the original sale. No rider COD or earning will be posted.</div>
+    <div className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded p-2">Returned items will go back into stock. No cash will be recorded.</div>
     <div className="space-y-2">{(itemsQ.data?.items ?? []).map(item => <div key={item.invoiceItemId} className="grid grid-cols-[1fr_90px] gap-2 items-end">
       <div><div className="text-xs font-medium">{item.productName}</div><div className="text-[10px] text-muted-foreground">Remaining {item.remainingQty}</div></div>
       <div><Label className="text-[10px]">Return qty</Label><Input type="number" min={0} max={item.remainingQty} value={returned[item.invoiceItemId] ?? item.remainingQty} onChange={e => setReturned(current => ({ ...current, [item.invoiceItemId]: Math.max(0, Math.min(Number(e.target.value), item.remainingQty)) }))} className="h-8" /></div>
@@ -401,10 +406,10 @@ function Phase3CodTab({ user }: { user: MeUser }) {
     queryKey: ['rider-cod-balances'],
     queryFn: async () => { const r = await fetch('/api/rider-cod/balances'); const j = await r.json(); if (!r.ok) throw new Error(j?.error ?? 'Failed'); return j },
   })
-  const canSettle = ['Owner', 'Admin', 'Accountant'].includes(user.roleName) || user.permissions.includes('can_confirm_cod_submission')
+  const canSettle = user.roleName !== 'Rider' && user.permissions.includes('can_confirm_cod_submission')
   return <div className="space-y-3">
     <div><h2 className="text-sm font-semibold text-foreground">Rider COD Balances</h2><p className="text-xs text-muted-foreground">Delivered COD stays held by the rider until settlement. Allocation is oldest-first.</p></div>
-    {q.isLoading ? <div className="py-8 text-center text-sm text-muted-foreground">Loading COD balancesâ€¦</div> : (q.data?.rows ?? []).length === 0 ? <div className="py-8 text-center text-sm text-muted-foreground">No rider COD is outstanding.</div> : <div className="space-y-2">{(q.data?.rows ?? []).map(row => <div key={row.riderId} className="border border-border rounded-lg bg-card p-3"><div className="flex justify-between gap-3"><div><div className="font-medium text-sm">{row.riderName}</div><div className="text-[10px] text-muted-foreground">{row.invoiceCount} invoice{row.invoiceCount === 1 ? '' : 's'}{row.oldestOutstandingDeliveryDate ? ` · oldest ${bizDate(row.oldestOutstandingDeliveryDate)}` : ''}</div></div><div className="text-right"><div className="font-semibold text-amber-700" data-num>{formatMoney(BigInt(row.outstandingCod))}</div><div className="text-[10px] text-muted-foreground">held COD</div></div></div><div className="mt-2 flex justify-between items-center text-[10px] text-muted-foreground"><span>Collected <span data-num>{formatMoney(BigInt(row.collectedCod), false)}</span> · Settled <span data-num>{formatMoney(BigInt(row.settledCod), false)}</span></span>{canSettle && BigInt(row.outstandingCod) > 0n && <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setSelected(row)}>Settle</Button>}</div></div>)}</div>}
+    {q.isLoading ? <div className="py-8 text-center text-sm text-muted-foreground">Loading COD balancesâ€¦</div> : (q.data?.rows ?? []).length === 0 ? <div className="py-8 text-center text-sm text-muted-foreground">No rider COD activity yet.</div> : <div className="space-y-2">{(q.data?.rows ?? []).map(row => <div key={row.riderId} className="border border-border rounded-lg bg-card p-3"><div className="flex justify-between gap-3"><div><div className="font-medium text-sm">{row.riderName}</div><div className="text-[10px] text-muted-foreground">{row.invoiceCount} outstanding invoice{row.invoiceCount === 1 ? '' : 's'}{row.oldestOutstandingDeliveryDate ? ` · oldest ${bizDate(row.oldestOutstandingDeliveryDate)}` : ''}</div></div><div className="text-right"><div className="font-semibold text-amber-700" data-num>{formatMoney(BigInt(row.outstandingCod))}</div><div className="text-[10px] text-muted-foreground">held COD</div></div></div><div className="mt-2 flex justify-between items-center text-[10px] text-muted-foreground"><span>Collected <span data-num>{formatMoney(BigInt(row.collectedCod), false)}</span> · Settled <span data-num>{formatMoney(BigInt(row.settledCod), false)}</span></span>{canSettle && BigInt(row.outstandingCod) > 0n && <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setSelected(row)}>Settle</Button>}</div></div>)}</div>}
     <AnimatePresence>{selected && <Phase3SettleModal rider={selected} onClose={() => setSelected(null)} onDone={() => void qc.invalidateQueries({ queryKey: ['rider-cod-balances'] })} />}</AnimatePresence>
   </div>
 }
@@ -516,13 +521,13 @@ function RiderHome({ user }: { user: MeUser }) {
             <div key={o.id} className="border border-border rounded-lg bg-card p-3">
               <div className="flex items-start justify-between gap-2 mb-2"><div><div className="font-medium text-foreground" data-num>{o.invoiceNo ?? '—'}</div><div className="text-[10px] text-muted-foreground">{o.customerName} · {o.customerPhone}</div></div><span className={`text-[9px] uppercase px-1.5 py-0.5 rounded border font-medium ${STATUS_BADGE[o.status] ?? 'bg-muted'}`}>{o.status.replace(/_/g, ' ')}</span></div>
               <div className="text-xs text-muted-foreground mb-2">{o.customerAddress}{o.customerCity ? `, ${o.customerCity}` : ''}</div>
-              <div className="flex items-center justify-between mb-2"><div className="text-xs">COD: <span className="font-medium" data-num>{formatMoney(BigInt(o.totalCodAmount))}</span></div><div className="flex gap-1">
+              <div className="flex items-center justify-between mb-2"><div className="text-xs">COD to collect: <span className="font-medium" data-num>{formatMoney(BigInt(o.totalCodAmount) - BigInt(o.codCollectedAmount))}</span></div><div className="flex gap-1">
                 {o.customerPhone && <a href={`tel:${o.customerPhone}`} className="text-xs text-primary flex items-center gap-1"><Phone className="size-3" /> Call</a>}
                 {o.customerAddress && <a href={`https://maps.google.com/?q=${encodeURIComponent(o.customerAddress + ' ' + (o.customerCity ?? ''))}`} target="_blank" rel="noreferrer" className="text-xs text-primary flex items-center gap-1"><MapPin className="size-3" /> Map</a>}
               </div></div>
               <div className="flex gap-2">
                 {o.status === 'assigned' && <Button size="sm" className="h-8 flex-1" onClick={async () => { try { const r = await fetch(`/api/delivery-orders/${o.id}/status`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ newStatus: 'out_for_delivery' }) }); if (!r.ok) throw new Error('Failed'); toast.success('Started delivery'); void qc.invalidateQueries({ queryKey: ['delivery-orders'] }); void qc.invalidateQueries({ queryKey: ['rider-dashboard'] }) } catch (e) { toast.error('Failed') } }}>Start Delivery</Button>}
-                {(o.status === 'out_for_delivery' || o.status === 'Partially Delivered') && <><Button size="sm" className="h-8 flex-1 bg-emerald-600 hover:bg-emerald-700" onClick={() => setModal({ type: 'delivered', order: o })}><CheckCircle2 className="size-3.5" /> Outcome</Button><Button size="sm" variant="outline" className="h-8 flex-1 text-rose-600" onClick={() => setModal({ type: 'returned', order: o })}><X className="size-3.5" /> Return</Button></>}
+                {(o.status === 'out_for_delivery' || o.status === 'Partially Delivered') && <><Button size="sm" className="h-8 flex-1 bg-emerald-600 hover:bg-emerald-700" onClick={() => setModal({ type: 'delivered', order: o })}><CheckCircle2 className="size-3.5" /> Delivered / Partial</Button><Button size="sm" variant="outline" className="h-8 flex-1 text-rose-600" onClick={() => setModal({ type: 'returned', order: o })}><X className="size-3.5" /> Returned / Partial</Button></>}
               </div>
             </div>
           ))}</div>

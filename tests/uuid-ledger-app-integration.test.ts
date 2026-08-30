@@ -90,8 +90,8 @@ test('sale, return, collection, delivery, settlement, and opening stock use atom
   assert.match(compatibility, /'post_sale_with_returns_ledger'/)
   assert.match(sales, /\.rpc\('post_sale_return_ledger'/)
   assert.match(sales, /\.rpc\('receive_invoice_payment_ledger'/)
-  assert.match(delivery, /\.rpc\('record_delivery_outcome_ledger'/)
-  assert.match(delivery, /\.rpc\('settle_rider_cod_ledger'/)
+  assert.match(delivery, /\.rpc\('record_delivery_outcome'/)
+  assert.match(delivery, /\.rpc\('settle_rider_cod'/)
   assert.match(products, /\.rpc\('post_opening_stock_ledger'/)
 })
 

@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth/authOptions'
 import { loadSessionUser, hasPermission } from '@/lib/auth/permissions'
-import { riderCodBalances } from '@/lib/delivery/data-access'
+import { getRiderByUserId, riderCodBalances } from '@/lib/delivery/data-access'
 import { resolveRequestId, safeApiError, withObservability } from '@/lib/observability'
 
 export const GET = withObservability('/api/rider-cod/balances', async (request: Request) => {
@@ -15,7 +15,13 @@ export const GET = withObservability('/api/rider-cod/balances', async (request: 
     if (loaded.roleName !== 'Rider' && !hasPermission(loaded, 'can_confirm_cod_submission')) {
       return NextResponse.json({ error: 'FORBIDDEN' }, { status: 403 })
     }
-    return NextResponse.json({ rows: await riderCodBalances(loaded.businessId) })
+    let riderId: string | null = null
+    if (loaded.roleName === 'Rider') {
+      const rider = await getRiderByUserId(loaded.businessId, loaded.userId)
+      if (!rider) return NextResponse.json({ rows: [] })
+      riderId = rider.id
+    }
+    return NextResponse.json({ rows: await riderCodBalances(loaded.businessId, riderId) })
   } catch (error) {
     return safeApiError({ route: '/api/rider-cod/balances', requestId, errorCode: 'RIDER_COD_BALANCES_FAILED', userMessage: 'Rider COD balances could not be loaded.', error })
   }

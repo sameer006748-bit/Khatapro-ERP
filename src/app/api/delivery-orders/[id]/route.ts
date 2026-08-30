@@ -25,7 +25,7 @@ const getDeliveryOrderById = async (_req: Request, { params }: { params: Promise
     }
   }
 
-  const items = await getDeliveryOrderItems(loaded.businessId, order.invoiceId)
+  const items = await getDeliveryOrderItems(loaded.businessId, order.invoiceId, order.id)
   return NextResponse.json({ order, items })
 }
 
