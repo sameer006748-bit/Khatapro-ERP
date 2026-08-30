@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useMemo } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { signOut } from 'next-auth/react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
@@ -86,7 +86,11 @@ import { AdvancedView } from '@/components/erp/views/advanced-view'
 import { AiSettingsView } from '@/components/erp/views/ai-settings-view'
 import { MyProfileView } from '@/components/erp/views/my-profile-view'
 import { AiExplainButton } from '@/components/erp/ai-actions'
+import { ContextualPageHelp } from '@/components/erp/contextual-page-help'
+import { ProductTourGuide } from '@/components/erp/product-tour'
 import { AI_SCREENS, type AiScreen } from '@/lib/ai/safety-core'
+import { getPageHelp } from '@/lib/onboarding/page-help'
+import type { TourStep } from '@/lib/onboarding/product-tour'
 
 import { SupabaseStatusBadge } from '@/components/erp/supabase-status-badge'
 
@@ -283,6 +287,7 @@ function resolveInitialPage(searchParams: URLSearchParams, user: MeUser): string
 
 export function DashboardShell({ user, onSignOut }: { user: MeUser; onSignOut: () => void }) {
   const [moreOpen, setMoreOpen] = useState(false)
+  const tourNavigationState = useRef<{ expanded: Set<string>; moreOpen: boolean } | null>(null)
   const searchParams = useSearchParams()
   const queryString = searchParams.toString()
   const ledgerAccountId = searchParams.get('ledger')
@@ -394,6 +399,40 @@ export function DashboardShell({ user, onSignOut }: { user: MeUser; onSignOut: (
     }))
     .filter((cat) => cat.visibleItems.length > 0)
 
+  const visiblePageKeys = useMemo(
+    () => cats.flatMap((category) => category.visibleItems.map((item) => item.key)),
+    [cats],
+  )
+
+  const handleTourStepChange = useCallback((step: TourStep | null) => {
+    if (!step) {
+      const previous = tourNavigationState.current
+      if (previous) {
+        setExpanded(previous.expanded)
+        setMoreOpen(previous.moreOpen)
+        tourNavigationState.current = null
+      }
+      return
+    }
+
+    setExpanded((current) => {
+      if (!tourNavigationState.current) {
+        tourNavigationState.current = { expanded: new Set(current), moreOpen }
+      }
+      if (!step.categoryId || current.has(step.categoryId)) return current
+      const next = new Set(current)
+      next.add(step.categoryId)
+      return next
+    })
+
+    const onMobile = window.matchMedia('(max-width: 767px)').matches
+    if (!onMobile) return
+    const isPrimaryPage = step.pageKey
+      ? MOBILE_SLOTS.some((slot) => slot.resolve(user) === step.pageKey)
+      : false
+    setMoreOpen(Boolean(step.categoryId && !isPrimaryPage))
+  }, [moreOpen, user])
+
   return (
     <div className="min-h-[100dvh] flex flex-col bg-background text-foreground">
       {/* Top bar */}
@@ -427,7 +466,7 @@ export function DashboardShell({ user, onSignOut }: { user: MeUser; onSignOut: (
       <div className="flex-1 flex">
         {/* Sidebar (desktop) — premium glass surface */}
         <aside className="hidden md:flex w-72 border-r border-white/10 bg-white/70 dark:bg-white/5 backdrop-blur-2xl flex-col shadow-[0_8px_32px_rgba(0,0,0,0.04)]">
-          <nav className="flex-1 overflow-y-auto p-4 space-y-1">
+          <nav className="flex-1 overflow-y-auto p-4 space-y-1" aria-label="Main navigation">
             {renderSidebarCategories(cats, effectiveActive, expanded, toggleCategory, selectItem)}
           </nav>
           <div className="p-4 border-t border-white/10">
@@ -451,13 +490,15 @@ export function DashboardShell({ user, onSignOut }: { user: MeUser; onSignOut: (
         {/* Main content */}
         <main className="flex-1 overflow-y-auto pb-28 md:pb-8">
           <div className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto">
-            {AI_SCREEN_SET.has(effectiveActive) && (
-              <div className="flex justify-end mb-3">
-                <AiExplainButton screen={effectiveActive as AiScreen} />
+            {(AI_SCREEN_SET.has(effectiveActive) || getPageHelp(effectiveActive)) && (
+              <div className="flex flex-wrap justify-end gap-2 mb-3">
+                <ContextualPageHelp pageKey={effectiveActive} />
+                {AI_SCREEN_SET.has(effectiveActive) && <AiExplainButton screen={effectiveActive as AiScreen} />}
               </div>
             )}
             <AnimatePresence mode="wait">
               <motion.div
+                data-tour="page-content"
                 key={effectiveActive + (ledgerAccountId ?? '')}
                 initial={{ opacity: 0, y: 6 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -494,6 +535,12 @@ export function DashboardShell({ user, onSignOut }: { user: MeUser; onSignOut: (
         />
       )}
       <LazyAiAssistant user={user} activeScreen={effectiveActive} />
+      <ProductTourGuide
+        user={user}
+        visiblePageKeys={visiblePageKeys}
+        onNavigate={selectItem}
+        onStepChange={handleTourStepChange}
+      />
     </div>
   )
 }
@@ -549,6 +596,7 @@ function SidebarCategory({
     return (
       <button
         type="button"
+        data-tour={`nav-page-${directItem.key}`}
         onClick={() => onSelect(directItem.key)}
         aria-current={isActive ? 'page' : undefined}
         className={cn(
@@ -581,6 +629,7 @@ function SidebarCategory({
       {/* Category header (click to expand/collapse) */}
       <button
         type="button"
+        data-tour={`nav-category-${category.id}`}
         onClick={onToggle}
         aria-expanded={isExpanded}
         className={cn(
@@ -622,6 +671,7 @@ function SidebarCategory({
                   <button
                     key={item.key}
                     type="button"
+                    data-tour={`nav-page-${item.key}`}
                     onClick={() => onSelect(item.key)}
                     aria-current={isItemActive ? 'page' : undefined}
                     className={cn(
@@ -690,6 +740,8 @@ function MobilePillNav({
         return (
           <button
             key={slot.id}
+            type="button"
+            data-tour={`nav-page-${slot.key}`}
             onClick={() => onSelect(slot.key!)}
             className="relative flex items-center justify-center press-sm"
             aria-label={slot.label}
@@ -716,6 +768,7 @@ function MobilePillNav({
       })}
       {hasMore && (
         <button
+          type="button"
           onClick={onMore}
           className="relative flex items-center justify-center press-sm"
           aria-label="More navigation"
@@ -768,7 +821,7 @@ function MobileMoreSheet({
             onClick={(e) => e.stopPropagation()}
           >
             {categories.map((cat) => (
-              <div key={cat.id} className="mb-4 last:mb-0">
+              <div key={cat.id} className="mb-4 last:mb-0" data-tour={`nav-category-${cat.id}`}>
                 <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mb-2 px-1 flex items-center gap-1.5">
                   <cat.icon className="size-3.5" strokeWidth={1.9} />
                   {cat.label}
@@ -780,6 +833,7 @@ function MobileMoreSheet({
                       <button
                         key={item.key}
                         type="button"
+                        data-tour={`nav-page-${item.key}`}
                         onClick={() => onSelect(item.key)}
                         aria-current={isActive ? 'page' : undefined}
                         className={cn(

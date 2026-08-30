@@ -506,3 +506,31 @@ selection passing 38/38; the full suite passed (507/507); and
 `npm run build` passed. Interactive desktop/mobile browser QA was attempted, but no browser
 session was connected in the execution environment, so no screenshot-based visual sign-off
 was possible. Protected local files were left unstaged and untouched by this batch.
+
+## Client Handover Onboarding Batch 3 — 2026-08-31
+
+Implemented a short, role-aware first-login guide without database or API changes. Completion
+uses the versioned, user-scoped client key `khataPro:onboarding:v1:<user-id>` because the
+current profile model has no suitable preference field. Skip and Finish both suppress future
+automatic prompts for that user/version; changing to a different supported role offers the
+correct guide, and My Profile → Restart Product Tour resets only the current user before
+starting again.
+
+Tour scope is intentionally bounded: Owner/Admin 9 steps, Accountant 7, Salesman 5 and Rider
+3. Step generation is filtered against the navigation pages the current session can actually
+see, so inaccessible workspaces are never introduced. Stable `data-tour` targets cover desktop
+and mobile navigation. The shell opens the required category or mobile More sheet during a
+step and restores its prior navigation state afterward. Dialogs retain keyboard focus trapping,
+Escape dismissal, visible text, adequate tap targets and the application-wide reduced-motion
+rules.
+
+A shared contextual-help model now covers 18 major pages: Home; Counter, Online and
+Out-of-City Sale; Sales List; Deliveries & Riders; Purchases; Accounts & Balances; Petty Cash;
+Contra; Products & Stock; Day Book; Ledger; Trial Balance; Chart of Accounts; Financial
+Reports; Users & Roles; and Roles & Permissions.
+
+Verification: TypeScript and changed-file ESLint passed; focused onboarding/help/navigation
+tests passed 33/33; explicit auth/permission/navigation tests passed 38/38; the full suite
+passed 521/521; and `npm run build` passed. Browser verification is NO because no browser
+session was connected, so final Owner/Rider/mobile client-style visual smoke testing remains
+pending. Protected local files were not modified or staged by this batch.

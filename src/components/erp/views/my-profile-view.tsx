@@ -8,8 +8,9 @@ import { Label } from '@/components/ui/label'
 import { toast } from 'sonner'
 import { signOut } from 'next-auth/react'
 import { motion } from 'framer-motion'
-import { User, Mail, Shield, Phone, Lock, LogOut, CheckCircle2, AlertCircle, ArrowLeft } from 'lucide-react'
+import { User, Mail, Shield, Phone, Lock, LogOut, CheckCircle2, AlertCircle, ArrowLeft, Compass } from 'lucide-react'
 import type { MeUser } from '@/components/erp/erp-app'
+import { PRODUCT_TOUR_RESTART_EVENT } from '@/lib/onboarding/product-tour'
 
 export function MyProfileView({ user }: { user: MeUser }) {
   const [phone, setPhone] = useState(user.phone ?? '')
@@ -137,6 +138,24 @@ export function MyProfileView({ user }: { user: MeUser }) {
           </div>
         )}
       </motion.div>
+
+      {/* App guide */}
+      <div className="card-3d p-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <div className="text-sm font-medium text-foreground flex items-center gap-2">
+            <Compass className="size-4 text-primary" strokeWidth={1.9} /> App Guide
+          </div>
+          <div className="text-xs text-muted-foreground mt-1">Review the KhataPro areas available to your role.</div>
+        </div>
+        <Button
+          type="button"
+          variant="outline"
+          className="min-h-11 shrink-0 border-primary/20 hover:bg-primary/[0.08]"
+          onClick={() => window.dispatchEvent(new Event(PRODUCT_TOUR_RESTART_EVENT))}
+        >
+          Restart Product Tour
+        </Button>
+      </div>
 
       {/* ── Logout ── */}
       <div className="card-3d p-4 flex items-center justify-between">
