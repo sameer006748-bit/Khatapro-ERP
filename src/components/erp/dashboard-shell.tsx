@@ -8,34 +8,42 @@ import { motion, AnimatePresence } from 'framer-motion'
 import {
   LayoutDashboard,
   Settings,
-  Users,
-  FileText,
-  ScrollText,
   ShoppingCart,
-  Receipt,
-  Bike,
-  Package,
+  Globe2,
+  Truck,
+  ShoppingBag,
+  ReceiptText,
+  PackageCheck,
+  PackagePlus,
+  Store,
+  HandCoins,
+  Boxes,
   BookOpen,
-  ClipboardList,
+  NotebookTabs,
   LogOut,
-  Wallet,
-  Shield,
+  WalletCards,
+  Coins,
+  Landmark,
+  ShieldCheck,
+  History,
   MoreHorizontal,
   Scale,
-  Plus,
-  Tag,
-  PackagePlus,
+  BookPlus,
   Clock,
   ChevronDown,
-  Briefcase,
-  BarChart3,
+  CalendarCheck2,
+  ChartColumnBig,
   Home as HomeIcon,
   ArrowLeftRight,
   ArrowDownToLine,
   ArrowUpFromLine,
   Sparkles,
-  DollarSign,
-  Banknote,
+  ListTree,
+  FileChartColumn,
+  PanelTop,
+  UserCog,
+  CircleUserRound,
+  type LucideIcon,
 } from 'lucide-react'
 import { useSearchParams } from 'next/navigation'
 import dynamic from 'next/dynamic'
@@ -52,7 +60,6 @@ import { BusinessAccountsView } from '@/components/erp/views/business-accounts-v
 import { AuditLogView } from '@/components/erp/views/audit-log-view'
 import { BizDayTestView } from '@/components/erp/views/biz-day-test-view'
 import { PermissionMatrixView } from '@/components/erp/views/permission-matrix-view'
-import { ComingSoonView } from '@/components/erp/views/coming-soon'
 import { JournalVoucherView } from '@/components/erp/views/journal-voucher-view'
 import { TrialBalanceView } from '@/components/erp/views/trial-balance-view'
 import { LedgerDrilldownView } from '@/components/erp/views/ledger-drilldown-view'
@@ -62,11 +69,6 @@ import { PaymentVoucherView, ReceiptVoucherView, ContraEntryView, OwnerCapitalVi
 import { ExpenseBatchView } from '@/components/erp/views/expense-batch-view'
 import { PettyCashView } from '@/components/erp/views/petty-cash-view'
 import { VoucherDetailView } from '@/components/erp/views/voucher-detail-view'
-import { ProductCategoriesView } from '@/components/erp/views/product-categories-view'
-import { ProductsView } from '@/components/erp/views/products-view'
-import { StockAdjustmentView } from '@/components/erp/views/stock-adjustment-view'
-import { NegativeStockReportView } from '@/components/erp/views/negative-stock-report-view'
-import { PendingStockReportView } from '@/components/erp/views/pending-stock-report-view'
 import { InventoryView } from '@/components/erp/views/inventory-view'
 import { PurchasesView } from '@/components/erp/views/purchases-view'
 import { VendorsView } from '@/components/erp/views/vendors-view'
@@ -105,7 +107,7 @@ type SubItem = {
   key: string
   label: string
   short: string
-  icon: React.ComponentType<{ className?: string }>
+  icon: LucideIcon
   perm?: string
   ownerOnly?: boolean
 }
@@ -113,7 +115,7 @@ type SubItem = {
 type NavCategory = {
   id: string
   label: string
-  icon: React.ComponentType<{ className?: string }>
+  icon: LucideIcon
   /** Optional direct key for categories that are also a page (e.g. Home). */
   directKey?: string
   items: SubItem[]
@@ -131,52 +133,52 @@ const NAV_CATEGORIES: NavCategory[] = [
   {
     id: 'daily-work',
     label: 'Daily Work',
-    icon: Briefcase,
+    icon: CalendarCheck2,
     items: [
       { key: 'counter-sale', label: 'Counter Sale', short: 'Counter', icon: ShoppingCart, perm: 'can_create_sales' },
-      { key: 'online-sale', label: 'Online Sale', short: 'Online', icon: ShoppingCart, perm: 'can_create_sales' },
-      { key: 'ofc-sale', label: 'OFC Sale', short: 'OFC', icon: ShoppingCart, perm: 'can_create_sales' },
-      { key: 'other-sale', label: 'Other Sale', short: 'Other', icon: ShoppingCart, perm: 'can_create_sales' },
-      { key: 'sales-list', label: 'Sales List', short: 'List', icon: ClipboardList, perm: 'can_view_sales' },
-      { key: 'delivery', label: 'Delivery / Riders', short: 'Delivery', icon: Bike, perm: 'can_view_delivery_orders' },
-      { key: 'purchases', label: 'Purchase Bills', short: 'Purchases', icon: Receipt, perm: 'can_view_purchases' },
-      { key: 'vendors', label: 'Vendors', short: 'Vendors', icon: Users, perm: 'can_view_purchases' },
-      { key: 'expense-batch', label: 'Add Expense', short: 'Expenses', icon: Receipt, perm: 'can_create_expense_batch' },
-      { key: 'my-reports', label: 'Salesman Reports', short: 'Reports', icon: BarChart3, perm: 'can_view_own_sales' },
+      { key: 'online-sale', label: 'Online Sale', short: 'Online', icon: Globe2, perm: 'can_create_sales' },
+      { key: 'ofc-sale', label: 'Out-of-City Sale', short: 'Out-of-City', icon: Truck, perm: 'can_create_sales' },
+      { key: 'other-sale', label: 'Other Sale', short: 'Other', icon: ShoppingBag, perm: 'can_create_sales' },
+      { key: 'sales-list', label: 'Sales List', short: 'Sales', icon: ReceiptText, perm: 'can_view_sales' },
+      { key: 'delivery', label: 'Deliveries & Riders', short: 'Delivery', icon: PackageCheck, perm: 'can_view_delivery_orders' },
+      { key: 'purchases', label: 'Purchases', short: 'Purchases', icon: PackagePlus, perm: 'can_view_purchases' },
+      { key: 'vendors', label: 'Vendors', short: 'Vendors', icon: Store, perm: 'can_view_purchases' },
+      { key: 'expense-batch', label: 'Expenses', short: 'Expenses', icon: HandCoins, perm: 'can_create_expense_batch' },
+      { key: 'my-reports', label: 'My Sales Reports', short: 'My Reports', icon: ChartColumnBig, perm: 'can_view_own_sales' },
     ],
   },
   {
     id: 'money',
     label: 'Money',
-    icon: Wallet,
+    icon: WalletCards,
     items: [
-      { key: 'accounts', label: 'Accounts & Balances', short: 'Accounts', icon: DollarSign, perm: 'can_view_account_balances' },
-      { key: 'petty-cash', label: 'Petty Cash', short: 'Petty', icon: Wallet, perm: 'can_manage_petty_cash' },
-      { key: 'owner-capital', label: 'Capital & Drawings', short: 'Capital', icon: Banknote, ownerOnly: true },
+      { key: 'accounts', label: 'Accounts & Balances', short: 'Accounts', icon: WalletCards, perm: 'can_view_account_balances' },
+      { key: 'petty-cash', label: 'Petty Cash', short: 'Petty Cash', icon: Coins, perm: 'can_manage_petty_cash' },
+      { key: 'owner-capital', label: 'Capital & Drawings', short: 'Capital', icon: Landmark, ownerOnly: true },
     ],
   },
   {
     id: 'inventory',
     label: 'Inventory',
-    icon: Package,
+    icon: Boxes,
     items: [
-      { key: 'inventory', label: 'Products & Stock', short: 'Stock', icon: Package, perm: 'can_view_products' },
+      { key: 'inventory', label: 'Products & Stock', short: 'Stock', icon: Boxes, perm: 'can_view_products' },
     ],
   },
   {
     id: 'accounting',
     label: 'Advanced Accounting',
-    icon: BookOpen,
+    icon: NotebookTabs,
     items: [
       { key: 'day-book', label: 'Day Book', short: 'Day Book', icon: BookOpen, perm: 'can_view_day_book' },
-      { key: 'journal-voucher', label: 'Journal Voucher', short: 'JV', icon: ClipboardList, perm: 'can_create_journal_voucher' },
+      { key: 'journal-voucher', label: 'Journal Voucher', short: 'Journal', icon: NotebookTabs, perm: 'can_create_journal_voucher' },
       { key: 'receipt-voucher', label: 'Receipt Voucher', short: 'Receipt', icon: ArrowDownToLine, perm: 'can_create_receipt_voucher' },
       { key: 'payment-voucher', label: 'Payment Voucher', short: 'Payment', icon: ArrowUpFromLine, perm: 'can_create_payment_voucher' },
       { key: 'contra-entry', label: 'Contra Entry', short: 'Contra', icon: ArrowLeftRight, perm: 'can_create_contra' },
       { key: 'trial-balance', label: 'Trial Balance', short: 'TB', icon: Scale, perm: 'can_view_trial_balance' },
-      { key: 'opening-balance', label: 'Opening Balance', short: 'Opening', icon: Plus, perm: 'can_post_opening_voucher' },
-      { key: 'coa', label: 'Chart of Accounts', short: 'CoA', icon: BookOpen, perm: 'can_view_setup' },
-      { key: 'reports', label: 'Financial Reports', short: 'Reports', icon: FileText, perm: 'can_view_trial_balance' },
+      { key: 'opening-balance', label: 'Opening Balance', short: 'Opening', icon: BookPlus, perm: 'can_post_opening_voucher' },
+      { key: 'coa', label: 'Chart of Accounts', short: 'Accounts', icon: ListTree, perm: 'can_view_setup' },
+      { key: 'reports', label: 'Financial Reports', short: 'Reports', icon: FileChartColumn, perm: 'can_view_trial_balance' },
     ],
   },
   {
@@ -184,16 +186,21 @@ const NAV_CATEGORIES: NavCategory[] = [
     label: 'Settings',
     icon: Settings,
     items: [
-      { key: 'setup', label: 'Setup Overview', short: 'Setup', icon: Settings, perm: 'can_view_setup' },
-      { key: 'business-accounts', label: 'Business Accounts', short: 'Accounts', icon: Wallet, perm: 'can_view_setup' },
-      { key: 'users', label: 'Users & Roles', short: 'Users', icon: Users, ownerOnly: true },
-      { key: 'permissions', label: 'Permission Matrix', short: 'Perms', icon: Shield, ownerOnly: true },
-      { key: 'audit', label: 'Audit Log', short: 'Audit', icon: ScrollText, perm: 'can_view_audit_log' },
-      { key: 'ai-settings', label: 'AI Settings', short: 'AI', icon: Sparkles, ownerOnly: true },
-      { key: 'biz-day-test', label: 'Biz-Day Test', short: 'Biz-Day', icon: Clock, ownerOnly: true },
-      { key: 'my-profile', label: 'My Profile', short: 'Profile', icon: Shield },
+      { key: 'setup', label: 'Setup Overview', short: 'Setup', icon: PanelTop, perm: 'can_view_setup' },
+      { key: 'business-accounts', label: 'Business Accounts', short: 'Accounts', icon: WalletCards, perm: 'can_view_setup' },
+      { key: 'users', label: 'Users & Roles', short: 'Users', icon: UserCog, ownerOnly: true },
+      { key: 'permissions', label: 'Roles & Permissions', short: 'Permissions', icon: ShieldCheck, ownerOnly: true },
+      { key: 'audit', label: 'Audit Log', short: 'Audit', icon: History, perm: 'can_view_audit_log' },
+      { key: 'ai-settings', label: 'KhataPro AI', short: 'AI', icon: Sparkles, ownerOnly: true },
+      { key: 'my-profile', label: 'My Profile', short: 'Profile', icon: CircleUserRound },
     ],
   },
+]
+
+// Kept for direct owner-only diagnostics, but intentionally excluded from all
+// normal client navigation and Setup surfaces.
+const INTERNAL_PAGES: SubItem[] = [
+  { key: 'biz-day-test', label: 'Business Day Diagnostic', short: 'Business Day', icon: Clock, ownerOnly: true },
 ]
 
 /** Flat map of every registered page key to its SubItem for quick lookup. */
@@ -203,6 +210,7 @@ for (const cat of NAV_CATEGORIES) {
     PAGE_REGISTRY.set(item.key, item)
   }
 }
+for (const item of INTERNAL_PAGES) PAGE_REGISTRY.set(item.key, item)
 
 function isItemVisible(user: MeUser, item: SubItem): boolean {
   if (item.ownerOnly) return user.roleName === 'Owner/Admin'
@@ -234,14 +242,14 @@ function categoryForKey(key: string): string | null {
 type MobileSlot = {
   id: string
   label: string
-  icon: React.ComponentType<{ className?: string }>
+  icon: LucideIcon
   /** Resolve to a nav key, or null if not available for this role. */
   resolve: (user: MeUser) => string | null
 }
 
 const MOBILE_SLOTS: MobileSlot[] = [
   { id: 'home', label: 'Home', icon: HomeIcon, resolve: () => 'home' },
-  { id: 'work', label: 'Work', icon: Briefcase, resolve: (u) => {
+  { id: 'work', label: 'Daily Work', icon: CalendarCheck2, resolve: (u) => {
     if (u.roleName === 'Rider' && u.permissions.includes('can_view_own_orders')) return 'delivery'
     if (u.permissions.includes('can_create_sales')) return 'counter-sale'
     if (u.permissions.includes('can_view_day_book')) return 'day-book'
@@ -249,11 +257,11 @@ const MOBILE_SLOTS: MobileSlot[] = [
     if (u.permissions.includes('can_view_trial_balance')) return 'trial-balance'
     return null
   }},
-  { id: 'stock', label: 'Stock', icon: Package, resolve: (u) => {
+  { id: 'stock', label: 'Stock', icon: Boxes, resolve: (u) => {
     if (u.permissions.includes('can_view_products')) return 'inventory'
     return null
   }},
-  { id: 'reports', label: 'Reports', icon: BarChart3, resolve: (u) => {
+  { id: 'reports', label: 'Reports', icon: FileChartColumn, resolve: (u) => {
     if (u.permissions.includes('can_view_own_sales') && !u.permissions.includes('can_view_trial_balance')) return 'my-reports'
     if (u.permissions.includes('can_view_trial_balance')) return 'reports'
     return null
@@ -540,12 +548,14 @@ function SidebarCategory({
   if (isDirect && directItem) {
     return (
       <button
+        type="button"
         onClick={() => onSelect(directItem.key)}
+        aria-current={isActive ? 'page' : undefined}
         className={cn(
-          'relative w-full flex items-center gap-2.5 px-3 py-2 text-sm rounded-lg press-sm',
+          'relative w-full min-h-10 flex items-center gap-2.5 px-2.5 py-1.5 text-sm rounded-xl press-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60',
           isActive
-            ? 'bg-accent text-accent-foreground font-medium'
-            : 'text-muted-foreground hover:text-foreground hover:bg-muted/60',
+            ? 'bg-primary/[0.09] text-foreground font-semibold shadow-[inset_0_0_0_1px_rgba(16,185,129,0.12)]'
+            : 'text-muted-foreground hover:text-foreground hover:bg-muted/70',
         )}
       >
         {isActive && (
@@ -555,7 +565,12 @@ function SidebarCategory({
             transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
           />
         )}
-        <directItem.icon className={cn('size-4 shrink-0', isActive && 'text-primary')} />
+        <span className={cn(
+          'grid size-7 shrink-0 place-items-center rounded-lg transition-colors',
+          isActive ? 'bg-primary/[0.14] text-primary' : 'text-muted-foreground',
+        )}>
+          <directItem.icon className="size-[18px]" strokeWidth={1.9} />
+        </span>
         <span className="truncate">{category.label}</span>
       </button>
     )
@@ -565,15 +580,22 @@ function SidebarCategory({
     <div>
       {/* Category header (click to expand/collapse) */}
       <button
+        type="button"
         onClick={onToggle}
+        aria-expanded={isExpanded}
         className={cn(
-          'w-full flex items-center gap-2.5 px-3 py-2 text-sm rounded-lg press-sm',
+          'w-full min-h-10 flex items-center gap-2.5 px-2.5 py-1.5 text-sm rounded-xl press-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60',
           isActive
-            ? 'text-foreground font-medium'
-            : 'text-muted-foreground hover:text-foreground hover:bg-muted/60',
+            ? 'text-foreground font-semibold bg-primary/[0.04]'
+            : 'text-muted-foreground hover:text-foreground hover:bg-muted/70',
         )}
       >
-        <category.icon className={cn('size-4 shrink-0', isActive && 'text-primary')} />
+        <span className={cn(
+          'grid size-7 shrink-0 place-items-center rounded-lg transition-colors',
+          isActive ? 'bg-primary/[0.12] text-primary' : 'text-muted-foreground',
+        )}>
+          <category.icon className="size-[18px]" strokeWidth={1.9} />
+        </span>
         <span className="truncate flex-1 text-left">{category.label}</span>
         <ChevronDown
           className={cn(
@@ -599,12 +621,14 @@ function SidebarCategory({
                 return (
                   <button
                     key={item.key}
+                    type="button"
                     onClick={() => onSelect(item.key)}
+                    aria-current={isItemActive ? 'page' : undefined}
                     className={cn(
-                      'relative w-full flex items-center gap-2 px-2.5 py-1.5 text-[13px] rounded-md press-sm',
+                      'relative w-full min-h-10 flex items-center gap-2.5 px-2 py-1.5 text-[13px] rounded-lg press-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60',
                       isItemActive
-                        ? 'bg-accent text-accent-foreground font-medium'
-                        : 'text-muted-foreground hover:text-foreground hover:bg-muted/40',
+                        ? 'bg-primary/[0.09] text-foreground font-semibold'
+                        : 'text-muted-foreground hover:text-foreground hover:bg-muted/60',
                     )}
                   >
                     {isItemActive && (
@@ -614,7 +638,12 @@ function SidebarCategory({
                         transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
                       />
                     )}
-                    <item.icon className={cn('size-3.5 shrink-0', isItemActive && 'text-primary')} />
+                    <span className={cn(
+                      'grid size-7 shrink-0 place-items-center rounded-lg transition-colors',
+                      isItemActive ? 'bg-primary/[0.14] text-primary' : 'text-muted-foreground',
+                    )}>
+                      <item.icon className="size-[18px]" strokeWidth={1.9} />
+                    </span>
                     <span className="truncate">{item.label}</span>
                   </button>
                 )
@@ -680,7 +709,7 @@ function MobilePillNav({
                 isActive ? 'text-primary-foreground' : 'text-muted-foreground',
               )}
             >
-              <slot.icon className="size-6" />
+              <slot.icon className="size-5" strokeWidth={1.9} />
             </span>
           </button>
         )
@@ -693,7 +722,7 @@ function MobilePillNav({
           style={{ minWidth: '48px', minHeight: '48px' }}
         >
           <span className="grid place-items-center size-11 rounded-full text-muted-foreground">
-            <MoreHorizontal className="size-6" />
+            <MoreHorizontal className="size-5" strokeWidth={1.9} />
           </span>
         </button>
       )}
@@ -741,7 +770,7 @@ function MobileMoreSheet({
             {categories.map((cat) => (
               <div key={cat.id} className="mb-4 last:mb-0">
                 <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mb-2 px-1 flex items-center gap-1.5">
-                  <cat.icon className="size-3" />
+                  <cat.icon className="size-3.5" strokeWidth={1.9} />
                   {cat.label}
                 </div>
                 <div className="grid grid-cols-3 gap-1.5">
@@ -750,13 +779,20 @@ function MobileMoreSheet({
                     return (
                       <button
                         key={item.key}
+                        type="button"
                         onClick={() => onSelect(item.key)}
+                        aria-current={isActive ? 'page' : undefined}
                         className={cn(
-                          'flex flex-col items-center gap-1.5 p-3 rounded-xl press-sm',
-                          isActive ? 'bg-accent text-accent-foreground' : 'text-foreground hover:bg-muted/60',
+                          'min-w-0 flex flex-col items-center gap-1.5 p-3 rounded-xl press-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60',
+                          isActive ? 'bg-primary/[0.09] text-foreground' : 'text-foreground hover:bg-muted/60',
                         )}
                       >
-                        <item.icon className={cn('size-5', isActive && 'text-primary')} />
+                        <span className={cn(
+                          'grid size-9 place-items-center rounded-xl',
+                          isActive ? 'bg-primary/[0.14] text-primary' : 'bg-muted/70 text-muted-foreground',
+                        )}>
+                          <item.icon className="size-5" strokeWidth={1.9} />
+                        </span>
                         <span className="text-[11px] font-medium truncate w-full text-center">
                           {item.short}
                         </span>

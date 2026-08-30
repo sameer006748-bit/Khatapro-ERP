@@ -3,7 +3,7 @@
 import { useState, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { formatMoney, formatWholeRupees, formatTableDate } from '@/lib/format'
-import { FileText, Search, Printer, X, ShoppingCart, Plus, ArrowDownToLine, RotateCcw } from 'lucide-react'
+import { FileText, Search, Printer, X, ShoppingCart, Truck, Plus, ArrowDownToLine, RotateCcw } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { useRouter } from 'next/navigation'
@@ -119,7 +119,7 @@ export function SalesListView() {
           <ShoppingCart className="size-4 mr-1.5" /> Online Sale
         </Button>
         <Button variant="outline" size="sm" className="h-10 press-sm" onClick={() => router.push('/?page=ofc-sale')}>
-          <ShoppingCart className="size-4 mr-1.5" /> OFC Sale
+          <Truck className="size-4 mr-1.5" /> Out-of-City Sale
         </Button>
         <Button variant="outline" size="sm" className="h-10 press-sm" onClick={() => router.push('/?page=other-sale')}>
           <ShoppingCart className="size-4 mr-1.5" /> Other Sale
@@ -185,7 +185,7 @@ export function SalesListView() {
         <div className="card-3d p-8 text-center">
           <div className="grid place-items-center size-12 rounded-xl icon-3d-muted mx-auto mb-3"><FileText className="size-6 text-muted-foreground" /></div>
           <p className="text-sm text-foreground font-medium">No invoices yet</p>
-          <p className="text-xs text-muted-foreground mt-1">Post a Counter / Online / OFC sale to see it here.</p>
+          <p className="text-xs text-muted-foreground mt-1">Post a Counter, Online or Out-of-City sale to see it here.</p>
         </div>
       ) : (
         <>

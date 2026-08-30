@@ -69,7 +69,7 @@ export function PermissionMatrixView({ user }: { user: MeUser }) {
         </div>
         <p className="text-sm font-medium text-foreground">Restricted to Owner/Admin</p>
         <p className="text-xs text-muted-foreground mt-1">
-          You don&apos;t have permission to view the permission matrix.
+          You don&apos;t have access to roles and permissions.
         </p>
       </div>
     )
@@ -83,7 +83,7 @@ export function PermissionMatrixView({ user }: { user: MeUser }) {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight text-foreground">
-          Permission Matrix
+          Roles &amp; Permissions
         </h1>
         <p className="text-sm text-muted-foreground mt-1.5 max-w-2xl">
           Owner/Admin always retains full access. Select a permission cell to configure

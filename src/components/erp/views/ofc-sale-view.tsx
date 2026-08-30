@@ -117,7 +117,7 @@ export function OfcSaleView({ user }: { user: MeUser }) {
 
       if (!r.ok) {
         const serverMsg = parsed && typeof parsed.error === 'string' ? parsed.error : null
-        let msg = serverMsg ?? 'Could not post OFC sale. Please try again.'
+        let msg = serverMsg ?? 'Could not post the out-of-city sale. Please try again.'
         if (requestId) msg += ` (Ref: ${requestId})`
         throw new Error(msg)
       }
@@ -125,7 +125,7 @@ export function OfcSaleView({ user }: { user: MeUser }) {
       return parsed
     },
     onSuccess: (j) => {
-      toast.success(`OFC sale posted: ${j.invoiceNo}`)
+      toast.success(`Out-of-city sale posted: ${j.invoiceNo}`)
       setResult({ ok: true, invoiceNo: j.invoiceNo, invoiceId: j.invoiceId })
       void qc.invalidateQueries({ queryKey: ['invoices'] })
       void qc.invalidateQueries({ queryKey: ['trial-balance'] })
@@ -144,7 +144,7 @@ export function OfcSaleView({ user }: { user: MeUser }) {
       <div className="space-y-6">
         <motion.div initial={{ opacity: 0, scale: 0.96 }} animate={{ opacity: 1, scale: 1 }} className="card-3d border-primary/40 p-8 text-center max-w-md mx-auto">
           <div className="grid place-items-center size-16 rounded-2xl icon-3d mx-auto mb-4"><CheckCircle2 className="size-8 text-primary-foreground" /></div>
-          <h2 className="text-xl font-semibold text-foreground">OFC Sale Posted!</h2>
+          <h2 className="text-xl font-semibold text-foreground">Out-of-City Sale Posted!</h2>
           <p className="text-3xl font-bold text-primary mt-1" data-num>{result.invoiceNo}</p>
           <div className="mt-6 flex flex-col gap-2">
             <Button className="press-md shadow-sm" onClick={() => window.open(`/?invoice=${result.invoiceId}`, '_self')}><FileText className="size-4" /> View Invoice</Button>
@@ -170,7 +170,7 @@ export function OfcSaleView({ user }: { user: MeUser }) {
 
   return (
     <div className="space-y-4">
-      <h1 className="text-xl font-semibold tracking-tight text-foreground">OFC Sale</h1>
+      <h1 className="text-xl font-semibold tracking-tight text-foreground">Out-of-City Sale</h1>
 
       {/* ── Salesman ── */}
       {coaQ.data?.availability?.accounting === false && (
@@ -281,7 +281,7 @@ export function OfcSaleView({ user }: { user: MeUser }) {
       {result && !result.ok && <div className="card-3d p-3 border-destructive/40 flex items-center gap-2"><AlertCircle className="size-4 text-destructive" /><span className="text-xs text-destructive">{result.error}</span></div>}
 
       <Button className="w-full press-md shadow-sm" disabled={postMut.isPending || !canPost || !ofcValid} onClick={() => postMut.mutate()}>
-        {!ofcValid && finalTotal > 0n ? 'Full advance required' : postMut.isPending ? 'Posting…' : <><Truck className="size-4" /> Post OFC Sale — {formatWholeRupees(finalTotal)}</>}
+        {!ofcValid && finalTotal > 0n ? 'Full advance required' : postMut.isPending ? 'Posting…' : <><Truck className="size-4" /> Post Out-of-City Sale — {formatWholeRupees(finalTotal)}</>}
       </Button>
     </div>
   )

@@ -1,7 +1,7 @@
 'use client'
 
 import type { MeUser } from '@/components/erp/erp-app'
-import { Wallet, BookOpen, Users, Shield, ScrollText, FileText, ArrowRight, Lock } from 'lucide-react'
+import { WalletCards, ListTree, UserCog, ShieldCheck, History, ArrowRight, Lock } from 'lucide-react'
 
 export function SetupView({
   user,
@@ -16,44 +16,37 @@ export function SetupView({
   const cards = [
     {
       title: 'Business Accounts',
-      desc: 'Cash / Petty Cash / Bank / Easypaisa / JazzCash / Wallet / Custom. Each creates a linked Asset ledger account.',
+      desc: 'Manage the cash, bank and mobile-wallet accounts used for daily payments.',
       route: 'business-accounts',
-      icon: Wallet,
+      icon: WalletCards,
       ownerOnly: false,
     },
     {
       title: 'Chart of Accounts',
-      desc: 'Default Pakistani garments SMB CoA — 17 accounts across Asset / Liability / Equity / Income / Expense.',
+      desc: 'Organize the accounts used to classify assets, liabilities, equity, income and expenses.',
       route: 'coa',
-      icon: BookOpen,
+      icon: ListTree,
       ownerOnly: false,
     },
     {
       title: 'Users & Roles',
-      desc: 'Invite users and assign one of the four system roles. Owner/Admin only.',
+      desc: 'Invite team members and assign roles that match their responsibilities.',
       route: 'users',
-      icon: Users,
+      icon: UserCog,
       ownerOnly: true,
     },
     {
-      title: 'Permission Matrix',
-      desc: 'Inspect which permissions each role has been granted. Owner/Admin only.',
+      title: 'Roles & Permissions',
+      desc: 'Review what each role can view or manage across the business.',
       route: 'permissions',
-      icon: Shield,
+      icon: ShieldCheck,
       ownerOnly: true,
     },
     {
       title: 'Audit Log',
-      desc: 'Every mutating action — bootstrap, user invite, business account creation, etc.',
+      desc: 'Review a dated history of important changes and actions.',
       route: 'audit',
-      icon: ScrollText,
-      ownerOnly: false,
-    },
-    {
-      title: 'Biz-Day Test',
-      desc: 'Verify Asia/Karachi midnight boundary grouping for UTC instants.',
-      route: 'biz-day-test',
-      icon: FileText,
+      icon: History,
       ownerOnly: false,
     },
   ]
@@ -63,7 +56,7 @@ export function SetupView({
       <div>
         <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight text-foreground">Setup</h1>
         <p className="text-sm text-muted-foreground mt-1.5 max-w-2xl">
-          Foundation configuration. Use the sidebar items under Setup to manage each section.
+          Manage business accounts, team access and accounting setup.
         </p>
       </div>
       <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
@@ -73,7 +66,7 @@ export function SetupView({
             <>
               <div className="flex items-start justify-between mb-3">
                 <div className="grid place-items-center size-10 rounded-xl icon-3d">
-                  <c.icon className="size-5 text-primary-foreground" />
+                    <c.icon className="size-5 text-primary-foreground" strokeWidth={1.9} />
                 </div>
                 {c.ownerOnly && (
                   <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wider bg-accent text-accent-foreground px-2 py-0.5 rounded-md font-medium">
@@ -96,9 +89,6 @@ export function SetupView({
                     Open <ArrowRight className="size-3" />
                   </span>
                 )}
-                <span className="text-muted-foreground" data-num>
-                  {c.route}
-                </span>
               </div>
             </>
           )

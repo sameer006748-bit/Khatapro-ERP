@@ -17,14 +17,14 @@ export function AiExplainButton({ screen }: { screen: AiScreen }) {
       type="button"
       variant="outline"
       size="sm"
-      className="h-8 text-xs"
+      className="h-8 border-primary/20 bg-primary/[0.04] text-xs text-foreground hover:bg-primary/10 hover:text-foreground"
       onClick={() => window.dispatchEvent(new CustomEvent<OpenAiDetail>('khatapro-ai-open', { detail: {
         mode: 'explain',
         screen,
         prompt: 'Explain this screen or report, its most important point, any possible concern, and the recommended next check.',
       } }))}
     >
-      <Sparkles className="size-3.5" /> Explain with KhataPro AI
+      <Sparkles className="size-3.5 text-primary" strokeWidth={1.9} /> Explain with KhataPro AI
     </Button>
   )
 }

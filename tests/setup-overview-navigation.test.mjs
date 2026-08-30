@@ -9,12 +9,11 @@ const mappings = {
   'Business Accounts': 'business-accounts',
   'Chart of Accounts': 'coa',
   'Users & Roles': 'users',
-  'Permission Matrix': 'permissions',
+  'Roles & Permissions': 'permissions',
   'Audit Log': 'audit',
-  'Biz-Day Test': 'biz-day-test',
 }
 
-test('all six Setup cards map to registered page keys', () => {
+test('all client Setup cards map to registered page keys', () => {
   for (const [title, key] of Object.entries(mappings)) {
     assert.match(setup, new RegExp(`title: '${title.replace(/[&]/g, '\\$&')}',[\\s\\S]*?route: '${key}'`))
     assert.match(shell, new RegExp(`key: '${key}'`))
@@ -28,10 +27,17 @@ test('every Setup target resolves to its existing view component', () => {
     users: 'UsersView',
     permissions: 'PermissionMatrixView',
     audit: 'AuditLogView',
-    'biz-day-test': 'BizDayTestView',
   })) {
     assert.match(shell, new RegExp(`active === '${key}'\\) return <${component}`))
   }
+})
+
+test('business-day diagnostics remain owner-only and outside client navigation', () => {
+  const navSource = shell.slice(shell.indexOf('const NAV_CATEGORIES'), shell.indexOf('const INTERNAL_PAGES'))
+  assert.doesNotMatch(navSource, /biz-day-test|Biz-Day Test|Business Day Diagnostic/)
+  assert.doesNotMatch(setup, /biz-day-test|Biz-Day Test|Business Day Diagnostic/)
+  assert.match(shell, /const INTERNAL_PAGES[\s\S]*key: 'biz-day-test'[\s\S]*ownerOnly: true/)
+  assert.match(shell, /active === 'biz-day-test'\) return <BizDayTestView/)
 })
 
 test('available cards are full semantic buttons with native keyboard activation', () => {

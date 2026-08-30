@@ -1,6 +1,6 @@
 # KhataPro ERP — Current Implementation Status
 
-Last updated: 2026-08-30
+Last updated: 2026-08-31
 
 This file is the operational handoff/status document. Agents must read it together with:
 
@@ -485,3 +485,24 @@ new tables remained empty, and the non-target public-schema fingerprint matched 
 Rider Phase A code/schema is complete. Production financial/browser UAT remains pending:
 only real `biz-default` exists, so no Rider outcome, return, settlement, or voucher was
 created for testing.
+
+## Client Handover Polish Batch 2 — 2026-08-31
+
+Completed on `fix/backend-stock-recovery` as a visual/content-only pass. Existing Lucide
+icons were given semantic page mappings and a consistent 18px / 1.9-stroke navigation
+rhythm. Desktop and mobile navigation now use calmer green-neutral active, hover and focus
+states, clearer labels (`Daily Work`, `Out-of-City Sale`, `Roles & Permissions`), and the
+same semantic icon language.
+
+Client-facing Setup descriptions were simplified and route slugs removed. The business-day
+diagnostic remains implemented as an owner-only direct route but is excluded from normal
+navigation and Setup. The header status no longer exposes raw service messages or vendor
+wording. The `Ask KhataPro AI` launcher and inline AI action use a restrained outline/card
+treatment instead of a black floating action.
+
+Verification: changed-file ESLint passed; `npx tsc --noEmit` passed; focused navigation,
+core permission and Setup tests passed (19/19), with the explicit auth/permission/navigation
+selection passing 38/38; the full suite passed (507/507); and
+`npm run build` passed. Interactive desktop/mobile browser QA was attempted, but no browser
+session was connected in the execution environment, so no screenshot-based visual sign-off
+was possible. Protected local files were left unstaged and untouched by this batch.
