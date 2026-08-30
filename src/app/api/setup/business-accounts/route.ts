@@ -13,8 +13,16 @@ import { z } from 'zod'
 import { db } from '@/lib/db'
 import { authOptions } from '@/lib/auth/authOptions'
 import { loadSessionUser, requirePermission, writeAudit } from '@/lib/auth/permissions'
-import { getAccountingAvailability, unavailableAccountingPayload } from '@/lib/accounting/availability'
 import { BUSINESS_ACCOUNT_TYPES } from '@/lib/accounting/business-account-types'
+import { isSupabaseConfigured } from '@/lib/supabase/config'
+import { usesLegacyTransactionSchema } from '@/lib/identity/legacy-bridge'
+import {
+  BUSINESS_ACCOUNTS_UNAVAILABLE_MESSAGE,
+  LegacyBusinessAccountsUnavailableError,
+  createLegacyBusinessAccount,
+  listLegacyBusinessAccounts,
+  type BusinessAccountRecord,
+} from '@/lib/accounting/legacy-business-accounts'
 
 const CreateSchema = z.object({
   name: z.string().min(1).max(80),
@@ -24,6 +32,34 @@ const CreateSchema = z.object({
   accountNumber: z.string().max(40).optional(),
 })
 
+function unavailableResponse() {
+  return NextResponse.json(
+    { error: 'FEATURE_UNAVAILABLE', message: BUSINESS_ACCOUNTS_UNAVAILABLE_MESSAGE },
+    { status: 503 },
+  )
+}
+
+function serializeLegacy(row: BusinessAccountRecord) {
+  return {
+    id: row.id,
+    name: row.name,
+    type: row.type,
+    accountHolder: row.accountHolder,
+    bankName: row.bankName,
+    accountNumber: row.accountNumber,
+    isActive: row.isActive,
+    createdAt: row.createdAt,
+    ledger: {
+      id: row.accountId,
+      code: row.accountCode,
+      name: row.name,
+      category: row.categoryName,
+      categoryType: row.categoryType,
+      balancePaisas: row.balancePaisas,
+    },
+  }
+}
+
 export async function GET() {
   const session = await getServerSession(authOptions)
   if (!session?.user) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
@@ -32,9 +68,15 @@ export async function GET() {
     return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
   }
 
-  const capability = await getAccountingAvailability(su.businessId)
-  if (capability.path === 'operational-fallback') {
-    return NextResponse.json(unavailableAccountingPayload({ rows: [] }, capability.reason))
+  if (isSupabaseConfigured()) {
+    if (!await usesLegacyTransactionSchema()) return unavailableResponse()
+    try {
+      const rows = await listLegacyBusinessAccounts(su.businessId, su.profileId)
+      return NextResponse.json({ rows: rows.map(serializeLegacy) })
+    } catch (error) {
+      if (error instanceof LegacyBusinessAccountsUnavailableError) return unavailableResponse()
+      throw error
+    }
   }
 
   const rows = await db.businessAccount.findMany({
@@ -72,20 +114,32 @@ export async function POST(req: Request) {
   if (!session?.user) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
   const loaded = await loadSessionUser((session.user as any).id)
   const su = await requirePermission(loaded, 'can_manage_setup')
-  const capability = await getAccountingAvailability(su.businessId)
-  if (capability.path === 'operational-fallback') {
-    return NextResponse.json(unavailableAccountingPayload(
-      { error: 'ACCOUNTING_MIGRATION_REQUIRED' },
-      capability.reason,
-    ), { status: 409 })
-  }
-
   const body = await req.json().catch(() => null)
   const parsed = CreateSchema.safeParse(body)
   if (!parsed.success) {
     return NextResponse.json({ error: 'INVALID_INPUT', details: parsed.error.flatten() }, { status: 400 })
   }
   const { name, type, accountHolder, bankName, accountNumber } = parsed.data
+
+  if (isSupabaseConfigured()) {
+    if (!await usesLegacyTransactionSchema()) return unavailableResponse()
+    try {
+      const created = await createLegacyBusinessAccount({
+        businessId: su.businessId,
+        actorProfileId: su.profileId,
+        idempotencyKey: req.headers.get('x-idempotency-key') ?? crypto.randomUUID(),
+        name,
+        type,
+        accountHolder,
+        bankName,
+        accountNumber,
+      })
+      return NextResponse.json({ row: serializeLegacy(created) })
+    } catch (error) {
+      if (error instanceof LegacyBusinessAccountsUnavailableError) return unavailableResponse()
+      throw error
+    }
+  }
 
   // 1. Find the Asset category for this business.
   const assetCat = await db.accountCategory.findUnique({

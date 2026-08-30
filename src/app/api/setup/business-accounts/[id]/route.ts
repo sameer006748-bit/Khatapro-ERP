@@ -21,8 +21,16 @@ import { z } from 'zod'
 import { db } from '@/lib/db'
 import { authOptions } from '@/lib/auth/authOptions'
 import { loadSessionUser, requirePermission, writeAudit } from '@/lib/auth/permissions'
-import { getAccountingAvailability, unavailableAccountingPayload } from '@/lib/accounting/availability'
 import { ACCEPTED_BUSINESS_ACCOUNT_TYPES } from '@/lib/accounting/business-account-types'
+import { isSupabaseConfigured } from '@/lib/supabase/config'
+import { usesLegacyTransactionSchema } from '@/lib/identity/legacy-bridge'
+import {
+  BUSINESS_ACCOUNTS_UNAVAILABLE_MESSAGE,
+  LegacyBusinessAccountsUnavailableError,
+  deleteLegacyBusinessAccount,
+  updateLegacyBusinessAccount,
+  type BusinessAccountRecord,
+} from '@/lib/accounting/legacy-business-accounts'
 
 const UpdateSchema = z.object({
   name: z.string().min(1).max(80).optional(),
@@ -40,20 +48,18 @@ type AuthResult =
   | { error: NextResponse; su?: never }
   | { error?: never; su: SessionUser }
 
+function unavailableResponse() {
+  return NextResponse.json(
+    { error: 'FEATURE_UNAVAILABLE', message: BUSINESS_ACCOUNTS_UNAVAILABLE_MESSAGE },
+    { status: 503 },
+  )
+}
+
 async function authorize(): Promise<AuthResult> {
   const session = await getServerSession(authOptions)
   if (!session?.user) return { error: NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 }) }
   const loaded = await loadSessionUser((session.user as any).id)
   const su = await requirePermission(loaded, 'can_manage_setup')
-  const capability = await getAccountingAvailability(su.businessId)
-  if (capability.path === 'operational-fallback') {
-    return {
-      error: NextResponse.json(
-        unavailableAccountingPayload({ error: 'ACCOUNTING_MIGRATION_REQUIRED' }, capability.reason),
-        { status: 409 },
-      ),
-    }
-  }
   return { su }
 }
 
@@ -83,6 +89,27 @@ function serialize(row: {
   }
 }
 
+function serializeLegacy(row: BusinessAccountRecord) {
+  return {
+    id: row.id,
+    name: row.name,
+    type: row.type,
+    accountHolder: row.accountHolder,
+    bankName: row.bankName,
+    accountNumber: row.accountNumber,
+    isActive: row.isActive,
+    createdAt: row.createdAt,
+    ledger: {
+      id: row.accountId,
+      code: row.accountCode,
+      name: row.name,
+      category: row.categoryName,
+      categoryType: row.categoryType,
+      balancePaisas: row.balancePaisas,
+    },
+  }
+}
+
 export async function PATCH(req: Request, ctx: Ctx) {
   const auth = await authorize()
   if (auth.error) return auth.error
@@ -97,6 +124,22 @@ export async function PATCH(req: Request, ctx: Ctx) {
   const patch = parsed.data
   if (Object.keys(patch).length === 0) {
     return NextResponse.json({ error: 'NOTHING_TO_UPDATE' }, { status: 400 })
+  }
+
+  if (isSupabaseConfigured()) {
+    if (!await usesLegacyTransactionSchema()) return unavailableResponse()
+    try {
+      const row = await updateLegacyBusinessAccount({
+        businessId: su.businessId,
+        businessAccountId: id,
+        actorProfileId: su.profileId,
+        patch,
+      })
+      return NextResponse.json({ row: serializeLegacy(row) })
+    } catch (error) {
+      if (error instanceof LegacyBusinessAccountsUnavailableError) return unavailableResponse()
+      throw error
+    }
   }
 
   const existing = await db.businessAccount.findFirst({
@@ -155,6 +198,31 @@ export async function DELETE(_req: Request, ctx: Ctx) {
   if (auth.error) return auth.error
   const su = auth.su
   const { id } = await ctx.params
+
+  if (isSupabaseConfigured()) {
+    if (!await usesLegacyTransactionSchema()) return unavailableResponse()
+    try {
+      const result = await deleteLegacyBusinessAccount({
+        businessId: su.businessId,
+        businessAccountId: id,
+        actorProfileId: su.profileId,
+      })
+      if (!result.deleted && result.error === 'ACCOUNT_IN_USE') {
+        return NextResponse.json(
+          {
+            error: 'ACCOUNT_IN_USE',
+            message: 'This account is used by posted transactions and cannot be deleted. Deactivate it instead — it will stop appearing on new sales while old invoices stay readable.',
+            references: result.references,
+          },
+          { status: 409 },
+        )
+      }
+      return NextResponse.json({ ok: true, deletedId: result.deleted_id ?? id })
+    } catch (error) {
+      if (error instanceof LegacyBusinessAccountsUnavailableError) return unavailableResponse()
+      throw error
+    }
+  }
 
   const existing = await db.businessAccount.findFirst({
     where: { id, businessId: su.businessId },

@@ -62,15 +62,21 @@ export function BusinessAccountsView({ user }: { user: MeUser }) {
   })
 
   const createMut = useMutation({
-    mutationFn: async (payload: Record<string, unknown>) => {
+    mutationFn: async ({ payload, idempotencyKey }: {
+      payload: Record<string, unknown>
+      idempotencyKey: string
+    }) => {
       const r = await fetch('/api/setup/business-accounts', {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: {
+          'content-type': 'application/json',
+          'x-idempotency-key': idempotencyKey,
+        },
         body: JSON.stringify(payload),
       })
       if (!r.ok) {
         const j = await r.json().catch(() => ({}))
-        throw new Error(j?.error ?? 'CREATE_FAILED')
+        throw new Error(j?.message ?? j?.error ?? 'CREATE_FAILED')
       }
       return r.json()
     },
@@ -163,7 +169,10 @@ export function BusinessAccountsView({ user }: { user: MeUser }) {
       {open && canManage && (
         <div className="card-3d p-5 sm:p-6 fade-in">
           <h2 className="text-base font-semibold text-foreground mb-4">Create business account</h2>
-          <AccountForm submitting={createMut.isPending} onSubmit={(v) => createMut.mutate(v)} />
+          <AccountForm
+            submitting={createMut.isPending}
+            onSubmit={(payload) => createMut.mutate({ payload, idempotencyKey: crypto.randomUUID() })}
+          />
         </div>
       )}
 

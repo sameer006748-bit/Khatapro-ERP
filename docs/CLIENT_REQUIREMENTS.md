@@ -295,6 +295,7 @@ Internal commission details must not appear on the customer copy unless explicit
 - `00037_legacy_historical_sales_returns.sql` is APPLIED in production (2026-08-29); it is the scoped legacy-schema activation for partial/historical sales returns.
 - `00038_legacy_contra_batch.sql` is APPLIED in production (2026-08-29).
 - `00039_legacy_rider_delivery_outcomes.sql` is APPLIED in production (2026-08-30); its exact production definitions and unchanged historical Rider/COD row counts were verified read-only.
+- `00040_legacy_business_accounts.sql` is prepared locally but NOT applied; it is the additive legacy-schema Business Accounts compatibility path.
 - Do not broadly apply pending migrations without explicit preflight and approval.
 - Production Supabase project ref used by current project: `ebcebxwpddltiwrqybqc`.
 

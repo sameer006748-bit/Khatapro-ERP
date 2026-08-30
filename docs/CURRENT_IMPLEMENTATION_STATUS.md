@@ -203,6 +203,21 @@ Focused payment tests reported 14/14 passing.
 
 Optional BusinessAccount description remains schema-dependent because the model currently has no description field.
 
+### Legacy production compatibility update — 2026-08-31
+
+Business Accounts no longer uses the UUID-ledger availability gate for configured legacy
+production. Additive migration `00040_legacy_business_accounts.sql` is prepared locally and
+adds service-role-only list/create/update/delete RPCs over the existing legacy `accounts`,
+`account_categories`, and `business_accounts` tables. Create is atomic and idempotent, and
+business-account code allocation is serialized per business with a transaction advisory lock.
+Update keeps the linked account name/active state synchronized; used accounts remain protected
+from deletion and must be deactivated instead. Configured deployments never fall through to
+Prisma/SQLite. Missing 00040 returns a generic feature-unavailable response.
+
+`00040` is **NOT APPLIED TO PRODUCTION**. Production preflight and authenticated browser UAT
+remain pending; no approved disposable local PostgreSQL target was available for migration-backed
+runtime execution during this implementation.
+
 ## Local NextAuth Fix — Uncommitted
 
 Local login failed with NextAuth v4 `NO_SECRET` when `NODE_ENV=production` was inherited by the dev process.
