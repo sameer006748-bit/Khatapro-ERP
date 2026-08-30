@@ -9,9 +9,20 @@ const purchases = await readFile('src/lib/purchases/data-access.ts', 'utf8')
 const sales = await readFile('src/lib/sales/data-access.ts', 'utf8')
 const contra = await readFile('src/lib/money/operational-money.ts', 'utf8')
 const salesReturnRoute = await readFile('src/app/api/sales/[id]/return/route.ts', 'utf8')
-const clientRequirements = (await readFile('docs/CLIENT_REQUIREMENTS.md')).toString('utf16le').replace(/^\uFEFF/, '')
-const identityPolicy = (await readFile('docs/ACCOUNTING_CODES_AND_IDENTITIES.md')).toString('utf16le').replace(/^\uFEFF/, '')
-const implementationStatus = (await readFile('docs/CURRENT_IMPLEMENTATION_STATUS.md')).toString('utf16le').replace(/^\uFEFF/, '')
+// Docs are maintained in mixed encodings: CLIENT_REQUIREMENTS and
+// CURRENT_IMPLEMENTATION_STATUS were re-encoded to UTF-8 (at the historical
+// sales-return workflow commit), while ACCOUNTING_CODES_AND_IDENTITIES remains
+// UTF-16LE. Decode each file by its UTF-16LE BOM when present, else UTF-8.
+async function readDoc(path: string): Promise<string> {
+  const buf = await readFile(path)
+  return buf.length >= 2 && buf[0] === 0xff && buf[1] === 0xfe
+    ? buf.toString('utf16le').replace(/^\uFEFF/, '')
+    : buf.toString('utf8').replace(/^\uFEFF/, '')
+}
+
+const clientRequirements = await readDoc('docs/CLIENT_REQUIREMENTS.md')
+const identityPolicy = await readDoc('docs/ACCOUNTING_CODES_AND_IDENTITIES.md')
+const implementationStatus = await readDoc('docs/CURRENT_IMPLEMENTATION_STATUS.md')
 
 const executableSql = migration
   .split('\n')
@@ -94,9 +105,9 @@ test('migration-absent compatibility retries unchanged legacy posting signatures
 
 test('sales return fails actionably when 00036 is absent and never posts a partial legacy return', () => {
   assert.match(bridge, /LegacyIdentityMigrationRequiredError/)
-  assert.match(sales, /whole-invoice sales returns only; no return was posted/)
+  assert.match(sales, /callRequiredLegacyIdentityRpc\('post_sales_return'/)
   assert.match(salesReturnRoute, /LEGACY_IDENTITY_MIGRATION_REQUIRED|e\.code/)
-  assert.match(salesReturnRoute, /00036_legacy_transaction_identity_bridge\.sql/)
+  assert.match(salesReturnRoute, /migration: e\.migration/)
   assert.match(salesReturnRoute, /status: 409/)
 })
 
@@ -104,7 +115,7 @@ test('required docs record the verified legacy production contract and bridge st
   for (const doc of [clientRequirements, identityPolicy, implementationStatus]) {
     assert.match(doc, /legacy\/original schema|original schema|legacy production schema/)
     assert.match(doc, /00036_legacy_transaction_identity_bridge\.sql/)
-    assert.match(doc, /NOT APPLIED|not-yet-applied/)
+    assert.match(doc, /APPLIED in production|applied in production|applied directly to|applied and schema-verified/i)
   }
   assert.match(identityPolicy, /`CAP`[\s\S]+`DRW`[\s\S]+`CS`[\s\S]+`DO`/)
   assert.match(implementationStatus, /00033[\s\S]+00034[\s\S]+00035[\s\S]+not suitable/)
