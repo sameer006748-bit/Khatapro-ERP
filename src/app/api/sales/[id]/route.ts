@@ -13,6 +13,7 @@ import { authOptions } from '@/lib/auth/authOptions'
 import { loadSessionUser, hasPermission } from '@/lib/auth/permissions'
 import { getInvoice, getBusinessIdentity, resolveSalesmanIdForUser, verifyInvoiceOwnership } from '@/lib/sales/data-access'
 import { withObservability } from '@/lib/observability'
+import { getDeliveryOrderForInvoice } from '@/lib/delivery/data-access'
 
 const getSale = async (
   _req: Request,
@@ -49,7 +50,10 @@ const getSale = async (
   // Letterhead travels with the invoice so printed documents carry the real
   // business identity instead of a hardcoded product name.
   const business = await getBusinessIdentity(su.businessId)
-  return NextResponse.json({ invoice, business })
+  const delivery = invoice.invoiceType === 'ONLINE' || invoice.invoiceType === 'OFC'
+    ? await getDeliveryOrderForInvoice(su.businessId, id)
+    : null
+  return NextResponse.json({ invoice, business, delivery })
 }
 
 export const GET = withObservability('/api/sales/[id]', getSale)

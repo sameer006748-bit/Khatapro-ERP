@@ -10,7 +10,7 @@ import { useMemo, useState } from 'react'
 import { motion } from 'framer-motion'
 import { toast } from 'sonner'
 import { PrintInvoiceButton } from '@/components/invoice/print-invoice-button'
-import { buildInvoicePrintModel } from '@/lib/sales/sale-engine'
+import { InvoicePrintDialog, type PrintableInvoice } from '@/components/invoice/invoice-print-dialog'
 
 type Invoice = {
   id: string
@@ -32,7 +32,7 @@ type Invoice = {
   memo: string | null
   items?: Array<{ id: string; productId: string | null; productName: string; qty: number; returnedQty?: number; unitPrice: string; lineTotal: string; isTemporary: boolean }>
   payments?: Array<{ id: string; accountId?: string; accountCode?: string; accountName: string; amount: string; isChange?: boolean; direction?: string | null; paymentMode?: string | null }>
-  returns?: Array<{ returnNo: string; returnDate: string; total: string; settlementStatus: string }>
+  returns?: Array<{ returnNo: string; returnDate: string; total: string; settlementStatus: string; reason: string | null; lines: Array<{ productName: string; qty: number; unitPrice: string; lineTotal: string }> }>
 }
 
 /** One commission entry as returned by GET /api/sales/:id/commission. */
@@ -86,6 +86,7 @@ export function InvoiceDetailView({ invoiceId, openReturn = false }: { invoiceId
   const [paymentAmount, setPaymentAmount] = useState('')
   const [paymentMode, setPaymentMode] = useState('CASH')
   const [paymentIdempotencyKey, setPaymentIdempotencyKey] = useState(() => crypto.randomUUID())
+  const [returnPrintDocuments, setReturnPrintDocuments] = useState<PrintableInvoice[]>([])
 
   const q = useQuery<{ invoice: Invoice; business?: { name: string; phone: string | null; address: string | null } | null }>({
     queryKey: ['invoice', invoiceId],
@@ -193,35 +194,20 @@ export function InvoiceDetailView({ invoiceId, openReturn = false }: { invoiceId
   const outstandingBeforeFloor = BigInt(inv.total) - returnedTotal - BigInt(inv.paidAmount)
   const outstanding = outstandingBeforeFloor > 0n ? outstandingBeforeFloor : 0n
   const business = q.data.business ?? null
-  // The browser-print block below renders from the same engine serialization
-  // the print dialog uses, so the two documents cannot show different figures.
-  // Commission is deliberately not passed: this is the customer document.
-  const printModel = buildInvoicePrintModel({
-    invoiceNo: inv.invoiceNo,
-    invoiceType: inv.invoiceType,
-    invoiceDate: inv.invoiceDate,
-    sellerName: inv.salesmanName,
-    sellerRole: inv.salesmanName ? 'SALESMAN' : 'OWNER',
-    customerName: inv.customerName,
-    customerPhone: inv.customerPhone,
-    customerAddress: inv.customerAddress,
-    customerCity: inv.customerCity,
-    memo: inv.memo,
-    items: (inv.items ?? []).map(it => ({
-      productName: `${it.productName}${it.isTemporary ? ' *' : ''}`,
-      qty: it.qty,
-      returnedQty: it.returnedQty ?? 0,
-      unitPrice: it.unitPrice,
-      lineTotal: it.lineTotal,
-    })),
-    subtotal: inv.subtotal,
-    discount: inv.discount ?? '0',
-    total: inv.total,
-    paidAmount: inv.paidAmount,
-    payments: (inv.payments ?? []).map(p => ({ accountCode: p.accountCode, accountName: p.accountName, amount: p.amount, isChange: p.isChange })),
-    isReturned: inv.isReturned,
-    isCancelled: inv.isCancelled,
-  })
+
+  function salesReturnDocument(row: NonNullable<Invoice['returns']>[number]): PrintableInvoice {
+    return {
+      id: `${inv.id}-${row.returnNo}`, invoiceNo: row.returnNo, invoiceType: 'COUNTER', invoiceDate: row.returnDate,
+      customerName: inv.customerName, customerPhone: inv.customerPhone, customerAddress: inv.customerAddress, customerCity: inv.customerCity,
+      salesmanName: inv.salesmanName, source: null, memo: row.reason, subtotal: row.total, discount: '0', deliveryFee: null,
+      total: row.total, paidAmount: '0', outstanding: '0', changeAmount: null, codAmount: null,
+      isReturned: false, isCancelled: false, documentKind: 'sales-return', documentTitle: 'SALES RETURN', channelLabel: 'Customer Return',
+      partyLabel: 'Customer', originalReference: inv.invoiceNo, referenceLabel: 'Original invoice', showSettlement: false,
+      settlementLabel: row.settlementStatus === 'REFUNDED' ? 'REFUNDED' : row.settlementStatus === 'CREDIT_DUE' ? 'CUSTOMER CREDIT DUE' : 'POSTED',
+      items: row.lines.map(line => ({ productName: line.productName, sku: null, qty: line.qty, unitPrice: line.unitPrice, lineTotal: line.lineTotal })),
+      payments: [],
+    }
+  }
 
   function back() { router.push('/') }
 
@@ -326,7 +312,7 @@ export function InvoiceDetailView({ invoiceId, openReturn = false }: { invoiceId
             {inv.returns.map(item => (
               <div key={item.returnNo} className="flex items-center justify-between gap-4 px-5 py-3 text-sm">
                 <div><div className="font-medium text-foreground" data-num>{item.returnNo}</div><div className="text-xs text-muted-foreground">Original invoice {inv.invoiceNo} · {bizDate(item.returnDate)}</div></div>
-                <div className="text-right"><div className="font-medium text-foreground" data-num>{formatMoney(BigInt(item.total))}</div><div className={`text-[10px] uppercase ${item.settlementStatus === 'REFUNDED' ? 'text-emerald-700' : 'text-amber-700'}`}>{item.settlementStatus === 'REFUNDED' ? 'Refunded' : item.settlementStatus === 'CREDIT_DUE' ? 'Customer credit due' : 'Posted'}</div></div>
+                <div className="flex items-center gap-3"><div className="text-right"><div className="font-medium text-foreground" data-num>{formatMoney(BigInt(item.total))}</div><div className={`text-[10px] uppercase ${item.settlementStatus === 'REFUNDED' ? 'text-emerald-700' : 'text-amber-700'}`}>{item.settlementStatus === 'REFUNDED' ? 'Refunded' : item.settlementStatus === 'CREDIT_DUE' ? 'Customer credit due' : 'Posted'}</div></div><Button variant="outline" size="sm" className="h-7 px-2 text-[10px]" onClick={() => setReturnPrintDocuments([salesReturnDocument(item)])}><Printer className="size-3" /> Print</Button></div>
               </div>
             ))}
           </div>
@@ -436,105 +422,13 @@ export function InvoiceDetailView({ invoiceId, openReturn = false }: { invoiceId
 
       {/* ─── PRINT-ONLY INVOICE (half-A4/A5, browser print) ─── */}
       {/* Hidden on screen via offscreen positioning; shown only during print via @media print CSS */}
-      <div className="print-invoice" style={{ position: 'absolute', left: '-9999px', top: 0, width: '100%' }}>
-        <div style={{ fontFamily: 'Arial, sans-serif', color: '#000', padding: '6mm', maxWidth: '140mm', margin: '0 auto' }}>
-          {/* Header */}
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: '2px solid #000', paddingBottom: '6px', marginBottom: '8px' }}>
-            <div>
-              <div style={{ fontSize: '18px', fontWeight: 'bold', color: '#000' }}>{business?.name ?? 'Invoice'}</div>
-              {business?.phone && <div style={{ fontSize: '8px', color: '#666' }}>{business.phone}</div>}
-              {business?.address && <div style={{ fontSize: '8px', color: '#666' }}>{business.address}</div>}
-            </div>
-            <div style={{ textAlign: 'right' }}>
-              <div style={{ fontSize: '11px', fontWeight: 'bold', letterSpacing: '0.5px' }}>{printModel.documentTitle}</div>
-              <div style={{ fontSize: '14px', fontWeight: 'bold' }}>{inv.invoiceNo}</div>
-              <div style={{ fontSize: '9px', color: '#666' }}>{printModel.channelLabel} · {bizFormat(inv.invoiceDate, 'datetime')}</div>
-            </div>
-          </div>
-          {/* Meta */}
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px', fontSize: '9px' }}>
-            <div>
-              {printModel.sellerName && <div><strong>Seller:</strong> {printModel.sellerName}{printModel.sellerRoleLabel ? ` (${printModel.sellerRoleLabel})` : ''}</div>}
-            </div>
-            <div style={{ textAlign: 'right' }}>
-              {inv.customerName && <div><strong>Customer:</strong> {inv.customerName}</div>}
-              {inv.customerPhone && <div><strong>Phone:</strong> {inv.customerPhone}</div>}
-              {inv.customerAddress && <div style={{ fontSize: '8px' }}>{inv.customerAddress}{inv.customerCity ? `, ${inv.customerCity}` : ''}</div>}
-            </div>
-          </div>
-          {/* Items — sold/returned/net columns appear only when the bill has returns */}
-          <table style={{ width: '100%', fontSize: '9px', borderCollapse: 'collapse', marginBottom: '6px' }}>
-            <thead>
-              <tr style={{ background: '#f0f0f0', borderBottom: '1px solid #000' }}>
-                <th style={{ textAlign: 'left', padding: '3px 4px', fontSize: '8px', textTransform: 'uppercase' }}>Item</th>
-                <th style={{ textAlign: 'right', padding: '3px', width: '28px', fontSize: '8px' }}>{printModel.hasReturns ? 'Sold' : 'Qty'}</th>
-                {printModel.hasReturns && <th style={{ textAlign: 'right', padding: '3px', width: '28px', fontSize: '8px' }}>Ret.</th>}
-                {printModel.hasReturns && <th style={{ textAlign: 'right', padding: '3px', width: '28px', fontSize: '8px' }}>Net</th>}
-                <th style={{ textAlign: 'right', padding: '3px 4px', width: '50px', fontSize: '8px' }}>Rate</th>
-                <th style={{ textAlign: 'right', padding: '3px 4px', width: '60px', fontSize: '8px' }}>Total</th>
-              </tr>
-            </thead>
-            <tbody>
-              {printModel.lines.map((line, i) => (
-                <tr key={i} style={{ borderBottom: '1px solid #ddd' }}>
-                  <td style={{ padding: '3px 4px' }}>{line.productName}</td>
-                  <td style={{ textAlign: 'right', padding: '3px' }}>{line.soldQty}</td>
-                  {printModel.hasReturns && <td style={{ textAlign: 'right', padding: '3px' }}>{line.returnedQty}</td>}
-                  {printModel.hasReturns && <td style={{ textAlign: 'right', padding: '3px', fontWeight: 'bold' }}>{line.netQty}</td>}
-                  <td style={{ textAlign: 'right', padding: '3px 4px', fontFamily: 'monospace' }}>{formatMoney(BigInt(line.unitPricePaisas), false)}</td>
-                  <td style={{ textAlign: 'right', padding: '3px 4px', fontFamily: 'monospace', fontWeight: 'bold' }}>{formatMoney(BigInt(line.lineTotalPaisas), false)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {/* Totals */}
-          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '8px' }}>
-            <div style={{ minWidth: '150px', fontSize: '10px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0' }}>
-                <span>Subtotal</span><span style={{ fontFamily: 'monospace' }}>{formatMoney(BigInt(printModel.subtotalPaisas), false)}</span>
-              </div>
-              {BigInt(printModel.returnDeductionPaisas) > 0n && (
-                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0' }}>
-                  <span>Less returns</span><span style={{ fontFamily: 'monospace' }}>-{formatMoney(BigInt(printModel.returnDeductionPaisas), false)}</span>
-                </div>
-              )}
-              {BigInt(printModel.discountPaisas) > 0n && (
-                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0' }}>
-                  <span>Discount</span><span style={{ fontFamily: 'monospace' }}>-{formatMoney(BigInt(printModel.discountPaisas), false)}</span>
-                </div>
-              )}
-              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0', borderTop: '1px solid #000', fontWeight: 'bold' }}>
-                <span>Net Payable</span><span style={{ fontFamily: 'monospace' }}>{formatMoney(BigInt(printModel.netPayablePaisas))}</span>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0' }}>
-                <span>Paid</span><span style={{ fontFamily: 'monospace' }}>{formatMoney(BigInt(printModel.paidPaisas))}</span>
-              </div>
-              {BigInt(printModel.balancePaisas) > 0n && (
-                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0', color: '#c00' }}>
-                  <span>Balance</span><span style={{ fontFamily: 'monospace' }}>{formatMoney(BigInt(printModel.balancePaisas))}</span>
-                </div>
-              )}
-              {printModel.payments.filter(p => p.isChange).map((p, i) => (
-                <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0' }}>
-                  <span>Change ({p.accountName})</span><span style={{ fontFamily: 'monospace' }}>{formatMoney(BigInt(p.amountPaisas))}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-          {/* Payment method */}
-          {printModel.payments.length > 0 && (
-            <div style={{ fontSize: '8px', marginBottom: '6px' }}>
-              <strong>Payment:</strong>{' '}
-              {printModel.payments.map(p => `${p.accountName}${p.isChange ? ' (change)' : ''} ${formatMoney(BigInt(p.amountPaisas), false)}`).join(' · ')}
-            </div>
-          )}
-          {/* Footer */}
-          <div style={{ textAlign: 'center', fontSize: '7px', color: '#999', borderTop: '1px solid #ccc', paddingTop: '4px' }}>
-            {business?.name ?? 'Invoice'} · PKR · Asia/Karachi · * = temporary item
-          </div>
-          {inv.memo && <div style={{ fontSize: '8px', color: '#666', marginTop: '4px' }}><strong>Note:</strong> {inv.memo}</div>}
-        </div>
-      </div>
+      <InvoicePrintDialog
+        open={returnPrintDocuments.length > 0}
+        onClose={() => setReturnPrintDocuments([])}
+        invoices={returnPrintDocuments}
+        businessName={business?.name ?? 'Sales Return'}
+        businessContact={business ? { phone: business.phone ?? undefined, address: business.address ?? undefined } : null}
+      />
     </motion.div>
   )
 }

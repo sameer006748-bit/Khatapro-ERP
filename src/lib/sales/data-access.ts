@@ -54,7 +54,14 @@ export type CustomerRow = {
   city: string | null
   isActive: boolean
 }
-export type InvoiceReturnRow = { returnNo: string; returnDate: string; total: string; settlementStatus: string }
+export type InvoiceReturnRow = {
+  returnNo: string
+  returnDate: string
+  total: string
+  settlementStatus: string
+  reason: string | null
+  lines: Array<{ productName: string; qty: number; unitPrice: string; lineTotal: string }>
+}
 export type InvoiceRow = { id: string; invoiceNo: string; invoiceType: string; invoiceDate: string; customerName: string | null; customerPhone?: string | null; customerAddress?: string | null; customerCity?: string | null; salesmanName: string | null; subtotal: string; discount?: string; total: string; paidAmount: string; status?: string; isCancelled: boolean; isReturned: boolean; memo?: string | null; items?: InvoiceItemRow[]; payments?: PaymentAllocationRow[]; returns?: InvoiceReturnRow[] }
 export type InvoiceItemRow = { id: string; productId: string | null; productName: string; qty: number; returnedQty?: number; unitPrice: string; lineTotal: string; isTemporary: boolean }
 export type InvoiceCommissionRow = {
@@ -704,13 +711,43 @@ export async function getInvoice(businessId: string, invoiceId: string): Promise
     const r = inv as any
     const { data: payments, error: paymentError } = await admin.from('payments').select('id, amount, direction, payment_mode').eq('business_id', businessId).eq('invoice_id', invoiceId).order('created_at')
     if (paymentError) throw new Error(`Supabase invoice payments: ${paymentError.message}`)
-    const { data: returns, error: returnError } = await admin.from('sales_returns').select('*').eq('business_id', businessId).eq('original_invoice_id', invoiceId).order('return_date')
+    const { data: returns, error: returnError } = await admin.from('sales_returns').select('id, return_no, return_date, total, settlement_status, reason').eq('business_id', businessId).eq('original_invoice_id', invoiceId).order('return_date')
     if (returnError) throw new Error(`Supabase invoice returns: ${returnError.message}`)
-    return { id: r.id, invoiceNo: r.invoice_no, invoiceType: r.invoice_type, invoiceDate: r.invoice_date, customerName: r.customer_name, customerPhone: r.customer_phone, customerAddress: r.customer_address, customerCity: r.customer_city, salesmanName: r.salesmen?.name ?? null, subtotal: String(r.subtotal), discount: String(r.discount ?? 0), total: String(r.total), paidAmount: String(r.paid), status: r.status, isCancelled: r.status === 'Cancelled', isReturned: r.status === 'Returned', memo: r.memo, items: (r.invoice_items ?? []).map((it: any) => ({ id: it.id, productId: it.product_id, productName: it.product_name, qty: it.qty, returnedQty: it.returned_qty, unitPrice: String(it.unit_price), lineTotal: String(it.line_total), isTemporary: it.is_temporary })), payments: (payments ?? []).map((p: any) => ({ id: p.id, accountName: p.payment_mode ?? 'Payment', amount: String(p.amount), direction: p.direction, paymentMode: p.payment_mode })), returns: (returns ?? []).map((sr: any) => ({ returnNo: sr.return_no, returnDate: sr.return_date, total: String(sr.total), settlementStatus: sr.settlement_status ?? 'POSTED' })) }
+    const returnIds = (returns ?? []).map((sr: any) => sr.id)
+    let returnLines: any[] = []
+    if (returnIds.length > 0) {
+      const { data: lines, error: lineError } = await admin.from('sales_return_lines')
+        .select('sales_return_id, original_invoice_item_id, returned_qty')
+        .eq('business_id', businessId)
+        .in('sale_return_id', returnIds)
+      if (lineError) throw new Error(`Supabase invoice return lines: ${lineError.message}`)
+      returnLines = lines ?? []
+    }
+    const sourceItems = new Map((r.invoice_items ?? []).map((it: any) => [it.id, it]))
+    return { id: r.id, invoiceNo: r.invoice_no, invoiceType: r.invoice_type, invoiceDate: r.invoice_date, customerName: r.customer_name, customerPhone: r.customer_phone, customerAddress: r.customer_address, customerCity: r.customer_city, salesmanName: r.salesmen?.name ?? null, subtotal: String(r.subtotal), discount: String(r.discount ?? 0), total: String(r.total), paidAmount: String(r.paid), status: r.status, isCancelled: r.status === 'Cancelled', isReturned: r.status === 'Returned', memo: r.memo, items: (r.invoice_items ?? []).map((it: any) => ({ id: it.id, productId: it.product_id, productName: it.product_name, qty: it.qty, returnedQty: it.returned_qty, unitPrice: String(it.unit_price), lineTotal: String(it.line_total), isTemporary: it.is_temporary })), payments: (payments ?? []).map((p: any) => ({ id: p.id, accountName: p.payment_mode ?? 'Payment', amount: String(p.amount), direction: p.direction, paymentMode: p.payment_mode })), returns: (returns ?? []).map((sr: any) => ({
+      returnNo: sr.return_no,
+      returnDate: sr.return_date,
+      total: String(sr.total),
+      settlementStatus: sr.settlement_status ?? 'POSTED',
+      reason: sr.reason ?? null,
+      lines: returnLines.filter(line => line.sales_return_id === sr.id).map(line => {
+        const source = sourceItems.get(line.original_invoice_item_id) as any
+        const qty = Number(line.returned_qty)
+        const unitPrice = String(source?.unit_price ?? '0')
+        return { productName: source?.product_name ?? 'Item', qty, unitPrice, lineTotal: (BigInt(unitPrice) * BigInt(qty)).toString() }
+      }),
+    })) }
   }
-  const inv = await db.invoice.findFirst({ where: { id: invoiceId, businessId }, include: { salesman: true, items: true, paymentAllocations: { include: { account: true } }, salesReturns: true } })
+  const inv = await db.invoice.findFirst({ where: { id: invoiceId, businessId }, include: { salesman: true, items: true, paymentAllocations: { include: { account: true } }, salesReturns: { include: { lines: { include: { originalInvoiceItem: true } } } } } })
   if (!inv) return null
-  return { id: inv.id, invoiceNo: inv.invoiceNo, invoiceType: inv.invoiceType, invoiceDate: inv.invoiceDate.toISOString(), customerName: inv.customerName, customerPhone: inv.customerPhone, customerAddress: inv.customerAddress, customerCity: inv.customerCity, salesmanName: inv.salesman?.name ?? null, subtotal: inv.subtotal.toString(), discount: inv.discount.toString(), total: inv.total.toString(), paidAmount: inv.paidAmount.toString(), isCancelled: inv.isCancelled, isReturned: inv.isReturned, memo: inv.memo, items: inv.items.map((it) => ({ id: it.id, productId: it.productId, productName: it.productName, qty: it.qty, returnedQty: it.returnedQty, unitPrice: it.unitPrice.toString(), lineTotal: it.lineTotal.toString(), isTemporary: it.isTemporary })), payments: inv.paymentAllocations.map((pa) => ({ id: pa.id, accountId: pa.accountId, accountCode: pa.account.code, accountName: pa.account.name, amount: pa.amount.toString(), isChange: pa.isChange })), returns: inv.salesReturns.map((sr) => ({ returnNo: sr.returnNo, returnDate: sr.returnDate.toISOString(), total: sr.total.toString(), settlementStatus: sr.status === 'refunded' ? 'REFUNDED' : sr.status === 'credit_due' ? 'CREDIT_DUE' : 'POSTED' })) }
+  return { id: inv.id, invoiceNo: inv.invoiceNo, invoiceType: inv.invoiceType, invoiceDate: inv.invoiceDate.toISOString(), customerName: inv.customerName, customerPhone: inv.customerPhone, customerAddress: inv.customerAddress, customerCity: inv.customerCity, salesmanName: inv.salesman?.name ?? null, subtotal: inv.subtotal.toString(), discount: inv.discount.toString(), total: inv.total.toString(), paidAmount: inv.paidAmount.toString(), isCancelled: inv.isCancelled, isReturned: inv.isReturned, memo: inv.memo, items: inv.items.map((it) => ({ id: it.id, productId: it.productId, productName: it.productName, qty: it.qty, returnedQty: it.returnedQty, unitPrice: it.unitPrice.toString(), lineTotal: it.lineTotal.toString(), isTemporary: it.isTemporary })), payments: inv.paymentAllocations.map((pa) => ({ id: pa.id, accountId: pa.accountId, accountCode: pa.account.code, accountName: pa.account.name, amount: pa.amount.toString(), isChange: pa.isChange })), returns: inv.salesReturns.map((sr) => ({
+    returnNo: sr.returnNo,
+    returnDate: sr.returnDate.toISOString(),
+    total: sr.total.toString(),
+    settlementStatus: sr.status === 'refunded' ? 'REFUNDED' : sr.status === 'credit_due' ? 'CREDIT_DUE' : 'POSTED',
+    reason: sr.reason,
+    lines: sr.lines.map(line => ({ productName: line.originalInvoiceItem.productName, qty: line.returnedQty, unitPrice: line.originalInvoiceItem.unitPrice.toString(), lineTotal: (line.originalInvoiceItem.unitPrice * BigInt(line.returnedQty)).toString() })),
+  })) }
 }
 
 /**

@@ -15,12 +15,13 @@ import { useRouter } from 'next/navigation'
 import type { MeUser } from '@/components/erp/erp-app'
 import { AiFieldHelp } from '@/components/erp/ai-actions'
 import { apiFetchJson } from '@/lib/api-client'
+import { InvoicePrintDialog, type PrintableInvoice } from '@/components/invoice/invoice-print-dialog'
 
 type Purchase = { id: string; purchaseNo: string; vendorId: string; vendorName: string | null; vendorPhone?: string | null; vendorAddress?: string | null; vendorCity?: string | null; supplierBillNo: string | null; purchaseDate: string; total: string; paidAmount: string; outstandingAmount: string; status: string }
 type Vendor = { id: string; name: string; phone: string | null }
 type Product = { id: string; name: string; currentStock: number; purchasePrice: number }
 type Account = { id: string; code: string; name: string }
-type PurchaseDetail = Purchase & { subtotal: string; discount: string; additionalCharges: string; notes: string | null; voucherId: string | null; items?: Array<{ id: string; productId: string | null; productName: string; quantity: number; unitCost: string; lineTotal: string; returnedQuantity: number }>; payments?: Array<{ id: string; accountId: string; amount: string; paymentType: string; paymentDate: string; notes: string | null }> }
+type PurchaseDetail = Purchase & { subtotal: string; discount: string; additionalCharges: string; notes: string | null; voucherId: string | null; items?: Array<{ id: string; productId: string | null; productName: string; quantity: number; unitCost: string; lineTotal: string; returnedQuantity: number }>; payments?: Array<{ id: string; accountId: string; amount: string; paymentType: string; paymentDate: string; notes: string | null }>; returns?: Array<{ returnNo: string; returnDate: string; totalAmount: string; settlementType: string; notes: string | null; items: Array<{ productName: string; quantity: number; unitCost: string; lineTotal: string }> }> }
 
 type CartItem = { key: string; productId: string; productName: string; qty: string; unitCost: string }
 type Payment = { accountId: string; amountPaisas: string; paymentType: string }
@@ -215,17 +216,41 @@ function AddPurchaseModal({ user, onClose, onViewPurchase }: { user: MeUser; onC
 
 function PurchaseDetailModal({ purchaseId, user, canPay, canReturn, onClose, onPay, onReturn, onReplacement, onApplyAdvance }: { purchaseId: string; user: MeUser; canPay: boolean; canReturn: boolean; onClose: () => void; onPay: (p: Purchase) => void; onReturn: (p: PurchaseDetail) => void; onReplacement: (p: PurchaseDetail) => void; onApplyAdvance: (p: PurchaseDetail) => void }) {
   const qc = useQueryClient()
-  const q = useQuery<{ purchase: PurchaseDetail }>({ queryKey: ['purchase', purchaseId], queryFn: ({ signal }) => apiFetchJson(`/api/purchases/${purchaseId}`, { signal }), enabled: !!purchaseId })
+  const [printDocuments, setPrintDocuments] = useState<PrintableInvoice[]>([])
+  const q = useQuery<{ purchase: PurchaseDetail; business?: { name: string; phone: string | null; address: string | null } | null }>({ queryKey: ['purchase', purchaseId], queryFn: ({ signal }) => apiFetchJson(`/api/purchases/${purchaseId}`, { signal }), enabled: !!purchaseId })
   const replacementsQ = useQuery<{ rows: Array<{ id: string; replacementNo: string; date: string; outgoingValue: string; incomingValue: string; valueDiff: string; notes: string | null }> }>({ queryKey: ['purchase-replacements', purchaseId], queryFn: ({ signal }) => apiFetchJson(`/api/purchases/${purchaseId}/replacements`, { signal }), enabled: !!purchaseId })
 
   if (q.isLoading) return <Shell title="Loading…" onClose={onClose}><div className="text-center py-4 text-sm text-muted-foreground animate-pulse">Loading purchase…</div></Shell>
   if (q.isError || !q.data?.purchase) return <Shell title="Error" onClose={onClose}><div className="text-center py-4"><p className="text-sm text-destructive mb-3">Unable to load purchase.</p><Button variant="outline" size="sm" onClick={() => q.refetch()}>Retry</Button></div></Shell>
   const p = q.data.purchase
+  const business = q.data.business ?? null
   const outstanding = BigInt(p.outstandingAmount)
   const replacements = replacementsQ.data?.rows ?? []
 
-  function printPurchase() {
-    window.print()
+  const purchaseDocument: PrintableInvoice = {
+    id: p.id, invoiceNo: p.purchaseNo, invoiceType: 'COUNTER', invoiceDate: p.purchaseDate,
+    customerName: p.vendorName, customerPhone: p.vendorPhone ?? null, customerAddress: p.vendorAddress ?? null, customerCity: p.vendorCity ?? null,
+    salesmanName: null, source: null, memo: p.notes, subtotal: p.subtotal, discount: p.discount, deliveryFee: null,
+    total: p.total, paidAmount: p.paidAmount, outstanding: p.outstandingAmount, changeAmount: null, codAmount: null,
+    isReturned: false, isCancelled: false, documentKind: 'purchase', documentTitle: 'PURCHASE BILL', channelLabel: 'Vendor Purchase',
+    partyLabel: 'Vendor', originalReference: p.supplierBillNo, referenceLabel: p.supplierBillNo ? 'Supplier bill' : null,
+    additionalCharges: p.additionalCharges, settlementLabel: p.status.replace(/_/g, ' ').toUpperCase(),
+    items: (p.items ?? []).map(item => ({ productName: item.productName, sku: null, qty: item.quantity, returnedQty: item.returnedQuantity, unitPrice: item.unitCost, lineTotal: item.lineTotal })),
+    payments: (p.payments ?? []).map(payment => ({ accountCode: '', accountName: payment.paymentType.replace(/_/g, ' '), amount: payment.amount, isChange: false })),
+  }
+
+  function purchaseReturnDocument(row: NonNullable<PurchaseDetail['returns']>[number]): PrintableInvoice {
+    return {
+      id: `${p.id}-${row.returnNo}`, invoiceNo: row.returnNo, invoiceType: 'COUNTER', invoiceDate: row.returnDate,
+      customerName: p.vendorName, customerPhone: p.vendorPhone ?? null, customerAddress: p.vendorAddress ?? null, customerCity: p.vendorCity ?? null,
+      salesmanName: null, source: null, memo: row.notes, subtotal: row.totalAmount, discount: '0', deliveryFee: null,
+      total: row.totalAmount, paidAmount: '0', outstanding: '0', changeAmount: null, codAmount: null,
+      isReturned: false, isCancelled: false, documentKind: 'purchase-return', documentTitle: 'PURCHASE RETURN', channelLabel: 'Vendor Return',
+      partyLabel: 'Vendor', originalReference: p.purchaseNo, referenceLabel: 'Original purchase', showSettlement: false,
+      settlementLabel: row.settlementType.replace(/_/g, ' ').toUpperCase(),
+      items: row.items.map(item => ({ productName: item.productName, sku: null, qty: item.quantity, unitPrice: item.unitCost, lineTotal: item.lineTotal })),
+      payments: [],
+    }
   }
 
   return <Shell title={p.purchaseNo} onClose={onClose} wide>
@@ -256,11 +281,12 @@ function PurchaseDetailModal({ purchaseId, user, canPay, canReturn, onClose, onP
       {p.payments && p.payments.length > 0 && <div className="border border-border rounded-lg p-2"><div className="text-[10px] uppercase text-muted-foreground mb-1">Payments</div><div className="space-y-0.5">{p.payments.map(pp => <div key={pp.id} className="flex justify-between text-xs"><span className="text-muted-foreground">{pp.paymentType.replace(/_/g, ' ')} · {bizDate(pp.paymentDate)}</span><span data-num>{formatWholeRupees(BigInt(pp.amount), false)}</span></div>)}</div></div>}
       {/* Replacements */}
       {replacements.length > 0 && <div className="border border-border rounded-lg p-2"><div className="text-[10px] uppercase text-muted-foreground mb-1 flex items-center gap-1"><ArrowRightLeft className="size-3" /> Replacements</div><div className="space-y-0.5">{replacements.map(r => <div key={r.id} className="flex justify-between text-xs"><span data-num>{r.replacementNo}</span><span className={BigInt(r.valueDiff) > 0n ? 'text-amber-600' : BigInt(r.valueDiff) < 0n ? 'text-emerald-600' : 'text-muted-foreground'} data-num>{BigInt(r.valueDiff) === 0n ? 'Equal' : formatWholeRupees(BigInt(r.valueDiff), false)}</span></div>)}</div></div>}
+      {p.returns && p.returns.length > 0 && <div className="border border-border rounded-lg p-2"><div className="text-[10px] uppercase text-muted-foreground mb-1">Purchase Returns</div><div className="divide-y divide-border/50">{p.returns.map(row => <div key={row.returnNo} className="flex items-center justify-between gap-3 py-1.5"><div className="text-xs"><div className="font-medium" data-num>{row.returnNo}</div><div className="text-[10px] text-muted-foreground">{bizDate(row.returnDate)} · {row.settlementType.replace(/_/g, ' ')}</div></div><div className="flex items-center gap-2"><span className="text-xs font-medium" data-num>{formatWholeRupees(BigInt(row.totalAmount))}</span><Button variant="outline" size="sm" className="h-7 px-2 text-[10px]" onClick={() => setPrintDocuments([purchaseReturnDocument(row)])}><Printer className="size-3" /> Print</Button></div></div>)}</div></div>}
       {/* Accounting impact (Owner/Accountant only) */}
       {p.voucherId && user.permissions.includes('can_view_day_book') && <AccountingImpact voucherId={p.voucherId} />}
       {/* Actions */}
       <div className="flex gap-2 pt-2 border-t border-border flex-wrap">
-        <Button variant="outline" size="sm" onClick={printPurchase}><Printer className="size-3.5" /> Print</Button>
+        <Button variant="outline" size="sm" onClick={() => setPrintDocuments([purchaseDocument])}><Printer className="size-3.5" /> Print</Button>
         {canPay && outstanding > 0n && <Button size="sm" onClick={() => onPay(p)}><Wallet className="size-3.5" /> Pay Vendor</Button>}
         {canPay && outstanding > 0n && <Button variant="outline" size="sm" onClick={() => onApplyAdvance(p)}><RefreshCw className="size-3.5" /> Apply Advance</Button>}
         {canReturn && <Button variant="outline" size="sm" onClick={() => onReturn(p)}><TrendingDown className="size-3.5" /> Return Items</Button>}
@@ -269,97 +295,13 @@ function PurchaseDetailModal({ purchaseId, user, canPay, canReturn, onClose, onP
     </div>
 
     {/* ─── PRINT-ONLY PURCHASE DOCUMENT (A5 / half-A4) ─── */}
-    <div className="print-purchase" style={{ position: 'absolute', left: '-9999px', top: 0, width: '100%' }}>
-      <div style={{ fontFamily: 'Arial, sans-serif', color: '#000', padding: '6mm', maxWidth: '140mm', margin: '0 auto' }}>
-        {/* Header */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '2px solid #000', paddingBottom: '6px', marginBottom: '8px' }}>
-          <div>
-            <div style={{ fontSize: '18px', fontWeight: 'bold', color: '#000' }}>KhataPro ERP</div>
-            <div style={{ fontSize: '8px', color: '#666' }}>Accounting-First Garments ERP</div>
-          </div>
-          <div style={{ textAlign: 'right' }}>
-            <div style={{ fontSize: '14px', fontWeight: 'bold' }}>PURCHASE</div>
-            <div style={{ fontSize: '11px', fontWeight: 'bold' }}>{p.purchaseNo}</div>
-            <div style={{ fontSize: '9px', color: '#666' }}>{bizDate(p.purchaseDate)}</div>
-          </div>
-        </div>
-        {/* Vendor + Bill info */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px', fontSize: '9px' }}>
-          <div>
-            <div style={{ fontWeight: 'bold', fontSize: '8px', textTransform: 'uppercase', color: '#666' }}>Vendor</div>
-            <div style={{ fontWeight: 'bold' }}>{p.vendorName ?? '—'}</div>
-            {p.vendorPhone && <div>Phone: {p.vendorPhone}</div>}
-            {p.vendorAddress && <div style={{ fontSize: '8px' }}>{p.vendorAddress}{p.vendorCity ? `, ${p.vendorCity}` : ''}</div>}
-          </div>
-          <div style={{ textAlign: 'right' }}>
-            {p.supplierBillNo && <div><strong>Bill No:</strong> {p.supplierBillNo}</div>}
-            <div><strong>Status:</strong> {p.status.replace(/_/g, ' ')}</div>
-          </div>
-        </div>
-        {/* Items */}
-        <table style={{ width: '100%', fontSize: '9px', borderCollapse: 'collapse', marginBottom: '6px' }}>
-          <thead>
-            <tr style={{ background: '#f0f0f0', borderBottom: '1px solid #000' }}>
-              <th style={{ textAlign: 'left', padding: '3px 4px', fontSize: '8px', textTransform: 'uppercase' }}>Product</th>
-              <th style={{ textAlign: 'center', padding: '3px', width: '30px', fontSize: '8px' }}>Qty</th>
-              <th style={{ textAlign: 'right', padding: '3px 4px', width: '55px', fontSize: '8px' }}>Unit Cost</th>
-              <th style={{ textAlign: 'right', padding: '3px 4px', width: '65px', fontSize: '8px' }}>Total</th>
-            </tr>
-          </thead>
-          <tbody>
-            {p.items?.map(it => (
-              <tr key={it.id} style={{ borderBottom: '1px solid #ddd' }}>
-                <td style={{ padding: '3px 4px' }}>{it.productName}{it.returnedQuantity > 0 ? ` (-${it.returnedQuantity} ret)` : ''}</td>
-                <td style={{ textAlign: 'center', padding: '3px' }}>{it.quantity}</td>
-                <td style={{ textAlign: 'right', padding: '3px 4px', fontFamily: 'monospace' }}>{formatWholeRupees(BigInt(it.unitCost), false)}</td>
-                <td style={{ textAlign: 'right', padding: '3px 4px', fontFamily: 'monospace', fontWeight: 'bold' }}>{formatWholeRupees(BigInt(it.lineTotal), false)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {/* Totals */}
-        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '6px' }}>
-          <div style={{ minWidth: '150px', fontSize: '10px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '1px 0' }}>
-              <span>Subtotal</span><span style={{ fontFamily: 'monospace' }}>{formatWholeRupees(BigInt(p.subtotal), false)}</span>
-            </div>
-            {BigInt(p.discount) > 0n && <div style={{ display: 'flex', justifyContent: 'space-between', padding: '1px 0' }}>
-              <span>Discount</span><span style={{ fontFamily: 'monospace' }}>−{formatWholeRupees(BigInt(p.discount), false)}</span>
-            </div>}
-            {BigInt(p.additionalCharges) > 0n && <div style={{ display: 'flex', justifyContent: 'space-between', padding: '1px 0' }}>
-              <span>Add. Charges</span><span style={{ fontFamily: 'monospace' }}>+{formatWholeRupees(BigInt(p.additionalCharges), false)}</span>
-            </div>}
-            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0', borderTop: '1px solid #000', fontWeight: 'bold' }}>
-              <span>Grand Total</span><span style={{ fontFamily: 'monospace' }}>{formatWholeRupees(BigInt(p.total))}</span>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '1px 0' }}>
-              <span>Paid</span><span style={{ fontFamily: 'monospace' }}>{formatWholeRupees(BigInt(p.paidAmount))}</span>
-            </div>
-            {outstanding > 0n && <div style={{ display: 'flex', justifyContent: 'space-between', padding: '1px 0', color: '#c00' }}>
-              <span>Outstanding</span><span style={{ fontFamily: 'monospace' }}>{formatWholeRupees(outstanding)}</span>
-            </div>}
-          </div>
-        </div>
-        {/* Payment summary */}
-        {p.payments && p.payments.length > 0 && (
-          <div style={{ fontSize: '8px', marginBottom: '6px', borderTop: '1px solid #ccc', paddingTop: '4px' }}>
-            <div style={{ fontWeight: 'bold', textTransform: 'uppercase', fontSize: '7px', color: '#666', marginBottom: '2px' }}>Payment Summary</div>
-            {p.payments.map(pp => (
-              <div key={pp.id} style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span>{pp.paymentType.replace(/_/g, ' ')} · {bizDate(pp.paymentDate)}</span>
-                <span style={{ fontFamily: 'monospace' }}>{formatWholeRupees(BigInt(pp.amount), false)}</span>
-              </div>
-            ))}
-          </div>
-        )}
-        {/* Notes */}
-        {p.notes && <div style={{ fontSize: '8px', color: '#666', marginBottom: '4px', borderTop: '1px solid #ccc', paddingTop: '4px' }}><strong>Notes:</strong> {p.notes}</div>}
-        {/* Footer */}
-        <div style={{ textAlign: 'center', fontSize: '7px', color: '#999', borderTop: '1px solid #ccc', paddingTop: '4px' }}>
-          KhataPro ERP · PKR · Asia/Karachi · This is a computer-generated purchase document.
-        </div>
-      </div>
-    </div>
+    <InvoicePrintDialog
+      open={printDocuments.length > 0}
+      onClose={() => setPrintDocuments([])}
+      invoices={printDocuments}
+      businessName={business?.name ?? 'Purchase Document'}
+      businessContact={business ? { phone: business.phone ?? undefined, address: business.address ?? undefined } : null}
+    />
   </Shell>
 }
 

@@ -8,6 +8,8 @@ const dialog = await readFile('src/components/invoice/invoice-print-dialog.tsx',
 const button = await readFile('src/components/invoice/print-invoice-button.tsx', 'utf8')
 const salesList = await readFile('src/components/erp/views/sales-list-view.tsx', 'utf8')
 const saleEngine = await readFile('src/lib/sales/sale-engine.ts', 'utf8')
+const invoiceDetail = await readFile('src/components/erp/views/invoice-detail-view.tsx', 'utf8')
+const purchasesView = await readFile('src/components/erp/views/purchases-view.tsx', 'utf8')
 const execFileAsync = promisify(execFile)
 
 test('shared template supports Counter, Online, and OFC document titles', () => {
@@ -30,17 +32,30 @@ test('half-A4 mode occupies one bounded half of an A4 portrait page', () => {
   assert.ok(dialog.includes('a4-half-bottom a4-half-blank'))
 })
 
-test('two-up mode requires exactly two independent invoices', () => {
-  assert.ok(dialog.includes("const twoUpInvalid = mode === 'two-up' && invoices.length !== 2"))
+test('two-up mode prints two half-A4 copies and still supports two-document batches', () => {
+  assert.ok(dialog.includes("const twoUpInvalid = mode === 'two-up' && invoices.length === 0"))
   assert.ok(dialog.includes('twoUpInvalid'))
-  // The second half renders only when a genuinely second invoice exists —
-  // never a duplicate of the first.
-  assert.ok(dialog.includes('showBottom && models[1]'))
-  assert.ok(dialog.includes('{models[1] && <InvoiceDocument'))
-  assert.ok(!dialog.includes('models[1] || models[0]'))
-  assert.ok(!dialog.includes('invoices[1] || invoices[0]'))
+  // A single detail document produces two physical copies. A batch that sends
+  // two documents keeps the genuinely second document in the lower half.
+  assert.ok(dialog.includes('models[1] ?? models[0]'))
   assert.ok(salesList.includes('label="Print Two Invoices on A4"'))
   assert.ok(salesList.includes('disabled={selected.length !== 2}'))
+})
+
+test('sales, returns, purchases, and purchase returns use the shared print renderer', () => {
+  for (const token of ["documentKind: 'sales-return'", "documentTitle: 'SALES RETURN'", '<InvoicePrintDialog']) {
+    assert.ok(invoiceDetail.includes(token), `invoice detail missing ${token}`)
+  }
+  for (const token of ["documentKind: 'purchase'", "documentKind: 'purchase-return'", "documentTitle: 'PURCHASE BILL'", "documentTitle: 'PURCHASE RETURN'", '<InvoicePrintDialog']) {
+    assert.ok(purchasesView.includes(token), `purchase view missing ${token}`)
+  }
+  assert.ok(!invoiceDetail.includes('className="print-invoice"'))
+  assert.ok(!purchasesView.includes('className="print-purchase"'))
+})
+
+test('customer-facing payment summaries do not expose account codes', () => {
+  assert.ok(!dialog.includes('[{p.accountCode}]'))
+  assert.ok(dialog.includes("{p.accountName}{p.isChange && ' (Change)'}"))
 })
 
 test('print CSS keeps top and bottom halves separate with a cut line', () => {

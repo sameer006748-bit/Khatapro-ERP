@@ -3,6 +3,7 @@ import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth/authOptions'
 import { loadSessionUser, hasPermission } from '@/lib/auth/permissions'
 import { getPurchase } from '@/lib/purchases/data-access'
+import { getBusinessIdentity } from '@/lib/sales/data-access'
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const session = await getServerSession(authOptions)
@@ -13,5 +14,6 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   const { id } = await params
   const purchase = await getPurchase(su.businessId, id)
   if (!purchase) return NextResponse.json({ error: 'NOT_FOUND' }, { status: 404 })
-  return NextResponse.json({ purchase })
+  const business = await getBusinessIdentity(su.businessId)
+  return NextResponse.json({ purchase, business })
 }

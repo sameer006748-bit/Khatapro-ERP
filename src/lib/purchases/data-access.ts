@@ -28,11 +28,19 @@ export type PurchaseRow = {
   supplierBillNo: string | null; purchaseDate: string; subtotal: string; discount: string
   additionalCharges: string; total: string; paidAmount: string; outstandingAmount: string
   status: string; notes: string | null; voucherId: string | null
-  items?: PurchaseItemRow[]; payments?: PurchasePaymentRow[]
+  items?: PurchaseItemRow[]; payments?: PurchasePaymentRow[]; returns?: PurchaseReturnRow[]
 }
 
 export type PurchaseItemRow = { id: string; productId: string | null; productName: string; quantity: number; unitCost: string; lineTotal: string; returnedQuantity: number }
 export type PurchasePaymentRow = { id: string; accountId: string; amount: string; paymentType: string; paymentDate: string; notes: string | null }
+export type PurchaseReturnRow = {
+  returnNo: string
+  returnDate: string
+  totalAmount: string
+  settlementType: string
+  notes: string | null
+  items: Array<{ productName: string; quantity: number; unitCost: string; lineTotal: string }>
+}
 
 // ─── Vendors ───
 export async function listVendors(businessId: string): Promise<VendorRow[]> {
@@ -186,11 +194,48 @@ export async function getPurchase(businessId: string, purchaseId: string): Promi
     const { data: inv, error } = await admin.from('purchases').select('id, purchase_no, vendor_id, supplier_bill_no, purchase_date, subtotal, discount, additional_charges, total, paid_amount, outstanding_amount, status, notes, voucher_id, vendors(name, phone, address, city), purchase_items(id, product_id, product_name, quantity, unit_cost, line_total, returned_quantity), purchase_payments(id, account_id, amount, payment_type, payment_date, notes)').eq('id', purchaseId).eq('business_id', businessId).single()
     if (error || !inv) return null
     const r = inv as any
-    return { id: r.id, purchaseNo: r.purchase_no, vendorId: r.vendor_id, vendorName: r.vendors?.name ?? null, vendorPhone: r.vendors?.phone ?? null, vendorAddress: r.vendors?.address ?? null, vendorCity: r.vendors?.city ?? null, supplierBillNo: r.supplier_bill_no, purchaseDate: r.purchase_date, subtotal: String(r.subtotal), discount: String(r.discount), additionalCharges: String(r.additional_charges), total: String(r.total), paidAmount: String(r.paid_amount), outstandingAmount: String(r.outstanding_amount), status: r.status, notes: r.notes, voucherId: r.voucher_id, items: (r.purchase_items ?? []).map((it: any) => ({ id: it.id, productId: it.product_id, productName: it.product_name, quantity: it.quantity, unitCost: String(it.unit_cost), lineTotal: String(it.line_total), returnedQuantity: it.returned_quantity })), payments: (r.purchase_payments ?? []).map((pp: any) => ({ id: pp.id, accountId: pp.account_id, amount: String(pp.amount), paymentType: pp.payment_type, paymentDate: pp.payment_date, notes: pp.notes })) }
+    const { data: returns, error: returnError } = await admin.from('purchase_returns')
+      .select('id, return_no, return_date, total_amount, settlement_type, notes')
+      .eq('business_id', businessId).eq('purchase_id', purchaseId).order('return_date')
+    if (returnError) throw new Error(`Supabase purchase returns: ${returnError.message}`)
+    const returnIds = (returns ?? []).map((row: any) => row.id)
+    let returnItems: any[] = []
+    if (returnIds.length > 0) {
+      const { data: rows, error: itemError } = await admin.from('purchase_return_items')
+        .select('purchase_return_id, product_name, quantity, unit_cost, line_total')
+        .eq('business_id', businessId).in('purchase_return_id', returnIds).order('created_at')
+      if (itemError) throw new Error(`Supabase purchase return items: ${itemError.message}`)
+      returnItems = rows ?? []
+    }
+    return {
+      id: r.id, purchaseNo: r.purchase_no, vendorId: r.vendor_id, vendorName: r.vendors?.name ?? null,
+      vendorPhone: r.vendors?.phone ?? null, vendorAddress: r.vendors?.address ?? null, vendorCity: r.vendors?.city ?? null,
+      supplierBillNo: r.supplier_bill_no, purchaseDate: r.purchase_date, subtotal: String(r.subtotal), discount: String(r.discount),
+      additionalCharges: String(r.additional_charges), total: String(r.total), paidAmount: String(r.paid_amount), outstandingAmount: String(r.outstanding_amount),
+      status: r.status, notes: r.notes, voucherId: r.voucher_id,
+      items: (r.purchase_items ?? []).map((it: any) => ({ id: it.id, productId: it.product_id, productName: it.product_name, quantity: it.quantity, unitCost: String(it.unit_cost), lineTotal: String(it.line_total), returnedQuantity: it.returned_quantity })),
+      payments: (r.purchase_payments ?? []).map((pp: any) => ({ id: pp.id, accountId: pp.account_id, amount: String(pp.amount), paymentType: pp.payment_type, paymentDate: pp.payment_date, notes: pp.notes })),
+      returns: (returns ?? []).map((row: any) => ({
+        returnNo: row.return_no, returnDate: row.return_date, totalAmount: String(row.total_amount), settlementType: row.settlement_type, notes: row.notes,
+        items: returnItems.filter(item => item.purchase_return_id === row.id).map(item => ({ productName: item.product_name, quantity: item.quantity, unitCost: String(item.unit_cost), lineTotal: String(item.line_total) })),
+      })),
+    }
   }
-  const p = await db.purchase.findFirst({ where: { id: purchaseId, businessId }, include: { vendor: true, items: true, payments: true } })
+  const p = await db.purchase.findFirst({ where: { id: purchaseId, businessId }, include: { vendor: true, items: true, payments: true, returns: { include: { items: true } } } })
   if (!p) return null
-  return { id: p.id, purchaseNo: p.purchaseNo, vendorId: p.vendorId, vendorName: p.vendor?.name ?? null, vendorPhone: p.vendor?.phone ?? null, vendorAddress: p.vendor?.address ?? null, vendorCity: p.vendor?.city ?? null, supplierBillNo: p.supplierBillNo, purchaseDate: p.purchaseDate.toISOString(), subtotal: p.subtotal.toString(), discount: p.discount.toString(), additionalCharges: p.additionalCharges.toString(), total: p.total.toString(), paidAmount: p.paidAmount.toString(), outstandingAmount: p.outstandingAmount.toString(), status: p.status, notes: p.notes, voucherId: p.voucherId, items: p.items.map(it => ({ id: it.id, productId: it.productId, productName: it.productName, quantity: it.quantity, unitCost: it.unitCost.toString(), lineTotal: it.lineTotal.toString(), returnedQuantity: it.returnedQuantity })), payments: p.payments.map(pp => ({ id: pp.id, accountId: pp.accountId, amount: pp.amount.toString(), paymentType: pp.paymentType, paymentDate: pp.paymentDate.toISOString(), notes: pp.notes })) }
+  return {
+    id: p.id, purchaseNo: p.purchaseNo, vendorId: p.vendorId, vendorName: p.vendor?.name ?? null,
+    vendorPhone: p.vendor?.phone ?? null, vendorAddress: p.vendor?.address ?? null, vendorCity: p.vendor?.city ?? null,
+    supplierBillNo: p.supplierBillNo, purchaseDate: p.purchaseDate.toISOString(), subtotal: p.subtotal.toString(), discount: p.discount.toString(),
+    additionalCharges: p.additionalCharges.toString(), total: p.total.toString(), paidAmount: p.paidAmount.toString(), outstandingAmount: p.outstandingAmount.toString(),
+    status: p.status, notes: p.notes, voucherId: p.voucherId,
+    items: p.items.map(it => ({ id: it.id, productId: it.productId, productName: it.productName, quantity: it.quantity, unitCost: it.unitCost.toString(), lineTotal: it.lineTotal.toString(), returnedQuantity: it.returnedQuantity })),
+    payments: p.payments.map(pp => ({ id: pp.id, accountId: pp.accountId, amount: pp.amount.toString(), paymentType: pp.paymentType, paymentDate: pp.paymentDate.toISOString(), notes: pp.notes })),
+    returns: p.returns.map(row => ({
+      returnNo: row.returnNo, returnDate: row.returnDate.toISOString(), totalAmount: row.totalAmount.toString(), settlementType: row.settlementType, notes: row.notes,
+      items: row.items.map(item => ({ productName: item.productName, quantity: item.quantity, unitCost: item.unitCost.toString(), lineTotal: item.lineTotal.toString() })),
+    })),
+  }
 }
 
 // ─── Vendor Payment (later) ───

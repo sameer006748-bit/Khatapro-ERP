@@ -148,6 +148,27 @@ export async function listDeliveryOrders(businessId: string, riderId?: string | 
   }))
 }
 
+/** Customer-facing delivery context for an invoice print. */
+export async function getDeliveryOrderForInvoice(businessId: string, invoiceId: string): Promise<DeliveryOrderRow | null> {
+  const admin = getAdminSupabase()
+  const { data, error } = await admin.from('delivery_orders')
+    .select('id, invoice_id, rider_id, status, product_amount, customer_delivery_charge, rider_earning_amount, company_delivery_income, total_cod_amount, cod_collected_amount, assigned_at, out_for_delivery_at, delivered_at, returned_at, recipient_name, delivery_note, return_reason, source, delivery_voucher_id, invoices(invoice_no, customer_name, customer_phone, customer_address, customer_city), riders(name)')
+    .eq('business_id', businessId).eq('invoice_id', invoiceId).order('created_at', { ascending: false }).limit(1).maybeSingle()
+  if (error || !data) return null
+  const r = data as any
+  return {
+    id: r.id, invoiceId: r.invoice_id, invoiceNo: r.invoices?.invoice_no ?? null,
+    riderId: r.rider_id, riderName: r.riders?.name ?? null,
+    status: r.status, productAmount: String(r.product_amount ?? '0'),
+    customerDeliveryCharge: String(r.customer_delivery_charge ?? '0'), riderEarningAmount: String(r.rider_earning_amount ?? '0'),
+    companyDeliveryIncome: String(r.company_delivery_income ?? '0'), totalCodAmount: String(r.total_cod_amount ?? '0'), codCollectedAmount: String(r.cod_collected_amount ?? '0'),
+    assignedAt: r.assigned_at, outForDeliveryAt: r.out_for_delivery_at, deliveredAt: r.delivered_at, returnedAt: r.returned_at,
+    recipientName: r.recipient_name, deliveryNote: r.delivery_note, returnReason: r.return_reason, source: r.source, deliveryVoucherId: r.delivery_voucher_id,
+    customerName: r.invoices?.customer_name ?? null, customerPhone: r.invoices?.customer_phone ?? null,
+    customerAddress: r.invoices?.customer_address ?? null, customerCity: r.invoices?.customer_city ?? null,
+  }
+}
+
 export async function getDeliveryOrder(businessId: string, orderId: string): Promise<DeliveryOrderRow | null> {
   const admin = getAdminSupabase()
   const { data, error } = await admin.from('delivery_orders')
