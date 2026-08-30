@@ -1,6 +1,6 @@
 # KhataPro ERP — Client Requirements Source of Truth
 
-Last updated: 2026-08-29
+Last updated: 2026-08-30
 
 This file is the authoritative client-requirements checklist for current implementation work. Agents must read this file before changing sales, rider, accounting, contra, invoice, identity, or dashboard workflows.
 
@@ -156,10 +156,13 @@ Partial delivery must also work:
 Rider UI must be extremely simple because riders may not be comfortable using apps. Ideally the rider sees the order and simple action buttons only.
 
 ### Current status
-🟡 Rider foundation and runtime compatibility exist.
-❌ Full client-approved rider settlement workflow is not yet considered complete.
-❌ Partial delivery/partial return end-to-end verification remains.
-❌ Final simplified rider UI acceptance remains.
+✅ Rider Phase A code and production schema are complete. Migration
+`00039_legacy_rider_delivery_outcomes.sql` was applied and verified in production on
+2026-08-30, including partial delivery/return, DO identities, Rider COD balances,
+RDS settlements, legacy-table compatibility, and service-role-only database access.
+🟡 Production financial/browser UAT remains pending because production contains only
+the real `biz-default` business; no Rider/COD/voucher transaction was created for testing.
+🟡 Final simplified rider UI acceptance remains pending.
 
 ## Entry Identity Numbers
 
@@ -290,6 +293,8 @@ Internal commission details must not appear on the customer copy unless explicit
 - `00033_mixed_sale_returns.sql` is prepared but NOT applied.
 - `00036_legacy_transaction_identity_bridge.sql` is applied in production.
 - `00037_legacy_historical_sales_returns.sql` is APPLIED in production (2026-08-29); it is the scoped legacy-schema activation for partial/historical sales returns.
+- `00038_legacy_contra_batch.sql` is APPLIED in production (2026-08-29).
+- `00039_legacy_rider_delivery_outcomes.sql` is APPLIED in production (2026-08-30); its exact production definitions and unchanged historical Rider/COD row counts were verified read-only.
 - Do not broadly apply pending migrations without explicit preflight and approval.
 - Production Supabase project ref used by current project: `ebcebxwpddltiwrqybqc`.
 
@@ -341,4 +346,3 @@ Production schema verified read-only after application. Read-only screen loading
 (accounts + historic activity resolve). A real multi-row / drawings batch remains unverified
 in a browser because no safe isolated test business exists and no financial transaction was
 created for testing.
-

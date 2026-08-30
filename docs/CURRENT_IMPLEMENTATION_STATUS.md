@@ -1,6 +1,6 @@
 # KhataPro ERP — Current Implementation Status
 
-Last updated: 2026-08-29
+Last updated: 2026-08-30
 
 This file is the operational handoff/status document. Agents must read it together with:
 
@@ -455,4 +455,26 @@ Read-only verification after application:
 
 No financial transaction was created (no safe isolated test business).
 
+## Migration 00039 production verification — 2026-08-30
+
+`00039_legacy_rider_delivery_outcomes.sql` was applied directly to production ref
+`ebcebxwpddltiwrqybqc` via exact-file `psql` with `ON_ERROR_STOP=1`; only that file ran,
+and its own `begin;`/`commit;` provided the single transaction. No migration discovery,
+history operation, repair, reset, or broad push was used.
+
+Read-only catalog verification confirmed `delivery_fee_recognized`, the extended
+`Partially Delivered` status constraint, all three Rider outcome/settlement tables with
+their intended keys/checks/indexes/RLS, and the exact `record_delivery_outcome`,
+`get_rider_cod_balances`, and `settle_rider_cod` signatures. The new RPCs are
+`SECURITY DEFINER`, use `search_path=public`, and are executable only by `service_role`
+(plus owner). Their live bodies use the legacy `business`/`accounts` lineage,
+`post_voucher`, `post_sales_return`, and the shared DO/RDS allocator paths; they do not
+reference `businesses`, `ledger_accounts`, or UUID-ledger posting RPCs.
+
+Historical counts remained unchanged (2 riders, 0 delivery orders/events/COD submissions,
+12 vouchers, 6 invoices, 11 invoice items), DO/RDS high-water values remained 0, all three
+new tables remained empty, and the non-target public-schema fingerprint matched preflight.
+Rider Phase A code/schema is complete. Production financial/browser UAT remains pending:
+only real `biz-default` exists, so no Rider outcome, return, settlement, or voucher was
+created for testing.
 
