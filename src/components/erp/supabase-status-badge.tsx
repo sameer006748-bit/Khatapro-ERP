@@ -33,20 +33,20 @@ export function SupabaseStatusBadge() {
     )
   }
 
-  // Fully live: admin works AND both migrations applied.
+  // Fully ready.
   if (s.configured && s.adminCanQuery && s.phase1Applied && s.phase2Applied) {
     return (
       <span
         className="hidden sm:inline-flex items-center gap-1.5 text-[11px] px-2 py-1 bg-primary/10 text-primary rounded-md font-medium"
-        title={`Supabase live: ${s.url}`}
+        title="System Online"
       >
         <CheckCircle2 className="size-3" />
-        Supabase live
+        System Online
       </span>
     )
   }
 
-  // Connected but migrations pending.
+  // Needs attention.
   if (s.configured && s.adminCanQuery && (!s.phase1Applied || !s.phase2Applied)) {
     return (
       <span
@@ -54,7 +54,7 @@ export function SupabaseStatusBadge() {
         title={s.message}
       >
         <AlertTriangle className="size-3" />
-        Supabase (migrations pending)
+        System needs attention
       </span>
     )
   }
@@ -67,7 +67,7 @@ export function SupabaseStatusBadge() {
         title={s.message}
       >
         <AlertCircle className="size-3" />
-        Supabase (pending)
+        System needs attention
       </span>
     )
   }
@@ -79,7 +79,7 @@ export function SupabaseStatusBadge() {
       title={s.message}
     >
       <Database className="size-3" />
-      Local preview
+      System status unavailable
     </span>
   )
 }

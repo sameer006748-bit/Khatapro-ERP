@@ -85,7 +85,7 @@ export function AccountsView({ user }: { user: MeUser }) {
         || tbQ.data?.availability?.accounting === false
         || dayBookQ.data?.availability?.accounting === false) && (
         <div className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-          Not available until accounting migration
+          This accounting feature is currently unavailable.
         </div>
       )}
       {/* Header */}
@@ -356,7 +356,7 @@ function AccountSubcategoryPanel({ activities, accounts, user }: { activities: M
         <div><Label className="text-[10px]">Subcategory</Label><Select value={subcategoryId} onValueChange={setSubcategoryId}><SelectTrigger className="h-8 bg-background"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="uncategorized">Uncategorized</SelectItem>{selectedParentCategories.map(category => <SelectItem key={category.id} value={category.id}>{category.name}</SelectItem>)}</SelectContent></Select></div>
         <Button size="sm" className="h-8" disabled={!accountId || categoryMutation.isPending} onClick={() => categoryMutation.mutate({ action: subcategoryId === 'uncategorized' ? 'uncategorize' : 'move', parentCode, accountId, subcategoryId: subcategoryId === 'uncategorized' ? null : subcategoryId })}>Assign</Button>
       </div>
-      {categoryQ.isError && <p className="text-[10px] text-amber-700">Persistence is unavailable until migration 00021 is inspected and applied.</p>}
+      {categoryQ.isError && <p className="text-[10px] text-amber-700">Saving categories is currently unavailable.</p>}
       {categoryQ.data && <div className="flex flex-wrap gap-1.5">{categoryQ.data.parentCategories.map(parent => <span key={parent.id} className="inline-flex items-center gap-1 rounded border border-primary/30 bg-primary/5 px-2 py-1 text-[10px] font-medium">{parent.label} · {parent.code}</span>)}{categoryQ.data.categories.map(category => <span key={category.id} className={`inline-flex items-center gap-1 rounded border px-2 py-1 text-[10px] ${category.isActive ? 'border-border bg-background' : 'border-border text-muted-foreground line-through'}`}>{ACCOUNT_CATEGORY_DEFINITIONS.find(parent => parent.id === category.parentCode)?.label}: {category.name}{category.code ? <span className="font-medium tracking-wide"> · {category.code}</span> : null}{category.isActive && <><button className="text-primary hover:underline" onClick={() => { const name = window.prompt('Rename subcategory', category.name); if (name?.trim()) categoryMutation.mutate({ action: 'rename', subcategoryId: category.id, name }) }}>Rename</button><button className="text-primary hover:underline" onClick={() => { const raw = window.prompt('Edit code word (letters, numbers, hyphens — e.g. EXP-COMM)', category.code ?? ''); if (raw?.trim()) categoryMutation.mutate({ action: 'rename', subcategoryId: category.id, name: category.name, code: raw }) }}>Edit code</button><button className="text-destructive hover:underline" onClick={() => categoryMutation.mutate({ action: 'archive', subcategoryId: category.id })}>Archive</button></>}</span>)}</div>}
     </div>}
     <div className="divide-y divide-border/50">

@@ -108,6 +108,14 @@ Recovery commit pushed previously:
 
 The recovery was runtime verified across core pages with zero unexplained API 400+/console failures at that time.
 
+### Client handover blocker batch 1 — 2026-08-31
+
+- Trial Balance now uses the verified legacy-schema report path when the newer ledger is unavailable, preserving business scope, permissions, and debit/credit totals.
+- Audit Log now reads the supported production audit source without selecting a serverless local fallback.
+- Both views retain the application shell and show a retryable inline error state for a failed request.
+- Client-visible infrastructure and migration wording was replaced with business-facing language.
+- TypeScript, changed-file lint, and the complete local test run passed (499/499). Authenticated browser verification remains pending because no browser surface was available in this session.
+
 ## Sales / Returns / Commission / Invoice Batch
 
 Local implementation commit:
@@ -477,4 +485,3 @@ new tables remained empty, and the non-target public-schema fingerprint matched 
 Rider Phase A code/schema is complete. Production financial/browser UAT remains pending:
 only real `biz-default` exists, so no Rider outcome, return, settlement, or voucher was
 created for testing.
-

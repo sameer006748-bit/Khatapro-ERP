@@ -173,7 +173,7 @@ function ReportContent({ type, fromDate, toDate, user }: { type: ReportType; fro
   if (q.isError || !q.data) return <div className="card-3d p-8 text-center"><p className="text-sm text-destructive mb-3">Unable to load report.</p><Button variant="outline" size="sm" onClick={() => q.refetch()}>Retry</Button></div>
   if (q.data.error === 'FORBIDDEN') return <div className="card-3d p-8 text-center"><p className="text-sm text-amber-600">You do not have permission to view this report.</p></div>
   if (q.data.availability?.accounting === false) {
-    return <div className="card-3d p-8 text-center"><p className="text-sm text-amber-700">Not available until accounting migration</p></div>
+    return <div className="card-3d p-8 text-center"><p className="text-sm text-amber-700">This accounting feature is currently unavailable.</p></div>
   }
 
   const rows = q.data?.rows ?? []
@@ -251,7 +251,7 @@ function ProfitLossReport({ rows }: { rows: any[] }) {
       <div className="card-3d p-3 border-amber-200 bg-amber-50">
         <AlertTriangle className="size-4 text-amber-600 inline mr-2" />
         <span className="text-xs text-amber-700">
-          Historical gross profit before the perpetual-inventory migration may be incomplete or estimated because sale-time cost was not captured.
+          Historical gross profit may be incomplete or estimated where sale-time cost was not recorded.
         </span>
       </div>
       <div className="card-3d p-4">
@@ -666,7 +666,7 @@ function ProductProfitabilityReport({ rows }: { rows: any[] }) {
         <div className="flex items-start gap-2">
           <AlertTriangle className="size-4 text-amber-600 mt-0.5" />
           <div className="text-xs text-amber-800">
-            <p className="font-medium">Historical gross profit before the perpetual-inventory migration may be incomplete or estimated because sale-time cost was not captured.</p>
+            <p className="font-medium">Historical gross profit may be incomplete or estimated where sale-time cost was not recorded.</p>
             <p className="mt-1 text-amber-700">Totals below include only products with real cost data. Products with unavailable historical cost are listed separately and excluded from margin calculations to avoid misleading margins above 100%.</p>
           </div>
         </div>
@@ -693,7 +693,7 @@ function ProductProfitabilityReport({ rows }: { rows: any[] }) {
       <div className="card-3d overflow-hidden">
         <div className="p-3 border-b border-border bg-muted/30">
           <h3 className="text-sm font-semibold text-foreground">Products with Exact Cost Data</h3>
-          <p className="text-[10px] text-muted-foreground mt-0.5">Post-migration sales with captured sale-time WAC</p>
+          <p className="text-[10px] text-muted-foreground mt-0.5">Sales with recorded sale-time cost</p>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-xs">
@@ -745,7 +745,7 @@ function ProductProfitabilityReport({ rows }: { rows: any[] }) {
           <div className="p-3 border-b border-border bg-zinc-50/70">
             <h3 className="text-sm font-semibold text-foreground">Products with Historical Cost Unavailable</h3>
             <p className="text-[10px] text-muted-foreground mt-0.5">
-              Pre-migration sales where sale-time WAC was not captured. Sales shown for reference; COGS and Gross Profit not claimed.
+              Earlier sales where sale-time cost was not recorded. Sales are shown for reference; cost and gross profit are not calculated.
             </p>
           </div>
           <div className="overflow-x-auto">

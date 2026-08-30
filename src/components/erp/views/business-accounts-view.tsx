@@ -140,7 +140,7 @@ export function BusinessAccountsView({ user }: { user: MeUser }) {
     <div className="space-y-6">
       {q.data?.availability?.accounting === false && (
         <div className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-          Not available until accounting migration
+          This accounting feature is currently unavailable.
         </div>
       )}
       <div className="flex items-end justify-between gap-4 flex-wrap">
@@ -149,8 +149,7 @@ export function BusinessAccountsView({ user }: { user: MeUser }) {
             Business Accounts
           </h1>
           <p className="text-sm text-muted-foreground mt-1.5 max-w-2xl">
-            Each business account has a 1:1 linked ledger account under Asset. Balance is derived
-            from voucher lines (Phase 2+); currently 0 because no vouchers exist.
+            Each business account has a linked accounting account. Balances update as entries are recorded.
           </p>
         </div>
         {canManage && (

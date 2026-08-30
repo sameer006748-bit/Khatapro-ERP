@@ -114,7 +114,7 @@ test('legacy reads select only existing operational columns', () => {
 test('accounting-unavailable response and UI never fabricate financial values', () => {
   assert.match(accounting, /available: false/)
   assert.match(accounting, /reason: 'ACCOUNTING_MIGRATION_REQUIRED'/)
-  assert.match(accounting, /Not available until accounting migration/)
+  assert.match(accounting, /This accounting feature is currently unavailable/)
   assert.match(accounting, /process\.env\.NODE_ENV === 'production'/)
   assert.doesNotMatch(ownerDashboard, /approxProfit \?\? \(todaySales - todayExpenses\)/)
   assert.match(ownerSummary, /dataSource: 'operational-fallback'/)

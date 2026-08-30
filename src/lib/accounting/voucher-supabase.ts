@@ -218,6 +218,55 @@ export async function trialBalanceViaSupabase(
   }))
 }
 
+/** Trial Balance for the verified legacy production schema. */
+export async function trialBalanceViaLegacySupabase(
+  businessId: string,
+  fromDate?: Date,
+  toDate?: Date,
+): Promise<Array<{
+  account: {
+    id: string
+    code: string
+    name: string
+    category: { code: string; name: string; type: string }
+  }
+  totalDebit: bigint
+  totalCredit: bigint
+  balance: bigint
+}>> {
+  const admin = getAdminSupabase()
+  const { data, error } = await admin.rpc('trial_balance', {
+    p_business_id: businessId,
+    p_from_date: fromDate ? bizDateString(fromDate) : null,
+    p_to_date: toDate ? bizDateString(toDate) : null,
+  })
+
+  if (error) throw new VoucherError(error.message, 'RPC_ERROR')
+  if (!data) return []
+
+  return (data as Array<{
+    account_id: string
+    account_code: string
+    account_name: string
+    category_code: string
+    category_name: string
+    category_type: string
+    total_debit: string | number
+    total_credit: string | number
+    balance: string | number
+  }>).map((r) => ({
+    account: {
+      id: r.account_id,
+      code: r.account_code,
+      name: r.account_name,
+      category: { code: r.category_code, name: r.category_name, type: r.category_type },
+    },
+    totalDebit: BigInt(r.total_debit),
+    totalCredit: BigInt(r.total_credit),
+    balance: BigInt(r.balance),
+  }))
+}
+
 /**
  * Account ledger drill-down via Supabase `account_ledger()` RPC.
  */

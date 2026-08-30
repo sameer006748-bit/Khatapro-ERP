@@ -4,7 +4,7 @@ import { getAdminSupabase } from '@/lib/supabase/admin'
 import { isSupabaseConfigured } from '@/lib/supabase/config'
 import { detectLedgerCapability, type LedgerCapability } from '@/lib/dashboard/compatibility'
 
-export const ACCOUNTING_MIGRATION_MESSAGE = 'Not available until accounting migration'
+export const ACCOUNTING_MIGRATION_MESSAGE = 'This accounting feature is currently unavailable.'
 
 export type AccountingAvailability = LedgerCapability | {
   path: 'legacy-local'

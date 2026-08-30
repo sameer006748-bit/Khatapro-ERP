@@ -3,6 +3,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { bizFormat } from '@/lib/dates'
 import { ScrollText } from 'lucide-react'
+import { apiFetchJson } from '@/lib/api-client'
 
 type Row = {
   id: string
@@ -25,7 +26,8 @@ const ACTION_BADGE: Record<string, string> = {
 export function AuditLogView() {
   const q = useQuery<{ rows: Row[] }>({
     queryKey: ['audit'],
-    queryFn: () => fetch('/api/audit-logs').then((r) => r.json()),
+    queryFn: ({ signal }) => apiFetchJson('/api/audit-logs', { signal }),
+    retry: false,
   })
 
   return (
@@ -41,7 +43,12 @@ export function AuditLogView() {
 
       {q.isLoading ? (
         <div className="card-3d p-8 text-sm text-muted-foreground">Loading…</div>
-      ) : q.data?.rows.length ? (
+      ) : q.isError ? (
+        <div className="card-3d p-8 text-center">
+          <p className="text-sm text-destructive mb-3">Unable to load activity history.</p>
+          <button className="text-sm font-medium text-primary hover:underline" onClick={() => q.refetch()}>Retry</button>
+        </div>
+      ) : q.data?.rows?.length ? (
         <>
           {/* Desktop table */}
           <div className="hidden md:block card-3d overflow-hidden">

@@ -3,6 +3,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { useRouter } from 'next/navigation'
 import { formatMoney } from '@/lib/format'
+import { apiFetchJson } from '@/lib/api-client'
 import { CheckCircle2, AlertCircle, ArrowRight, Scale } from 'lucide-react'
 
 type Row = {
@@ -35,21 +36,17 @@ export function TrialBalanceView() {
     availability?: { accounting: boolean; message?: string }
   }>({
     queryKey: ['trial-balance'],
-    queryFn: () => fetch('/api/trial-balance').then((r) => r.json()),
+    queryFn: ({ signal }) => apiFetchJson('/api/trial-balance', { signal }),
     retry: false,
   })
 
+  const unavailable = q.data?.availability?.accounting === false
   const nonZeroRows = (q.data?.rows ?? []).filter(
     (r) => BigInt(r.totalDebit) > 0n || BigInt(r.totalCredit) > 0n,
   )
 
   return (
     <div className="space-y-6">
-      {q.data?.availability?.accounting === false && (
-        <div className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-          Not available until accounting migration
-        </div>
-      )}
       <div>
         <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight text-foreground">
           Trial Balance
@@ -61,7 +58,7 @@ export function TrialBalanceView() {
       </div>
 
       {/* Balance status banner */}
-      {q.data && (
+      {q.data && !unavailable && (
         <div
           className={`card-3d p-5 ${
             q.data.isBalanced ? 'border-primary/40' : 'border-destructive/40'
@@ -105,6 +102,15 @@ export function TrialBalanceView() {
 
       {q.isLoading ? (
         <div className="card-3d p-8 text-sm text-muted-foreground">Loading…</div>
+      ) : q.isError ? (
+        <div className="card-3d p-8 text-center">
+          <p className="text-sm text-destructive mb-3">Unable to load Trial Balance.</p>
+          <button className="text-sm font-medium text-primary hover:underline" onClick={() => q.refetch()}>Retry</button>
+        </div>
+      ) : unavailable ? (
+        <div className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          This accounting feature is currently unavailable.
+        </div>
       ) : nonZeroRows.length === 0 ? (
         <div className="card-3d p-8 text-center">
           <div className="grid place-items-center size-12 rounded-xl icon-3d-muted mx-auto mb-3">

@@ -71,17 +71,19 @@ test('one unavailable source permits a partial page payload', async () => {
 })
 
 test('accounting APIs detect capability before querying new ledger objects', () => {
-  for (const route of [coaRoute, trialBalanceRoute, dayBookRoute, expensesRoute]) {
+  for (const route of [coaRoute, dayBookRoute, expensesRoute]) {
     assert.match(route, /getAccountingAvailability/)
     assert.match(route, /unavailableAccountingPayload/)
   }
   assert.match(reportsRoute, /isSchemaUnavailableError/)
-  assert.match(availability, /Not available until accounting migration/)
+  assert.match(availability, /This accounting feature is currently unavailable/)
+  assert.match(trialBalanceRoute, /trialBalanceViaLegacySupabase/)
+  assert.match(trialBalanceRoute, /safeApiError/)
 })
 
-test('unsupported UI sections show the required message and do not retry', () => {
-  assert.match(accountsView, /Not available until accounting migration/)
-  assert.match(reportsView, /Not available until accounting migration/)
+test('unsupported UI sections use business-facing language and do not retry', () => {
+  assert.match(accountsView, /This accounting feature is currently unavailable/)
+  assert.match(reportsView, /This accounting feature is currently unavailable/)
   assert.match(accountsView, /retry: false/)
   assert.match(reportsView, /retry: false/)
   for (const view of [counterSaleView, onlineSaleView, ofcSaleView, otherSaleView, expenseView]) {
