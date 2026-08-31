@@ -135,7 +135,7 @@ begin
     raise exception 'Business is unavailable';
   end if;
 
-  v_fingerprint := encode(digest(concat_ws(chr(31),
+  v_fingerprint := encode(extensions.digest(concat_ws(chr(31),
     btrim(p_name), p_type, coalesce(p_account_holder, ''),
     coalesce(p_bank_name, ''), coalesce(p_account_number, '')), 'sha256'), 'hex');
 
