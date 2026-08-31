@@ -501,11 +501,9 @@ export function CounterSaleView({ user }: { user: MeUser }) {
         </div>
 
         {/* ═══ RIGHT: ACTIVE BILL ═══ */}
-        {/* Right card is viewport-aware (not a fixed 680px) so the Net sale / Post Sale footer
-            stays reachable at ~1366x720 with a small page scroll. lg:overflow-y-auto ensures the
-            footer is never permanently clipped by the card when a big bill exceeds the cap, and
-            lg:mb-20 keeps the footer clear of the fixed "Ask KhataPro AI" launcher. */}
-        <div className="card-3d flex min-h-0 flex-col overflow-hidden lg:max-h-[min(820px,calc(100dvh-8rem))] lg:overflow-y-auto lg:self-start lg:mb-20">
+        {/* Normal bills use natural document flow. Bottom spacing leaves the Post Sale
+            action clear of the fixed Ask KhataPro AI launcher when the page scrolls. */}
+        <div className="card-3d flex flex-col lg:self-start lg:mb-20">
           <BillHeader
             user={user}
             canAttributeAnySeller={canAttributeAnySeller}
@@ -523,17 +521,13 @@ export function CounterSaleView({ user }: { user: MeUser }) {
             invoiceDate={invoiceDate}
           />
 
-          {/* Middle scrolls inside the height-capped card so the Net sale / Post Sale
-              footer always stays visible; rows keep their natural height, never compressed. */}
-          <div className="lg:min-h-0 lg:flex-1 lg:basis-0 lg:overflow-y-auto">
-            <BillRows
-              rows={rows}
-              normalized={normalized}
-              products={productsQ.data?.rows ?? []}
-              onPatch={patchRow}
-              onRemove={removeRow}
-            />
-          </div>
+          <BillRows
+            rows={rows}
+            normalized={normalized}
+            products={productsQ.data?.rows ?? []}
+            onPatch={patchRow}
+            onRemove={removeRow}
+          />
 
           {rows.length > 0 && (
             <div className="shrink-0">
@@ -792,7 +786,7 @@ function BillRows({
 
   return (
     <div
-      className={shouldScrollItems ? 'min-h-0 min-w-0 flex-1 basis-0 overflow-y-auto' : 'min-w-0 shrink-0'}
+      className={shouldScrollItems ? 'min-w-0 lg:max-h-[420px] lg:overflow-y-auto' : 'min-w-0'}
       aria-label="Active bill items"
       data-testid="active-bill-items"
     >

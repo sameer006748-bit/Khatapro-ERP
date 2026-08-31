@@ -39,7 +39,7 @@ test('active bill keeps normal bills readable and scrolls only genuinely long it
   assert.doesNotMatch(counter, /lg:h-\[calc\(100dvh-9\.5rem\)\]/)
   assert.match(billRows, /data-testid="active-bill-items"/)
   assert.match(billRows, /const shouldScrollItems = rows\.length > 6/)
-  assert.match(billRows, /shouldScrollItems \? 'min-h-0 min-w-0 flex-1 basis-0 overflow-y-auto' : 'min-w-0 shrink-0'/)
+  assert.match(billRows, /shouldScrollItems \? 'min-w-0 lg:max-h-\[420px\] lg:overflow-y-auto' : 'min-w-0'/)
   assert.match(billRows, /data-testid="active-bill-item-row"/)
   assert.match(billRows, /line-clamp-2 break-words font-medium leading-tight text-foreground/)
   assert.match(billRows, /title=\{row\.productName\}/)
@@ -89,18 +89,18 @@ test('totals and Post Sale remain in the fixed bill footer with a disabled reaso
   assert.match(counter, /disabledReason/)
 })
 
-test('counter footer stays reachable at short desktop viewports without compressing rows', () => {
-  // Viewport-aware card height (not the old fixed 680px) keeps the footer near the fold.
-  assert.match(counter, /lg:max-h-\[min\(820px,calc\(100dvh-8rem\)\)\]/)
-  // Card may scroll internally so an oversized bill can never permanently clip the footer.
-  assert.match(counter, /lg:overflow-y-auto/)
-  // Bottom spacing keeps the footer clear of the fixed "Ask KhataPro AI" launcher.
+test('counter uses natural Active Bill flow and caps only a genuinely long item list', () => {
+  const billRows = counter.slice(counter.indexOf('function BillRows'), counter.indexOf('function Detail'))
+  // Bottom spacing keeps the footer clear of the fixed Ask KhataPro AI launcher.
   assert.match(counter, /lg:mb-20/)
-  // The items area scrolls inside the height-capped card so the footer always stays visible.
-  assert.match(counter, /lg:min-h-0 lg:flex-1 lg:basis-0 lg:overflow-y-auto/)
-  // No re-introduction of the earlier cart-compressing sizing.
+  // A normal bill has no viewport cap or leftover-height wrapper that can collapse rows.
+  assert.doesNotMatch(counter, /lg:max-h-\[min\(820px,calc\(100dvh-8rem\)\)\]/)
+  assert.doesNotMatch(counter, /lg:flex-1 lg:basis-0 lg:overflow-y-auto/)
   assert.doesNotMatch(counter, /lg:min-h-\[96px\]/)
   assert.doesNotMatch(counter, /lg:h-\[calc\(100dvh-9\.5rem\)\]/)
-  // Item rows keep their natural sizing and the long-list scroll behavior.
-  assert.match(counter, /shouldScrollItems \? 'min-h-0 min-w-0 flex-1 basis-0 overflow-y-auto' : 'min-w-0 shrink-0'/)
+  // 1–6 items render in document flow; only 7+ use the capped internal list.
+  assert.match(billRows, /const shouldScrollItems = rows\.length > 6/)
+  assert.match(billRows, /lg:max-h-\[420px\] lg:overflow-y-auto/)
+  assert.ok(counter.indexOf('<BillRows') < counter.indexOf('<PaymentPanel'))
+  assert.ok(counter.indexOf('<PaymentPanel') < counter.indexOf('<BillSummary'))
 })
