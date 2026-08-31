@@ -25,6 +25,14 @@ test('default bill row is compact and advanced accounting details expand on dema
   assert.match(counter, /overflow-x-hidden/)
 })
 
+test('default cart rows reserve visible space for the selected product identity', () => {
+  const billRows = counter.slice(counter.indexOf('function BillRows'), counter.indexOf('function Detail'))
+  assert.match(billRows, /table-fixed/)
+  assert.match(billRows, /w-\[124px\].*>Qty</)
+  assert.match(billRows, /w-\[84px\].*>Total</)
+  assert.match(billRows, /break-words font-medium leading-tight text-foreground">\{row\.productName\}/)
+})
+
 test('same-bill Sold 10 / Returned 2 remains Net 8 with unchanged commission arithmetic', () => {
   const line = normalizeSaleLine({
     productId: 'product-1', productName: 'Fabric', soldQty: 10, returnedQty: 2,

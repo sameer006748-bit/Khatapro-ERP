@@ -786,20 +786,20 @@ function BillRows({
         <span className="text-[10px] uppercase tracking-wide text-muted-foreground">net = sold − returned</span>
       </div>
       <div className="overflow-x-hidden">
-        <table className="w-full text-xs">
+        <table className="w-full table-fixed text-xs">
           <caption className="sr-only">Bill items with sold, returned and net quantities, rate, discount, line total, commission and stock effect</caption>
           <thead>
             <tr className="border-b border-border bg-muted/40 text-[10px] uppercase tracking-wide text-muted-foreground">
               <th scope="col" className="text-left p-2 font-medium">Product</th>
-              <th scope="col" className="text-right p-2 font-medium">Qty</th>
+              <th scope="col" className="w-[124px] text-right p-2 font-medium">Qty</th>
               <th scope="col" className="hidden">Returned</th>
               <th scope="col" className="hidden">Net</th>
               <th scope="col" className="hidden">Rate</th>
-              <th scope="col" className="text-right p-2 font-medium">Total</th>
+              <th scope="col" className="w-[84px] text-right p-2 font-medium">Total</th>
               <th scope="col" className="hidden">Commission per piece</th>
               <th scope="col" className="hidden">Commission total</th>
               <th scope="col" className="hidden">Stock impact</th>
-              <th scope="col" className="p-2"><span className="sr-only">Item details</span></th>
+              <th scope="col" className="w-[44px] p-2"><span className="sr-only">Item details</span></th>
             </tr>
           </thead>
           <tbody>
@@ -811,7 +811,7 @@ function BillRows({
                 <Fragment key={row.key}>
                 <tr className={`border-b border-border/50 ${error ? 'bg-destructive/5' : ''}`}>
                   <td className="min-w-0 p-2">
-                    <div className="font-medium leading-tight text-foreground">{row.productName}</div>
+                    <div className="break-words font-medium leading-tight text-foreground">{row.productName}</div>
                     {row.isTemporary && <span className="text-[9px] uppercase bg-amber-100 text-amber-700 px-1 rounded">Temp</span>}
                     {row.returnedQty > 0 && line && (
                       <div className="mt-0.5 text-[10px] font-medium text-amber-700" data-num>
