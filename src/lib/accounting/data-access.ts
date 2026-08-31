@@ -11,7 +11,9 @@
  */
 import 'server-only'
 import { db } from '@/lib/db'
+import { usesLegacyTransactionSchema } from '@/lib/identity/legacy-bridge'
 import { getAdminSupabase } from '@/lib/supabase/admin'
+import { isSupabaseConfigured } from '@/lib/supabase/config'
 import { probeTable } from '@/lib/supabase/phase-probe'
 
 /**
@@ -56,10 +58,52 @@ export function getDefaultBusinessId(): string {
 
 /** List all account categories with their accounts for a business. */
 export async function getChartOfAccounts(businessId: string): Promise<CategoryWithAccounts[]> {
+  if (isSupabaseConfigured() && await usesLegacyTransactionSchema()) {
+    return getChartOfAccountsFromLegacySupabase(businessId)
+  }
   if (await isSupabaseLive()) {
     return getChartOfAccountsFromSupabase(businessId)
   }
   return getChartOfAccountsFromPrisma(businessId)
+}
+
+async function getChartOfAccountsFromLegacySupabase(businessId: string): Promise<CategoryWithAccounts[]> {
+  const admin = getAdminSupabase()
+  const [{ data: cats, error: categoryError }, { data: accts, error: accountError }] = await Promise.all([
+    admin
+      .from('account_categories')
+      .select('id, code, name, type')
+      .eq('business_id', businessId)
+      .order('code'),
+    admin
+      .from('accounts')
+      .select('id, code, name, category_id, is_active, is_business_account, is_party_account, party_type, balance_cache')
+      .eq('business_id', businessId)
+      .order('code'),
+  ])
+  if (categoryError) throw new Error(`Chart of accounts categories failed: ${categoryError.message}`)
+  if (accountError) throw new Error(`Chart of accounts failed: ${accountError.message}`)
+
+  return (cats ?? []).map((category) => ({
+    id: category.id,
+    code: category.code,
+    name: category.name,
+    type: category.type,
+    accounts: (accts ?? [])
+      .filter((account) => account.category_id === category.id)
+      .map((account) => ({
+        id: account.id,
+        code: account.code,
+        name: account.name,
+        categoryId: account.category_id,
+        isActive: account.is_active,
+        isBusinessAccount: account.is_business_account,
+        isPartyAccount: account.is_party_account,
+        partyType: account.party_type,
+        balanceCache: BigInt(account.balance_cache ?? 0),
+        category: { id: category.id, code: category.code, name: category.name, type: category.type },
+      })),
+  }))
 }
 
 async function getChartOfAccountsFromPrisma(businessId: string): Promise<CategoryWithAccounts[]> {
@@ -157,6 +201,35 @@ async function getChartOfAccountsFromSupabase(businessId: string): Promise<Categ
 
 /** Find a single account by ID. */
 export async function getAccountById(businessId: string, accountId: string): Promise<AccountRow | null> {
+  if (isSupabaseConfigured() && await usesLegacyTransactionSchema()) {
+    const admin = getAdminSupabase()
+    const { data, error } = await admin
+      .from('accounts')
+      .select('id, code, name, category_id, is_active, is_business_account, is_party_account, party_type, balance_cache')
+      .eq('id', accountId)
+      .eq('business_id', businessId)
+      .maybeSingle()
+    if (error || !data) return null
+    const { data: category, error: categoryError } = await admin
+      .from('account_categories')
+      .select('id, code, name, type')
+      .eq('id', data.category_id)
+      .eq('business_id', businessId)
+      .maybeSingle()
+    if (categoryError || !category) return null
+    return {
+      id: data.id,
+      code: data.code,
+      name: data.name,
+      categoryId: data.category_id,
+      isActive: data.is_active,
+      isBusinessAccount: data.is_business_account,
+      isPartyAccount: data.is_party_account,
+      partyType: data.party_type,
+      balanceCache: BigInt(data.balance_cache ?? 0),
+      category: { id: category.id, code: category.code, name: category.name, type: category.type },
+    }
+  }
   if (await isSupabaseLive()) {
     const admin = getAdminSupabase()
     const { data, error } = await admin

@@ -70,11 +70,12 @@ test('one unavailable source permits a partial page payload', async () => {
   assert.deepEqual(healthy, { value: 'operational-data', available: true, error: null })
 })
 
-test('accounting APIs detect capability before querying new ledger objects', () => {
+test('accounting APIs detect capability and keep configured legacy reads available', () => {
   for (const route of [coaRoute, dayBookRoute, expensesRoute]) {
     assert.match(route, /getAccountingAvailability/)
-    assert.match(route, /unavailableAccountingPayload/)
   }
+  assert.match(coaRoute, /operational-fallback' && !isSupabaseConfigured/)
+  assert.match(dayBookRoute, /operational-fallback' && !isSupabaseConfigured/)
   assert.match(reportsRoute, /isSchemaUnavailableError/)
   assert.match(availability, /This accounting feature is currently unavailable/)
   assert.match(trialBalanceRoute, /trialBalanceViaLegacySupabase/)
@@ -82,7 +83,7 @@ test('accounting APIs detect capability before querying new ledger objects', () 
 })
 
 test('unsupported UI sections use business-facing language and do not retry', () => {
-  assert.match(accountsView, /This accounting feature is currently unavailable/)
+  assert.match(accountsView, /Account information is currently unavailable/)
   assert.match(reportsView, /This accounting feature is currently unavailable/)
   assert.match(accountsView, /retry: false/)
   assert.match(reportsView, /retry: false/)

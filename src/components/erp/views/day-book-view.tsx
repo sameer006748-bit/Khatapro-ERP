@@ -128,7 +128,7 @@ export function DayBookView({ user, onSelectVoucher }: { user: MeUser; onSelectV
         </div>
       )
       : q.isError ? <div className="text-center py-8"><p className="text-sm text-destructive">Failed to load vouchers.</p><button className="mt-2 text-sm text-primary hover:underline" onClick={() => q.refetch()}>Retry</button></div>
-      : filtered.length === 0 ? <div className="text-center py-8"><BookOpen className="size-8 text-muted-foreground mx-auto mb-2 opacity-50" /><p className="text-sm text-muted-foreground">No vouchers for this filter.</p></div>
+      : filtered.length === 0 ? <div className="text-center py-8"><BookOpen className="size-8 text-muted-foreground mx-auto mb-2 opacity-50" /><p className="text-sm text-muted-foreground">{rows.length === 0 && !fromDate && !toDate && voucherType === 'all' ? 'No transactions yet.' : 'No vouchers for this filter.'}</p></div>
       : (
         <>
           {/* Desktop table */}

@@ -22,6 +22,7 @@ import { writeAudit } from '@/lib/auth/permissions'
 import { bizDateString } from '@/lib/dates'
 import type { VoucherLineInput, PostVoucherInput } from '@/lib/accounting/voucher'
 import { VoucherError } from '@/lib/accounting/voucher'
+import { usesLegacyTransactionSchema } from '@/lib/identity/legacy-bridge'
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
@@ -319,6 +320,42 @@ export async function accountLedgerViaSupabase(
   }))
 }
 
+/** Account ledger drill-down for the verified legacy production schema. */
+export async function accountLedgerViaLegacySupabase(
+  businessId: string,
+  accountId: string,
+  fromDate?: Date,
+  toDate?: Date,
+): Promise<Array<{
+  lineId: string
+  voucherId: string
+  voucherType: string
+  voucherDate: Date
+  memo: string | null
+  debit: bigint
+  credit: bigint
+  runningBalance: bigint
+}>> {
+  const { data, error } = await getAdminSupabase().rpc('account_ledger', {
+    p_business_id: businessId,
+    p_account_id: accountId,
+    p_from_date: fromDate ? bizDateString(fromDate) : null,
+    p_to_date: toDate ? bizDateString(toDate) : null,
+  })
+  if (error) throw new VoucherError(error.message, 'RPC_ERROR')
+
+  return (data ?? []).map((row: any) => ({
+    lineId: row.line_id,
+    voucherId: row.voucher_id,
+    voucherType: row.voucher_type,
+    voucherDate: new Date(row.voucher_date),
+    memo: row.memo,
+    debit: BigInt(row.debit ?? 0),
+    credit: BigInt(row.credit ?? 0),
+    runningBalance: BigInt(row.running_balance ?? 0),
+  }))
+}
+
 /**
  * Cancel voucher via Supabase `cancel_voucher()` RPC.
  */
@@ -379,6 +416,9 @@ export async function accountLedgerSmart(
   fromDate?: Date,
   toDate?: Date,
 ) {
+  if (isSupabaseConfigured() && await usesLegacyTransactionSchema()) {
+    return accountLedgerViaLegacySupabase(businessId, accountId, fromDate, toDate)
+  }
   if (await isSupabaseLive()) {
     return accountLedgerViaSupabase(businessId, accountId, fromDate, toDate)
   }

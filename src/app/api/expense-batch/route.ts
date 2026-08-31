@@ -7,6 +7,8 @@ import { postExpenseBatch } from '@/lib/vouchers/data-access'
 import { parseMoney } from '@/lib/format'
 import { resolveRequestId, safeMutationError } from '@/lib/observability'
 import { isSupabaseConfigured } from '@/lib/supabase/config'
+import { usesLegacyTransactionSchema } from '@/lib/identity/legacy-bridge'
+import { getAccountById } from '@/lib/accounting/data-access'
 
 const isUuid = (s: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s)
 const LineSchema = z.object({
@@ -32,20 +34,27 @@ export async function POST(req: Request) {
   const body = await req.json().catch(() => null)
   const parsed = Schema.safeParse(body)
   if (!parsed.success) return NextResponse.json({ error: 'INVALID_INPUT', details: parsed.error.flatten() }, { status: 400 })
-  if (!isSupabaseConfigured()) {
-    if (!parsed.data.paymentAccountId) return NextResponse.json({ error: 'Invalid payment account ID' }, { status: 400 })
-    for (const l of parsed.data.lines) {
-      if (!l.expenseAccountId) return NextResponse.json({ error: `Invalid expense account ID: ${l.expenseAccountId}` }, { status: 400 })
-      const amt = parseMoney(l.amount)
-      if (amt === null || amt <= 0n) return NextResponse.json({ error: `Invalid amount on line: ${l.amount}` }, { status: 400 })
-    }
-  } else {
+  const usesUuidLedger = isSupabaseConfigured() && !await usesLegacyTransactionSchema()
+  if (usesUuidLedger) {
     if (!isUuid(parsed.data.paymentAccountId)) return NextResponse.json({ error: 'Invalid payment account ID' }, { status: 400 })
     for (const l of parsed.data.lines) {
       if (!isUuid(l.expenseAccountId)) return NextResponse.json({ error: `Invalid expense account ID: ${l.expenseAccountId}` }, { status: 400 })
-      const amt = parseMoney(l.amount)
-      if (amt === null || amt <= 0n) return NextResponse.json({ error: `Invalid amount on line: ${l.amount}` }, { status: 400 })
     }
+  }
+  for (const l of parsed.data.lines) {
+    const amt = parseMoney(l.amount)
+    if (amt === null || amt <= 0n) return NextResponse.json({ error: `Invalid amount on line: ${l.amount}` }, { status: 400 })
+  }
+
+  const [paymentAccount, ...expenseAccounts] = await Promise.all([
+    getAccountById(su.businessId, parsed.data.paymentAccountId),
+    ...parsed.data.lines.map((line) => getAccountById(su.businessId, line.expenseAccountId)),
+  ])
+  if (!paymentAccount?.isActive || !paymentAccount.isBusinessAccount || paymentAccount.category.type !== 'Asset') {
+    return NextResponse.json({ error: 'INVALID_PAYMENT_ACCOUNT' }, { status: 400 })
+  }
+  if (expenseAccounts.some((account) => !account?.isActive || account.category.type !== 'Expense')) {
+    return NextResponse.json({ error: 'INVALID_EXPENSE_ACCOUNT' }, { status: 400 })
   }
   const requestId = resolveRequestId(req)
   try {

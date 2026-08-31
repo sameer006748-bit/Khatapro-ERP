@@ -36,9 +36,9 @@ export function AccountsView({ user }: { user: MeUser }) {
   // short staleTime only skips refetches on plain navigation revisits)
   const tbQ = useQuery<any>({ queryKey: ['trial-balance'], queryFn: ({ signal }) => apiFetchJson<any>('/api/trial-balance', { signal }), staleTime: 30_000, retry: false })
   const tbRows: any[] = tbQ.data?.rows ?? []
-  const getBalance = (code: string): bigint => {
+  const getBalance = (code: string): bigint | null => {
     const row = tbRows.find((r: any) => r.accountCode === code)
-    return row ? BigInt(row.balance) : 0n
+    return row ? BigInt(row.balance) : null
   }
 
   // Day book for recent activity (invalidated by every posting mutation)
@@ -63,9 +63,26 @@ export function AccountsView({ user }: { user: MeUser }) {
 
   // Pending: standard receivable/payable control accounts from trial balance
   const receivablesBal = getBalance('1200')
-  const payablesBal = getBalance('2010') + getBalance('2020')
-  const totalAvailable = businessAccounts.reduce((s, a) => s + getBalance(a.code), 0n)
-  const balancesReady = !tbQ.isLoading && tbRows.length > 0
+  const payableBalances = [getBalance('2010'), getBalance('2020')]
+  const payablesBal = payableBalances.every((balance) => balance !== null)
+    ? payableBalances.reduce<bigint>((sum, balance) => sum + (balance ?? 0n), 0n)
+    : null
+  const businessBalances = businessAccounts.map((account) => getBalance(account.code))
+  const allBusinessBalancesTracked = businessBalances.every((balance) => balance !== null)
+  const totalAvailable = businessBalances.reduce<bigint>((sum, balance) => sum + (balance ?? 0n), 0n)
+  const balancesReady = tbQ.isSuccess && tbQ.data?.availability?.accounting !== false
+  const usableAccountingData = accounts.length > 0 || tbRows.length > 0 || recentVouchers.length > 0
+  const declaredUnavailable = !usableAccountingData && (
+    coaQ.data?.availability?.accounting === false
+    || tbQ.data?.availability?.accounting === false
+    || dayBookQ.data?.availability?.accounting === false
+  )
+  const hasLoadError = coaQ.isError || tbQ.isError || dayBookQ.isError
+  const activitySummary = (value: bigint) => dayBookQ.isLoading
+    ? 'Loading…'
+    : dayBookQ.isError || dayBookQ.data?.availability?.accounting === false
+      ? 'Unavailable'
+      : formatMoney(value)
 
   const canPostReceipt = user.permissions.includes('can_create_receipt_voucher')
   const canPostPayment = user.permissions.includes('can_create_payment_voucher')
@@ -81,11 +98,12 @@ export function AccountsView({ user }: { user: MeUser }) {
 
   return (
     <div className="space-y-5">
-      {(coaQ.data?.availability?.accounting === false
-        || tbQ.data?.availability?.accounting === false
-        || dayBookQ.data?.availability?.accounting === false) && (
+      {(declaredUnavailable || hasLoadError) && (
         <div className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-          This accounting feature is currently unavailable.
+          <div className="flex items-center justify-between gap-3">
+            <span>{declaredUnavailable ? 'Account information is currently unavailable.' : 'Some account information could not be loaded.'}</span>
+            {hasLoadError && <button className="font-medium underline underline-offset-2" onClick={() => { void coaQ.refetch(); void tbQ.refetch(); void dayBookQ.refetch() }}>Retry</button>}
+          </div>
         </div>
       )}
       {/* Header */}
@@ -111,7 +129,12 @@ export function AccountsView({ user }: { user: MeUser }) {
           {businessAccounts.map(a => {
             const bal = getBalance(a.code)
             const icon = BUSINESS_ACCOUNT_ICONS[a.code] ?? '💼'
-            const isNegative = bal < 0n
+            const isNegative = bal !== null && bal < 0n
+            const balanceLabel = tbQ.isLoading
+              ? 'Loading…'
+              : tbQ.isError || tbQ.data?.availability?.accounting === false
+                ? 'Unavailable'
+                : bal === null ? 'Not tracked' : formatMoney(bal)
             return (
               <div key={a.id} className={`border rounded-lg bg-card p-3 cursor-pointer hover:bg-muted/20 press-sm ${isNegative ? 'border-amber-300' : 'border-border'}`} onClick={() => openLedger(a.id)}>
                 <div className="flex items-center justify-between mb-1">
@@ -119,15 +142,18 @@ export function AccountsView({ user }: { user: MeUser }) {
                   {isNegative && <span className="text-[8px] uppercase bg-amber-100 text-amber-700 px-1 py-0.5 rounded font-medium">Overdrawn</span>}
                 </div>
                 <div className="text-[10px] uppercase tracking-wider text-muted-foreground truncate">{a.name}</div>
-                <div className={`text-base font-bold ${isNegative ? 'text-amber-700' : 'text-foreground'}`} data-num>{formatMoney(bal)}</div>
+                <div className={`text-base font-bold ${isNegative ? 'text-amber-700' : 'text-foreground'}`} data-num>{balanceLabel}</div>
               </div>
             )
           })}
+          {coaQ.isSuccess && businessAccounts.length === 0 && (
+            <div className="col-span-full border border-dashed border-border rounded-lg bg-card p-4 text-sm text-muted-foreground">No business accounts configured.</div>
+          )}
           {balancesReady && businessAccounts.length > 0 && (
             <div className="border border-primary/40 rounded-lg bg-card p-3">
               <div className="flex items-center justify-between mb-1"><span className="text-lg">💰</span></div>
               <div className="text-[10px] uppercase tracking-wider text-muted-foreground truncate">Total Available</div>
-              <div className={`text-base font-bold ${totalAvailable < 0n ? 'text-amber-700' : 'text-primary'}`} data-num>{formatMoney(totalAvailable)}</div>
+              <div className={`text-base font-bold ${allBusinessBalancesTracked && totalAvailable < 0n ? 'text-amber-700' : 'text-primary'}`} data-num>{allBusinessBalancesTracked ? formatMoney(totalAvailable) : 'Not fully tracked'}</div>
             </div>
           )}
         </div>
@@ -135,10 +161,10 @@ export function AccountsView({ user }: { user: MeUser }) {
 
       {/* Daily summary */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-        <SummaryCard icon={TrendingUp} label="Money In Today" value={formatMoney(moneyInToday)} color="text-emerald-600" />
-        <SummaryCard icon={TrendingDown} label="Money Out Today" value={formatMoney(moneyOutToday)} color="text-amber-600" />
-        <SummaryCard icon={ReceiptIcon} label="Expenses Today" value={formatMoney(expensesToday)} color="text-rose-600" />
-        <SummaryCard icon={Wallet} label="Net Movement" value={formatMoney(moneyInToday - moneyOutToday - expensesToday)} color={moneyInToday - moneyOutToday - expensesToday >= 0n ? 'text-emerald-600' : 'text-amber-600'} />
+        <SummaryCard icon={TrendingUp} label="Money In Today" value={activitySummary(moneyInToday)} color="text-emerald-600" />
+        <SummaryCard icon={TrendingDown} label="Money Out Today" value={activitySummary(moneyOutToday)} color="text-amber-600" />
+        <SummaryCard icon={ReceiptIcon} label="Expenses Today" value={activitySummary(expensesToday)} color="text-rose-600" />
+        <SummaryCard icon={Wallet} label="Net Movement" value={activitySummary(moneyInToday - moneyOutToday - expensesToday)} color={moneyInToday - moneyOutToday - expensesToday >= 0n ? 'text-emerald-600' : 'text-amber-600'} />
       </div>
 
       {/* Paisa Kahan Se Aya / Kahan Gaya (recent, from loaded day book) */}
@@ -184,11 +210,11 @@ export function AccountsView({ user }: { user: MeUser }) {
           <div className="grid grid-cols-1 sm:grid-cols-2 divide-y sm:divide-y-0 sm:divide-x divide-border/40">
             <div className="p-3 flex items-center justify-between gap-2">
               <div><div className="text-sm text-foreground">To collect from customers</div><div className="text-[10px] text-muted-foreground">Receivables</div></div>
-              <span className="text-sm font-semibold text-emerald-600" data-num>{formatMoney(receivablesBal)}</span>
+              <span className="text-sm font-semibold text-emerald-600" data-num>{receivablesBal === null ? 'Not tracked' : formatMoney(receivablesBal)}</span>
             </div>
             <div className="p-3 flex items-center justify-between gap-2">
               <div><div className="text-sm text-foreground">To pay vendors</div><div className="text-[10px] text-muted-foreground">Payables</div></div>
-              <span className="text-sm font-semibold text-amber-600" data-num>{formatMoney(payablesBal)}</span>
+              <span className="text-sm font-semibold text-amber-600" data-num>{payablesBal === null ? 'Not tracked' : formatMoney(payablesBal)}</span>
             </div>
           </div>
         </div>

@@ -5,6 +5,7 @@ import { loadSessionUser, requirePermission, hasPermission } from '@/lib/auth/pe
 import { dayBook } from '@/lib/vouchers/data-access'
 import { resolveRequestId, safeApiError, withObservability } from '@/lib/observability'
 import { getAccountingAvailability, unavailableAccountingPayload } from '@/lib/accounting/availability'
+import { isSupabaseConfigured } from '@/lib/supabase/config'
 
 export const GET = withObservability('/api/day-book', async (req: Request) => {
   const requestId = resolveRequestId(req)
@@ -23,7 +24,7 @@ export const GET = withObservability('/api/day-book', async (req: Request) => {
   }
   try {
     const capability = await getAccountingAvailability(loaded.businessId)
-    if (capability.path === 'operational-fallback') {
+    if (capability.path === 'operational-fallback' && !isSupabaseConfigured()) {
       return NextResponse.json(unavailableAccountingPayload({ rows: [] }, capability.reason))
     }
     const rows = await dayBook(loaded.businessId, filters)

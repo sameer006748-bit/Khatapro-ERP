@@ -50,6 +50,28 @@ export function ExpenseBatchView({ user }: { user: MeUser }) {
 
   const canPost = paymentAccountId && lines.length >= 1 && lines.every(l => l.expenseAccountId && (parseMoney(l.amount) ?? 0n) > 0n) && total > 0n
 
+  if (coaQ.isLoading) {
+    return (
+      <div className="space-y-4">
+        <div><h1 className="text-xl font-semibold tracking-tight text-foreground">Expense Batch</h1></div>
+        <div className="card-3d p-6 text-center text-sm text-muted-foreground" role="status">Loading eligible accounts…</div>
+      </div>
+    )
+  }
+
+  if (coaQ.isError) {
+    return (
+      <div className="space-y-4">
+        <div><h1 className="text-xl font-semibold tracking-tight text-foreground">Expense Batch</h1></div>
+        <div className="card-3d p-6 text-center text-sm text-muted-foreground">
+          <AlertCircle className="size-8 mx-auto mb-3 text-amber-500" />
+          <p>Unable to load eligible accounts.</p>
+          <Button variant="outline" size="sm" className="mt-4" onClick={() => coaQ.refetch()}>Retry</Button>
+        </div>
+      </div>
+    )
+  }
+
   if (coaQ.data?.availability?.accounting === false) {
     return (
       <div className="space-y-4">
@@ -57,6 +79,20 @@ export function ExpenseBatchView({ user }: { user: MeUser }) {
         <div className="card-3d p-6 text-center text-sm text-muted-foreground">
           <AlertCircle className="size-8 mx-auto mb-3 text-amber-500" />
           {coaQ.data.availability.message}
+        </div>
+      </div>
+    )
+  }
+
+  if (businessAccounts.length === 0 || expenseAccounts.length === 0) {
+    return (
+      <div className="space-y-4">
+        <div><h1 className="text-xl font-semibold tracking-tight text-foreground">Expense Batch</h1></div>
+        <div className="card-3d p-6 text-center text-sm text-muted-foreground">
+          <AlertCircle className="size-8 mx-auto mb-3 text-amber-500" />
+          {businessAccounts.length === 0
+            ? 'No eligible payment accounts configured.'
+            : 'No eligible expense accounts configured.'}
         </div>
       </div>
     )

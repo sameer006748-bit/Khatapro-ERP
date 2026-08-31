@@ -8,6 +8,7 @@ import { authOptions } from '@/lib/auth/authOptions'
 import { loadSessionUser } from '@/lib/auth/permissions'
 import { getChartOfAccounts } from '@/lib/accounting/data-access'
 import { getAccountingAvailability, unavailableAccountingPayload } from '@/lib/accounting/availability'
+import { isSupabaseConfigured } from '@/lib/supabase/config'
 
 export async function GET() {
   const session = await getServerSession(authOptions)
@@ -18,7 +19,7 @@ export async function GET() {
   }
 
   const capability = await getAccountingAvailability(su.businessId)
-  if (capability.path === 'operational-fallback') {
+  if (capability.path === 'operational-fallback' && !isSupabaseConfigured()) {
     return NextResponse.json(unavailableAccountingPayload(
       { categories: [] },
       capability.reason,

@@ -320,13 +320,14 @@ export async function dayBook(
   filters?: { fromDate?: string | null; toDate?: string | null; voucherType?: string | null },
 ): Promise<DayBookRow[]> {
   const admin = getAdminSupabase()
-  const { data, error } = await admin.rpc('ledger_day_book', {
+  const legacy = await usesLegacyTransactionSchema()
+  const { data, error } = await admin.rpc(legacy ? 'day_book' : 'ledger_day_book', {
     p_business_id: businessId,
     p_from_date: filters?.fromDate ?? null,
     p_to_date: filters?.toDate ?? null,
     p_voucher_type: filters?.voucherType ?? null,
   })
-  if (error) throw new Error(`ledger_day_book: ${error.message}`)
+  if (error) throw new Error(`day_book: ${error.message}`)
   if (!data || !Array.isArray(data)) return []
   return (data as any[]).map(r => ({
     voucherId: r.voucher_id,
