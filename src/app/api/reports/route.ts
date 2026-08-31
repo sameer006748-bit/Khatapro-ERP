@@ -7,6 +7,8 @@ import { resolveRequestId, safeApiError, withObservability } from '@/lib/observa
 import { bizDateString } from '@/lib/dates'
 import { isSchemaUnavailableError } from '@/lib/dashboard/compatibility'
 import { getAccountingAvailability, unavailableAccountingPayload } from '@/lib/accounting/availability'
+import { usesLegacyTransactionSchema } from '@/lib/identity/legacy-bridge'
+import { isSupabaseConfigured } from '@/lib/supabase/config'
 
 export const GET = withObservability('/api/reports', async (req: Request) => {
   const requestId = resolveRequestId(req)
@@ -55,7 +57,10 @@ export const GET = withObservability('/api/reports', async (req: Request) => {
     ])
     if (accountingTypes.has(type)) {
       const capability = await getAccountingAvailability(bid)
-      if (capability.path === 'operational-fallback') {
+      const legacyReportsSupported = capability.path === 'operational-fallback'
+        && isSupabaseConfigured()
+        && await usesLegacyTransactionSchema()
+      if (capability.path === 'operational-fallback' && !legacyReportsSupported) {
         return NextResponse.json(unavailableAccountingPayload(
           { rows: [] },
           capability.reason,
@@ -65,7 +70,7 @@ export const GET = withObservability('/api/reports', async (req: Request) => {
     switch (type) {
       case 'profit-loss': return NextResponse.json({ rows: await reportProfitLoss(bid, fromDate, toDate) })
       case 'balance-sheet': return NextResponse.json({ rows: await reportBalanceSheet(bid, toDate) })
-      case 'trial-balance': return NextResponse.json({ rows: await reportTrialBalance(bid) })
+      case 'trial-balance': return NextResponse.json({ rows: await reportTrialBalance(bid, fromDate, toDate) })
       case 'sales-summary': return NextResponse.json({ rows: await reportSalesSummary(bid, fromDate, toDate) })
       case 'inventory-valuation': return NextResponse.json({ rows: await reportInventoryValuation(bid) })
       case 'cash-flow': return NextResponse.json({ rows: await reportCashFlow(bid, fromDate, toDate) })

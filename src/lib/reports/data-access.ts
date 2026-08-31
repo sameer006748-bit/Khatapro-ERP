@@ -4,25 +4,37 @@
 import 'server-only'
 import { getAdminSupabase } from '@/lib/supabase/admin'
 import { bizDateString } from '@/lib/dates'
+import { usesLegacyTransactionSchema } from '@/lib/identity/legacy-bridge'
+
+/**
+ * The production legacy schema keeps its financial reports under their
+ * original RPC names.  Keep this choice here so every Financial tab report
+ * reads the same business-scoped source as Trial Balance.
+ */
+async function financialReportRpc<T>(
+  uuidRpc: string,
+  legacyRpc: string,
+  args: Record<string, unknown>,
+): Promise<T> {
+  const rpc = (await usesLegacyTransactionSchema()) ? legacyRpc : uuidRpc
+  const { data, error } = await getAdminSupabase().rpc(rpc, args)
+  if (error) throw new Error(`${rpc}: ${error.message}`)
+  return (data ?? []) as T
+}
+
 export async function reportProfitLoss(businessId: string, fromDate: string, toDate: string) {
-  const admin = getAdminSupabase()
-  const { data, error } = await admin.rpc('ledger_profit_loss', {
+  return financialReportRpc<any[]>('ledger_profit_loss', 'report_profit_loss', {
     p_business_id: businessId,
     p_from_date: fromDate,
     p_to_date: toDate,
   })
-  if (error) throw new Error(`ledger_profit_loss: ${error.message}`)
-  return (data ?? []) as any[]
 }
 
 export async function reportBalanceSheet(businessId: string, asOfDate: string) {
-  const admin = getAdminSupabase()
-  const { data, error } = await admin.rpc('ledger_balance_sheet', {
+  return financialReportRpc<any[]>('ledger_balance_sheet', 'report_balance_sheet', {
     p_business_id: businessId,
     p_as_of_date: asOfDate,
   })
-  if (error) throw new Error(`ledger_balance_sheet: ${error.message}`)
-  return (data ?? []) as any[]
 }
 
 /*
@@ -171,17 +183,19 @@ export async function reportInventoryValuation(businessId: string) {
 }
 
 export async function reportCashFlow(businessId: string, fromDate: string, toDate: string) {
-  const admin = getAdminSupabase()
-  const { data, error } = await admin.rpc('report_cash_flow', { p_business_id: businessId, p_from_date: fromDate, p_to_date: toDate })
-  if (error) throw new Error(`report_cash_flow: ${error.message}`)
-  return data as any[]
+  return financialReportRpc<any[]>('report_cash_flow', 'report_cash_flow', {
+    p_business_id: businessId,
+    p_from_date: fromDate,
+    p_to_date: toDate,
+  })
 }
 
 export async function reportExpenseSummary(businessId: string, fromDate: string, toDate: string) {
-  const admin = getAdminSupabase()
-  const { data, error } = await admin.rpc('report_expense_summary', { p_business_id: businessId, p_from_date: fromDate, p_to_date: toDate })
-  if (error) throw new Error(`report_expense_summary: ${error.message}`)
-  return data as any[]
+  return financialReportRpc<any[]>('report_expense_summary', 'report_expense_summary', {
+    p_business_id: businessId,
+    p_from_date: fromDate,
+    p_to_date: toDate,
+  })
 }
 
 export async function reportCustomerOutstanding(businessId: string) {
@@ -444,15 +458,12 @@ export async function reportProductProfitability(
 // ─────────────────────────────────────────────────────────────
 // Phase 8 completion: Trial Balance (uses existing RPC)
 // ─────────────────────────────────────────────────────────────
-export async function reportTrialBalance(businessId: string) {
-  const admin = getAdminSupabase()
-  const { data, error } = await admin.rpc('ledger_trial_balance', {
+export async function reportTrialBalance(businessId: string, fromDate?: string, toDate?: string) {
+  return financialReportRpc<any[]>('ledger_trial_balance', 'trial_balance', {
     p_business_id: businessId,
-    p_from_date: null,
-    p_to_date: null,
+    p_from_date: fromDate ?? null,
+    p_to_date: toDate ?? null,
   })
-  if (error) throw new Error(`ledger_trial_balance: ${error.message}`)
-  return (data ?? []) as any[]
 }
 
 // ─────────────────────────────────────────────────────────────

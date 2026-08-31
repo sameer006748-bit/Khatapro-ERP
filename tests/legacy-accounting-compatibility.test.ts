@@ -18,6 +18,9 @@ const trialRoute = await source('src/app/api/trial-balance/route.ts')
 const ledgerRoute = await source('src/app/api/ledger/[accountId]/route.ts')
 const ledgerAccess = await source('src/lib/accounting/voucher-supabase.ts')
 const ledgerView = await source('src/components/erp/views/ledger-drilldown-view.tsx')
+const reportsAccess = await source('src/lib/reports/data-access.ts')
+const reportsRoute = await source('src/app/api/reports/route.ts')
+const reportsView = await source('src/components/erp/views/reports-view.tsx')
 
 test('configured legacy production loads its business-scoped Chart of Accounts', () => {
   assert.match(accountingAccess, /usesLegacyTransactionSchema/)
@@ -60,6 +63,22 @@ test('Trial Balance list and drill-down use matching legacy report contracts', (
   assert.match(ledgerRoute, /getAccountById\(su\.businessId, accountId\)/)
   assert.match(ledgerRoute, /accountLedgerSmart\(su\.businessId, accountId\)/)
   assert.match(ledgerRoute, /requirePermission\(loaded, 'can_view_ledgers'\)/)
+})
+
+test('Financial reports use the verified legacy report source without bypassing report scope or dates', () => {
+  assert.match(reportsAccess, /usesLegacyTransactionSchema/)
+  assert.match(reportsAccess, /financialReportRpc<any\[]>\('ledger_profit_loss', 'report_profit_loss'/)
+  assert.match(reportsAccess, /financialReportRpc<any\[]>\('ledger_balance_sheet', 'report_balance_sheet'/)
+  assert.match(reportsAccess, /financialReportRpc<any\[]>\('ledger_trial_balance', 'trial_balance'/)
+  assert.match(reportsAccess, /p_from_date: fromDate/)
+  assert.match(reportsAccess, /p_to_date: toDate/)
+  assert.match(reportsRoute, /legacyReportsSupported/)
+  assert.match(reportsRoute, /reportTrialBalance\(bid, fromDate, toDate\)/)
+  assert.match(reportsRoute, /hasPermission\(loaded, requiredPerm\)/)
+  assert.match(reportsRoute, /const bid = loaded\.businessId/)
+  assert.match(reportsView, /No revenue in this period\./)
+  assert.match(reportsView, /Unable to load financial report\./)
+  assert.match(reportsView, /Financial report is not available for this business\./)
 })
 
 test('ledger drill-down renders real empty and retry states without exposing request details', () => {

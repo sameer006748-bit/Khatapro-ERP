@@ -160,6 +160,7 @@ export function ReportsView({ user }: { user: MeUser }) {
 }
 
 function ReportContent({ type, fromDate, toDate, user }: { type: ReportType; fromDate: string; toDate: string; user: MeUser }) {
+  const isFinancialReport = ['profit-loss', 'balance-sheet', 'trial-balance', 'cash-flow', 'expense'].includes(type)
   const q = useQuery<any>({
     queryKey: ['report', type, fromDate, toDate],
     queryFn: ({ signal }) => apiFetchJson<any>(`/api/reports?type=${type}&fromDate=${fromDate}&toDate=${toDate}`, { signal }),
@@ -170,10 +171,10 @@ function ReportContent({ type, fromDate, toDate, user }: { type: ReportType; fro
   })
 
   if (q.isLoading) return <div className="card-3d p-8 text-center text-sm text-muted-foreground animate-pulse">Loading report…</div>
-  if (q.isError || !q.data) return <div className="card-3d p-8 text-center"><p className="text-sm text-destructive mb-3">Unable to load report.</p><Button variant="outline" size="sm" onClick={() => q.refetch()}>Retry</Button></div>
+  if (q.isError || !q.data) return <div className="card-3d p-8 text-center"><p className="text-sm text-destructive mb-3">{isFinancialReport ? 'Unable to load financial report.' : 'Unable to load report.'}</p><Button variant="outline" size="sm" onClick={() => q.refetch()}>Retry</Button></div>
   if (q.data.error === 'FORBIDDEN') return <div className="card-3d p-8 text-center"><p className="text-sm text-amber-600">You do not have permission to view this report.</p></div>
   if (q.data.availability?.accounting === false) {
-    return <div className="card-3d p-8 text-center"><p className="text-sm text-amber-700">This accounting feature is currently unavailable.</p></div>
+    return <div className="card-3d p-8 text-center"><p className="text-sm text-amber-700">{isFinancialReport ? 'Financial report is not available for this business.' : 'This accounting feature is currently unavailable.'}</p></div>
   }
 
   const rows = q.data?.rows ?? []
