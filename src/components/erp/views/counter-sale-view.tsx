@@ -414,7 +414,7 @@ export function CounterSaleView({ user }: { user: MeUser }) {
         </Button>
       </div>
 
-      <div className="grid gap-3 lg:min-h-0 lg:h-full lg:flex-1 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
+      <div className="grid gap-3 lg:min-h-0 lg:flex-1 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] lg:grid-rows-[minmax(0,1fr)]">
         {/* ═══ LEFT: PRODUCT FINDER ═══ */}
         <div className="min-h-0 lg:h-full">
           <div className="card-3d flex h-full min-h-0 flex-col p-3">
@@ -528,6 +528,7 @@ export function CounterSaleView({ user }: { user: MeUser }) {
           />
 
           {rows.length > 0 && (
+            <div className="shrink-0">
             <PaymentPanel
               accounts={businessAccounts}
               {...payment.panelProps}
@@ -545,6 +546,7 @@ export function CounterSaleView({ user }: { user: MeUser }) {
                 <Input id="counter-discount" value={discountRupees} onChange={e => setDiscountRupees(e.target.value)} placeholder="0" className="h-9 bg-background press-sm text-sm" data-num />
               </div>
             </PaymentPanel>
+            </div>
           )}
 
           <BillSummary
@@ -780,7 +782,11 @@ function BillRows({
   }
 
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto">
+    <div
+      className="min-h-0 min-w-0 flex-1 basis-0 overflow-y-auto lg:min-h-[96px]"
+      aria-label="Active bill items"
+      data-testid="active-bill-items"
+    >
       <div className="px-3 py-2 border-b border-border flex items-center justify-between">
         <span className="text-sm font-semibold text-foreground">Items ({rows.length})</span>
         <span className="text-[10px] uppercase tracking-wide text-muted-foreground">net = sold − returned</span>
@@ -809,7 +815,7 @@ function BillRows({
               const isExpanded = expandedRows.has(row.key)
               return (
                 <Fragment key={row.key}>
-                <tr className={`border-b border-border/50 ${error ? 'bg-destructive/5' : ''}`}>
+                <tr data-testid="active-bill-item-row" className={`border-b border-border/50 ${error ? 'bg-destructive/5' : ''}`}>
                   <td className="min-w-0 p-2">
                     <div className="break-words font-medium leading-tight text-foreground">{row.productName}</div>
                     {row.isTemporary && <span className="text-[9px] uppercase bg-amber-100 text-amber-700 px-1 rounded">Temp</span>}

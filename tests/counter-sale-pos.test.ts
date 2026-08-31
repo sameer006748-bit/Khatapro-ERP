@@ -33,6 +33,20 @@ test('default cart rows reserve visible space for the selected product identity'
   assert.match(billRows, /break-words font-medium leading-tight text-foreground">\{row\.productName\}/)
 })
 
+test('active bill keeps rendered item rows in its own resolved scroll region', () => {
+  const billRows = counter.slice(counter.indexOf('function BillRows'), counter.indexOf('function Detail'))
+  assert.match(counter, /grid-rows-\[minmax\(0,1fr\)\]/)
+  assert.match(billRows, /data-testid="active-bill-items"/)
+  assert.match(billRows, /flex-1 basis-0 overflow-y-auto lg:min-h-\[96px\]/)
+  assert.match(billRows, /data-testid="active-bill-item-row"/)
+  assert.match(billRows, /\{row\.productName\}/)
+  assert.match(billRows, /Quantity of \$\{row\.productName\}/)
+  assert.match(billRows, /formatWholeRupees\(line\.lineTotalPaisas\)/)
+  assert.match(billRows, /aria-expanded=\{isExpanded\}/)
+  assert.match(counter, /<PaymentPanel/)
+  assert.match(counter, /> Post Sale</)
+})
+
 test('same-bill Sold 10 / Returned 2 remains Net 8 with unchanged commission arithmetic', () => {
   const line = normalizeSaleLine({
     productId: 'product-1', productName: 'Fabric', soldQty: 10, returnedQty: 2,
