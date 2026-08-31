@@ -88,3 +88,19 @@ test('totals and Post Sale remain in the fixed bill footer with a disabled reaso
   assert.match(counter, /> Post Sale</)
   assert.match(counter, /disabledReason/)
 })
+
+test('counter footer stays reachable at short desktop viewports without compressing rows', () => {
+  // Viewport-aware card height (not the old fixed 680px) keeps the footer near the fold.
+  assert.match(counter, /lg:max-h-\[min\(820px,calc\(100dvh-8rem\)\)\]/)
+  // Card may scroll internally so an oversized bill can never permanently clip the footer.
+  assert.match(counter, /lg:overflow-y-auto/)
+  // Bottom spacing keeps the footer clear of the fixed "Ask KhataPro AI" launcher.
+  assert.match(counter, /lg:mb-20/)
+  // The items area scrolls inside the height-capped card so the footer always stays visible.
+  assert.match(counter, /lg:min-h-0 lg:flex-1 lg:basis-0 lg:overflow-y-auto/)
+  // No re-introduction of the earlier cart-compressing sizing.
+  assert.doesNotMatch(counter, /lg:min-h-\[96px\]/)
+  assert.doesNotMatch(counter, /lg:h-\[calc\(100dvh-9\.5rem\)\]/)
+  // Item rows keep their natural sizing and the long-list scroll behavior.
+  assert.match(counter, /shouldScrollItems \? 'min-h-0 min-w-0 flex-1 basis-0 overflow-y-auto' : 'min-w-0 shrink-0'/)
+})
