@@ -17,9 +17,9 @@ import type { MeUser } from '@/components/erp/erp-app'
 import { apiFetchJson } from '@/lib/api-client'
 import { PaymentPanel } from '@/components/erp/sales/payment-panel'
 import { usePaymentDraft } from '@/components/erp/sales/use-payment-draft'
+import { usePaymentAccounts } from '@/components/erp/sales/use-payment-accounts'
 
 type Product = { id: string; name: string; salePrice: number }
-type Account = { id: string; code: string; name: string }
 type Salesman = { id: string; name: string; commissionPct: number; isActive?: boolean }
 type Item = { key: string; productId: string; productName: string; qty: string; unitPrice: string }
 
@@ -38,7 +38,7 @@ export function OfcSaleView({ user }: { user: MeUser }) {
   const [result, setResult] = useState<{ ok: boolean; invoiceNo?: string; invoiceId?: string; error?: string } | null>(null)
   const [idempotencyKey, setIdempotencyKey] = useState(() => crypto.randomUUID())
 
-  const coaQ = useQuery<any>({ queryKey: ['coa'], queryFn: ({ signal }) => apiFetchJson<any>('/api/setup/coa', { signal }), staleTime: 300_000 })
+  const paymentAccountsQ = usePaymentAccounts()
   const productsQ = useQuery<{ rows: Product[] }>({ queryKey: ['products'], queryFn: ({ signal }) => apiFetchJson('/api/products', { signal }), staleTime: 30_000 })
   const salesmenQ = useQuery<{ rows: Salesman[] }>({ queryKey: ['salesmen'], queryFn: ({ signal }) => apiFetchJson('/api/salesmen', { signal }), staleTime: 300_000, enabled: mustPickSalesman })
 
@@ -47,10 +47,7 @@ export function OfcSaleView({ user }: { user: MeUser }) {
   // active salesman (unambiguous) — never guess among several.
   const effectiveSalesmanId = useMemo(() => salesmanId || (activeSalesmen.length === 1 ? activeSalesmen[0].id : ''), [salesmanId, activeSalesmen])
 
-  const businessAccounts: Account[] = useMemo(() => {
-    if (!coaQ.data?.categories) return []
-    return coaQ.data.categories.flatMap((c: any) => c.accounts).filter((a: any) => a.isBusinessAccount && a.isActive).map((a: any) => ({ id: a.id, code: a.code, name: a.name }))
-  }, [coaQ.data])
+  const businessAccounts = paymentAccountsQ.accounts
 
   // ── Phase 9.1 totals with discount ──
   const subtotal = items.reduce((acc, it) => acc + (parseMoney(it.unitPrice) ?? 0n) * BigInt(parseInt(it.qty) || 0), 0n)
@@ -173,9 +170,9 @@ export function OfcSaleView({ user }: { user: MeUser }) {
       <h1 className="text-xl font-semibold tracking-tight text-foreground">Out-of-City Sale</h1>
 
       {/* ── Salesman ── */}
-      {coaQ.data?.availability?.accounting === false && (
+      {paymentAccountsQ.isError && (
         <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-muted-foreground">
-          {coaQ.data.availability.message}
+          Payment accounts could not be loaded. Try again before recording an advance.
         </div>
       )}
 

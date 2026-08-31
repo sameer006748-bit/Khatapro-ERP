@@ -556,3 +556,13 @@ tests passed 33/33; explicit auth/permission/navigation tests passed 38/38; the 
 passed 521/521; and `npm run build` passed. Browser verification is NO because no browser
 session was connected, so final Owner/Rider/mobile client-style visual smoke testing remains
 pending. Protected local files were not modified or staged by this batch.
+
+## Counter Sale POS + Payment Account Integration — 2026-08-31
+
+Sale screens now obtain active payment accounts through one cached Business Accounts query (`/api/setup/business-accounts`) rather than filtering the complete Chart of Accounts. This keeps Counter, Online, Out-of-City, and Other Sale compatible with the verified legacy production Business Accounts RPC path and removes the UUID-ledger capability dependency from account selection. The projection exposes only the linked ledger ID, code, name, active state, and optional type. One active account auto-selects; multiple accounts require an explicit choice; inactive accounts are excluded.
+
+Counter Sale now blocks bill construction only after a successful zero-account response. Owners/authorized setup users receive a direct Business Accounts setup action; other roles receive an ask-the-owner message. Loading and load-error states do not masquerade as a zero-account blocker, and no migration/schema/vendor wording is exposed.
+
+The desktop Counter Sale is a fixed-height two-panel workstation: independently scrolling product finder and bill regions, compact seller/customer header, Product / Qty / Total default rows, expandable return/rate/commission/stock details, collapsed editable payment, and an always-visible Net Sale/Post Sale footer. Same-bill return arithmetic, commission attribution/calculation, split payment, optional customer, and keyboard search/add behavior remain on their existing engines.
+
+Verification in this batch: TypeScript and changed-file ESLint passed; focused payment/POS/mixed-return/commission tests passed 77/77; the explicit full suite passed 541/541; and `npm run build` passed. Browser visual verification is NO because no browser session was connected; 1366×720 and narrow-viewport screenshot approval remain pending. No production database or migration was touched.

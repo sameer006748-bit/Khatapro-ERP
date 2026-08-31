@@ -25,6 +25,10 @@ import {
   ACCEPTED_BUSINESS_ACCOUNT_TYPES,
   normalizeBusinessAccountType,
 } from '../src/lib/accounting/business-account-types.ts'
+import {
+  resolvePaymentAccountGate,
+  selectActivePaymentAccounts,
+} from '../src/lib/sales/payment-accounts.ts'
 
 const CASHBOX = 'acc-cashbox'
 const MEEZAN = 'acc-meezan'
@@ -47,6 +51,7 @@ const ofcView = await readFile('src/components/erp/views/ofc-sale-view.tsx', 'ut
 const otherView = await readFile('src/components/erp/views/other-sale-view.tsx', 'utf8')
 const panel = await readFile('src/components/erp/sales/payment-panel.tsx', 'utf8')
 const draftHook = await readFile('src/components/erp/sales/use-payment-draft.ts', 'utf8')
+const accountsHook = await readFile('src/components/erp/sales/use-payment-accounts.ts', 'utf8')
 const accountsView = await readFile('src/components/erp/views/business-accounts-view.tsx', 'utf8')
 const accountRoute = await readFile('src/app/api/setup/business-accounts/route.ts', 'utf8')
 const accountItemRoute = await readFile('src/app/api/setup/business-accounts/[id]/route.ts', 'utf8')
@@ -158,11 +163,13 @@ test('change is a separate allocation and does not inflate money received', () =
 
 test('a user-created account is selectable and an inactive one is rejected', () => {
   const accounts = [{ id: MEEZAN }, { id: WALLET }]
-  // Positional default: whatever the business created first, never a named account.
-  assert.equal(resolveDefaultPaymentAccountId(accounts, ''), MEEZAN)
+  // Multiple active accounts require an explicit choice; one is unambiguous.
+  assert.equal(resolveDefaultPaymentAccountId(accounts, ''), '')
+  assert.equal(resolveDefaultPaymentAccountId([{ id: MEEZAN }], ''), MEEZAN)
   assert.equal(resolveDefaultPaymentAccountId(accounts, WALLET), WALLET)
-  // A selection that is no longer in the active list falls back instead of posting.
-  assert.equal(resolveDefaultPaymentAccountId(accounts, 'acc-deactivated'), MEEZAN)
+  // A stale selection clears when several choices remain, or uses the sole fallback.
+  assert.equal(resolveDefaultPaymentAccountId(accounts, 'acc-deactivated'), '')
+  assert.equal(resolveDefaultPaymentAccountId([{ id: MEEZAN }], 'acc-deactivated'), MEEZAN)
   assert.equal(resolveDefaultPaymentAccountId([], 'acc-deactivated'), '')
 
   const stale = draft({ paidPaisas: 100_00n, accountId: 'acc-deactivated', netPayablePaisas: 100_00n })
@@ -179,12 +186,10 @@ test('a user-created account is selectable and an inactive one is rejected', () 
   assert.match(String(validatePaymentDraft(staleSplit, { availableAccountIds: [MEEZAN] })), /no longer active/)
 })
 
-test('sale screens read active business accounts and hard-code no brand name', () => {
+test('sale screens use the supported shared Business Accounts source', () => {
   for (const view of salesViews) {
-    // Every screen derives its options from the COA business accounts that are
-    // still active — the exact predicate wording differs per screen.
-    assert.match(view, /isBusinessAccount &&/)
-    assert.match(view, /isActive/)
+    assert.match(view, /usePaymentAccounts/)
+    assert.doesNotMatch(view, /\/api\/setup\/coa/)
     // No name/code based default may reappear in any sale screen.
     assert.doesNotMatch(view, /name === 'Cash'/)
     assert.doesNotMatch(view, /name === 'Bank'/)
@@ -192,6 +197,32 @@ test('sale screens read active business accounts and hard-code no brand name', (
     assert.doesNotMatch(view, /'Easypaisa'/)
     assert.doesNotMatch(view, /code === '10\d0'/)
   }
+  assert.match(accountsHook, /\/api\/setup\/business-accounts/)
+  assert.match(accountsHook, /queryKey: \['business-accounts'\]/)
+})
+
+test('Business Accounts are projected to active ledger payment identities only', () => {
+  const projected = selectActivePaymentAccounts([
+    {
+      id: 'business-account-cash', name: 'CASH', type: 'Cash', isActive: true,
+      ledger: { id: CASHBOX, code: '1060', name: 'CASH' },
+    },
+    {
+      id: 'business-account-old', name: 'Old Bank', type: 'Bank', isActive: false,
+      ledger: { id: 'ledger-old', code: '1061', name: 'Old Bank' },
+    },
+  ])
+  assert.deepEqual(projected, [{ id: CASHBOX, code: '1060', name: 'CASH', isActive: true, type: 'Cash' }])
+})
+
+test('Counter setup gate waits for loading and blocks only a confirmed zero-account result', () => {
+  assert.equal(resolvePaymentAccountGate({ isPending: true, isError: false, isSuccess: false, accountCount: 0 }), 'loading')
+  assert.equal(resolvePaymentAccountGate({ isPending: false, isError: true, isSuccess: false, accountCount: 0 }), 'error')
+  assert.equal(resolvePaymentAccountGate({ isPending: false, isError: false, isSuccess: true, accountCount: 0 }), 'setup-required')
+  assert.equal(resolvePaymentAccountGate({ isPending: false, isError: false, isSuccess: true, accountCount: 1 }), 'ready')
+  assert.match(counterView, /Payment account required/)
+  assert.match(counterView, /Set up payment account/)
+  assert.doesNotMatch(counterView, /ACCOUNTING_MIGRATION_REQUIRED/)
 })
 
 test('payment account identity is what gets posted, never the display name', () => {

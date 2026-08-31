@@ -86,8 +86,10 @@ test('unsupported UI sections use business-facing language and do not retry', ()
   assert.match(reportsView, /This accounting feature is currently unavailable/)
   assert.match(accountsView, /retry: false/)
   assert.match(reportsView, /retry: false/)
-  for (const view of [counterSaleView, onlineSaleView, ofcSaleView, otherSaleView, expenseView]) {
-    assert.match(view, /availability\.message/)
+  assert.match(expenseView, /availability\.message/)
+  for (const view of [counterSaleView, onlineSaleView, ofcSaleView, otherSaleView]) {
+    assert.match(view, /usePaymentAccounts/)
+    assert.doesNotMatch(view, /availability\.message/)
   }
 })
 

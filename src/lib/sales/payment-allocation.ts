@@ -108,16 +108,17 @@ export function primaryPaymentAccountId(draft: PaymentDraft): string {
 }
 
 /**
- * Pick the account a screen should start on. Deliberately positional — never
- * matched on a name or a code, because payment accounts are user-created data
- * and no built-in "Cash" or wallet account is guaranteed to exist.
+ * Keep an explicit active choice or auto-select the sole active account.
+ * With several accounts, their ordering must not silently decide where money
+ * was received; the operator chooses explicitly.
  */
 export function resolveDefaultPaymentAccountId(
   accounts: readonly { id: string }[],
   selected: string,
 ): string {
   if (selected && accounts.some((account) => account.id === selected)) return selected
-  return accounts.length > 0 ? accounts[0].id : ''
+  // One account is unambiguous. With several, require an explicit choice.
+  return accounts.length === 1 ? accounts[0].id : ''
 }
 
 // ─────────────────────────────────────────────────────────────

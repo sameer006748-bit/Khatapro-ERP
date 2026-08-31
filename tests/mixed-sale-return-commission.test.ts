@@ -378,11 +378,10 @@ test('an absent product commission column is reported unavailable, never rewritt
   assert.match(dataAccess, /rather than silently\r?\n \* rewritten to zero/)
 })
 
-test('the migration-dependent notice is scoped to the affected feature, not the whole workspace', () => {
-  // Counter Sale keeps working; the accounting notice sits inside the Payment
-  // card rather than as a banner over the entire POS workspace.
-  assert.match(counterView, /availability\.message/)
-  assert.match(counterView, /Migration-dependent status stays beside the feature it affects/)
+test('Counter payment accounts do not depend on generic accounting availability', () => {
+  assert.match(counterView, /usePaymentAccounts/)
+  assert.doesNotMatch(counterView, /availability\.message/)
+  assert.doesNotMatch(counterView, /\/api\/setup\/coa/)
 })
 
 // ── 17. Invoice item detail ────────────────────────────────────────────────
@@ -471,7 +470,7 @@ test('Counter Sale product finder and bill rows are keyboard operable', () => {
   assert.match(counterView, /aria-label="Search products"/)
   assert.match(counterView, /role="listbox"/)
   assert.match(paymentPanel, /aria-label="Payment account"/)
-  assert.match(counterView, /aria-label=\{`Sold quantity of \$\{row\.productName\}`\}/)
+  assert.match(counterView, /aria-label=\{`Quantity of \$\{row\.productName\}`\}/)
 })
 
 test('the bill row shows sold, returned, net and commission side by side', () => {

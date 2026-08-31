@@ -24,23 +24,21 @@ The owner must be able to change the reporting period directly from Home, includ
 Counter Sale must be a professional POS-style screen, not a basic scrolling form.
 
 ### Current status
-✅ Major redesign implemented and manually reviewed.
+✅ High-speed two-panel POS redesign implemented and regression-tested.
 
 Current design includes:
-- product finder/search;
+- fixed-height desktop workspace with independently scrolling product and bill panels;
+- product finder/search with in-stock products presented first;
 - keyboard navigation and Enter-to-add;
 - stock/low-stock state;
-- active bill panel;
-- Owner/Salesman attribution;
-- sold / returned / net quantities;
-- rate, discount, total;
-- commission per piece and total commission;
-- stock impact;
-- payment summary;
-- visible Post Sale action.
+- compact Owner/Salesman and optional-customer bill header;
+- compact default Product / Qty / Total item rows;
+- expandable returned quantity, net, rate, commission, stock, and remove controls;
+- collapsed-by-default payment summary with explicit edit/full-payment action;
+- always-visible Net Sale and Post Sale footer with a disabled reason.
 
 ### Remaining Counter Sale UI work
-🟡 Final visual polish is still desirable for spacing, density, column readability, and print-quality presentation.
+🟡 Automated and static verification is complete, but final 1366×720 and narrow-viewport browser sign-off remains pending because no browser session was connected in the implementation environment.
 
 ## Same-Bill Sale + Return
 
@@ -245,15 +243,21 @@ It must be easy and quick to use.
 Payment accounts must be user-managed business data, not hard-coded Cash/JazzCash/Easypaisa/Bank labels inside sale screens.
 
 ### Current status
-🟡 Shared payment-allocation engine and business-account management were implemented locally after current HEAD but are not yet committed/pushed.
+✅ Sale payment-account discovery now uses the supported Business Accounts API directly across Counter, Online, Out-of-City, and Other Sale; it no longer depends on Chart of Accounts or UUID-ledger availability.
 
-Current work includes:
+Current behavior includes:
 - user-created payment accounts;
 - canonical account types;
 - edit/activate/deactivate/guarded-delete;
-- shared payment UI across sale channels;
+- one cached active-account projection shared across all four sale channels;
+- the linked ledger account ID/code/name used for posting and display;
+- exactly one active account auto-selected, while multiple accounts require an explicit choice;
+- inactive accounts excluded from new sale selection;
+- Counter Sale loading state followed by an upfront zero-account setup guard before bill construction;
 - account-ID persistence;
 - split payment support.
+
+The production-compatible legacy Business Accounts path is therefore eligible to supply accounts such as `CASH · 1060` to sale screens. Production/browser visual confirmation remains pending; no production financial write was made in this implementation batch.
 
 Optional account description currently requires a schema migration because the current BusinessAccount model has no description column.
 

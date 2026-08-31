@@ -26,11 +26,18 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Plus, Split, Trash2, Undo2, AlertCircle } from 'lucide-react'
+import { useState } from 'react'
+import { Plus, Split, Trash2, Undo2, AlertCircle, Pencil } from 'lucide-react'
 import { formatWholeRupees } from '@/lib/format'
 import type { PaymentSplitMode } from '@/lib/sales/payment-allocation'
 
-export type PaymentAccountOption = { id: string; code: string; name: string }
+export type PaymentAccountOption = {
+  id: string
+  code: string
+  name: string
+  isActive?: boolean
+  type?: string
+}
 
 /** One split row as the screen holds it: a stable key plus raw typed text. */
 export type PaymentSplitRow = { key: string; accountId: string; amount: string }
@@ -69,6 +76,12 @@ export type PaymentPanelProps = {
   headerSlot?: React.ReactNode
   /** Channel-specific fields rendered under the payment inputs. */
   children?: React.ReactNode
+  /** Counter POS starts as a one-line summary and expands only on request. */
+  collapsible?: boolean
+  /** Removes the outer card when embedded in a larger bill workspace. */
+  embedded?: boolean
+  /** Explicit convenience action; it never records money until clicked. */
+  onPayFull?: () => void
 }
 
 export function PaymentPanel({
@@ -93,19 +106,66 @@ export function PaymentPanel({
   idPrefix = 'payment',
   headerSlot,
   children,
+  collapsible = false,
+  embedded = false,
+  onPayFull,
 }: PaymentPanelProps) {
   const isSplit = mode === 'split'
   const hasAccounts = accounts.length > 0
+  const [editing, setEditing] = useState(!collapsible)
+  const selectedAccount = accounts.find((account) => account.id === accountId)
 
   function patchRow(key: string, patch: Partial<PaymentSplitRow>) {
     onSplitRowsChange(splitRows.map((row) => (row.key === key ? { ...row, ...patch } : row)))
   }
 
+  if (collapsible && !editing) {
+    const accountSummary = isSplit
+      ? `${splitRows.filter((row) => row.accountId).length || splitRows.length} accounts (split)`
+      : selectedAccount
+        ? `${selectedAccount.name} / ${selectedAccount.code}`
+        : 'Choose account'
+    const amountSummary = paidPaisas > 0n
+      ? formatWholeRupees(paidPaisas)
+      : 'Amount not entered'
+
+    return (
+      <div className={embedded ? 'border-t border-border/70 px-3 py-2' : 'card-3d p-3'}>
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <div className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Payment</div>
+            <div className="truncate text-sm font-medium text-foreground" data-num>
+              {accountSummary} <span className="text-muted-foreground">/</span> {amountSummary}
+            </div>
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-8 shrink-0 text-xs press-sm"
+            onClick={() => setEditing(true)}
+          >
+            <Pencil className="size-3" /> Edit
+          </Button>
+        </div>
+      </div>
+    )
+  }
+
   return (
-    <div className="card-3d p-3">
+    <div className={embedded ? 'border-t border-border/70 px-3 py-2' : 'card-3d p-3'}>
       <div className="flex items-center gap-1.5 mb-2">
         <span className="text-sm font-semibold text-foreground">Payment</span>
         {headerSlot}
+        {collapsible && (
+          <button
+            type="button"
+            onClick={() => setEditing(false)}
+            className="ml-auto text-[11px] font-medium text-muted-foreground hover:text-foreground press-sm"
+          >
+            Done
+          </button>
+        )}
       </div>
 
       {notice && (
@@ -138,6 +198,15 @@ export function PaymentPanel({
             className="h-9 bg-background press-sm text-sm"
             data-num
           />
+          {onPayFull && (
+            <button
+              type="button"
+              onClick={onPayFull}
+              className="mt-1 text-[11px] font-medium text-primary hover:underline press-sm"
+            >
+              Pay full amount
+            </button>
+          )}
         </div>
         {!isSplit && (
           <div>

@@ -24,11 +24,11 @@ import type { MeUser } from '@/components/erp/erp-app'
 import { apiFetchJson } from '@/lib/api-client'
 import { PaymentPanel, type PaymentAccountOption } from '@/components/erp/sales/payment-panel'
 import { usePaymentDraft } from '@/components/erp/sales/use-payment-draft'
+import { usePaymentAccounts } from '@/components/erp/sales/use-payment-accounts'
 
 type Product = { id: string; name: string; currentStock: number; salePrice: number; unit: string }
 type Salesman = { id: string; name: string; commissionPct: number }
 type Customer = { id: string; name: string; phone?: string; city?: string }
-type Account = { id: string; code: string; name: string; isBusinessAccount: boolean }
 
 type CartItem = {
   key: string
@@ -59,11 +59,7 @@ export function OtherSaleView({ user }: { user: MeUser }) {
   const [isPosting, setIsPosting] = useState(false)
   const postingRef = useRef(false)
 
-  const coaQ = useQuery<any>({
-    queryKey: ['coa'],
-    queryFn: ({ signal }) => apiFetchJson<any>('/api/setup/coa', { signal }),
-    staleTime: 300_000,
-  })
+  const paymentAccountsQ = usePaymentAccounts()
   const productsQ = useQuery<{ rows: Product[] }>({
     queryKey: ['products'],
     queryFn: ({ signal }) => apiFetchJson('/api/products', { signal }),
@@ -80,13 +76,7 @@ export function OtherSaleView({ user }: { user: MeUser }) {
     staleTime: 60_000,
   })
 
-  const accounts = useMemo<PaymentAccountOption[]>(() => {
-    const categories = (coaQ.data as any)?.categories ?? []
-    return categories
-      .flatMap((category: any) => category.accounts ?? [])
-      .filter((account: Account & { isActive?: boolean }) => account.isBusinessAccount && account.isActive !== false)
-      .map((account: Account) => ({ id: account.id, code: account.code, name: account.name }))
-  }, [coaQ.data])
+  const accounts: PaymentAccountOption[] = paymentAccountsQ.accounts
 
   const filteredProducts = useMemo(() => {
     const rows = productsQ.data?.rows ?? []
@@ -235,9 +225,9 @@ export function OtherSaleView({ user }: { user: MeUser }) {
         )}
       </div>
 
-      {coaQ.data?.availability?.accounting === false && (
+      {paymentAccountsQ.isError && (
         <div className="mb-4 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-muted-foreground">
-          {coaQ.data.availability.message}
+          Payment accounts could not be loaded. Try again before recording a payment.
         </div>
       )}
 
