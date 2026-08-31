@@ -400,7 +400,7 @@ export function CounterSaleView({ user }: { user: MeUser }) {
   }
 
   return (
-    <div className="flex flex-col gap-2 lg:h-[calc(100dvh-9.5rem)] lg:min-h-[520px]">
+    <div className="flex flex-col gap-2">
       {/* ── Workspace header ── */}
       <div className="flex items-end justify-between gap-3 flex-wrap">
         <div>
@@ -414,9 +414,9 @@ export function CounterSaleView({ user }: { user: MeUser }) {
         </Button>
       </div>
 
-      <div className="grid gap-3 lg:min-h-0 lg:flex-1 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] lg:grid-rows-[minmax(0,1fr)]">
+      <div className="grid gap-3 lg:items-start lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
         {/* ═══ LEFT: PRODUCT FINDER ═══ */}
-        <div className="min-h-0 lg:h-full">
+        <div className="min-h-0 lg:h-[560px]">
           <div className="card-3d flex h-full min-h-0 flex-col p-3">
             <div className="relative">
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
@@ -501,7 +501,7 @@ export function CounterSaleView({ user }: { user: MeUser }) {
         </div>
 
         {/* ═══ RIGHT: ACTIVE BILL ═══ */}
-        <div className="card-3d flex min-h-0 flex-col overflow-hidden lg:h-full">
+        <div className="card-3d flex min-h-0 flex-col overflow-hidden lg:max-h-[680px] lg:self-start">
           <BillHeader
             user={user}
             canAttributeAnySeller={canAttributeAnySeller}
@@ -759,6 +759,7 @@ function BillRows({
   onRemove: (key: string) => void
 }) {
   const [expandedRows, setExpandedRows] = useState<Set<string>>(() => new Set())
+  const shouldScrollItems = rows.length > 6
 
   function toggleExpanded(key: string) {
     setExpandedRows((current) => {
@@ -783,7 +784,7 @@ function BillRows({
 
   return (
     <div
-      className="min-h-0 min-w-0 flex-1 basis-0 overflow-y-auto lg:min-h-[96px]"
+      className={shouldScrollItems ? 'min-h-0 min-w-0 flex-1 basis-0 overflow-y-auto' : 'min-w-0 shrink-0'}
       aria-label="Active bill items"
       data-testid="active-bill-items"
     >
@@ -817,7 +818,7 @@ function BillRows({
                 <Fragment key={row.key}>
                 <tr data-testid="active-bill-item-row" className={`border-b border-border/50 ${error ? 'bg-destructive/5' : ''}`}>
                   <td className="min-w-0 p-2">
-                    <div className="break-words font-medium leading-tight text-foreground">{row.productName}</div>
+                    <div className="line-clamp-2 break-words font-medium leading-tight text-foreground" title={row.productName}>{row.productName}</div>
                     {row.isTemporary && <span className="text-[9px] uppercase bg-amber-100 text-amber-700 px-1 rounded">Temp</span>}
                     {row.returnedQty > 0 && line && (
                       <div className="mt-0.5 text-[10px] font-medium text-amber-700" data-num>
@@ -885,7 +886,7 @@ function BillRows({
                 {isExpanded && (
                   <tr className="border-b border-border/50 bg-muted/20">
                     <td colSpan={10} className="px-3 py-2">
-                      <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+                      <div className="grid gap-2 sm:grid-cols-2 2xl:grid-cols-4">
                         <label className="text-[10px] uppercase tracking-wide text-muted-foreground">
                           Returned quantity
                           <input type="number" min={0} max={row.soldQty} value={row.returnedQty} onChange={(event) => onPatch(row.key, { returnedQty: Math.max(0, Number.parseInt(event.target.value || '0', 10) || 0) })} aria-label={`Returned quantity of ${row.productName}`} className="mt-1 h-8 w-full rounded-md border border-border bg-background px-2 text-sm" data-num />
