@@ -214,9 +214,16 @@ Update keeps the linked account name/active state synchronized; used accounts re
 from deletion and must be deactivated instead. Configured deployments never fall through to
 Prisma/SQLite. Missing 00040 returns a generic feature-unavailable response.
 
-`00040` is **NOT APPLIED TO PRODUCTION**. Production preflight and authenticated browser UAT
-remain pending; no approved disposable local PostgreSQL target was available for migration-backed
-runtime execution during this implementation.
+`00040` is APPLIED to production (2026-08-31). A live runtime check then surfaced a concrete type
+bug: production `profiles.id` is TEXT while the RPC `p_actor_profile_id` params are uuid, so the
+00040 `p.id = p_actor_profile_id` comparison failed on every call with SQLSTATE 42883
+`operator does not exist: text = uuid`. Additive migration `00041_legacy_business_accounts_type_fix.sql`
+(APPLIED 2026-08-31) recreates the four RPCs with `p.id = p_actor_profile_id::text`, preserving
+SECURITY DEFINER, `search_path = public`, and service_role-only grants. After 00041 the full Business
+Accounts production UAT passed 43/43 (list, create, idempotent create retry, update, deactivate, delete,
+cleanup) with no `ACCOUNTING_MIGRATION_REQUIRED`, no backend wording exposed to the client, and no
+Prisma/SQLite fallback. The temporary zero-balance "UAT Business Account" (code 1060) was deleted; only
+immutable audit/idempotency history remains.
 
 ## Local NextAuth Fix — Uncommitted
 

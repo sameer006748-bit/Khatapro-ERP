@@ -295,7 +295,8 @@ Internal commission details must not appear on the customer copy unless explicit
 - `00037_legacy_historical_sales_returns.sql` is APPLIED in production (2026-08-29); it is the scoped legacy-schema activation for partial/historical sales returns.
 - `00038_legacy_contra_batch.sql` is APPLIED in production (2026-08-29).
 - `00039_legacy_rider_delivery_outcomes.sql` is APPLIED in production (2026-08-30); its exact production definitions and unchanged historical Rider/COD row counts were verified read-only.
-- `00040_legacy_business_accounts.sql` is prepared locally but NOT applied; it is the additive legacy-schema Business Accounts compatibility path.
+- `00040_legacy_business_accounts.sql` is APPLIED to production (2026-08-31); it is the additive legacy-schema Business Accounts compatibility path.
+- `00041_legacy_business_accounts_type_fix.sql` is APPLIED to production (2026-08-31); it recreates the four Business Accounts RPCs with `p.id = p_actor_profile_id::text` (production `profiles.id` is TEXT, so the 00040 un-cast comparison failed at runtime with SQLSTATE 42883 `operator does not exist: text = uuid`). After 00041, Business Accounts list/create/update/deactivate/delete and idempotent-create retry were runtime verified (43/43) via the service-role data path; the temporary UAT account was cleaned up; no UUID-ledger dependency and no Prisma/SQLite production fallback.
 - Do not broadly apply pending migrations without explicit preflight and approval.
 - Production Supabase project ref used by current project: `ebcebxwpddltiwrqybqc`.
 
