@@ -21,6 +21,7 @@ import { usePaymentAccounts } from '@/components/erp/sales/use-payment-accounts'
 
 type Product = { id: string; name: string; salePrice: number }
 type Salesman = { id: string; name: string; commissionPct: number; isActive?: boolean }
+type Rider = { id: string; name: string; phone: string | null; isActive: boolean }
 type Item = { key: string; productId: string; productName: string; qty: string; unitPrice: string }
 
 export function OnlineSaleView({ user }: { user: MeUser }) {
@@ -32,7 +33,7 @@ export function OnlineSaleView({ user }: { user: MeUser }) {
   const [form, setForm] = useState({
     customerName: '', customerPhone: '', customerAddress: '', customerCity: '',
     source: 'WhatsApp', codAmount: '', deliveryFee: '', riderEarning: '',
-    companyDeliveryIncome: '', discountRupees: '',
+    companyDeliveryIncome: '', discountRupees: '', riderId: '',
     invoiceDate: bizDateString(new Date()),
   })
   const [items, setItems] = useState<Item[]>([{ key: '1', productId: '', productName: '', qty: '1', unitPrice: '' }])
@@ -44,6 +45,8 @@ export function OnlineSaleView({ user }: { user: MeUser }) {
   const salesmenQ = useQuery<{ rows: Salesman[] }>({ queryKey: ['salesmen'], queryFn: ({ signal }) => apiFetchJson('/api/salesmen', { signal }), staleTime: 300_000, enabled: mustPickSalesman })
 
   const activeSalesmen = useMemo(() => (salesmenQ.data?.rows ?? []).filter(s => s.isActive !== false), [salesmenQ.data])
+  const ridersQ = useQuery<{ rows: Rider[] }>({ queryKey: ['riders'], queryFn: ({ signal }) => apiFetchJson('/api/riders', { signal }), staleTime: 60_000 })
+  const activeRiders = useMemo(() => (ridersQ.data?.rows ?? []).filter(r => r.isActive !== false), [ridersQ.data])
   // Same rule as Counter Sale: auto-select only when there is exactly ONE
   // active salesman (unambiguous) — never guess among several.
   const effectiveSalesmanId = useMemo(() => salesmanId || (activeSalesmen.length === 1 ? activeSalesmen[0].id : ''), [salesmanId, activeSalesmen])
@@ -131,12 +134,32 @@ export function OnlineSaleView({ user }: { user: MeUser }) {
       }
       return parsed
     },
-    onSuccess: (j) => {
+    onSuccess: async (j) => {
       toast.success(`Online sale posted: ${j.invoiceNo}`)
       setResult({ ok: true, invoiceNo: j.invoiceNo, invoiceId: j.invoiceId, remainingCod: j.remainingCod, customerGrandTotal: j.customerGrandTotal })
       void qc.invalidateQueries({ queryKey: ['invoices'] })
       void qc.invalidateQueries({ queryKey: ['trial-balance'] })
       void qc.invalidateQueries({ queryKey: ['products'] })
+      // Rider assignment happens after the sale succeeds; its failure must be
+      // visible without turning a posted sale into a failed one.
+      if (form.riderId && j.deliveryOrderId) {
+        try {
+          const assignment = await fetch(`/api/delivery-orders/${encodeURIComponent(j.deliveryOrderId)}/assign`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ riderId: form.riderId }),
+          })
+          if (!assignment.ok) {
+            const body = await assignment.json().catch(() => null)
+            throw new Error(body?.error ?? 'The rider could not be assigned.')
+          }
+          void qc.invalidateQueries({ queryKey: ['delivery-orders'] })
+        } catch (error) {
+          toast.warning(`Sale posted, but rider assignment failed: ${(error as Error).message}`)
+        }
+      } else if (form.riderId) {
+        toast.warning('Sale posted, but no delivery order was available for rider assignment.')
+      }
     },
     onError: (e: Error) => { setResult({ ok: false, error: e.message }); toast.error(`Failed: ${e.message}`) },
   })
@@ -165,7 +188,7 @@ export function OnlineSaleView({ user }: { user: MeUser }) {
             <Button variant="ghost" className="press-sm" onClick={() => {
               setResult(null)
               setItems([{ key: String(Date.now()), productId: '', productName: '', qty: '1', unitPrice: '' }])
-              setForm({ customerName: '', customerPhone: '', customerAddress: '', customerCity: '', source: 'WhatsApp', codAmount: '', deliveryFee: '', riderEarning: '', companyDeliveryIncome: '', discountRupees: '', invoiceDate: bizDateString(new Date()) })
+              setForm({ customerName: '', customerPhone: '', customerAddress: '', customerCity: '', source: 'WhatsApp', codAmount: '', deliveryFee: '', riderEarning: '', companyDeliveryIncome: '', discountRupees: '', riderId: '', invoiceDate: bizDateString(new Date()) })
               advance.reset()
               setIdempotencyKey(crypto.randomUUID())
             }}><Globe className="size-4" /> New Order</Button>
@@ -182,7 +205,7 @@ export function OnlineSaleView({ user }: { user: MeUser }) {
     !discountError && (form.discountRupees === '' || discountPaisas >= 0n)
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
       <h1 className="text-xl font-semibold tracking-tight text-foreground">Online Sale</h1>
 
       {paymentAccountsQ.isError && (
@@ -191,8 +214,10 @@ export function OnlineSaleView({ user }: { user: MeUser }) {
         </div>
       )}
 
+      <div className="grid gap-3 lg:grid-cols-[minmax(0,1.65fr)_minmax(360px,1fr)] lg:items-start">
+        <div className="min-w-0 space-y-3">
       {mustPickSalesman && (
-        <div className="card-3d p-4 space-y-2">
+        <div className="card-3d p-3 space-y-2">
           <h2 className="text-sm font-semibold text-foreground">Salesman *</h2>
           <Select value={salesmanId} onValueChange={setSalesmanId}>
             <SelectTrigger className="h-11 bg-background press-sm text-sm"><SelectValue placeholder="Select salesman…" /></SelectTrigger>
@@ -204,7 +229,7 @@ export function OnlineSaleView({ user }: { user: MeUser }) {
         </div>
       )}
 
-      <div className="card-3d p-4 space-y-3">
+      <div className="card-3d p-3 space-y-2">
         <h2 className="text-sm font-semibold text-foreground">Customer</h2>
         <div className="grid sm:grid-cols-2 gap-2">
           <Input value={form.customerName} onChange={e => setForm(s => ({ ...s, customerName: e.target.value }))} placeholder="Name *" className="h-9 bg-background press-sm" />
@@ -230,15 +255,22 @@ export function OnlineSaleView({ user }: { user: MeUser }) {
         </div>
       </div>
 
-      <div className="card-3d p-4">
+      <div className="card-3d p-3">
         <div className="flex items-center justify-between mb-2">
           <h2 className="text-sm font-semibold text-foreground">Items</h2>
           <Button variant="outline" size="sm" onClick={() => setItems(ls => [...ls, { key: String(Date.now()), productId: '', productName: '', qty: '1', unitPrice: '' }])} className="press-sm"><Plus className="size-3" /> Add</Button>
         </div>
-        <div className="space-y-1.5">
+        {/* Compact column headers */}
+        <div className="grid grid-cols-[minmax(0,2fr)_0.7fr_minmax(0,1fr)_auto] gap-1.5 mb-1 px-1">
+          <span className="text-[10px] text-muted-foreground font-medium">Product</span>
+          <span className="text-[10px] text-muted-foreground font-medium">Qty</span>
+          <span className="text-[10px] text-muted-foreground font-medium">Price (Rs)</span>
+          <span className="text-[10px] text-muted-foreground font-medium">Remove</span>
+        </div>
+        <div className="space-y-1.5 lg:max-h-[calc(100dvh-25rem)] lg:overflow-y-auto lg:pr-1">
           {items.map((it) => (
-            <div key={it.key} className="grid grid-cols-4 gap-1.5 items-end">
-              <div className="col-span-2">
+            <div key={it.key} className="grid grid-cols-[minmax(0,2fr)_0.7fr_minmax(0,1fr)_auto] gap-1.5 items-end">
+              <div>
                 <Select value={it.productId} onValueChange={v => onProductSelect(it.key, v)}>
                   <SelectTrigger className="h-9 bg-background press-sm text-sm"><SelectValue placeholder="Product…" /></SelectTrigger>
                   <SelectContent>{productsQ.data?.rows.map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}</SelectContent>
@@ -254,7 +286,9 @@ export function OnlineSaleView({ user }: { user: MeUser }) {
         </div>
       </div>
 
-      <div className="card-3d p-4 space-y-3">
+        </div>
+        <div className="min-w-0 space-y-3 lg:sticky lg:top-3">
+      <div className="card-3d p-3 space-y-2">
         <h2 className="text-sm font-semibold text-foreground">Delivery</h2>
         <div className="grid sm:grid-cols-3 gap-2">
           <div>
@@ -275,15 +309,31 @@ export function OnlineSaleView({ user }: { user: MeUser }) {
         )}
       </div>
 
+        {/* Rider selector */}
+        <div>
+          <Label className="text-[10px] text-muted-foreground">Assign Rider (optional)</Label>
+          <Select value={form.riderId} onValueChange={v => setForm(s => ({ ...s, riderId: v }))}>
+            <SelectTrigger className="h-9 bg-background press-sm text-sm"><SelectValue placeholder="Select a rider..." /></SelectTrigger>
+            <SelectContent>
+              {activeRiders.map(r => <SelectItem key={r.id} value={r.id}>{r.name}{r.phone ? ` (${r.phone})` : ''}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          {ridersQ.isSuccess && activeRiders.length === 0 && (
+            <div className="text-[10px] text-destructive mt-0.5">No active rider found. Add one before assigning.</div>
+          )}
+        </div>
+
       <PaymentPanel
         accounts={businessAccounts}
         {...advance.panelProps}
         error={advance.error}
         paidLabel="Advance Received (Rs)"
+        paidPlaceholder={formatWholeRupees(customerGrandTotal, false)}
+        onPayFull={() => advance.setPaidAmount(formatWholeRupees(customerGrandTotal, false).replace(/,/g, ''))}
         idPrefix="online-advance"
       />
 
-      <div className="card-3d p-4 space-y-1">
+      <div className="card-3d p-3 space-y-1">
         <h2 className="text-sm font-semibold text-foreground mb-2">Reconciled Totals</h2>
         <div className="flex items-center justify-between text-sm">
           <span className="text-muted-foreground">Product Subtotal</span><span className="font-medium" data-num>{formatWholeRupees(subtotal, false)}</span>
@@ -316,8 +366,9 @@ export function OnlineSaleView({ user }: { user: MeUser }) {
           <span className="text-muted-foreground">Advance Received</span><span className="font-medium" data-num>{formatWholeRupees(advanceReceived, false)}</span>
         </div>
         {changeAmount > 0n && (
-          <div className="flex items-center justify-between text-sm">
-            <span className="text-muted-foreground">Change</span><span className="font-medium text-amber-600" data-num>−{formatWholeRupees(changeAmount, false)}</span>
+          <div className="flex items-center justify-between rounded-md bg-amber-50 border border-amber-200 px-3 py-2 mt-1">
+            <span className="text-xs font-semibold text-amber-700">Change to Return</span>
+            <span className="text-sm font-bold text-amber-700" data-num>{formatWholeRupees(changeAmount, false)}</span>
           </div>
         )}
         <div className="flex items-center justify-between text-sm">
@@ -336,6 +387,8 @@ export function OnlineSaleView({ user }: { user: MeUser }) {
       <Button className="w-full press-md shadow-sm" disabled={postMut.isPending || !canPost} onClick={() => postMut.mutate()}>
         {postMut.isPending ? 'Posting…' : <><Globe className="size-4" /> Post Online Sale</>}
       </Button>
+        </div>
+      </div>
     </div>
   )
 }

@@ -166,7 +166,7 @@ export function OfcSaleView({ user }: { user: MeUser }) {
     !discountError && (form.discountRupees === '' || discountPaisas >= 0n)
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
       <h1 className="text-xl font-semibold tracking-tight text-foreground">Out-of-City Sale</h1>
 
       {/* ── Salesman ── */}
@@ -176,8 +176,10 @@ export function OfcSaleView({ user }: { user: MeUser }) {
         </div>
       )}
 
+      <div className="grid gap-3 lg:grid-cols-[minmax(0,1.65fr)_minmax(360px,1fr)] lg:items-start">
+        <div className="min-w-0 space-y-3">
       {mustPickSalesman && (
-        <div className="card-3d p-4 space-y-2">
+        <div className="card-3d p-3 space-y-2">
           <h2 className="text-sm font-semibold text-foreground">Salesman *</h2>
           <Select value={salesmanId} onValueChange={setSalesmanId}>
             <SelectTrigger className="h-11 bg-background press-sm text-sm"><SelectValue placeholder="Select salesman…" /></SelectTrigger>
@@ -190,7 +192,7 @@ export function OfcSaleView({ user }: { user: MeUser }) {
       )}
 
       {/* ── Customer ── */}
-      <div className="card-3d p-4 space-y-3">
+      <div className="card-3d p-3 space-y-2">
         <h2 className="text-sm font-semibold text-foreground">Customer</h2>
         <div className="grid sm:grid-cols-2 gap-2">
           <Input value={form.customerName} onChange={e => setForm(s => ({ ...s, customerName: e.target.value }))} placeholder="Name *" className="h-9 bg-background press-sm" />
@@ -198,11 +200,11 @@ export function OfcSaleView({ user }: { user: MeUser }) {
           <Input value={form.customerAddress} onChange={e => setForm(s => ({ ...s, customerAddress: e.target.value }))} placeholder="Address *" className="h-9 bg-background press-sm" />
           <Input value={form.customerCity} onChange={e => setForm(s => ({ ...s, customerCity: e.target.value }))} placeholder="City *" className="h-9 bg-background press-sm" />
         </div>
-        <div>
+        <div className="lg:hidden">
           <Label className="text-[10px] text-muted-foreground">Courier Note (optional)</Label>
           <Input value={form.courierNote} onChange={e => setForm(s => ({ ...s, courierNote: e.target.value }))} placeholder="Courier name, tracking # etc." className="h-9 bg-background press-sm text-sm" />
         </div>
-        <div>
+        <div className="lg:hidden">
           <Label className="text-[10px] text-muted-foreground">Discount (Rs, optional)</Label>
           <Input type="text" value={form.discountRupees} onChange={e => setForm(s => ({ ...s, discountRupees: e.target.value }))} placeholder="0" className="h-8 bg-background press-sm text-sm max-w-[200px]" data-num />
           {discountError && <div className="text-[10px] text-destructive mt-0.5">{discountError}</div>}
@@ -210,12 +212,19 @@ export function OfcSaleView({ user }: { user: MeUser }) {
       </div>
 
       {/* ── Items ── */}
-      <div className="card-3d p-4 space-y-3">
+      <div className="card-3d p-3 space-y-2">
         <h2 className="text-sm font-semibold text-foreground">Items</h2>
-        <div className="space-y-1.5">
+        {/* Compact column headers */}
+        <div className="grid grid-cols-[minmax(0,2fr)_0.7fr_minmax(0,1fr)_auto] gap-1.5 mb-1 px-1">
+          <span className="text-[10px] text-muted-foreground font-medium">Product</span>
+          <span className="text-[10px] text-muted-foreground font-medium">Qty</span>
+          <span className="text-[10px] text-muted-foreground font-medium">Price (Rs)</span>
+          <span className="text-[10px] text-muted-foreground font-medium">Remove</span>
+        </div>
+        <div className="space-y-1.5 lg:max-h-[calc(100dvh-25rem)] lg:overflow-y-auto lg:pr-1">
           {items.map((it) => (
-            <div key={it.key} className="grid grid-cols-4 gap-1.5 items-end">
-              <div className="col-span-2">
+            <div key={it.key} className="grid grid-cols-[minmax(0,2fr)_0.7fr_minmax(0,1fr)_auto] gap-1.5 items-end">
+              <div>
                 <Select value={it.productId} onValueChange={v => onProductSelect(it.key, v)}>
                   <SelectTrigger className="h-9 bg-background press-sm text-sm"><SelectValue placeholder="Product…" /></SelectTrigger>
                   <SelectContent>{productsQ.data?.rows.map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}</SelectContent>
@@ -233,6 +242,20 @@ export function OfcSaleView({ user }: { user: MeUser }) {
       </div>
 
       {/* ── Advance ── */}
+        </div>
+        <div className="min-w-0 space-y-3 lg:sticky lg:top-3">
+      <div className="card-3d hidden space-y-2 p-3 lg:block">
+        <h2 className="text-sm font-semibold text-foreground">Courier & Discount</h2>
+        <div>
+          <Label className="text-[10px] text-muted-foreground">Courier Note (optional)</Label>
+          <Input value={form.courierNote} onChange={e => setForm(s => ({ ...s, courierNote: e.target.value }))} placeholder="Courier name, tracking # etc." className="mt-1 h-9 bg-background press-sm text-sm" />
+        </div>
+        <div>
+          <Label className="text-[10px] text-muted-foreground">Discount (Rs, optional)</Label>
+          <Input type="text" value={form.discountRupees} onChange={e => setForm(s => ({ ...s, discountRupees: e.target.value }))} placeholder="0" className="mt-1 h-8 bg-background press-sm text-sm" data-num />
+          {discountError && <div className="mt-0.5 text-[10px] text-destructive">{discountError}</div>}
+        </div>
+      </div>
       <PaymentPanel
         accounts={businessAccounts}
         {...advance.panelProps}
@@ -240,10 +263,11 @@ export function OfcSaleView({ user }: { user: MeUser }) {
         paidLabel="Advance Received (Rs)"
         paidPlaceholder={formatWholeRupees(finalTotal, false)}
         idPrefix="ofc-advance"
+        onPayFull={() => advance.setPaidAmount(formatWholeRupees(finalTotal, false).replace(/,/g, ''))}
       />
 
       {/* ── Totals ── */}
-      <div className="card-3d p-4 space-y-1">
+      <div className="card-3d p-3 space-y-1">
         <h2 className="text-sm font-semibold text-foreground mb-2">Totals</h2>
         <div className="flex items-center justify-between text-sm">
           <span className="text-muted-foreground">Subtotal</span><span className="font-medium" data-num>{formatWholeRupees(subtotal, false)}</span>
@@ -260,8 +284,8 @@ export function OfcSaleView({ user }: { user: MeUser }) {
           <span className="text-muted-foreground">Advance Received</span><span className="font-medium" data-num>{formatWholeRupees(advanceReceived, false)}</span>
         </div>
         {changeAmount > 0n && (
-          <div className="flex items-center justify-between text-sm">
-            <span className="text-muted-foreground">Change</span><span className="font-medium text-amber-600" data-num>−{formatWholeRupees(changeAmount, false)}</span>
+          <div className="flex items-center justify-between rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-sm">
+            <span className="font-semibold text-amber-700">Change to Return</span><span className="font-medium text-amber-700" data-num>{formatWholeRupees(changeAmount, false)}</span>
           </div>
         )}
         <div className="flex items-center justify-between text-sm">
@@ -280,6 +304,8 @@ export function OfcSaleView({ user }: { user: MeUser }) {
       <Button className="w-full press-md shadow-sm" disabled={postMut.isPending || !canPost || !ofcValid} onClick={() => postMut.mutate()}>
         {!ofcValid && finalTotal > 0n ? 'Full advance required' : postMut.isPending ? 'Posting…' : <><Truck className="size-4" /> Post Out-of-City Sale — {formatWholeRupees(finalTotal)}</>}
       </Button>
+        </div>
+      </div>
     </div>
   )
 }

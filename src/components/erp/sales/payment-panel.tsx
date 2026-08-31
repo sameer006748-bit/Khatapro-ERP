@@ -182,34 +182,25 @@ export function PaymentPanel({
       )}
 
       {/* ── Default: one amount, one account ── */}
-      <div className="grid sm:grid-cols-2 gap-2">
-        <div>
-          <label
-            htmlFor={`${idPrefix}-paid`}
-            className="text-[10px] uppercase tracking-wide text-muted-foreground"
-          >
-            {paidLabel}
-          </label>
-          <Input
-            id={`${idPrefix}-paid`}
-            value={paidAmount}
-            onChange={(e) => onPaidAmountChange(e.target.value)}
-            placeholder={paidPlaceholder}
-            className="h-9 bg-background press-sm text-sm"
-            data-num
-          />
-          {onPayFull && (
-            <button
-              type="button"
-              onClick={onPayFull}
-              className="mt-1 text-[11px] font-medium text-primary hover:underline press-sm"
+      {!isSplit ? (
+        <div className="flex flex-wrap items-end gap-2">
+          <div className="flex-1 min-w-[180px]">
+            <label
+              htmlFor={`${idPrefix}-paid`}
+              className="text-[10px] uppercase tracking-wide text-muted-foreground"
             >
-              Pay full amount
-            </button>
-          )}
-        </div>
-        {!isSplit && (
-          <div>
+              {paidLabel}
+            </label>
+            <Input
+              id={`${idPrefix}-paid`}
+              value={paidAmount}
+              onChange={(e) => onPaidAmountChange(e.target.value)}
+              placeholder={paidPlaceholder}
+              className="h-9 bg-background press-sm text-sm"
+              data-num
+            />
+          </div>
+          <div className="flex-1 min-w-[180px]">
             <label
               htmlFor={`${idPrefix}-account`}
               className="text-[10px] uppercase tracking-wide text-muted-foreground"
@@ -233,11 +224,29 @@ export function PaymentPanel({
               </SelectContent>
             </Select>
           </div>
-        )}
-      </div>
-
-      {/* ── Optional: split the same paid amount across accounts ── */}
-      {isSplit && (
+          <div className="flex gap-1.5 pb-0.5">
+            {onPayFull && (
+              <Button
+                type="button"
+                size="sm"
+                onClick={onPayFull}
+                className="h-9 text-xs press-sm shrink-0"
+              >
+                Pay Full
+              </Button>
+            )}
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => onModeChange('split')}
+              className="h-9 text-xs press-sm shrink-0"
+            >
+              <Split className="size-3.5 mr-1" /> Split
+            </Button>
+          </div>
+        </div>
+      ) : (
         <div className="mt-2 space-y-1.5 rounded-md border border-border/70 bg-muted/20 p-2">
           {splitRows.map((row, index) => (
             <div key={row.key} className="grid grid-cols-[1fr_auto] gap-1 items-center">
@@ -288,15 +297,30 @@ export function PaymentPanel({
           ))}
 
           <div className="flex items-center justify-between gap-2 pt-0.5">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="h-7 text-xs press-sm"
-              onClick={() => onSplitRowsChange([...splitRows, newPaymentSplitRow()])}
-            >
-              <Plus className="size-3" /> Add payment account
-            </Button>
+            <div className="flex items-center gap-1.5">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-7 text-xs press-sm"
+                onClick={() => onSplitRowsChange([...splitRows, newPaymentSplitRow()])}
+              >
+                <Plus className="size-3" /> Add payment account
+              </Button>
+              {onPayFull && (
+                <Button
+                  type="button"
+                  size="sm"
+                  className="h-7 text-xs press-sm"
+                  onClick={() => {
+                    onModeChange('single')
+                    onPayFull()
+                  }}
+                >
+                  Pay Full
+                </Button>
+              )}
+            </div>
             <div className="text-[11px] text-muted-foreground" data-num>
               Split total{' '}
               <span
@@ -323,7 +347,7 @@ export function PaymentPanel({
             htmlFor={`${idPrefix}-change-account`}
             className="text-[10px] uppercase tracking-wide text-muted-foreground"
           >
-            Return change of {formatWholeRupees(changePaisas, false)} from
+            Change to Return: {formatWholeRupees(changePaisas, false)} from
           </label>
           <Select value={changeAccountId} onValueChange={onChangeAccountIdChange}>
             <SelectTrigger

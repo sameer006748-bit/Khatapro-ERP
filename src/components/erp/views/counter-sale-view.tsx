@@ -414,9 +414,9 @@ export function CounterSaleView({ user }: { user: MeUser }) {
         </Button>
       </div>
 
-      <div className="grid gap-3 lg:min-h-0 lg:flex-1 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
+      <div className="grid gap-3 lg:min-h-0 lg:h-full lg:flex-1 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
         {/* ═══ LEFT: PRODUCT FINDER ═══ */}
-        <div className="min-h-0">
+        <div className="min-h-0 lg:h-full">
           <div className="card-3d flex h-full min-h-0 flex-col p-3">
             <div className="relative">
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
@@ -501,7 +501,7 @@ export function CounterSaleView({ user }: { user: MeUser }) {
         </div>
 
         {/* ═══ RIGHT: ACTIVE BILL ═══ */}
-        <div className="card-3d flex min-h-0 flex-col overflow-hidden">
+        <div className="card-3d flex min-h-0 flex-col overflow-hidden lg:h-full">
           <BillHeader
             user={user}
             canAttributeAnySeller={canAttributeAnySeller}
@@ -534,7 +534,6 @@ export function CounterSaleView({ user }: { user: MeUser }) {
               error={payment.error}
               paidPlaceholder={formatWholeRupees(netTotal, false)}
               idPrefix="counter-payment"
-              collapsible
               embedded
               onPayFull={() => payment.setPaidAmount(formatWholeRupees(netTotal, false).replace(/,/g, ''))}
               headerSlot={

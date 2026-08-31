@@ -214,7 +214,7 @@ export function OtherSaleView({ user }: { user: MeUser }) {
   }
 
   return (
-    <div className="card-3d p-6 max-w-4xl mx-auto">
+    <div className="card-3d p-6 max-w-6xl mx-auto">
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-2">
           <ShoppingCart className="size-5 text-primary" />
@@ -253,7 +253,9 @@ export function OtherSaleView({ user }: { user: MeUser }) {
         </div>
       )}
 
-      <div className="grid md:grid-cols-2 gap-4 mb-6">
+      <div className="grid lg:grid-cols-5 gap-4 items-start">
+        <div className="lg:col-span-3 space-y-4">
+      <div className="grid md:grid-cols-2 gap-4">
         {/* Salesman */}
         <div>
           <label className="text-xs font-medium text-muted-foreground mb-1 block">Salesman *</label>
@@ -368,8 +370,12 @@ export function OtherSaleView({ user }: { user: MeUser }) {
         ))}
       </div>
 
+        </div>
+
+        <div className="lg:col-span-2 space-y-4 lg:sticky lg:top-4">
+
       {/* Payment section — shared panel: single account by default, split on request */}
-      <div className="mb-6">
+      <div>
         <PaymentPanel
           accounts={accounts}
           {...payment.panelProps}
@@ -377,11 +383,12 @@ export function OtherSaleView({ user }: { user: MeUser }) {
           paidLabel="Paid Amount (Rs)"
           paidPlaceholder="0 = fully credit"
           idPrefix="other-payment"
+          onPayFull={() => payment.setPaidAmount(formatWholeRupees(total, false).replace(/,/g, ''))}
         />
       </div>
 
       {/* Discount */}
-      <div className="flex items-center gap-2 mb-4">
+      <div className="flex items-center gap-2">
         <Percent className="size-4 text-muted-foreground" />
         <Input
           placeholder="Discount (Rs)"
@@ -392,7 +399,7 @@ export function OtherSaleView({ user }: { user: MeUser }) {
       </div>
 
       {/* Totals */}
-      <div className="border-t pt-4 mb-6 space-y-1 text-right">
+      <div className="card-3d p-4 space-y-1 text-right">
         <p className="text-sm text-muted-foreground">Subtotal: Rs {formatWholeRupees(subtotal)}</p>
         {discount > 0n && <p className="text-sm text-green-600">Discount: -Rs {formatWholeRupees(discount)}</p>}
         <p className="text-lg font-bold">Total: Rs {formatWholeRupees(total)}</p>
@@ -401,7 +408,7 @@ export function OtherSaleView({ user }: { user: MeUser }) {
             <p className="text-sm text-green-600">Paid: Rs {formatWholeRupees(payment.paidPaisas)}</p>
             <p className="text-sm text-amber-600">Outstanding: Rs {formatWholeRupees(total > payment.paidPaisas ? total - payment.paidPaisas : 0n)}</p>
             {payment.changePaisas > 0n && (
-              <p className="text-sm text-amber-600">Change: Rs {formatWholeRupees(payment.changePaisas)}</p>
+              <p className="text-sm font-medium text-amber-700">Change to Return: {formatWholeRupees(payment.changePaisas)}</p>
             )}
           </>
         )}
@@ -413,6 +420,8 @@ export function OtherSaleView({ user }: { user: MeUser }) {
           {isPosting ? 'Posting...' : 'Post Other Sale'}
         </Button>
         <Button variant="outline" onClick={resetForm}>Reset</Button>
+      </div>
+        </div>
       </div>
     </div>
   )

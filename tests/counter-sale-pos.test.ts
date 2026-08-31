@@ -37,13 +37,14 @@ test('same-bill Sold 10 / Returned 2 remains Net 8 with unchanged commission ari
   assert.equal(totals.totalCommissionPaisas, 160_00n)
 })
 
-test('payment stays explicit, collapsed by default, editable, and split-capable', () => {
-  assert.match(counter, /collapsible/)
+test('payment stays explicit, always expanded (embedded), editable, and split-capable', () => {
+  // Payment panel is embedded in the compact layout; no longer collapsible.
+  assert.doesNotMatch(counter, /collapsible/)
   assert.match(counter, /onPayFull/)
   assert.match(paymentPanel, /Amount not entered/)
   assert.match(paymentPanel, /> Edit/)
   assert.match(paymentPanel, /Split Payment/)
-  assert.match(paymentPanel, /Pay full amount/)
+  assert.match(paymentPanel, /Pay Full/)
 })
 
 test('seller and optional customer attribution remain in the compact bill header', () => {
