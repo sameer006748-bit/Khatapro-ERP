@@ -17,6 +17,7 @@ import {
   isSchemaUnavailableError,
   type PostgrestLikeError,
 } from './compatibility'
+import { buildRecentDashboardActivity } from './recent-activity'
 
 type Range = { from: string; to: string }
 type Metric<T> = { value: T | null; available: boolean }
@@ -124,6 +125,7 @@ async function buildLocalOperationalPayload(input: {
         action: true,
         entity: true,
         entityId: true,
+        details: true,
       },
       orderBy: { timestamp: 'desc' },
       take: 20,
@@ -263,13 +265,13 @@ async function buildLocalOperationalPayload(input: {
       name: product.name,
       currentStock: product.currentStock,
     })),
-    auditLogs: auditLogs.map(row => ({
-      id: row.id,
-      timestamp: row.timestamp.toISOString(),
-      action: row.action,
-      entity: row.entity,
-      entityId: row.entityId,
-    })),
+    recentActivity: {
+      state: 'available' as const,
+      items: buildRecentDashboardActivity(auditLogs.map(row => ({
+        id: row.id, timestamp: row.timestamp.toISOString(), action: row.action,
+        entity: row.entity, entityId: row.entityId, details: row.details,
+      }))),
+    },
   }
 }
 
@@ -343,7 +345,7 @@ export async function buildOwnerDashboardPayload(input: {
       .select('id, name, current_stock, low_stock_threshold, is_active')
       .eq('business_id', bid).eq('is_active', true))),
     isolated('auditLogs', unavailable, async () => rowsOrThrow(await admin.from('audit_logs')
-      .select('id, timestamp, action, entity, entity_id').eq('business_id', bid)
+      .select('id, timestamp, action, entity, entity_id, details').eq('business_id', bid)
       .order('timestamp', { ascending: false }).limit(20))),
   ])
 
@@ -513,6 +515,12 @@ export async function buildOwnerDashboardPayload(input: {
       total: String(row.total ?? 0), paidAmount: String(row.paid_amount ?? 0), status: row.status,
     })),
     lowStockProducts: stock?.lowStockProducts ?? [], negativeStockProducts: stock?.negativeStockProducts ?? [],
-    auditLogs: (auditQ.value ?? []).map(row => ({ id: row.id, timestamp: row.timestamp, action: row.action, entity: row.entity, entityId: row.entity_id })),
+    recentActivity: {
+      state: auditQ.available ? 'available' as const : unavailable.get('auditLogs') ?? 'error',
+      items: auditQ.available ? buildRecentDashboardActivity((auditQ.value ?? []).map(row => ({
+        id: row.id, timestamp: row.timestamp, action: row.action,
+        entity: row.entity, entityId: row.entity_id, details: row.details,
+      }))) : [],
+    },
   }
 }

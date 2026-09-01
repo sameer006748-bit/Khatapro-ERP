@@ -7,9 +7,7 @@ import {
   ArrowRight,
   Building2,
   CircleDollarSign,
-  ClipboardList,
   Package,
-  Receipt,
   RefreshCw,
   ShoppingCart,
   Users,
@@ -19,8 +17,9 @@ import {
 import { useRouter } from 'next/navigation'
 import { useOwnerDashboard } from '@/hooks/use-owner-dashboard'
 import { formatWholeRupees } from '@/lib/format'
-import { bizPresetDateRange, isBusinessDateRange, type BusinessDateRange } from '@/lib/dates'
+import { bizFormat, bizPresetDateRange, isBusinessDateRange, type BusinessDateRange } from '@/lib/dates'
 import { buildDashboardAttention, type AttentionSeverity, type DashboardAttentionItem } from '@/lib/dashboard/attention'
+import { buildDashboardInsights, type DashboardInsight } from '@/lib/dashboard/insights'
 
 type MetricState = 'available' | 'not-tracked' | 'error'
 
@@ -76,21 +75,32 @@ function AttentionItem({ item, onOpen }: { item: DashboardAttentionItem; onOpen:
   </button>
 }
 
-function ActivityList({ title, icon: Icon, items, emptyMessage, onViewAll }: {
-  title: string
-  icon: LucideIcon
-  items: Array<{ id: string; label: string; sublabel: string; amount: string }>
-  emptyMessage: string
-  onViewAll: () => void
-}) {
-  return (
-    <section className="rounded-xl border border-border bg-card p-4">
-      <div className="flex items-center justify-between gap-3"><div className="flex items-center gap-2"><Icon className="size-4 text-primary" /><h2 className="text-sm font-semibold">{title}</h2></div><button onClick={onViewAll} className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline">View all <ArrowRight className="size-3" /></button></div>
-      <div className="mt-3 space-y-1">
-        {items.length === 0 ? <p className="py-3 text-sm text-muted-foreground">{emptyMessage}</p> : items.map((item) => <div key={item.id} className="flex items-center justify-between gap-3 border-t border-border/60 py-2 first:border-t-0 first:pt-0"><div className="min-w-0"><p className="truncate text-sm font-medium text-foreground">{item.label}</p><p className="truncate text-xs text-muted-foreground">{item.sublabel}</p></div><span className="shrink-0 text-sm font-semibold" data-num>{formatWholeRupees(Number(item.amount))}</span></div>)}
-      </div>
-    </section>
-  )
+function InsightItem({ item, onOpen }: { item: DashboardInsight; onOpen: (destination: string) => void }) {
+  return <button type="button" onClick={() => onOpen(item.destination)} aria-label={`${item.actionLabel}: ${item.title}`} className="flex min-w-0 items-start gap-3 rounded-lg border border-border bg-card px-3 py-3 text-left transition-colors hover:border-primary/50 hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2">
+    <CircleDollarSign className="mt-0.5 size-4 shrink-0 text-primary" aria-hidden />
+    <span className="min-w-0 flex-1"><span className="block text-sm font-medium text-foreground">{item.title}</span><span className="mt-0.5 block text-xs text-muted-foreground">{item.detail}</span></span>
+    <span className="inline-flex min-h-8 shrink-0 items-center gap-1 text-xs font-medium text-primary">{item.actionLabel}<ArrowRight className="size-3" aria-hidden /></span>
+  </button>
+}
+
+type RecentActivityProps = {
+  state: 'available' | 'not-tracked' | 'error'
+  items: Array<{
+    id: string
+    timestamp: string
+    kind: 'sale' | 'purchase' | 'payment' | 'expense' | 'transfer' | 'return' | 'rider' | 'entry'
+    title: string
+    reference: string | null
+    amount: string | null
+    destination: string
+  }>
+  onOpen: (destination: string) => void
+  onRetry: () => void
+}
+
+function RecentActivity({ state, items, onOpen, onRetry }: RecentActivityProps) {
+  const iconFor = (kind: RecentActivityProps['items'][number]['kind']) => kind === 'sale' ? ShoppingCart : kind === 'purchase' ? Package : kind === 'payment' || kind === 'expense' ? Wallet : kind === 'return' ? AlertTriangle : Building2
+  return <section className="rounded-xl border border-border bg-card p-4" aria-label="Recent Activity"><div className="flex items-center gap-2"><Building2 className="size-4 text-primary" aria-hidden /><div><h2 className="text-sm font-semibold">Recent Activity</h2><p className="text-xs text-muted-foreground">Latest business events.</p></div></div><div className="mt-3 space-y-1">{state === 'error' ? <div className="py-3 text-sm text-muted-foreground">Unable to load recent activity <button type="button" onClick={onRetry} className="ml-1 min-h-8 font-medium text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">Retry</button></div> : state === 'not-tracked' ? <p className="py-3 text-sm text-muted-foreground">Recent activity is not available.</p> : items.length === 0 ? <p className="py-3 text-sm text-muted-foreground">No recent activity</p> : items.map((item) => { const Icon = iconFor(item.kind); return <button type="button" key={item.id} onClick={() => onOpen(item.destination)} aria-label={`${item.title}${item.reference ? ` ${item.reference}` : ''}`} className="flex w-full min-w-0 items-start gap-3 border-t border-border/60 py-3 text-left first:border-t-0 first:pt-0 hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"><Icon className="mt-0.5 size-4 shrink-0 text-primary" aria-hidden /><span className="min-w-0 flex-1"><span className="block text-sm font-medium text-foreground">{item.title}{item.reference ? ` · ${item.reference}` : ''}</span><span className="mt-0.5 block text-xs text-muted-foreground">{bizFormat(item.timestamp, 'datetime')}</span></span>{item.amount && <span className="shrink-0 text-xs font-medium text-foreground" data-num>{formatWholeRupees(BigInt(item.amount))}</span>}</button> })}</div></section>
 }
 
 export function OwnerDashboard({ user }: { user: { displayName: string; roleName: string } }) {
@@ -101,6 +111,7 @@ export function OwnerDashboard({ user }: { user: { displayName: string; roleName
   const [customTo, setCustomTo] = useState(range.to)
   const [rangeError, setRangeError] = useState('')
   const [showAllAttention, setShowAllAttention] = useState(false)
+  const [showAllInsights, setShowAllInsights] = useState(false)
   const { data, isLoading, isFetching, error, refetch } = useOwnerDashboard(range)
 
   useEffect(() => {
@@ -133,6 +144,14 @@ export function OwnerDashboard({ user }: { user: { displayName: string; roleName
     paymentAccounts: data.paymentAccounts,
   })
   const visibleAttentionItems = showAllAttention ? attentionItems : attentionItems.slice(0, 4)
+  const insights = buildDashboardInsights({
+    netCashMovement: data.kpis.todayNetCashFlow,
+    netCashMovementAvailable: stateFor('todayNetCashFlow') === 'available',
+    negativeStockCount: data.kpis.negativeStockCount,
+    lowStockCount: data.kpis.lowStockCount,
+    paymentAccounts: data.paymentAccounts,
+  })
+  const visibleInsights = showAllInsights ? insights : insights.slice(0, 3)
   const heroMetrics = [
     { label: 'Sales', value: data.kpis.todaySales, state: stateFor('todaySales'), detail: data.kpis.todaySales === 0 ? 'No activity in this period' : activeRangeLabel, icon: ShoppingCart, destination: '/?page=sales-list', actionLabel: 'View Sales' },
     { label: 'Net Cash Movement', value: data.kpis.todayNetCashFlow, state: stateFor('todayNetCashFlow'), detail: data.kpis.todayNetCashFlow === 0 ? 'No movement in this period' : activeRangeLabel, icon: CircleDollarSign, destination: '/?page=accounts', actionLabel: 'View Money' },
@@ -154,11 +173,12 @@ export function OwnerDashboard({ user }: { user: { displayName: string; roleName
 
       {attentionItems.length > 0 && <section className="rounded-xl border border-border bg-muted/20 p-4" aria-label="Needs Attention"><div className="flex items-start justify-between gap-3"><div><h2 className="text-sm font-semibold text-foreground">Needs Attention</h2><p className="text-xs text-muted-foreground">Actionable items, ordered by urgency.</p></div><span className="shrink-0 text-xs text-muted-foreground">{attentionItems.length} item{attentionItems.length === 1 ? '' : 's'}</span></div><div className="mt-3 grid gap-2">{visibleAttentionItems.map((item) => <AttentionItem key={item.id} item={item} onOpen={(destination) => router.push(destination)} />)}</div>{attentionItems.length > 4 && <button type="button" onClick={() => setShowAllAttention((shown) => !shown)} className="mt-3 min-h-9 text-xs font-medium text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">{showAllAttention ? 'Show Less' : `Show ${attentionItems.length - 4} More`}</button>}</section>}
 
+      {insights.length > 0 && <section className="rounded-xl border border-border bg-muted/20 p-4" aria-label="Business Insights"><div><h2 className="text-sm font-semibold text-foreground">Business Insights</h2><p className="text-xs text-muted-foreground">Factual signals from current business data.</p></div><div className="mt-3 grid gap-2">{visibleInsights.map((item) => <InsightItem key={item.id} item={item} onOpen={(destination) => router.push(destination)} />)}</div>{insights.length > 3 && <button type="button" onClick={() => setShowAllInsights((shown) => !shown)} className="mt-3 min-h-9 text-xs font-medium text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">{showAllInsights ? 'Show Less' : `Show ${insights.length - 3} More`}</button>}</section>}
+
       <section className="grid gap-4 lg:grid-cols-[1.15fr_0.85fr]">
-        <ActivityList title="Recent invoices" icon={ClipboardList} emptyMessage="No invoices in this period." onViewAll={() => router.push('/?page=sales-list')} items={data.recentInvoices.map((invoice) => ({ id: invoice.id, label: invoice.invoiceNo, sublabel: invoice.customerName ?? 'Walk-in customer', amount: invoice.total }))} />
+        <RecentActivity {...data.recentActivity} onOpen={(destination) => router.push(destination)} onRetry={() => refetch()} />
         <section className="rounded-xl border border-border bg-card p-4"><div className="flex items-center gap-2"><Building2 className="size-4 text-primary" /><h2 className="text-sm font-semibold">Sales by channel</h2></div><p className="mt-1 text-xs text-muted-foreground">Posted sales in {activeRangeLabel}.</p><div className="mt-3 grid grid-cols-2 gap-2">{[['Counter', data.salesByType.counter], ['Online', data.salesByType.online], ['OFC', data.salesByType.ofc], ['Other', data.salesByType.other]].map(([label, value]) => <div key={label as string} className="rounded-lg bg-muted/50 p-3"><p className="text-xs text-muted-foreground">{label as string}</p><p className="mt-1 text-sm font-semibold" data-num>{formatWholeRupees(Number((value as { amount: string }).amount))}</p><p className="text-xs text-muted-foreground">{(value as { count: number }).count} invoices</p></div>)}</div></section>
       </section>
-      <ActivityList title="Recent purchases" icon={Receipt} emptyMessage="No purchases in this period." onViewAll={() => router.push('/?page=purchases')} items={data.recentPurchases.map((purchase) => ({ id: purchase.id, label: purchase.purchaseNo, sublabel: purchase.vendorName ?? 'Vendor not recorded', amount: purchase.total }))} />
     </main>
   )
 }

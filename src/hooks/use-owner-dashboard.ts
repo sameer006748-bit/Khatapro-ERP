@@ -98,13 +98,18 @@ export interface OwnerDashboardData {
     name: string
     currentStock: number
   }>
-  auditLogs: Array<{
-    id: string
-    timestamp: string
-    action: string
-    entity: string
-    entityId: string | null
-  }>
+  recentActivity: {
+    state: 'available' | 'not-tracked' | 'error'
+    items: Array<{
+      id: string
+      timestamp: string
+      kind: 'sale' | 'purchase' | 'payment' | 'expense' | 'transfer' | 'return' | 'rider' | 'entry'
+      title: string
+      reference: string | null
+      amount: string | null
+      destination: string
+    }>
+  }
 }
 
 async function fetchOwnerDashboard(range: BusinessDateRange, signal?: AbortSignal): Promise<OwnerDashboardData> {
