@@ -11,6 +11,7 @@ import { Search, ChevronDown, ChevronRight, BookOpen, ArrowLeft } from 'lucide-r
 import { motion, AnimatePresence } from 'framer-motion'
 import type { MeUser } from '@/components/erp/erp-app'
 import { apiFetchJson } from '@/lib/api-client'
+import { PageHeader } from '@/components/erp/page-header'
 
 type DayBookRow = {
   voucherId: string; voucherNo: string | null; voucherType: string; voucherDate: string
@@ -81,10 +82,7 @@ export function DayBookView({ user, onSelectVoucher }: { user: MeUser; onSelectV
           This accounting feature is currently unavailable.
         </div>
       )}
-      <div>
-        <h1 className="text-xl font-semibold tracking-tight text-foreground">Day Book</h1>
-        <p className="text-xs text-muted-foreground mt-0.5">All posted vouchers — expand any row to see its lines</p>
-      </div>
+      <PageHeader compact title="Day Book" description="Review posted vouchers and expand a row to see its accounting lines." />
 
       {/* Filters */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-2">

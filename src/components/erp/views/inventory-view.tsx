@@ -19,6 +19,7 @@ import { bizDate, bizDateString } from '@/lib/dates'
 import { motion, AnimatePresence } from 'framer-motion'
 import type { MeUser } from '@/components/erp/erp-app'
 import { apiFetchJson } from '@/lib/api-client'
+import { PageHeader } from '@/components/erp/page-header'
 
 type Product = {
   id: string; name: string; categoryId: string | null; categoryName: string | null
@@ -101,18 +102,17 @@ export function InventoryView({ user }: { user: MeUser }) {
   return (
     <div className="space-y-4">
       {/* Header */}
-      <div className="flex items-end justify-between gap-3 flex-wrap">
-        <div>
-          <h1 className="text-xl font-semibold tracking-tight text-foreground">Inventory</h1>
-          <p className="text-xs text-muted-foreground mt-0.5">Products, stock levels and stock movements</p>
-        </div>
-        {canManage && (
-          <div className="flex gap-2">
+      <PageHeader
+        compact
+        title="Inventory"
+        description="Products, stock levels and stock movements."
+        actions={canManage && (
+          <>
             <Button variant="outline" size="sm" className="h-8 press-sm" onClick={() => setModal({ type: 'stockEntry' })}><PackagePlus className="size-3.5" /> Stock Entry</Button>
             <Button size="sm" className="h-8 press-sm shadow-sm" onClick={() => setModal({ type: 'add' })}><Plus className="size-3.5" /> Add Product</Button>
-          </div>
+          </>
         )}
-      </div>
+      />
 
       {/* KPI Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">

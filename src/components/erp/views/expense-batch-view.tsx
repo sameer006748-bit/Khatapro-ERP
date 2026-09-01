@@ -12,6 +12,7 @@ import { Plus, Trash2, ArrowRight, AlertCircle, CheckCircle2 } from 'lucide-reac
 import { formatMoney, parseMoney } from '@/lib/format'
 import type { MeUser } from '@/components/erp/erp-app'
 import { apiFetchJson } from '@/lib/api-client'
+import { PageHeader } from '@/components/erp/page-header'
 
 type Account = { id: string; code: string; name: string; categoryType: string }
 
@@ -109,7 +110,7 @@ export function ExpenseBatchView({ user }: { user: MeUser }) {
 
   return (
     <div className="space-y-4">
-      <div><h1 className="text-xl font-semibold tracking-tight text-foreground">Expense Batch</h1><p className="text-xs text-muted-foreground mt-0.5">Multiple expense lines paid from one account — single credit to payment account</p></div>
+      <PageHeader compact title="Expense Batch" description="Record several expense lines paid from one business account." />
 
       {/* Header */}
       <div className="card-3d p-5 space-y-3">

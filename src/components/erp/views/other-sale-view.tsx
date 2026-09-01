@@ -25,6 +25,7 @@ import { apiFetchJson } from '@/lib/api-client'
 import { PaymentPanel, type PaymentAccountOption } from '@/components/erp/sales/payment-panel'
 import { usePaymentDraft } from '@/components/erp/sales/use-payment-draft'
 import { usePaymentAccounts } from '@/components/erp/sales/use-payment-accounts'
+import { userFacingError } from '@/lib/user-facing-error'
 
 type Product = { id: string; name: string; currentStock: number; salePrice: number; unit: string }
 type Salesman = { id: string; name: string; commissionPct: number }
@@ -184,8 +185,9 @@ export function OtherSaleView({ user }: { user: MeUser }) {
       })
       const data = await res.json()
       if (!res.ok) {
-        setResult({ ok: false, error: data.error || data.message || 'Failed to post Other Sale' })
-        toast.error(data.error || data.message || 'Failed to post Other Sale')
+        const message = userFacingError(data.error || data.message, 'The sale could not be posted. Please review the details and try again.')
+        setResult({ ok: false, error: message })
+        toast.error(message)
         return
       }
       setResult({ ok: true, invoiceNo: data.invoiceNo, invoiceId: data.invoiceId })
@@ -193,8 +195,9 @@ export function OtherSaleView({ user }: { user: MeUser }) {
       qc.invalidateQueries({ queryKey: ['products'] })
       qc.invalidateQueries({ queryKey: ['customers'] })
     } catch (e) {
-      setResult({ ok: false, error: (e as Error).message })
-      toast.error((e as Error).message)
+      const message = userFacingError(e, 'The sale could not be posted. Please check your connection and try again.')
+      setResult({ ok: false, error: message })
+      toast.error(message)
     } finally {
       postingRef.current = false
       setIsPosting(false)

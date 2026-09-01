@@ -16,6 +16,7 @@ import { formatTableDate } from '@/lib/format'
 import type { MeUser } from '@/components/erp/erp-app'
 import { toast } from 'sonner'
 import { Users as UsersIcon, Plus, X, ShieldCheck, Lock, KeyRound } from 'lucide-react'
+import { PageHeader } from '@/components/erp/page-header'
 
 type UserRow = {
   id: string
@@ -115,21 +116,14 @@ export function UsersView({ user }: { user: MeUser }) {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-end justify-between gap-4 flex-wrap">
-        <div>
-          <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight text-foreground">
-            Users & Roles
-          </h1>
-          <p className="text-sm text-muted-foreground mt-1.5 max-w-2xl">
-            After first-owner bootstrap, public registration is closed — invite new users from
-            here.
-          </p>
-        </div>
-        <Button onClick={() => setOpen((v) => !v)} className="press-md shadow-sm">
+      <PageHeader
+        title="Users & Roles"
+        description="Invite team members and manage role-based access from one place."
+        actions={<Button onClick={() => setOpen((v) => !v)} className="press-md shadow-sm">
           {open ? <X className="size-4" /> : <Plus className="size-4" />}
           {open ? 'Close' : 'Invite user'}
-        </Button>
-      </div>
+        </Button>}
+      />
 
       {open && (
         <div className="card-3d p-5 sm:p-6 fade-in">

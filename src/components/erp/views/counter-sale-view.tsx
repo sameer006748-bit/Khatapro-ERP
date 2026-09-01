@@ -27,6 +27,7 @@ import { AiFieldHelp } from '@/components/erp/ai-actions'
 import { PaymentPanel } from '@/components/erp/sales/payment-panel'
 import { usePaymentDraft } from '@/components/erp/sales/use-payment-draft'
 import { usePaymentAccounts } from '@/components/erp/sales/use-payment-accounts'
+import { userFacingError } from '@/lib/user-facing-error'
 import { resolvePaymentAccountGate } from '@/lib/sales/payment-accounts'
 import {
   normalizeSaleLine,
@@ -283,7 +284,7 @@ export function CounterSaleView({ user }: { user: MeUser }) {
         }),
       })
       const j = await r.json()
-      if (!r.ok) throw Object.assign(new Error(j?.error ?? 'POST_FAILED'), { setupRequired: j?.setupRequired })
+      if (!r.ok) throw Object.assign(new Error(j?.error ?? 'Unable to post this sale. Please try again.'), { setupRequired: j?.setupRequired })
       return j
     },
     onSuccess: (j) => {
@@ -296,8 +297,9 @@ export function CounterSaleView({ user }: { user: MeUser }) {
     },
     onError: (e: Error & { setupRequired?: boolean }) => {
       postingRef.current = false
-      setResult({ ok: false, error: e.message, setupRequired: e.setupRequired })
-      toast.error(`Sale failed: ${e.message}`)
+      const message = userFacingError(e, 'The sale could not be posted. Please review the details and try again.')
+      setResult({ ok: false, error: message, setupRequired: e.setupRequired })
+      toast.error(message)
     },
   })
 

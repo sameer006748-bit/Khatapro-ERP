@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query'
 import { bizFormat } from '@/lib/dates'
 import { ScrollText } from 'lucide-react'
 import { apiFetchJson } from '@/lib/api-client'
+import { PageHeader } from '@/components/erp/page-header'
 
 type Row = {
   id: string
@@ -32,14 +33,7 @@ export function AuditLogView() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight text-foreground">
-          Audit Log
-        </h1>
-        <p className="text-sm text-muted-foreground mt-1.5 max-w-2xl">
-          Most recent 200 entries. Every mutating API call writes one row.
-        </p>
-      </div>
+      <PageHeader title="Audit Log" description="Review the most recent 200 recorded business changes and actions." />
 
       {q.isLoading ? (
         <div className="card-3d p-8 text-sm text-muted-foreground">Loading…</div>

@@ -14,6 +14,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import type { MeUser } from '@/components/erp/erp-app'
 import { apiFetchJson } from '@/lib/api-client'
 import { ACCOUNT_CATEGORY_DEFINITIONS, UNCATEGORIZED_CATEGORY, classifyMoneyActivity, matchesAccountSubcategory, summarizeAccountSubcategories, type MoneyActivity } from '@/lib/money/account-subcategories'
+import { PageHeader } from '@/components/erp/page-header'
 
 type Account = { id: string; code: string; name: string; isBusinessAccount: boolean; isPartyAccount: boolean; partyType: string | null; categoryCode: string; categoryType: string }
 type Category = { id: string; code: string; name: string; type: string; accounts: Account[] }
@@ -107,13 +108,12 @@ export function AccountsView({ user }: { user: MeUser }) {
         </div>
       )}
       {/* Header */}
-      <div className="flex items-end justify-between gap-3 flex-wrap">
-        <div>
-          <h1 className="text-xl font-semibold tracking-tight text-foreground">Money Summary</h1>
-          <p className="text-xs text-muted-foreground mt-0.5">Current balances, today's money movement and pending amounts</p>
-        </div>
-        <Button size="sm" className="h-8 press-sm shadow-sm" onClick={() => setEntryModal('receive')}><Plus className="size-3.5" /> New Entry</Button>
-      </div>
+      <PageHeader
+        compact
+        title="Money Summary"
+        description="Current balances, today’s money movement and pending amounts."
+        actions={<Button size="sm" className="h-8 press-sm shadow-sm" onClick={() => setEntryModal('receive')}><Plus className="size-3.5" /> New entry</Button>}
+      />
 
       {/* Current Money */}
       <div>

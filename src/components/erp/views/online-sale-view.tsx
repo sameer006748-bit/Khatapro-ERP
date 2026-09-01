@@ -18,6 +18,8 @@ import { apiFetchJson } from '@/lib/api-client'
 import { PaymentPanel } from '@/components/erp/sales/payment-panel'
 import { usePaymentDraft } from '@/components/erp/sales/use-payment-draft'
 import { usePaymentAccounts } from '@/components/erp/sales/use-payment-accounts'
+import { PageHeader } from '@/components/erp/page-header'
+import { userFacingError } from '@/lib/user-facing-error'
 
 type Product = { id: string; name: string; salePrice: number }
 type Salesman = { id: string; name: string; commissionPct: number; isActive?: boolean }
@@ -161,7 +163,11 @@ export function OnlineSaleView({ user }: { user: MeUser }) {
         toast.warning('Sale posted, but no delivery order was available for rider assignment.')
       }
     },
-    onError: (e: Error) => { setResult({ ok: false, error: e.message }); toast.error(`Failed: ${e.message}`) },
+    onError: (e: Error) => {
+      const message = userFacingError(e, 'The sale could not be posted. Please review the details and try again.')
+      setResult({ ok: false, error: message })
+      toast.error(message)
+    },
   })
 
   function onProductSelect(key: string, productId: string) {
@@ -206,7 +212,7 @@ export function OnlineSaleView({ user }: { user: MeUser }) {
 
   return (
     <div className="space-y-3">
-      <h1 className="text-xl font-semibold tracking-tight text-foreground">Online Sale</h1>
+      <PageHeader compact title="Online Sale" description="Record a delivery sale with customer, delivery and payment details." />
 
       {paymentAccountsQ.isError && (
         <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-muted-foreground">
@@ -232,10 +238,10 @@ export function OnlineSaleView({ user }: { user: MeUser }) {
       <div className="card-3d p-3 space-y-2">
         <h2 className="text-sm font-semibold text-foreground">Customer</h2>
         <div className="grid sm:grid-cols-2 gap-2">
-          <Input value={form.customerName} onChange={e => setForm(s => ({ ...s, customerName: e.target.value }))} placeholder="Name *" className="h-9 bg-background press-sm" />
-          <Input value={form.customerPhone} onChange={e => setForm(s => ({ ...s, customerPhone: e.target.value }))} placeholder="Phone *" className="h-9 bg-background press-sm" data-num />
-          <Input value={form.customerAddress} onChange={e => setForm(s => ({ ...s, customerAddress: e.target.value }))} placeholder="Address *" className="h-9 bg-background press-sm" />
-          <Input value={form.customerCity} onChange={e => setForm(s => ({ ...s, customerCity: e.target.value }))} placeholder="City" className="h-9 bg-background press-sm" />
+          <div><Label className="text-xs text-muted-foreground">Customer name *</Label><Input value={form.customerName} onChange={e => setForm(s => ({ ...s, customerName: e.target.value }))} placeholder="Customer name" className="h-9 bg-background press-sm mt-1" /></div>
+          <div><Label className="text-xs text-muted-foreground">Phone *</Label><Input value={form.customerPhone} onChange={e => setForm(s => ({ ...s, customerPhone: e.target.value }))} placeholder="Phone number" className="h-9 bg-background press-sm mt-1" data-num /></div>
+          <div><Label className="text-xs text-muted-foreground">Address *</Label><Input value={form.customerAddress} onChange={e => setForm(s => ({ ...s, customerAddress: e.target.value }))} placeholder="Delivery address" className="h-9 bg-background press-sm mt-1" /></div>
+          <div><Label className="text-xs text-muted-foreground">City</Label><Input value={form.customerCity} onChange={e => setForm(s => ({ ...s, customerCity: e.target.value }))} placeholder="City" className="h-9 bg-background press-sm mt-1" /></div>
         </div>
         <div>
           <div className="sm:max-w-sm">

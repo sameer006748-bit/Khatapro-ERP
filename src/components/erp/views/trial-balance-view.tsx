@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { formatMoney } from '@/lib/format'
 import { apiFetchJson } from '@/lib/api-client'
 import { CheckCircle2, AlertCircle, ArrowRight, Scale } from 'lucide-react'
+import { PageHeader } from '@/components/erp/page-header'
 
 type Row = {
   accountId: string
@@ -47,15 +48,10 @@ export function TrialBalanceView() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight text-foreground">
-          Trial Balance
-        </h1>
-        <p className="text-sm text-muted-foreground mt-1.5 max-w-2xl">
-          Aggregate debit/credit per active account. Click any account to drill into its ledger.
-          Grand totals must match (debit = credit) — that&apos;s the double-entry invariant.
-        </p>
-      </div>
+      <PageHeader
+        title="Trial Balance"
+        description="Review debit and credit totals by account. Select an account to open its ledger."
+      />
 
       {/* Balance status banner */}
       {q.data && !unavailable && (

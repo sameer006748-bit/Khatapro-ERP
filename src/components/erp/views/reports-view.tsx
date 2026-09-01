@@ -12,6 +12,7 @@ import { BarChart3, FileText, Scale, Wallet, Package, Users, Bike, ScrollText, T
 import { motion, AnimatePresence } from 'framer-motion'
 import type { MeUser } from '@/components/erp/erp-app'
 import { apiFetchJson } from '@/lib/api-client'
+import { PageHeader } from '@/components/erp/page-header'
 
 type Category = 'overview' | 'financial' | 'sales' | 'purchases' | 'inventory' | 'parties' | 'delivery' | 'audit'
 type ReportType = 'overview' | 'profit-loss' | 'balance-sheet' | 'trial-balance' | 'cash-flow' | 'expense' | 'sales-summary' | 'sales-detail' | 'customer-outstanding' | 'vendor-outstanding' | 'inventory-valuation' | 'stock-movements' | 'product-profitability' | 'purchase-detail' | 'delivery-summary' | 'cod-settlements' | 'exceptions'
@@ -101,13 +102,15 @@ export function ReportsView({ user }: { user: MeUser }) {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-end justify-between gap-3 flex-wrap">
-        <div><h1 className="text-xl font-semibold tracking-tight text-foreground">Reports</h1><p className="text-xs text-muted-foreground mt-0.5">Financial, sales, purchase, inventory and delivery reports</p></div>
-        <div className="flex gap-2">
+      <PageHeader
+        compact
+        title="Reports"
+        description="Financial, sales, purchase, inventory and delivery reports."
+        actions={<>
           <Button variant="outline" size="sm" onClick={exportCsv}><Download className="size-3.5" /> CSV</Button>
           <Button variant="outline" size="sm" onClick={() => window.print()}><Printer className="size-3.5" /> Print</Button>
-        </div>
-      </div>
+        </>}
+      />
 
       {/* Date filters */}
       <div className="flex flex-wrap gap-2 items-end">

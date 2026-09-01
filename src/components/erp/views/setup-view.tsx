@@ -2,6 +2,7 @@
 
 import type { MeUser } from '@/components/erp/erp-app'
 import { WalletCards, ListTree, UserCog, ShieldCheck, History, ArrowRight, Lock } from 'lucide-react'
+import { PageHeader } from '@/components/erp/page-header'
 
 export function SetupView({
   user,
@@ -53,12 +54,7 @@ export function SetupView({
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight text-foreground">Setup</h1>
-        <p className="text-sm text-muted-foreground mt-1.5 max-w-2xl">
-          Manage business accounts, team access and accounting setup.
-        </p>
-      </div>
+      <PageHeader title="Setup" description="Manage business accounts, team access and accounting setup." />
       <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
         {cards.map((c) => {
           const locked = !canOpen(c.route)

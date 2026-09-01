@@ -3,12 +3,13 @@
 import { useState, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { formatMoney, formatWholeRupees, formatTableDate } from '@/lib/format'
-import { FileText, Search, Printer, X, ShoppingCart, Truck, Plus, ArrowDownToLine, RotateCcw } from 'lucide-react'
+import { FileText, Search, Printer, X, ShoppingCart, Truck, ArrowDownToLine, RotateCcw } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { useRouter } from 'next/navigation'
 import { PrintInvoiceButton } from '@/components/invoice/print-invoice-button'
 import { apiFetchJson } from '@/lib/api-client'
+import { PageHeader } from '@/components/erp/page-header'
 
 type Invoice = {
   id: string
@@ -86,10 +87,7 @@ export function SalesListView() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div>
-        <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight text-foreground">Sales</h1>
-        <p className="text-sm text-muted-foreground mt-1.5 max-w-2xl">Create, view and manage all sales invoices.</p>
-      </div>
+      <PageHeader title="Sales" description="Create, review and manage all sales invoices." />
 
       {/* Summary bar */}
       <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
@@ -110,9 +108,6 @@ export function SalesListView() {
       {/* Primary action + Quick actions */}
       <div className="flex flex-wrap gap-2">
         <Button size="sm" className="h-10 press-sm shadow-sm" onClick={() => router.push('/?page=counter-sale')}>
-          <Plus className="size-4 mr-1.5" /> New Sale
-        </Button>
-        <Button variant="outline" size="sm" className="h-10 press-sm" onClick={() => router.push('/?page=counter-sale')}>
           <ShoppingCart className="size-4 mr-1.5" /> Counter Sale
         </Button>
         <Button variant="outline" size="sm" className="h-10 press-sm" onClick={() => router.push('/?page=online-sale')}>

@@ -17,6 +17,7 @@ import type { MeUser } from '@/components/erp/erp-app'
 import { toast } from 'sonner'
 import { Wallet, Plus, X, ArrowRight, Pencil, Power, Trash2 } from 'lucide-react'
 import { BUSINESS_ACCOUNT_TYPES } from '@/lib/accounting/business-account-types'
+import { PageHeader } from '@/components/erp/page-header'
 
 type BusinessAccountRow = {
   id: string
@@ -149,22 +150,16 @@ export function BusinessAccountsView({ user }: { user: MeUser }) {
           This accounting feature is currently unavailable.
         </div>
       )}
-      <div className="flex items-end justify-between gap-4 flex-wrap">
-        <div>
-          <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight text-foreground">
-            Business Accounts
-          </h1>
-          <p className="text-sm text-muted-foreground mt-1.5 max-w-2xl">
-            Each business account has a linked accounting account. Balances update as entries are recorded.
-          </p>
-        </div>
-        {canManage && (
+      <PageHeader
+        title="Business Accounts"
+        description="Manage cash, bank and wallet accounts used for daily payments. Balances update as entries are recorded."
+        actions={canManage && (
           <Button onClick={() => setOpen((v) => !v)} className="press-md shadow-sm">
             {open ? <X className="size-4" /> : <Plus className="size-4" />}
             {open ? 'Close' : 'New business account'}
           </Button>
         )}
-      </div>
+      />
 
       {open && canManage && (
         <div className="card-3d p-5 sm:p-6 fade-in">
