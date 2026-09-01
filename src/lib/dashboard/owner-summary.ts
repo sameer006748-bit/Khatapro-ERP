@@ -1,7 +1,16 @@
 import { getAdminSupabase } from '@/lib/supabase/admin'
 import { getAccountByCode } from '@/lib/accounting/data-access'
+import { listLegacyBusinessAccounts } from '@/lib/accounting/legacy-business-accounts'
 import { db } from '@/lib/db'
+import {
+  reportCashFlow,
+  reportCustomerOutstanding,
+  reportSalesDetail,
+  reportSalesSummary,
+  reportVendorOutstanding,
+} from '@/lib/reports/data-access'
 import { isSupabaseConfigured } from '@/lib/supabase/config'
+import { usesLegacyTransactionSchema } from '@/lib/identity/legacy-bridge'
 import {
   detectLedgerCapability,
   isolateDashboardMetric,
@@ -61,6 +70,7 @@ function isPostedInvoice(row: any): boolean {
 
 async function buildLocalOperationalPayload(input: {
   businessId: string
+  profileId: string
   range: Range
   today: string
   requestId: string
@@ -68,7 +78,7 @@ async function buildLocalOperationalPayload(input: {
   const startedAt = Date.now()
   const from = new Date(`${input.range.from}T00:00:00+05:00`)
   const to = new Date(`${input.range.to}T23:59:59.999+05:00`)
-  const [invoices, purchases, products, auditLogs] = await Promise.all([
+  const [invoices, purchases, products, auditLogs, activePaymentAccountCount] = await Promise.all([
     db.invoice.findMany({
       where: { businessId: input.businessId, invoiceDate: { gte: from, lte: to } },
       select: {
@@ -118,6 +128,7 @@ async function buildLocalOperationalPayload(input: {
       orderBy: { timestamp: 'desc' },
       take: 20,
     }),
+    db.businessAccount.count({ where: { businessId: input.businessId, isActive: true } }),
   ])
   const postedInvoices = invoices.filter(invoice => !invoice.isCancelled && !invoice.isReturned)
   const postedPurchases = purchases.filter(purchase => purchase.status.toLowerCase() !== 'cancelled')
@@ -215,6 +226,7 @@ async function buildLocalOperationalPayload(input: {
     },
     availability,
     metricStates: metricStates(availability),
+    paymentAccounts: { activeCount: activePaymentAccountCount, state: 'available' as const },
     salesByType: {
       counter: saleType(saleTypes.counter),
       online: saleType(saleTypes.online),
@@ -263,6 +275,7 @@ async function buildLocalOperationalPayload(input: {
 
 export async function buildOwnerDashboardPayload(input: {
   businessId: string
+  profileId: string
   range: Range
   today: string
   requestId: string
@@ -280,18 +293,27 @@ export async function buildOwnerDashboardPayload(input: {
   const unavailable = new Map<string, MetricState>()
   const { businessId: bid, range } = input
   const capability = await detectLedgerCapability(admin, bid, range.to)
+  const legacyReports = capability.path === 'operational-fallback' && await usesLegacyTransactionSchema()
 
   // One query per operational source. Each optional metric is isolated, while
   // authentication and business-scope errors still fail the request.
-  const [invoiceQ, paymentQ, expenseQ, purchaseQ, salesReturnQ, purchaseReturnQ, customerQ, payableQ, productQ, auditQ] = await Promise.all([
-    isolated('todaySales', unavailable, async () => rowsOrThrow(await admin.from('invoices')
+  const [invoiceQ, recentInvoiceQ, paymentQ, cashFlowQ, expenseQ, purchaseQ, salesReturnQ, purchaseReturnQ, customerQ, payableQ, paymentAccountsQ, productQ, auditQ] = await Promise.all([
+    legacyReports
+      ? isolated('todaySales', unavailable, () => reportSalesSummary(bid, range.from, range.to))
+      : isolated('todaySales', unavailable, async () => rowsOrThrow(await admin.from('invoices')
       .select('id, invoice_type, invoice_date, customer_name, total, paid, status')
       .eq('business_id', bid).gte('invoice_date', range.from).lte('invoice_date', range.to)
       .order('invoice_date', { ascending: false }))),
+    legacyReports
+      ? isolated('recentInvoices', unavailable, () => reportSalesDetail(bid, range.from, range.to))
+      : Promise.resolve<Metric<any[]> | null>(null),
     isolated('todayCollections', unavailable, async () => rowsOrThrow(await admin.from('payments')
       .select('amount, direction, payment_mode, created_at, invoice_id')
       .eq('business_id', bid).gte('created_at', boundary(range.from))
       .lte('created_at', boundary(range.to, true)))),
+    legacyReports
+      ? isolated('todayNetCashFlow', unavailable, () => reportCashFlow(bid, range.from, range.to))
+      : Promise.resolve<Metric<any[]> | null>(null),
     isolated('todayExpenses', unavailable, async () => rowsOrThrow(await admin.from('expenses')
       .select('total_amount, expense_date, status').eq('business_id', bid)
       .gte('expense_date', range.from).lte('expense_date', range.to))),
@@ -306,10 +328,17 @@ export async function buildOwnerDashboardPayload(input: {
     isolated('periodPurchaseReturns', unavailable, async () => rowsOrThrow(await admin.from('purchase_returns')
       .select('total_amount, return_date').eq('business_id', bid)
       .gte('return_date', range.from).lte('return_date', range.to))),
-    isolated('totalReceivables', unavailable, async () => rowsOrThrow(await admin.from('customers')
+    legacyReports
+      ? isolated('totalReceivables', unavailable, () => reportCustomerOutstanding(bid))
+      : isolated('totalReceivables', unavailable, async () => rowsOrThrow(await admin.from('customers')
       .select('credit').eq('business_id', bid))),
-    isolated('totalPayables', unavailable, async () => rowsOrThrow(await admin.from('purchases')
+    legacyReports
+      ? isolated('totalPayables', unavailable, () => reportVendorOutstanding(bid))
+      : isolated('totalPayables', unavailable, async () => rowsOrThrow(await admin.from('purchases')
       .select('outstanding_amount, status').eq('business_id', bid))),
+    legacyReports
+      ? isolated('paymentAccounts', unavailable, () => listLegacyBusinessAccounts(bid, input.profileId))
+      : Promise.resolve<Metric<any[]> | null>(null),
     isolated('stock', unavailable, async () => rowsOrThrow(await admin.from('products')
       .select('id, name, current_stock, low_stock_threshold, is_active')
       .eq('business_id', bid).eq('is_active', true))),
@@ -318,7 +347,9 @@ export async function buildOwnerDashboardPayload(input: {
       .order('timestamp', { ascending: false }).limit(20))),
   ])
 
-  const invoices = (invoiceQ.value ?? []).filter(isPostedInvoice)
+  const invoices = legacyReports
+    ? (recentInvoiceQ?.value ?? [])
+    : (invoiceQ.value ?? []).filter(isPostedInvoice)
   const saleTypes = {
     counter: { count: 0, amount: 0n }, online: { count: 0, amount: 0n },
     ofc: { count: 0, amount: 0n }, other: { count: 0, amount: 0n },
@@ -326,14 +357,14 @@ export async function buildOwnerDashboardPayload(input: {
   let sales: number | null = invoiceQ.available ? 0 : null
   if (sales !== null) {
     let total = 0n
-    for (const invoice of invoices) {
-      const amount = BigInt(invoice.total ?? 0)
+    for (const invoice of invoiceQ.value ?? []) {
+      const amount = BigInt(legacyReports ? invoice.total_subtotal ?? 0 : invoice.total ?? 0)
       total += amount
       const invoiceType = String(invoice.invoice_type ?? '').toUpperCase()
       const bucket = invoiceType === 'COUNTER' ? saleTypes.counter
         : invoiceType === 'ONLINE' ? saleTypes.online
           : invoiceType === 'OFC' ? saleTypes.ofc : saleTypes.other
-      bucket.count += 1
+      bucket.count += Number(legacyReports ? invoice.invoice_count ?? 0 : 1)
       bucket.amount += amount
     }
     sales = Number(total)
@@ -352,14 +383,19 @@ export async function buildOwnerDashboardPayload(input: {
   const purchases = purchaseQ.available ? sum(periodPurchases, 'total') : null
   const salesReturns = salesReturnQ.available ? sum(salesReturnQ.value ?? [], 'total') : null
   const purchaseReturns = purchaseReturnQ.available ? sum(purchaseReturnQ.value ?? [], 'total_amount') : null
-  let receivablesMovement = invoiceQ.available
+  let receivablesMovement = !legacyReports && invoiceQ.available
     ? Number(invoices.reduce((value, row) => value + BigInt(row.total ?? 0) - BigInt(row.paid ?? 0), 0n))
     : null
   let payablesMovement = purchaseQ.available ? sum(periodPurchases, 'outstanding_amount') : null
-  let receivables = customerQ.available ? sum(customerQ.value ?? [], 'credit') : null
+  let receivables = customerQ.available ? sum(customerQ.value ?? [], legacyReports ? 'outstanding' : 'credit') : null
   let payables = payableQ.available
-    ? sum((payableQ.value ?? []).filter(row => String(row.status ?? '').toLowerCase() !== 'cancelled'), 'outstanding_amount')
+    ? legacyReports
+      ? sum(payableQ.value ?? [], 'outstanding')
+      : sum((payableQ.value ?? []).filter(row => String(row.status ?? '').toLowerCase() !== 'cancelled'), 'outstanding_amount')
     : null
+  const netCashMovement = legacyReports
+    ? cashFlowQ?.available ? Number((cashFlowQ.value ?? []).reduce((total, row) => total + BigInt(row.total_debit ?? 0) - BigInt(row.total_credit ?? 0), 0n)) : null
+    : received !== null && expenses !== null ? received - expenses : null
   let cashBalance: number | null = null
   let bankBalance: number | null = null
   let cashMovement: Movement | null = null
@@ -409,7 +445,7 @@ export async function buildOwnerDashboardPayload(input: {
       return sum(rows.filter(row => row.section === 'COST_OF_GOODS_SOLD'), 'amount')
     })
     cogs = cogsQ.value
-  } else {
+  } else if (!legacyReports) {
     for (const name of ['cashBalance', 'bankBalance', 'cashMovement', 'bankMovement', 'periodCogs', 'totalSales']) {
       unavailable.set(name, 'not-tracked')
     }
@@ -428,7 +464,7 @@ export async function buildOwnerDashboardPayload(input: {
     ? sales - salesReturns - cogs - expenses : null
   const availability = {
     todaySales: sales !== null, todayCollections: received !== null, todayExpenses: expenses !== null,
-    todayNetCashFlow: received !== null && expenses !== null, todayPurchases: purchases !== null,
+    todayNetCashFlow: netCashMovement !== null, todayPurchases: purchases !== null,
     periodSalesReturns: salesReturns !== null, periodPurchaseReturns: purchaseReturns !== null,
     periodCogs: cogs !== null, approxProfit: approxProfit !== null,
     cashBalance: cashBalance !== null, bankBalance: bankBalance !== null,
@@ -450,7 +486,7 @@ export async function buildOwnerDashboardPayload(input: {
       todaySales: sales, todaySalesPaisas: sales === null ? null : String(sales),
       todayCollections: received, todayExpenses: expenses,
       todayExpensesPaisas: expenses === null ? null : String(expenses),
-      todayNetCashFlow: received !== null && expenses !== null ? received - expenses : null,
+      todayNetCashFlow: netCashMovement,
       todayPurchases: purchases, cashBalance, bankBalance,
       cashInflow: cashMovement?.inflow ?? null, cashOutflow: cashMovement?.outflow ?? null,
       bankInflow: bankMovement?.inflow ?? null, bankOutflow: bankMovement?.outflow ?? null,
@@ -464,10 +500,13 @@ export async function buildOwnerDashboardPayload(input: {
     },
     availability,
     metricStates: metricStates(availability, unavailable),
+    paymentAccounts: legacyReports
+      ? { activeCount: paymentAccountsQ?.available ? (paymentAccountsQ.value ?? []).filter((account) => account.isActive).length : null, state: paymentAccountsQ?.available ? 'available' as const : unavailable.get('paymentAccounts') ?? 'error' }
+      : { activeCount: null, state: 'not-tracked' as const },
     salesByType: { counter: saleType(saleTypes.counter), online: saleType(saleTypes.online), ofc: saleType(saleTypes.ofc), other: saleType(saleTypes.other) },
     recentInvoices: invoices.slice(0, 5).map(row => ({
-      id: row.id, invoiceNo: row.id, invoiceType: row.invoice_type, invoiceDate: row.invoice_date,
-      customerName: row.customer_name, salesmanName: null, total: String(row.total ?? 0), paidAmount: String(row.paid ?? 0),
+      id: row.id, invoiceNo: legacyReports ? row.invoice_no ?? row.id : row.id, invoiceType: row.invoice_type, invoiceDate: row.invoice_date,
+      customerName: row.customer_name, salesmanName: null, total: String(row.total ?? 0), paidAmount: String(legacyReports ? row.paid_amount ?? 0 : row.paid ?? 0),
     })),
     recentPurchases: periodPurchases.slice(0, 5).map(row => ({
       id: row.id, purchaseNo: row.purchase_no ?? row.id, vendorName: null, purchaseDate: row.purchase_date,

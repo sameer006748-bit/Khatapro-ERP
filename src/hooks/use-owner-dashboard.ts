@@ -58,6 +58,10 @@ export interface OwnerDashboardData {
     negativeStockCount: boolean
   }
   metricStates: Record<string, 'available' | 'not-tracked' | 'error'>
+  paymentAccounts: {
+    activeCount: number | null
+    state: 'available' | 'not-tracked' | 'error'
+  }
   salesByType: {
     counter: { count: number; amount: string }
     online: { count: number; amount: string }

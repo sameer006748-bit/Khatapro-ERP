@@ -36,6 +36,7 @@ export const GET = withObservability('/api/dashboard/owner', async (req: Request
 
     return NextResponse.json(await buildOwnerDashboardPayload({
       businessId: loaded.businessId,
+      profileId: loaded.profileId,
       range,
       today,
       requestId,

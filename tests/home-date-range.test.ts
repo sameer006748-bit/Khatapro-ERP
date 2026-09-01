@@ -161,7 +161,14 @@ test('Needs Attention is conditional and every live stock condition links to inv
   assert.match(page, /attentionItems\.length > 0/)
   assert.match(page, /negativeStockProducts/)
   assert.match(page, /lowStockProducts/)
-  assert.match(page, /router\.push\('\/\?page=inventory'\)/)
+  assert.match(page, /destination: '\/\?page=inventory'/)
+  assert.match(page, /router\.push\(item\.destination\)/)
+})
+
+test('Home recognizes a missing active payment account only from the shared status payload', () => {
+  assert.match(page, /data\.paymentAccounts\.state === 'available'/)
+  assert.match(page, /data\.paymentAccounts\.activeCount === 0/)
+  assert.match(page, /\/?page=business-accounts/)
 })
 
 test('Home does not render a literal escaped separator', () => {

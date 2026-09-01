@@ -138,3 +138,19 @@ test('Today, a custom single date, and a custom range share the selected Karachi
   assert.match(hook, /dashboardDateRangeQuery\(range\)/)
   assert.match(hook, /queryKey: \['owner-dashboard', range\.from, range\.to\]/)
 })
+
+test('legacy dashboard metrics use verified report and payment-account contracts', () => {
+  for (const source of [
+    'reportSalesSummary', 'reportCashFlow', 'reportCustomerOutstanding',
+    'reportVendorOutstanding', 'reportSalesDetail', 'listLegacyBusinessAccounts',
+  ]) assert.ok(summary.includes(source), source)
+  assert.match(summary, /const legacyReports = capability\.path === 'operational-fallback'/)
+  assert.match(summary, /reportSalesSummary\(bid, range\.from, range\.to\)/)
+  assert.match(summary, /reportCashFlow\(bid, range\.from, range\.to\)/)
+  assert.match(summary, /reportCustomerOutstanding\(bid\)/)
+  assert.match(summary, /reportVendorOutstanding\(bid\)/)
+  assert.match(summary, /total_debit \?\? 0\) - BigInt\(row\.total_credit \?\? 0\)/)
+  assert.match(summary, /listLegacyBusinessAccounts\(bid, input\.profileId\)/)
+  assert.match(summary, /account\.isActive/)
+  assert.match(route, /profileId: loaded\.profileId/)
+})
