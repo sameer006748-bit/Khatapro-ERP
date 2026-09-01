@@ -7,6 +7,7 @@ const hook = await readFile('src/hooks/use-owner-dashboard.ts', 'utf8')
 const page = await readFile('src/components/erp/views/owner-dashboard.tsx', 'utf8')
 const route = await readFile('src/app/api/dashboard/owner/route.ts', 'utf8')
 const summary = await readFile('src/lib/dashboard/owner-summary.ts', 'utf8')
+const attention = await readFile('src/lib/dashboard/attention.ts', 'utf8')
 
 test('Today, Last 3 Days, Last 7 Days, and This Month use Karachi business dates', () => {
   assert.match(page, /bizPresetDateRange\('today'\)/)
@@ -159,16 +160,16 @@ test('command center has four non-duplicated hero metrics with clear state seman
 
 test('Needs Attention is conditional and every live stock condition links to inventory', () => {
   assert.match(page, /attentionItems\.length > 0/)
-  assert.match(page, /negativeStockProducts/)
-  assert.match(page, /lowStockProducts/)
-  assert.match(page, /destination: '\/\?page=inventory'/)
-  assert.match(page, /router\.push\(item\.destination\)/)
+  assert.match(attention, /negativeStockProducts/)
+  assert.match(attention, /lowStockProducts/)
+  assert.match(attention, /destination: '\/\?page=inventory'/)
+  assert.match(page, /router\.push\(destination\)/)
 })
 
 test('Home recognizes a missing active payment account only from the shared status payload', () => {
-  assert.match(page, /data\.paymentAccounts\.state === 'available'/)
-  assert.match(page, /data\.paymentAccounts\.activeCount === 0/)
-  assert.match(page, /\/?page=business-accounts/)
+  assert.match(attention, /input\.paymentAccounts\.state === 'available'/)
+  assert.match(attention, /input\.paymentAccounts\.activeCount === 0/)
+  assert.match(attention, /\/?page=business-accounts/)
 })
 
 test('Home does not render a literal escaped separator', () => {

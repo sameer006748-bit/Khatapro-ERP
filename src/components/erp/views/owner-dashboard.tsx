@@ -20,6 +20,7 @@ import { useRouter } from 'next/navigation'
 import { useOwnerDashboard } from '@/hooks/use-owner-dashboard'
 import { formatWholeRupees } from '@/lib/format'
 import { bizPresetDateRange, isBusinessDateRange, type BusinessDateRange } from '@/lib/dates'
+import { buildDashboardAttention, type AttentionSeverity, type DashboardAttentionItem } from '@/lib/dashboard/attention'
 
 type MetricState = 'available' | 'not-tracked' | 'error'
 
@@ -29,22 +30,50 @@ function metricDisplay(value: number | null, state: MetricState) {
   return formatWholeRupees(value)
 }
 
-function HeroMetric({ label, value, state, detail, icon: Icon, onRetry }: {
+function HeroMetric({ label, value, state, detail, icon: Icon, onRetry, onOpen, actionLabel }: {
   label: string
   value: number | null
   state: MetricState
   detail: string
   icon: LucideIcon
   onRetry: () => void
+  onOpen?: () => void
+  actionLabel?: string
 }) {
   const unavailable = state === 'error'
+  const content = <>
+    <div className="flex items-center justify-between gap-3"><p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</p><Icon className="size-4 text-primary" aria-hidden /></div>
+    <p className={`mt-3 text-2xl font-semibold tracking-tight ${unavailable ? 'text-muted-foreground' : 'text-foreground'}`} data-num>{metricDisplay(value, state)}</p>
+    <div className="mt-1 min-h-4 text-xs text-muted-foreground">{unavailable ? null : detail}</div>
+  </>
+  if (onOpen && !unavailable) {
+    return <button type="button" onClick={onOpen} className="rounded-xl border border-border bg-card p-4 text-left shadow-sm transition-colors hover:border-primary/50 hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2">
+      {content}
+      <span className="mt-3 inline-flex min-h-5 items-center gap-1 text-xs font-medium text-primary">{actionLabel} <ArrowRight className="size-3" aria-hidden /></span>
+    </button>
+  }
   return (
     <section className="rounded-xl border border-border bg-card p-4 shadow-sm">
-      <div className="flex items-center justify-between gap-3"><p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</p><Icon className="size-4 text-primary" aria-hidden /></div>
-      <p className={`mt-3 text-2xl font-semibold tracking-tight ${unavailable ? 'text-muted-foreground' : 'text-foreground'}`} data-num>{metricDisplay(value, state)}</p>
-      <div className="mt-1 min-h-4 text-xs text-muted-foreground">{unavailable ? <button onClick={onRetry} className="font-medium text-primary hover:underline">Retry</button> : detail}</div>
+      {content}
+      {unavailable && <button type="button" onClick={onRetry} className="mt-2 min-h-8 text-xs font-medium text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">Retry</button>}
     </section>
   )
+}
+
+const attentionStyle: Record<AttentionSeverity, { label: string; badge: string; tone: string }> = {
+  critical: { label: 'Critical', badge: 'border-destructive/30 bg-destructive/10 text-destructive', tone: 'text-destructive' },
+  'due-soon': { label: 'Due Soon', badge: 'border-amber-300 bg-amber-50 text-amber-800', tone: 'text-amber-700' },
+  watch: { label: 'Watch', badge: 'border-sky-300 bg-sky-50 text-sky-800', tone: 'text-sky-700' },
+}
+
+function AttentionItem({ item, onOpen }: { item: DashboardAttentionItem; onOpen: (destination: string) => void }) {
+  const style = attentionStyle[item.severity]
+  const Icon = item.kind === 'negative-stock' ? AlertTriangle : item.kind === 'low-stock' ? Package : Wallet
+  return <button type="button" onClick={() => onOpen(item.destination)} aria-label={`${item.actionLabel}: ${item.title}`} className="flex min-w-0 items-start gap-3 rounded-lg border border-border bg-card px-3 py-3 text-left transition-colors hover:border-primary/50 hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2">
+    <Icon className={`mt-0.5 size-4 shrink-0 ${style.tone}`} aria-hidden />
+    <span className="min-w-0 flex-1"><span className="flex flex-wrap items-center gap-2"><span className="text-sm font-medium text-foreground">{item.title}</span><span className={`rounded border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${style.badge}`}>{style.label}</span></span><span className="mt-0.5 block text-xs text-muted-foreground">{item.detail}</span></span>
+    <span className="inline-flex min-h-8 shrink-0 items-center gap-1 text-xs font-medium text-primary">{item.actionLabel}<ArrowRight className="size-3" aria-hidden /></span>
+  </button>
 }
 
 function ActivityList({ title, icon: Icon, items, emptyMessage, onViewAll }: {
@@ -71,6 +100,7 @@ export function OwnerDashboard({ user }: { user: { displayName: string; roleName
   const [customFrom, setCustomFrom] = useState(range.from)
   const [customTo, setCustomTo] = useState(range.to)
   const [rangeError, setRangeError] = useState('')
+  const [showAllAttention, setShowAllAttention] = useState(false)
   const { data, isLoading, isFetching, error, refetch } = useOwnerDashboard(range)
 
   useEffect(() => {
@@ -97,16 +127,17 @@ export function OwnerDashboard({ user }: { user: { displayName: string; roleName
 
   const stateFor = (name: string): MetricState => data.metricStates[name] ?? (data.availability[name as keyof typeof data.availability] ? 'available' : 'not-tracked')
   const hasPeriodActivity = (data.kpis.todaySales ?? 0) !== 0 || (data.kpis.todayCollections ?? 0) !== 0 || (data.kpis.todayExpenses ?? 0) !== 0 || (data.kpis.todayPurchases ?? 0) !== 0
-  const attentionItems = [
-    ...data.negativeStockProducts.map((product) => ({ id: `negative-${product.id}`, title: `${product.name} has negative stock`, detail: `${product.currentStock} units recorded`, icon: AlertTriangle, tone: 'text-destructive', destination: '/?page=inventory' })),
-    ...data.lowStockProducts.map((product) => ({ id: `low-${product.id}`, title: `${product.name} is low in stock`, detail: `${product.currentStock} remaining; threshold ${product.lowStockThreshold}`, icon: Package, tone: 'text-amber-600', destination: '/?page=inventory' })),
-    ...(data.paymentAccounts.state === 'available' && data.paymentAccounts.activeCount === 0 ? [{ id: 'payment-accounts', title: 'No active payment account', detail: 'Add or activate a business account to receive payments.', icon: Wallet, tone: 'text-amber-600', destination: '/?page=business-accounts' }] : []),
-  ].slice(0, 4)
+  const attentionItems = buildDashboardAttention({
+    negativeStockProducts: data.negativeStockProducts,
+    lowStockProducts: data.lowStockProducts,
+    paymentAccounts: data.paymentAccounts,
+  })
+  const visibleAttentionItems = showAllAttention ? attentionItems : attentionItems.slice(0, 4)
   const heroMetrics = [
-    { label: 'Sales', value: data.kpis.todaySales, state: stateFor('todaySales'), detail: data.kpis.todaySales === 0 ? 'No activity in this period' : activeRangeLabel, icon: ShoppingCart },
-    { label: 'Net Cash Movement', value: data.kpis.todayNetCashFlow, state: stateFor('todayNetCashFlow'), detail: data.kpis.todayNetCashFlow === 0 ? 'No movement in this period' : activeRangeLabel, icon: CircleDollarSign },
-    { label: 'Receivables', value: data.kpis.totalReceivables, state: stateFor('totalReceivables'), detail: data.kpis.totalReceivables === 0 ? 'Current balance is Rs 0' : 'Current balance', icon: Users },
-    { label: 'Payables', value: data.kpis.totalPayables, state: stateFor('totalPayables'), detail: data.kpis.totalPayables === 0 ? 'Current balance is Rs 0' : 'Current balance', icon: Wallet },
+    { label: 'Sales', value: data.kpis.todaySales, state: stateFor('todaySales'), detail: data.kpis.todaySales === 0 ? 'No activity in this period' : activeRangeLabel, icon: ShoppingCart, destination: '/?page=sales-list', actionLabel: 'View Sales' },
+    { label: 'Net Cash Movement', value: data.kpis.todayNetCashFlow, state: stateFor('todayNetCashFlow'), detail: data.kpis.todayNetCashFlow === 0 ? 'No movement in this period' : activeRangeLabel, icon: CircleDollarSign, destination: '/?page=accounts', actionLabel: 'View Money' },
+    { label: 'Receivables', value: data.kpis.totalReceivables, state: stateFor('totalReceivables'), detail: data.kpis.totalReceivables === 0 ? 'Current balance is Rs 0' : 'Current balance', icon: Users, destination: '/?page=accounts', actionLabel: 'View Receivables' },
+    { label: 'Payables', value: data.kpis.totalPayables, state: stateFor('totalPayables'), detail: data.kpis.totalPayables === 0 ? 'Current balance is Rs 0' : 'Current balance', icon: Wallet, destination: '/?page=purchases', actionLabel: 'View Payables' },
   ]
 
   return (
@@ -118,10 +149,10 @@ export function OwnerDashboard({ user }: { user: { displayName: string; roleName
         {rangeError && <p className="mt-2 text-xs text-destructive">{rangeError}</p>}
       </header>
 
-      <section aria-label="Business overview"><div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">{heroMetrics.map((metric) => <HeroMetric key={metric.label} {...metric} onRetry={() => refetch()} />)}</div></section>
+      <section aria-label="Business overview"><div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">{heroMetrics.map((metric) => <HeroMetric key={metric.label} {...metric} onRetry={() => refetch()} onOpen={() => router.push(metric.destination)} />)}</div></section>
       {!hasPeriodActivity && <p className="rounded-lg border border-dashed border-border px-4 py-3 text-sm text-muted-foreground">No activity in this period.</p>}
 
-      {attentionItems.length > 0 && <section className="rounded-xl border border-amber-200 bg-amber-50/40 p-4" aria-label="Needs Attention"><div><h2 className="text-sm font-semibold text-foreground">Needs Attention</h2><p className="text-xs text-muted-foreground">Items that need an operational follow-up.</p></div><div className="mt-3 grid gap-2 md:grid-cols-2">{attentionItems.map((item) => <div key={item.id} className="flex min-w-0 items-start gap-3 rounded-lg border border-amber-200/70 bg-card px-3 py-2.5"><item.icon className={`mt-0.5 size-4 shrink-0 ${item.tone}`} /><div className="min-w-0 flex-1"><p className="text-sm font-medium text-foreground">{item.title}</p><p className="text-xs text-muted-foreground">{item.detail}</p></div><button onClick={() => router.push(item.destination)} className="shrink-0 text-xs font-medium text-primary hover:underline">Review</button></div>)}</div></section>}
+      {attentionItems.length > 0 && <section className="rounded-xl border border-border bg-muted/20 p-4" aria-label="Needs Attention"><div className="flex items-start justify-between gap-3"><div><h2 className="text-sm font-semibold text-foreground">Needs Attention</h2><p className="text-xs text-muted-foreground">Actionable items, ordered by urgency.</p></div><span className="shrink-0 text-xs text-muted-foreground">{attentionItems.length} item{attentionItems.length === 1 ? '' : 's'}</span></div><div className="mt-3 grid gap-2">{visibleAttentionItems.map((item) => <AttentionItem key={item.id} item={item} onOpen={(destination) => router.push(destination)} />)}</div>{attentionItems.length > 4 && <button type="button" onClick={() => setShowAllAttention((shown) => !shown)} className="mt-3 min-h-9 text-xs font-medium text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">{showAllAttention ? 'Show Less' : `Show ${attentionItems.length - 4} More`}</button>}</section>}
 
       <section className="grid gap-4 lg:grid-cols-[1.15fr_0.85fr]">
         <ActivityList title="Recent invoices" icon={ClipboardList} emptyMessage="No invoices in this period." onViewAll={() => router.push('/?page=sales-list')} items={data.recentInvoices.map((invoice) => ({ id: invoice.id, label: invoice.invoiceNo, sublabel: invoice.customerName ?? 'Walk-in customer', amount: invoice.total }))} />
