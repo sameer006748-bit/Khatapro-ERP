@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { toast } from 'sonner'
-import { Plus, Wallet, ArrowDownToLine, ArrowUpFromLine, Receipt as ReceiptIcon, ArrowLeftRight, Coffee, Settings2, TrendingUp, TrendingDown, BookOpen, ChevronDown, ChevronRight, X, CheckCircle2, AlertCircle } from 'lucide-react'
+import { Plus, Wallet, WalletCards, Banknote, Landmark, Smartphone, CircleDollarSign, ArrowDownToLine, ArrowUpFromLine, Receipt as ReceiptIcon, ArrowLeftRight, Coffee, Settings2, TrendingUp, TrendingDown, BookOpen, ChevronDown, ChevronRight, X, CheckCircle2, AlertCircle } from 'lucide-react'
 import { formatMoney, parseMoney } from '@/lib/format'
 import { bizDate, bizDateString } from '@/lib/dates'
 import { motion, AnimatePresence } from 'framer-motion'
@@ -19,8 +19,24 @@ import { PageHeader } from '@/components/erp/page-header'
 type Account = { id: string; code: string; name: string; isBusinessAccount: boolean; isPartyAccount: boolean; partyType: string | null; categoryCode: string; categoryType: string }
 type Category = { id: string; code: string; name: string; type: string; accounts: Account[] }
 
-const BUSINESS_ACCOUNT_ICONS: Record<string, string> = {
-  '1010': '💵', '1020': '🪙', '1030': '🏦', '1040': '📱', '1050': '📲',
+type AccountGroup = 'Cash' | 'Bank' | 'Mobile Wallets' | 'Other'
+
+const ACCOUNT_GROUPS: AccountGroup[] = ['Cash', 'Bank', 'Mobile Wallets', 'Other']
+
+function accountGroup(account: Account): AccountGroup {
+  const identity = `${account.code} ${account.name}`.toLowerCase()
+  if (account.code === '1010' || account.code === '1020' || identity.includes('cash')) return 'Cash'
+  if (account.code === '1030' || identity.includes('bank')) return 'Bank'
+  if (account.code === '1040' || account.code === '1050' || /(easypaisa|jazzcash|wallet|mobile)/.test(identity)) return 'Mobile Wallets'
+  return 'Other'
+}
+
+function AccountIcon({ account }: { account: Account }) {
+  const group = accountGroup(account)
+  if (group === 'Cash') return account.code === '1020' ? <WalletCards className="size-4 text-foreground" aria-hidden /> : <Banknote className="size-4 text-foreground" aria-hidden />
+  if (group === 'Bank') return <Landmark className="size-4 text-foreground" aria-hidden />
+  if (group === 'Mobile Wallets') return <Smartphone className="size-4 text-foreground" aria-hidden />
+  return <Wallet className="size-4 text-foreground" aria-hidden />
 }
 
 export function AccountsView({ user }: { user: MeUser }) {
@@ -110,15 +126,23 @@ export function AccountsView({ user }: { user: MeUser }) {
       {/* Header */}
       <PageHeader
         compact
-        title="Money Summary"
+        title="Accounts & Balances"
         description="Current balances, today’s money movement and pending amounts."
-        actions={<Button size="sm" className="h-8 press-sm shadow-sm" onClick={() => setEntryModal('receive')}><Plus className="size-3.5" /> New entry</Button>}
+        actions={<Button size="sm" className="h-8 shadow-sm" onClick={() => setEntryModal('receive')}><Plus className="size-3.5" /> New Entry</Button>}
       />
 
       {/* Current Money */}
       <div>
-        <h2 className="text-sm font-semibold text-foreground mb-2">Current Money</h2>
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-2">
+        <div className="mb-3 flex items-end justify-between gap-3">
+          <div><h2 className="text-sm font-semibold text-foreground">Current Money</h2><p className="mt-0.5 text-xs text-muted-foreground">Available business accounts, grouped by account type.</p></div>
+          {balancesReady && businessAccounts.length > 0 && (
+            <div className={`rounded-lg border bg-card px-3 py-2 text-right ${allBusinessBalancesTracked && totalAvailable < 0n ? 'border-destructive/40' : 'border-primary/30'}`}>
+              <div className="flex items-center justify-end gap-1.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground"><CircleDollarSign className="size-3.5" /> Total Available</div>
+              <div className={`mt-0.5 text-lg font-semibold ${allBusinessBalancesTracked && totalAvailable < 0n ? 'text-destructive' : 'text-foreground'}`} data-num>{allBusinessBalancesTracked ? formatMoney(totalAvailable) : 'Not fully tracked'}</div>
+            </div>
+          )}
+        </div>
+        <div className="space-y-4">
           {(coaQ.isLoading || tbQ.isLoading) && businessAccounts.length === 0 && [1, 2, 3, 4, 5].map(i => (
             <div key={i} className="border border-border rounded-lg bg-card p-3 animate-pulse" role="status" aria-label="Loading balances">
               <div className="h-5 w-5 rounded bg-muted mb-2" />
@@ -126,46 +150,32 @@ export function AccountsView({ user }: { user: MeUser }) {
               <div className="h-4 w-20 rounded bg-muted" />
             </div>
           ))}
-          {businessAccounts.map(a => {
-            const bal = getBalance(a.code)
-            const icon = BUSINESS_ACCOUNT_ICONS[a.code] ?? '💼'
-            const isNegative = bal !== null && bal < 0n
-            const balanceLabel = tbQ.isLoading
-              ? 'Loading…'
-              : tbQ.isError || tbQ.data?.availability?.accounting === false
-                ? 'Unavailable'
-                : bal === null ? 'Not tracked' : formatMoney(bal)
-            return (
-              <div key={a.id} className={`border rounded-lg bg-card p-3 cursor-pointer hover:bg-muted/20 press-sm ${isNegative ? 'border-amber-300' : 'border-border'}`} onClick={() => openLedger(a.id)}>
-                <div className="flex items-center justify-between mb-1">
-                  <span className="text-lg">{icon}</span>
-                  {isNegative && <span className="text-[8px] uppercase bg-amber-100 text-amber-700 px-1 py-0.5 rounded font-medium">Overdrawn</span>}
-                </div>
-                <div className="text-[10px] uppercase tracking-wider text-muted-foreground truncate">{a.name}</div>
-                <div className={`text-base font-bold ${isNegative ? 'text-amber-700' : 'text-foreground'}`} data-num>{balanceLabel}</div>
+          {ACCOUNT_GROUPS.map(group => {
+            const groupedAccounts = businessAccounts.filter(account => accountGroup(account) === group)
+            if (groupedAccounts.length === 0) return null
+            return <section key={group} aria-label={`${group} accounts`}>
+              <h3 className="mb-2 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">{group}</h3>
+              <div className="grid grid-cols-1 min-[420px]:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2">
+                {groupedAccounts.map(a => <FinanceAccountCard key={a.id} account={a} balance={getBalance(a.code)} isLoading={tbQ.isLoading} unavailable={tbQ.isError || tbQ.data?.availability?.accounting === false} onOpen={() => openLedger(a.id)} />)}
               </div>
-            )
+            </section>
           })}
           {coaQ.isSuccess && businessAccounts.length === 0 && (
-            <div className="col-span-full border border-dashed border-border rounded-lg bg-card p-4 text-sm text-muted-foreground">No business accounts configured.</div>
-          )}
-          {balancesReady && businessAccounts.length > 0 && (
-            <div className="border border-primary/40 rounded-lg bg-card p-3">
-              <div className="flex items-center justify-between mb-1"><span className="text-lg">💰</span></div>
-              <div className="text-[10px] uppercase tracking-wider text-muted-foreground truncate">Total Available</div>
-              <div className={`text-base font-bold ${allBusinessBalancesTracked && totalAvailable < 0n ? 'text-amber-700' : 'text-primary'}`} data-num>{allBusinessBalancesTracked ? formatMoney(totalAvailable) : 'Not fully tracked'}</div>
-            </div>
+            <div className="border border-dashed border-border rounded-lg bg-card p-4 text-sm text-muted-foreground">No business accounts configured.</div>
           )}
         </div>
       </div>
 
       {/* Daily summary */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-        <SummaryCard icon={TrendingUp} label="Money In Today" value={activitySummary(moneyInToday)} color="text-emerald-600" />
-        <SummaryCard icon={TrendingDown} label="Money Out Today" value={activitySummary(moneyOutToday)} color="text-amber-600" />
-        <SummaryCard icon={ReceiptIcon} label="Expenses Today" value={activitySummary(expensesToday)} color="text-rose-600" />
-        <SummaryCard icon={Wallet} label="Net Movement" value={activitySummary(moneyInToday - moneyOutToday - expensesToday)} color={moneyInToday - moneyOutToday - expensesToday >= 0n ? 'text-emerald-600' : 'text-amber-600'} />
-      </div>
+      <section className="overflow-hidden rounded-lg border border-border bg-card" aria-label="Today movement">
+        <div className="border-b border-border px-4 py-2.5"><h2 className="text-sm font-semibold text-foreground">Todayâ€™s Movement</h2></div>
+        <div className="grid grid-cols-2 divide-x divide-y divide-border md:grid-cols-4 md:divide-y-0">
+          <SummaryCard icon={TrendingUp} label="Money In Today" value={activitySummary(moneyInToday)} color="text-emerald-700" />
+          <SummaryCard icon={TrendingDown} label="Money Out Today" value={activitySummary(moneyOutToday)} color="text-amber-700" />
+          <SummaryCard icon={ReceiptIcon} label="Expenses Today" value={activitySummary(expensesToday)} color="text-destructive" />
+          <SummaryCard icon={Wallet} label="Net Movement" value={activitySummary(moneyInToday - moneyOutToday - expensesToday)} color={moneyInToday - moneyOutToday - expensesToday >= 0n ? 'text-emerald-700' : 'text-destructive'} />
+        </div>
+      </section>
 
       {/* Paisa Kahan Se Aya / Kahan Gaya (recent, from loaded day book) */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
@@ -178,9 +188,9 @@ export function AccountsView({ user }: { user: MeUser }) {
             {dayBookQ.isLoading && <p className="p-3 text-xs text-muted-foreground" role="status">Loading…</p>}
             {!dayBookQ.isLoading && inflowVouchers.length === 0 && <p className="p-3 text-xs text-muted-foreground">No money received yet — use Receive Payment below to record one.</p>}
             {inflowVouchers.slice(0, 6).map((v: any) => (
-              <div key={v.voucherId} className="px-4 py-2 flex items-center justify-between gap-2">
-                <div className="min-w-0"><div className="text-sm text-foreground truncate">{v.memo || 'Money received'}</div><div className="text-[10px] text-muted-foreground" data-num>{bizDate(v.voucherDate)}</div></div>
-                <span className="text-sm font-medium text-emerald-600 shrink-0" data-num>+{formatMoney(BigInt(v.totalDebit), false)}</span>
+              <div key={v.voucherId} className="px-4 py-2.5 flex items-center justify-between gap-3">
+                <div className="min-w-0"><div className="text-sm font-medium text-foreground truncate">{v.memo || 'Money received'}</div><div className="mt-0.5 flex gap-2 text-[10px] text-muted-foreground"><span data-num>{bizDate(v.voucherDate)}</span><span className="truncate">{v.voucherNo || v.sourceLabel || 'Receipt'}</span></div></div>
+                <span className="text-sm font-semibold text-emerald-700 shrink-0" data-num>+{formatMoney(BigInt(v.totalDebit), false)}</span>
               </div>
             ))}
           </div>
@@ -194,9 +204,9 @@ export function AccountsView({ user }: { user: MeUser }) {
             {dayBookQ.isLoading && <p className="p-3 text-xs text-muted-foreground" role="status">Loading…</p>}
             {!dayBookQ.isLoading && outflowVouchers.length === 0 && <p className="p-3 text-xs text-muted-foreground">No payments or expenses yet — use Pay Vendor or Add Expense below.</p>}
             {outflowVouchers.slice(0, 6).map((v: any) => (
-              <div key={v.voucherId} className="px-4 py-2 flex items-center justify-between gap-2">
-                <div className="min-w-0"><div className="text-sm text-foreground truncate">{v.memo || (v.voucherType === 'EX' ? 'Expense' : 'Payment')}</div><div className="text-[10px] text-muted-foreground" data-num>{bizDate(v.voucherDate)}</div></div>
-                <span className="text-sm font-medium text-amber-600 shrink-0" data-num>−{formatMoney(BigInt(v.totalCredit), false)}</span>
+              <div key={v.voucherId} className="px-4 py-2.5 flex items-center justify-between gap-3">
+                <div className="min-w-0"><div className="text-sm font-medium text-foreground truncate">{v.memo || (v.voucherType === 'EX' ? 'Expense' : 'Payment')}</div><div className="mt-0.5 flex gap-2 text-[10px] text-muted-foreground"><span data-num>{bizDate(v.voucherDate)}</span><span className="truncate">{v.voucherNo || v.sourceLabel || 'Payment'}</span></div></div>
+                <span className="text-sm font-semibold text-amber-700 shrink-0" data-num>−{formatMoney(BigInt(v.totalCredit), false)}</span>
               </div>
             ))}
           </div>
@@ -399,12 +409,29 @@ function AccountSubcategoryPanel({ activities, accounts, user }: { activities: M
   </div>
 }
 
+function FinanceAccountCard({ account, balance: bal, isLoading, unavailable, onOpen }: { account: Account; balance: bigint | null; isLoading: boolean; unavailable: boolean; onOpen: () => void }) {
+  const isNegative = bal !== null && bal < 0n
+  const isZero = bal === 0n
+  const status = isLoading ? 'Loading' : unavailable ? 'Unavailable' : bal === null ? 'Not tracked' : isNegative ? 'Overdrawn' : isZero ? 'Zero' : 'Normal'
+  const balanceLabel = isLoading ? 'Loading…' : unavailable ? 'Unavailable' : bal === null ? 'Not tracked' : formatMoney(bal)
+  const statusClass = isNegative ? 'border-destructive/30 bg-destructive/5 text-destructive' : isZero ? 'border-border bg-muted/50 text-muted-foreground' : 'border-emerald-700/20 bg-emerald-700/5 text-emerald-700'
+
+  return <button type="button" className={`min-h-28 rounded-lg border bg-card p-3 text-left transition-colors hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${isNegative ? 'border-destructive/40' : 'border-border'}`} onClick={onOpen}>
+    <div className="flex items-start justify-between gap-3">
+      <div className="grid size-8 place-items-center rounded-md border border-border bg-muted/35"><AccountIcon account={account} /></div>
+      <span className={`rounded border px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide ${statusClass}`}>{status}</span>
+    </div>
+    <div className="mt-3 truncate text-sm font-medium text-foreground">{account.name}</div>
+    <div className="mt-1 flex items-end justify-between gap-2"><span className={`text-lg font-semibold ${isNegative ? 'text-destructive' : 'text-foreground'}`} data-num>{balanceLabel}</span><span className="text-[10px] text-muted-foreground" data-num>Account {account.code}</span></div>
+  </button>
+}
+
 function SummaryCard({ icon: Icon, label, value, color }: { icon: React.ComponentType<{ className?: string }>; label: string; value: string; color: string }) {
-  return <div className="border border-border rounded-lg bg-card p-3"><div className="flex items-center gap-1.5 mb-1"><Icon className={`size-3 ${color}`} /><span className="text-[9px] uppercase tracking-wider text-muted-foreground">{label}</span></div><div className={`text-sm font-bold ${color}`} data-num>{value}</div></div>
+  return <div className="min-h-20 p-3"><div className="flex items-center gap-1.5"><Icon className={`size-3.5 ${color}`} /><span className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</span></div><div className={`mt-2 text-sm font-semibold ${color}`} data-num>{value}</div></div>
 }
 
 function QuickAction({ icon: Icon, label, onClick }: { icon: React.ComponentType<{ className?: string }>; label: string; onClick: () => void }) {
-  return <button onClick={onClick} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border bg-card text-xs font-medium hover:bg-muted/20 press-sm"><Icon className="size-3.5 text-primary" /> {label}</button>
+  return <button onClick={onClick} className="flex min-h-9 items-center gap-1.5 rounded-md border border-border bg-card px-3 py-1.5 text-xs font-medium hover:bg-muted/30"><Icon className="size-3.5 text-muted-foreground" /> {label}</button>
 }
 
 function TypeBadge({ type, label }: { type: string; label: string }) {

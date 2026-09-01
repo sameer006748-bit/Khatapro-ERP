@@ -15,7 +15,7 @@ import {
 import { formatMoney, formatTableDate } from '@/lib/format'
 import type { MeUser } from '@/components/erp/erp-app'
 import { toast } from 'sonner'
-import { Wallet, Plus, X, ArrowRight, Pencil, Power, Trash2 } from 'lucide-react'
+import { Wallet, WalletCards, Banknote, Landmark, Smartphone, Plus, X, ArrowRight, Pencil, Power, Trash2 } from 'lucide-react'
 import { BUSINESS_ACCOUNT_TYPES } from '@/lib/accounting/business-account-types'
 import { PageHeader } from '@/components/erp/page-header'
 
@@ -48,6 +48,19 @@ function typeOptions(current?: string): string[] {
   const options: string[] = [...BUSINESS_ACCOUNT_TYPES]
   if (current && !options.includes(current)) options.push(current)
   return options
+}
+
+function AccountTypeIcon({ type, className = 'size-3 text-muted-foreground' }: { type: string; className?: string }) {
+  const normalized = type.toLowerCase()
+  if (normalized.includes('petty')) return <WalletCards className={className} aria-hidden />
+  if (normalized.includes('cash')) return <Banknote className={className} aria-hidden />
+  if (normalized.includes('bank')) return <Landmark className={className} aria-hidden />
+  if (/(wallet|easypaisa|jazzcash|mobile)/.test(normalized)) return <Smartphone className={className} aria-hidden />
+  return <Wallet className={className} aria-hidden />
+}
+
+function AccountTypeLabel({ type }: { type: string }) {
+  return <span className="inline-flex items-center gap-1.5 rounded border border-border bg-muted/30 px-2 py-1 text-[11px] text-foreground"><AccountTypeIcon type={type} />{type}</span>
 }
 
 export function BusinessAccountsView({ user }: { user: MeUser }) {
@@ -144,7 +157,7 @@ export function BusinessAccountsView({ user }: { user: MeUser }) {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       {q.data?.availability?.accounting === false && (
         <div className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
           This accounting feature is currently unavailable.
@@ -154,7 +167,7 @@ export function BusinessAccountsView({ user }: { user: MeUser }) {
         title="Business Accounts"
         description="Manage cash, bank and wallet accounts used for daily payments. Balances update as entries are recorded."
         actions={canManage && (
-          <Button onClick={() => setOpen((v) => !v)} className="press-md shadow-sm">
+          <Button onClick={() => setOpen((v) => !v)} className="shadow-sm">
             {open ? <X className="size-4" /> : <Plus className="size-4" />}
             {open ? 'Close' : 'New business account'}
           </Button>
@@ -162,7 +175,7 @@ export function BusinessAccountsView({ user }: { user: MeUser }) {
       />
 
       {open && canManage && (
-        <div className="card-3d p-5 sm:p-6 fade-in">
+        <div className="rounded-lg border border-border bg-card p-5 sm:p-6">
           <h2 className="text-base font-semibold text-foreground mb-4">Create business account</h2>
           <AccountForm
             submitting={createMut.isPending}
@@ -173,11 +186,11 @@ export function BusinessAccountsView({ user }: { user: MeUser }) {
 
       {/* Desktop: table. Mobile: cards. */}
       {q.isLoading ? (
-        <div className="card-3d p-8 text-sm text-muted-foreground">Loading…</div>
+        <div className="rounded-lg border border-border bg-card p-8 text-sm text-muted-foreground">Loading…</div>
       ) : q.data?.rows.length ? (
         <>
           {/* Desktop table */}
-          <div className="hidden md:block card-3d overflow-hidden">
+          <div className="hidden overflow-hidden rounded-lg border border-border bg-card md:block">
             <div className="px-5 py-3.5 border-b border-border flex items-center justify-between">
               <h2 className="text-sm font-semibold text-foreground">Accounts</h2>
               <span className="text-xs text-muted-foreground" data-num>
@@ -205,14 +218,10 @@ export function BusinessAccountsView({ user }: { user: MeUser }) {
                     >
                       <td className="p-3.5">
                         <div className="font-medium text-foreground">{r.name}</div>
-                        {!r.isActive && (
-                          <span className="text-[10px] uppercase text-destructive">Inactive</span>
-                        )}
+                        <span className={`mt-1 inline-flex rounded border px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide ${r.isActive ? 'border-emerald-700/20 bg-emerald-700/5 text-emerald-700' : 'border-destructive/30 bg-destructive/5 text-destructive'}`}>{r.isActive ? 'Active' : 'Inactive'}</span>
                       </td>
                       <td className="p-3.5">
-                        <span className="inline-block text-xs px-2 py-0.5 bg-muted text-foreground rounded-md">
-                          {r.type}
-                        </span>
+                        <AccountTypeLabel type={r.type} />
                       </td>
                       <td className="p-3.5 text-xs text-muted-foreground">
                         <div>{r.accountHolder ?? '—'}</div>
@@ -226,7 +235,7 @@ export function BusinessAccountsView({ user }: { user: MeUser }) {
                         <div className="text-muted-foreground">{r.ledger.name}</div>
                         <div className="text-muted-foreground">{r.ledger.category}</div>
                       </td>
-                      <td className="p-3.5 text-right font-medium text-foreground" data-num>
+                      <td className={`p-3.5 text-right font-semibold ${BigInt(r.ledger.balancePaisas) < 0n ? 'text-destructive' : 'text-foreground'}`} data-num>
                         {formatMoney(BigInt(r.ledger.balancePaisas))}
                       </td>
                       <td className="p-3.5 text-xs text-muted-foreground" data-num>
@@ -272,24 +281,22 @@ export function BusinessAccountsView({ user }: { user: MeUser }) {
           {/* Mobile cards */}
           <div className="md:hidden space-y-3">
             {q.data.rows.map((r) => (
-              <div key={r.id} className="card-3d card-3d-hover p-4">
+              <div key={r.id} className={`rounded-lg border bg-card p-4 ${r.isActive ? 'border-border' : 'border-destructive/30'}`}>
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex items-center gap-3 min-w-0">
-                    <div className="grid place-items-center size-10 rounded-xl icon-3d shrink-0">
-                      <Wallet className="size-5 text-primary-foreground" />
+                    <div className="grid size-10 shrink-0 place-items-center rounded-md border border-border bg-muted/35">
+                      <AccountTypeIcon type={r.type} className="size-5 text-foreground" />
                     </div>
                     <div className="min-w-0">
                       <div className="font-medium text-foreground truncate">{r.name}</div>
-                      <span className="inline-block text-[10px] px-1.5 py-0.5 bg-muted text-foreground rounded mt-0.5">
-                        {r.type}
-                      </span>
+                      <div className="mt-1"><AccountTypeLabel type={r.type} /></div>
                     </div>
                   </div>
                   <div className="text-right shrink-0">
                     <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
                       Balance
                     </div>
-                    <div className="font-semibold text-foreground" data-num>
+                    <div className={`font-semibold ${BigInt(r.ledger.balancePaisas) < 0n ? 'text-destructive' : 'text-foreground'}`} data-num>
                       {formatMoney(BigInt(r.ledger.balancePaisas))}
                     </div>
                   </div>
@@ -325,9 +332,9 @@ export function BusinessAccountsView({ user }: { user: MeUser }) {
                 {canManage && (
                   <div className="mt-3 pt-3 border-t border-border flex items-center justify-between gap-2">
                     {!r.isActive ? (
-                      <span className="text-[10px] uppercase tracking-wider text-destructive">Inactive</span>
+                      <span className="rounded border border-destructive/30 bg-destructive/5 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide text-destructive">Inactive</span>
                     ) : (
-                      <span className="text-[10px] uppercase tracking-wider text-muted-foreground">Active</span>
+                      <span className="rounded border border-emerald-700/20 bg-emerald-700/5 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide text-emerald-700">Active</span>
                     )}
                     <div className="flex items-center gap-1">
                       <RowActions
@@ -359,8 +366,8 @@ export function BusinessAccountsView({ user }: { user: MeUser }) {
           </div>
         </>
       ) : (
-        <div className="card-3d p-8 text-center">
-          <div className="grid place-items-center size-12 rounded-xl icon-3d-muted mx-auto mb-3">
+        <div className="rounded-lg border border-border bg-card p-8 text-center">
+          <div className="mx-auto mb-3 grid size-12 place-items-center rounded-md border border-border bg-muted/35">
             <Wallet className="size-6 text-muted-foreground" />
           </div>
           <p className="text-sm text-muted-foreground">No business accounts yet.</p>

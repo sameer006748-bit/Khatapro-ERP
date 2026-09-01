@@ -27,5 +27,5 @@ test('primary sales pages keep one clear primary path and visible required custo
 
 test('money page uses the shared client-facing page frame', () => {
   assert.match(accounts, /<PageHeader/)
-  assert.match(accounts, /title="Money Summary"/)
+  assert.match(accounts, /title="Accounts & Balances"/)
 })
