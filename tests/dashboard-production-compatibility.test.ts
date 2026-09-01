@@ -106,19 +106,21 @@ test('operational Received uses actual payments and excludes rider delivery even
   assert.match(summary, /Rider delivery tables are intentionally absent/)
 })
 
-test('Counter, Online, OFC, and every other sale type are represented', () => {
+test('Counter, Online, OFC, and every other sale type are represented in the visible breakdown', () => {
   assert.match(summary, /invoiceType === 'COUNTER'/)
   assert.match(summary, /invoiceType === 'ONLINE'/)
   assert.match(summary, /invoiceType === 'OFC'/)
   assert.match(summary, /: saleTypes\.other/)
-  assert.match(page, /salesByType\.other\.count/)
+  assert.match(page, /data\.salesByType\.other/)
 })
 
-test('unsupported metrics remain null and are not fabricated as zero', () => {
+test('unsupported metrics remain null and are represented as not tracked rather than fabricated as zero', () => {
   assert.match(summary, /let cashBalance: number \| null = null/)
   assert.match(summary, /let cogs: number \| null = null/)
   assert.match(summary, /approxProfit[\s\S]*: null/)
-  assert.match(page, /Not available without reliable COGS/)
+  assert.match(summary, /metricStates: metricStates\(availability, unavailable\)/)
+  assert.match(page, /Not tracked/)
+  assert.match(page, /Unable to load/)
 })
 
 test('retry is bounded and stale date-range requests are aborted', () => {

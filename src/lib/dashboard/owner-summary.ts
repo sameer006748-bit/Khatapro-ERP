@@ -12,6 +12,7 @@ import {
 type Range = { from: string; to: string }
 type Metric<T> = { value: T | null; available: boolean }
 type Movement = { inflow: number; outflow: number }
+type MetricState = 'available' | 'not-tracked' | 'error'
 
 function errorShape(error: unknown): PostgrestLikeError {
   return error && typeof error === 'object' ? error as PostgrestLikeError : { message: String(error) }
@@ -19,19 +20,26 @@ function errorShape(error: unknown): PostgrestLikeError {
 
 async function isolated<T>(
   name: string,
-  unavailable: Set<string>,
+  unavailable: Map<string, MetricState>,
   query: () => Promise<T>,
 ): Promise<Metric<T>> {
   const result = await isolateDashboardMetric(query)
   if (result.available) return { value: result.value, available: true }
   const shaped = errorShape(result.error)
-  unavailable.add(name)
+  unavailable.set(name, isSchemaUnavailableError(shaped) ? 'not-tracked' : 'error')
   console.warn('[dashboard] metric unavailable', {
     metric: name,
     category: isSchemaUnavailableError(shaped) ? 'schema-unavailable' : 'query-failed',
     code: shaped.code ?? null,
   })
   return { value: null, available: false }
+}
+
+function metricStates(availability: Record<string, boolean>, unavailable?: Map<string, MetricState>) {
+  return Object.fromEntries(Object.entries(availability).map(([name, available]) => [
+    name,
+    available ? 'available' : unavailable?.get(name) ?? 'not-tracked',
+  ])) as Record<string, MetricState>
 }
 
 function rowsOrThrow(result: { data: unknown; error: PostgrestLikeError | null }): any[] {
@@ -206,6 +214,7 @@ async function buildLocalOperationalPayload(input: {
       negativeStockCount: negative.length,
     },
     availability,
+    metricStates: metricStates(availability),
     salesByType: {
       counter: saleType(saleTypes.counter),
       online: saleType(saleTypes.online),
@@ -268,7 +277,7 @@ export async function buildOwnerDashboardPayload(input: {
   }
   const startedAt = Date.now()
   const admin: any = getAdminSupabase()
-  const unavailable = new Set<string>()
+  const unavailable = new Map<string, MetricState>()
   const { businessId: bid, range } = input
   const capability = await detectLedgerCapability(admin, bid, range.to)
 
@@ -401,7 +410,9 @@ export async function buildOwnerDashboardPayload(input: {
     })
     cogs = cogsQ.value
   } else {
-    for (const name of ['cashBalance', 'bankBalance', 'cashMovement', 'bankMovement', 'periodCogs', 'totalSales']) unavailable.add(name)
+    for (const name of ['cashBalance', 'bankBalance', 'cashMovement', 'bankMovement', 'periodCogs', 'totalSales']) {
+      unavailable.set(name, 'not-tracked')
+    }
   }
 
   const products = productQ.value ?? []
@@ -429,7 +440,7 @@ export async function buildOwnerDashboardPayload(input: {
   console.info('[dashboard] owner summary', {
     requestId: input.requestId, path: capability.path, capabilityReason: capability.reason,
     durationMs: Date.now() - startedAt,
-    unavailableMetrics: Object.entries(availability).filter(([, ok]) => !ok).map(([name]) => name),
+    unavailableMetrics: Array.from(unavailable.keys()),
   })
   const saleType = (item: { count: number; amount: bigint }) => ({ count: item.count, amount: item.amount.toString() })
 
@@ -452,6 +463,7 @@ export async function buildOwnerDashboardPayload(input: {
       lowStockCount: stock?.lowStockCount ?? null, negativeStockCount: stock?.negativeStockCount ?? null,
     },
     availability,
+    metricStates: metricStates(availability, unavailable),
     salesByType: { counter: saleType(saleTypes.counter), online: saleType(saleTypes.online), ofc: saleType(saleTypes.ofc), other: saleType(saleTypes.other) },
     recentInvoices: invoices.slice(0, 5).map(row => ({
       id: row.id, invoiceNo: row.id, invoiceType: row.invoice_type, invoiceDate: row.invoice_date,

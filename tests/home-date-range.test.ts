@@ -27,12 +27,14 @@ test('custom range validates start/end before applying', () => {
   for (const label of ['Start date', 'End date', 'Apply', 'Reset']) assert.ok(page.includes(label))
 })
 
-test('one range reaches one owner API query key and is cancelled when stale', () => {
+test('one range reaches one owner API query key and refreshes in place', () => {
   assert.match(hook, /dashboardDateRangeQuery\(range\)/)
   assert.match(hook, /queryKey: \['owner-dashboard', range\.from, range\.to\]/)
   assert.match(hook, /queryFn: \(\{ signal \}\) => fetchOwnerDashboard\(range, signal\)/)
   assert.match(route, /resolveDashboardDateRange\(url\.searchParams, now\)/)
-  assert.match(page, /data\.range\.from !== range\.from \|\| data\.range\.to !== range\.to/)
+  assert.match(hook, /placeholderData: keepPreviousData/)
+  assert.match(page, /isLoading && !data/)
+  assert.match(page, /isFetching/)
 })
 
 test('valid Karachi date labels are not shifted to the previous UTC date', async () => {
@@ -99,10 +101,8 @@ test('all operational period metrics use the same validated range', () => {
   ]) assert.ok(summary.includes(expression), expression)
 })
 
-test('current balances are separate from period movements', () => {
-  for (const label of ['Current Cash', 'Current Bank', 'Current Receivables', 'Current Payables']) {
-    assert.ok(page.includes(label), label)
-  }
+test('hero balances remain separate from period movement data', () => {
+  for (const label of ['Net Cash Movement', 'Receivables', 'Payables']) assert.ok(page.includes(label), label)
   assert.match(summary, /receivablesMovement/)
   assert.match(summary, /payablesMovement/)
   assert.match(summary, /let cashBalance: number \| null = null/)
@@ -111,7 +111,7 @@ test('current balances are separate from period movements', () => {
 test('all sale types include Other Sale', () => {
   for (const type of ['COUNTER', 'ONLINE', 'OFC']) assert.ok(summary.includes(`invoiceType === '${type}'`))
   assert.match(summary, /: saleTypes\.other/)
-  assert.match(page, /salesByType\.other\.count/)
+  assert.match(page, /data\.salesByType\.other/)
 })
 
 test('collections use actual payments and never delivery state', () => {
@@ -127,10 +127,7 @@ test('returns are period scoped and optional', () => {
   assert.match(summary, /purchaseReturns = purchaseReturnQ\.available/)
 })
 
-test('cash/bank movement and current balances remain structurally distinct', () => {
-  for (const label of ['Cash Inflow', 'Cash Outflow', 'Current Cash', 'Bank Inflow', 'Bank Outflow', 'Current Bank']) {
-    assert.ok(page.includes(label), label)
-  }
+test('cash/bank movement and current balances remain structurally distinct in the data source', () => {
   assert.match(summary, /cashMovement/)
   assert.match(summary, /cashBalance/)
 })
@@ -138,18 +135,37 @@ test('cash/bank movement and current balances remain structurally distinct', () 
 test('Approximate Profit requires Sales, Returns, COGS, and Expenses', () => {
   assert.match(summary, /sales - salesReturns - cogs - expenses/)
   assert.match(summary, /: null/)
-  assert.match(page, /Not available without reliable COGS/)
+  assert.doesNotMatch(page, /Approximate Profit/)
 })
 
-test('authorization and empty-state presentation remain intact', () => {
+test('authorization and business-facing empty state presentation remain intact', () => {
   assert.match(route, /loaded\.roleName !== 'Owner\/Admin'/)
   assert.match(route, /requirePermission\(loaded, 'can_view_trial_balance'\)/)
-  assert.match(page, /No sales, purchases, expenses or collections were recorded for/)
+  assert.match(page, /No activity in this period\./)
 })
 
-test('active range is visible and mobile presets remain scrollable', () => {
-  assert.match(page, /overflow-x-auto/)
-  assert.match(page, /Active range:/)
+test('active range controls wrap on mobile without horizontal scrolling', () => {
+  assert.match(page, /flex flex-wrap gap-2/)
+  assert.doesNotMatch(page, /overflow-x-auto/)
+})
+
+test('command center has four non-duplicated hero metrics with clear state semantics', () => {
+  for (const label of ['Sales', 'Net Cash Movement', 'Receivables', 'Payables']) assert.ok(page.includes(`label: '${label}'`), label)
+  assert.match(page, /No activity in this period/)
+  assert.match(page, /Not tracked/)
+  assert.match(page, /Unable to load/)
+  assert.doesNotMatch(page, /primaryCards|Pending \/ Outstanding|NO DATA/)
+})
+
+test('Needs Attention is conditional and every live stock condition links to inventory', () => {
+  assert.match(page, /attentionItems\.length > 0/)
+  assert.match(page, /negativeStockProducts/)
+  assert.match(page, /lowStockProducts/)
+  assert.match(page, /router\.push\('\/\?page=inventory'\)/)
+})
+
+test('Home does not render a literal escaped separator', () => {
+  assert.doesNotMatch(page, /\\u00B7/)
 })
 
 test('no stale Yesterday or This Week labels remain', () => {

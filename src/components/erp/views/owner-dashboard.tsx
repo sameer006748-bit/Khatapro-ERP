@@ -1,67 +1,77 @@
-﻿'use client'
+'use client'
 
 import { useEffect, useState } from 'react'
-import { motion } from 'framer-motion'
 import { format } from 'date-fns'
 import {
-  ShoppingCart,
-  Wallet,
-  TrendingUp,
-  TrendingDown,
-  ArrowDownToLine,
-  ArrowUpFromLine,
-  Package,
   AlertTriangle,
-  Receipt,
-  FileText,
-  Users,
-  ChevronDown,
-  ChevronRight,
-  RefreshCw,
-  Sparkles,
   ArrowRight,
-  Banknote,
   Building2,
-  Undo2,
-  Scale,
+  CircleDollarSign,
+  ClipboardList,
+  Package,
+  Receipt,
+  RefreshCw,
+  ShoppingCart,
+  Users,
+  Wallet,
+  type LucideIcon,
 } from 'lucide-react'
-import { useOwnerDashboard } from '@/hooks/use-owner-dashboard'
-import { GlassPanel, SectionHeader, EmptyState } from '@/components/erp/dashboard-components'
-import { formatWholeRupees } from '@/lib/format'
 import { useRouter } from 'next/navigation'
+import { useOwnerDashboard } from '@/hooks/use-owner-dashboard'
+import { formatWholeRupees } from '@/lib/format'
 import { bizPresetDateRange, isBusinessDateRange, type BusinessDateRange } from '@/lib/dates'
 
-function formatDateTime(iso: string): string {
-  try { return format(new Date(iso), 'HH:mm') } catch { return iso }
+type MetricState = 'available' | 'not-tracked' | 'error'
+
+function metricDisplay(value: number | null, state: MetricState) {
+  if (state === 'error') return 'Unable to load'
+  if (state !== 'available' || value === null) return 'Not tracked'
+  return formatWholeRupees(value)
 }
 
-function Chip({ icon: Icon, label, onClick }: { icon: React.ComponentType<{ className?: string }>; label: string; onClick: () => void }) {
+function HeroMetric({ label, value, state, detail, icon: Icon, onRetry }: {
+  label: string
+  value: number | null
+  state: MetricState
+  detail: string
+  icon: LucideIcon
+  onRetry: () => void
+}) {
+  const unavailable = state === 'error'
   return (
-    <button onClick={onClick} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border bg-card text-xs font-medium hover:bg-muted/30 press-sm transition-colors">
-      <Icon className="size-3.5 text-primary" /> {label}
-    </button>
+    <section className="rounded-xl border border-border bg-card p-4 shadow-sm">
+      <div className="flex items-center justify-between gap-3"><p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</p><Icon className="size-4 text-primary" aria-hidden /></div>
+      <p className={`mt-3 text-2xl font-semibold tracking-tight ${unavailable ? 'text-muted-foreground' : 'text-foreground'}`} data-num>{metricDisplay(value, state)}</p>
+      <div className="mt-1 min-h-4 text-xs text-muted-foreground">{unavailable ? <button onClick={onRetry} className="font-medium text-primary hover:underline">Retry</button> : detail}</div>
+    </section>
   )
 }
 
-function PendingCard({ icon: Icon, label, value, sub, accent }: { icon: React.ComponentType<{ className?: string }>; label: string; value: string; sub: string; accent: string }) {
+function ActivityList({ title, icon: Icon, items, emptyMessage, onViewAll }: {
+  title: string
+  icon: LucideIcon
+  items: Array<{ id: string; label: string; sublabel: string; amount: string }>
+  emptyMessage: string
+  onViewAll: () => void
+}) {
   return (
-    <div className="rounded-xl border border-border bg-muted/20 p-4">
-      <div className="flex items-center gap-2 mb-1"><Icon className={`size-4 ${accent}`} /><span className="text-sm font-medium text-foreground">{label}</span></div>
-      <div className="text-lg font-bold text-foreground" data-num>{value}</div>
-      <div className="text-[11px] text-muted-foreground mt-0.5">{sub}</div>
-    </div>
+    <section className="rounded-xl border border-border bg-card p-4">
+      <div className="flex items-center justify-between gap-3"><div className="flex items-center gap-2"><Icon className="size-4 text-primary" /><h2 className="text-sm font-semibold">{title}</h2></div><button onClick={onViewAll} className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline">View all <ArrowRight className="size-3" /></button></div>
+      <div className="mt-3 space-y-1">
+        {items.length === 0 ? <p className="py-3 text-sm text-muted-foreground">{emptyMessage}</p> : items.map((item) => <div key={item.id} className="flex items-center justify-between gap-3 border-t border-border/60 py-2 first:border-t-0 first:pt-0"><div className="min-w-0"><p className="truncate text-sm font-medium text-foreground">{item.label}</p><p className="truncate text-xs text-muted-foreground">{item.sublabel}</p></div><span className="shrink-0 text-sm font-semibold" data-num>{formatWholeRupees(Number(item.amount))}</span></div>)}
+      </div>
+    </section>
   )
 }
 
-export function OwnerDashboard({ user }: { user: any }) {
+export function OwnerDashboard({ user }: { user: { displayName: string; roleName: string } }) {
   const router = useRouter()
   const [range, setRange] = useState<BusinessDateRange>(() => bizPresetDateRange('today'))
   const [preset, setPreset] = useState<'today' | 'last3' | 'last7' | 'month' | 'custom'>('today')
   const [customFrom, setCustomFrom] = useState(range.from)
   const [customTo, setCustomTo] = useState(range.to)
   const [rangeError, setRangeError] = useState('')
-  const { data, isLoading, error, refetch } = useOwnerDashboard(range)
-  const [showAdvanced, setShowAdvanced] = useState(false)
+  const { data, isLoading, isFetching, error, refetch } = useOwnerDashboard(range)
 
   useEffect(() => {
     const aiPeriod = preset === 'today' ? { preset: 'today' as const } : preset === 'month' ? { preset: 'this-month' as const } : preset === 'last3' ? { preset: 'last3' as const } : preset === 'last7' ? { preset: 'last7' as const } : { preset: 'custom' as const, from: range.from, to: range.to }
@@ -69,6 +79,7 @@ export function OwnerDashboard({ user }: { user: any }) {
     window.dispatchEvent(new CustomEvent('khatapro-ai-period', { detail: { period: aiPeriod, label } }))
   }, [preset, range])
 
+  const activeRangeLabel = preset === 'today' ? 'Today' : preset === 'last3' ? 'Last 3 Days' : preset === 'last7' ? 'Last 7 Days' : preset === 'month' ? 'This Month' : `${range.from} to ${range.to}`
   const setPresetRange = (next: 'today' | 'last3' | 'last7' | 'month') => {
     const nextRange = bizPresetDateRange(next)
     setPreset(next); setRangeError('')
@@ -80,341 +91,42 @@ export function OwnerDashboard({ user }: { user: any }) {
     setPreset('custom'); setRangeError('')
     if (range.from !== nextRange.from || range.to !== nextRange.to) setRange(nextRange)
   }
-  const resetRange = () => {
-    const nextRange = bizPresetDateRange('today')
-    setPreset('today'); setCustomFrom(nextRange.from); setCustomTo(nextRange.to); setRangeError('')
-    if (range.from !== nextRange.from || range.to !== nextRange.to) setRange(nextRange)
-  }
 
-  const container = { hidden: { opacity: 0 }, show: { opacity: 1, transition: { staggerChildren: 0.05 } } }
-  const item = { hidden: { opacity: 0, y: 10 }, show: { opacity: 1, y: 0 } }
+  if (isLoading && !data) return <div className="space-y-4" aria-label="Loading dashboard"><div className="h-32 animate-pulse rounded-xl bg-muted" /><div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">{[1, 2, 3, 4].map((key) => <div key={key} className="h-32 animate-pulse rounded-xl bg-muted" />)}</div></div>
+  if (error || !data) return <div className="rounded-xl border border-border bg-card p-6"><h1 className="text-xl font-semibold">Business command center</h1><p className="mt-2 text-sm text-muted-foreground">Unable to load dashboard.</p><button onClick={() => refetch()} className="mt-4 inline-flex items-center gap-2 text-sm font-medium text-primary hover:underline"><RefreshCw className="size-4" /> Retry</button></div>
 
-  if (isLoading || (data && (data.range.from !== range.from || data.range.to !== range.to))) {
-    return (
-      <div className="space-y-6">
-        <GlassPanel padding="p-8">
-          <div className="h-8 w-64 rounded-lg bg-white/40 animate-pulse mb-2" />
-          <div className="h-4 w-96 rounded-lg bg-white/40 animate-pulse" />
-        </GlassPanel>
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          {[1, 2, 3, 4, 5, 6, 7, 8].map(i => (
-            <div key={i} className="rounded-2xl border border-white/10 bg-white/60 dark:bg-white/5 p-5 animate-pulse">
-              <div className="h-3 w-20 rounded bg-white/40 mb-3" />
-              <div className="h-8 w-24 rounded bg-white/40 mb-2" />
-              <div className="h-3 w-16 rounded bg-white/40" />
-            </div>
-          ))}
-        </div>
-      </div>
-    )
-  }
-
-  if (error || !data) {
-    return (
-      <div className="space-y-6">
-        <GlassPanel padding="p-8">
-          <h1 className="text-2xl font-semibold mb-2">Welcome, {user.displayName.split(' ')[0]}.</h1>
-          <p className="text-muted-foreground">Unable to load dashboard data.</p>
-          <button onClick={() => refetch()} className="mt-4 flex items-center gap-2 text-sm text-primary hover:underline">
-            <RefreshCw className="size-4" /> Retry
-          </button>
-        </GlassPanel>
-      </div>
-    )
-  }
-
-  const karachiTime = new Date().toLocaleString('en-GB', { timeZone: 'Asia/Karachi', hour: '2-digit', minute: '2-digit' })
-
-  // ── Metrics ──
-  const todaySales = data.kpis.todaySales
-  const todayCollections = data.kpis.todayCollections
-  const todayExpenses = data.kpis.todayExpenses
-  const todayPurchases = data.kpis.todayPurchases
-  const totalReceivables = data.kpis.totalReceivables
-  const totalPayables = data.kpis.totalPayables
-  const cashBalance = data.kpis.cashBalance
-  const bankBalance = data.kpis.bankBalance
-  const cashInflow = data.kpis.cashInflow
-  const cashOutflow = data.kpis.cashOutflow
-  const bankInflow = data.kpis.bankInflow
-  const bankOutflow = data.kpis.bankOutflow
-  const totalInflow = data.kpis.totalInflow
-  const totalOutflow = data.kpis.totalOutflow
-  const periodSalesReturns = data.kpis.periodSalesReturns
-  const periodPurchaseReturns = data.kpis.periodPurchaseReturns
-  const pendingOutstanding = data.kpis.pendingOutstanding
-  const receivablesMovement = data.kpis.periodReceivablesMovement
-  const payablesMovement = data.kpis.periodPayablesMovement
-  const approxProfit = data.kpis.approxProfit
-  const lowStockCount = data.kpis.lowStockCount
-  const negativeStockCount = data.kpis.negativeStockCount
-  const activeRangeLabel = preset === 'today' ? 'Today' : preset === 'last3' ? 'Last 3 Days' : preset === 'last7' ? 'Last 7 Days' : preset === 'month' ? 'This Month' : `${range.from} to ${range.to}`
-  const hasActivity = (todaySales ?? 0) > 0 || (todayExpenses ?? 0) > 0 || (todayPurchases ?? 0) > 0 || (todayCollections ?? 0) > 0
-
-  const primaryCards: Array<{ label: string; value: string; sub: string; icon: React.ComponentType<{ className?: string }>; accent: string; show: boolean }> = [
-    { label: 'Sales', value: data.kpis.todaySales != null ? formatWholeRupees(todaySales) : '—', sub: data.kpis.todaySales != null ? `${data.salesByType.counter.count} counter · ${data.salesByType.online.count} online · ${data.salesByType.ofc.count} OFC · ${data.salesByType.other.count} other` : 'Not available', icon: ShoppingCart, accent: 'bg-emerald-500/10 text-emerald-600', show: true },
-    { label: 'Amount Received', value: todayCollections != null ? formatWholeRupees(todayCollections) : '—', sub: todayCollections != null ? `Received · ${activeRangeLabel}` : 'Not available', icon: ArrowDownToLine, accent: 'bg-green-500/10 text-green-600', show: true },
-    { label: 'Expenses', value: data.kpis.todayExpenses != null ? formatWholeRupees(todayExpenses) : '—', sub: data.kpis.todayExpenses != null ? `Expenses · ${activeRangeLabel}` : 'Not available', icon: ArrowUpFromLine, accent: 'bg-red-500/10 text-red-600', show: true },
-    { label: 'Purchases', value: todayPurchases != null ? formatWholeRupees(todayPurchases) : '—', sub: todayPurchases != null ? `Purchases · ${activeRangeLabel}` : 'Not available', icon: Receipt, accent: 'bg-amber-500/10 text-amber-600', show: todayPurchases != null },
-    { label: 'Sales Returns', value: data.kpis.periodSalesReturns != null ? formatWholeRupees(periodSalesReturns) : '—', sub: data.kpis.periodSalesReturns != null ? `Returns · ${activeRangeLabel}` : 'Not available', icon: Undo2, accent: 'bg-rose-500/10 text-rose-600', show: true },
-    { label: 'Purchase Returns', value: data.kpis.periodPurchaseReturns != null ? formatWholeRupees(periodPurchaseReturns) : '—', sub: data.kpis.periodPurchaseReturns != null ? `Returns · ${activeRangeLabel}` : 'Not available', icon: Undo2, accent: 'bg-orange-500/10 text-orange-600', show: true },
-    { label: 'Cash Inflow', value: cashInflow != null ? formatWholeRupees(cashInflow) : '—', sub: `Period movement · ${activeRangeLabel}`, icon: ArrowDownToLine, accent: 'bg-teal-500/10 text-teal-600', show: cashInflow != null },
-    { label: 'Cash Outflow', value: cashOutflow != null ? formatWholeRupees(cashOutflow) : '—', sub: `Period movement · ${activeRangeLabel}`, icon: ArrowUpFromLine, accent: 'bg-teal-500/10 text-teal-600', show: cashOutflow != null },
-    { label: 'Current Cash', value: cashBalance != null ? formatWholeRupees(cashBalance) : '—', sub: 'Current closing balance', icon: Banknote, accent: 'bg-teal-500/10 text-teal-600', show: cashBalance != null },
-    { label: 'Bank Inflow', value: bankInflow != null ? formatWholeRupees(bankInflow) : '—', sub: `Period movement · ${activeRangeLabel}`, icon: ArrowDownToLine, accent: 'bg-sky-500/10 text-sky-600', show: bankInflow != null },
-    { label: 'Bank Outflow', value: bankOutflow != null ? formatWholeRupees(bankOutflow) : '—', sub: `Period movement · ${activeRangeLabel}`, icon: ArrowUpFromLine, accent: 'bg-sky-500/10 text-sky-600', show: bankOutflow != null },
-    { label: 'Current Bank', value: bankBalance != null ? formatWholeRupees(bankBalance) : '—', sub: 'Current closing balance', icon: Building2, accent: 'bg-sky-500/10 text-sky-600', show: bankBalance != null },
-    { label: 'Total Inflow', value: totalInflow != null ? formatWholeRupees(totalInflow) : '—', sub: `Cash + Bank · ${activeRangeLabel}`, icon: ArrowDownToLine, accent: 'bg-green-500/10 text-green-600', show: totalInflow != null },
-    { label: 'Total Outflow', value: totalOutflow != null ? formatWholeRupees(totalOutflow) : '—', sub: `Cash + Bank · ${activeRangeLabel}`, icon: ArrowUpFromLine, accent: 'bg-red-500/10 text-red-600', show: totalOutflow != null },
-    { label: 'Current Receivables', value: data.kpis.totalReceivables != null ? formatWholeRupees(totalReceivables) : '—', sub: data.kpis.totalReceivables != null ? 'Current balance' : 'Not available', icon: Users, accent: 'bg-violet-500/10 text-violet-600', show: true },
-    { label: 'Current Payables', value: data.kpis.totalPayables != null ? formatWholeRupees(totalPayables) : '—', sub: data.kpis.totalPayables != null ? 'Current balance' : 'Not available', icon: Wallet, accent: 'bg-amber-500/10 text-amber-600', show: true },
-    { label: 'Pending / Outstanding', value: data.kpis.pendingOutstanding != null ? formatWholeRupees(pendingOutstanding) : '—', sub: data.kpis.pendingOutstanding != null ? 'Receivables + Payables · current balance' : 'Not available', icon: Scale, accent: 'bg-fuchsia-500/10 text-fuchsia-600', show: true },
-    { label: 'Receivables Movement', value: receivablesMovement != null ? formatWholeRupees(receivablesMovement) : '—', sub: `Period movement · ${activeRangeLabel}`, icon: TrendingUp, accent: 'bg-violet-500/10 text-violet-600', show: receivablesMovement != null },
-    { label: 'Payables Movement', value: payablesMovement != null ? formatWholeRupees(payablesMovement) : '—', sub: `Period movement · ${activeRangeLabel}`, icon: TrendingDown, accent: 'bg-amber-500/10 text-amber-600', show: payablesMovement != null },
-    { label: 'Approximate Profit', value: approxProfit != null ? formatWholeRupees(approxProfit) : '—', sub: approxProfit != null ? `Sales − Returns − COGS − Expenses · ${activeRangeLabel}` : 'Not available without reliable COGS', icon: TrendingUp, accent: (approxProfit ?? 0) >= 0 ? 'bg-blue-500/10 text-blue-600' : 'bg-orange-500/10 text-orange-600', show: true },
+  const stateFor = (name: string): MetricState => data.metricStates[name] ?? (data.availability[name as keyof typeof data.availability] ? 'available' : 'not-tracked')
+  const hasPeriodActivity = (data.kpis.todaySales ?? 0) !== 0 || (data.kpis.todayCollections ?? 0) !== 0 || (data.kpis.todayExpenses ?? 0) !== 0 || (data.kpis.todayPurchases ?? 0) !== 0
+  const attentionItems = [
+    ...data.negativeStockProducts.map((product) => ({ id: `negative-${product.id}`, title: `${product.name} has negative stock`, detail: `${product.currentStock} units recorded`, icon: AlertTriangle, tone: 'text-destructive' })),
+    ...data.lowStockProducts.map((product) => ({ id: `low-${product.id}`, title: `${product.name} is low in stock`, detail: `${product.currentStock} remaining; threshold ${product.lowStockThreshold}`, icon: Package, tone: 'text-amber-600' })),
+  ].slice(0, 4)
+  const heroMetrics = [
+    { label: 'Sales', value: data.kpis.todaySales, state: stateFor('todaySales'), detail: data.kpis.todaySales === 0 ? 'No activity in this period' : activeRangeLabel, icon: ShoppingCart },
+    { label: 'Net Cash Movement', value: data.kpis.todayNetCashFlow, state: stateFor('todayNetCashFlow'), detail: data.kpis.todayNetCashFlow === 0 ? 'No movement in this period' : activeRangeLabel, icon: CircleDollarSign },
+    { label: 'Receivables', value: data.kpis.totalReceivables, state: stateFor('totalReceivables'), detail: data.kpis.totalReceivables === 0 ? 'Current balance is Rs 0' : 'Current balance', icon: Users },
+    { label: 'Payables', value: data.kpis.totalPayables, state: stateFor('totalPayables'), detail: data.kpis.totalPayables === 0 ? 'Current balance is Rs 0' : 'Current balance', icon: Wallet },
   ]
 
-  const visibleCards = primaryCards.filter(c => c.show)
-
   return (
-    <motion.div variants={container} initial="hidden" animate="show" className="space-y-6">
-      {/* Header */}
-      <motion.div variants={item}>
-        <GlassPanel padding="p-6 sm:p-8">
-          <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
-            <div className="flex-1">
-              <div className="flex items-center gap-2 mb-2">
-                <span className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium">
-                  {format(new Date(), 'EEEE, MMMM d, yyyy')}
-                </span>
-                <span className="text-[11px] text-muted-foreground/60">\u00B7</span>
-                <span className="text-[11px] text-muted-foreground/60" data-num>{karachiTime} PKT</span>
-              </div>
-              <h1 className="text-3xl sm:text-4xl font-semibold tracking-tight text-foreground mb-2">
-                Business Summary
-              </h1>
-              <p className="text-sm text-muted-foreground max-w-2xl">
-                {activeRangeLabel} sales, collections, expenses and payment movement overview.
-              </p>
-              <div className="mt-4 space-y-2">
-                <div className="flex gap-1 overflow-x-auto pb-1 -mx-1 px-1" aria-label="Business summary date range">
-                  {([['today', 'Today'], ['last3', 'Last 3 Days'], ['last7', 'Last 7 Days'], ['month', 'This Month']] as const).map(([key, label]) => (
-                    <button key={key} onClick={() => setPresetRange(key)} className={`shrink-0 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors ${preset === key ? 'border-primary bg-primary text-primary-foreground' : 'border-border bg-card hover:bg-muted/30'}`}>{label}</button>
-                  ))}
-                  <button onClick={() => setPreset('custom')} className={`shrink-0 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors ${preset === 'custom' ? 'border-primary bg-primary text-primary-foreground' : 'border-border bg-card hover:bg-muted/30'}`}>Custom Range</button>
-                </div>
-                {preset === 'custom' && <div className="grid grid-cols-1 sm:grid-cols-[1fr_1fr_auto_auto] gap-2 max-w-xl"><input aria-label="Start date" type="date" value={customFrom} onChange={e => setCustomFrom(e.target.value)} className="h-9 min-w-0 rounded-md border border-input bg-background px-2 text-xs" /><input aria-label="End date" type="date" value={customTo} onChange={e => setCustomTo(e.target.value)} className="h-9 min-w-0 rounded-md border border-input bg-background px-2 text-xs" /><button onClick={applyCustomRange} className="h-9 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground">Apply</button><button onClick={resetRange} className="h-9 rounded-md border border-border bg-card px-3 text-xs font-medium">Reset</button></div>}
-                {rangeError && <p className="text-xs text-destructive">{rangeError}</p>}
-                <p className="text-[11px] text-muted-foreground">Active range: <span className="font-medium text-foreground">{activeRangeLabel}</span> ({range.from} to {range.to})</p>
-              </div>
-            </div>
-            <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white/50 border border-white/10">
-              <Sparkles className="size-4 text-primary" />
-              <span className="text-xs font-medium text-foreground">{user.roleName}</span>
-            </div>
-          </div>
-        </GlassPanel>
-      </motion.div>
+    <main className="space-y-5" aria-busy={isFetching}>
+      <header className="rounded-xl border border-border bg-card p-4 sm:p-5">
+        <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-start"><div><p className="text-xs font-medium text-muted-foreground">{format(new Date(), 'EEEE, MMMM d, yyyy')} • {user.roleName}</p><h1 className="mt-1 text-2xl font-semibold tracking-tight text-foreground">Business command center</h1><p className="mt-1 text-sm text-muted-foreground">A clear view of the business for {activeRangeLabel}.</p></div>{isFetching && <span className="text-xs font-medium text-muted-foreground">Updating selected period…</span>}</div>
+        <div className="mt-4 flex flex-wrap gap-2" aria-label="Business summary date range">{([['today', 'Today'], ['last3', 'Last 3 Days'], ['last7', 'Last 7 Days'], ['month', 'This Month']] as const).map(([key, label]) => <button key={key} onClick={() => setPresetRange(key)} className={`rounded-md border px-3 py-1.5 text-xs font-medium ${preset === key ? 'border-primary bg-primary text-primary-foreground' : 'border-border bg-background hover:bg-muted'}`}>{label}</button>)}<button onClick={() => setPreset('custom')} className={`rounded-md border px-3 py-1.5 text-xs font-medium ${preset === 'custom' ? 'border-primary bg-primary text-primary-foreground' : 'border-border bg-background hover:bg-muted'}`}>Custom range</button></div>
+        {preset === 'custom' && <div className="mt-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto_auto]"><input aria-label="Start date" type="date" value={customFrom} onChange={(event) => setCustomFrom(event.target.value)} className="h-9 min-w-0 rounded-md border border-input bg-background px-2 text-xs" /><input aria-label="End date" type="date" value={customTo} onChange={(event) => setCustomTo(event.target.value)} className="h-9 min-w-0 rounded-md border border-input bg-background px-2 text-xs" /><button onClick={applyCustomRange} className="h-9 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground">Apply</button><button onClick={() => setPresetRange('today')} className="h-9 rounded-md border border-border px-3 text-xs font-medium">Reset</button></div>}
+        {rangeError && <p className="mt-2 text-xs text-destructive">{rangeError}</p>}
+      </header>
 
-      {!hasActivity && (
-        <motion.div variants={item}>
-          <GlassPanel padding="p-6">
-            <EmptyState message={`No sales, purchases, expenses or collections were recorded for ${activeRangeLabel} (${range.from} to ${range.to}).`} />
-          </GlassPanel>
-        </motion.div>
-      )}
+      <section aria-label="Business overview"><div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">{heroMetrics.map((metric) => <HeroMetric key={metric.label} {...metric} onRetry={() => refetch()} />)}</div></section>
+      {!hasPeriodActivity && <p className="rounded-lg border border-dashed border-border px-4 py-3 text-sm text-muted-foreground">No activity in this period.</p>}
 
-      {/* Primary summary cards */}
-      <motion.div variants={item}>
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          {visibleCards.map(card => (
-            <div key={card.label} className="rounded-2xl border border-white/10 bg-white/60 dark:bg-white/5 p-5">
-              <div className="flex items-center gap-2 mb-3">
-                <div className={`size-8 rounded-lg flex items-center justify-center ${card.accent}`}><card.icon className="size-4" /></div>
-                <span className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium">{card.label}</span>
-              </div>
-              <div className="text-xl sm:text-2xl font-bold text-foreground mb-1" data-num>{card.value}</div>
-              <div className="text-[11px] text-muted-foreground">{card.sub}</div>
-            </div>
-          ))}
-        </div>
-      </motion.div>
+      {attentionItems.length > 0 && <section className="rounded-xl border border-amber-200 bg-amber-50/40 p-4" aria-label="Needs Attention"><div className="flex items-center justify-between gap-3"><div><h2 className="text-sm font-semibold text-foreground">Needs Attention</h2><p className="text-xs text-muted-foreground">Items that need an operational follow-up.</p></div><button onClick={() => router.push('/?page=inventory')} className="inline-flex shrink-0 items-center gap-1 text-xs font-medium text-primary hover:underline">Open inventory <ArrowRight className="size-3" /></button></div><div className="mt-3 grid gap-2 md:grid-cols-2">{attentionItems.map((item) => <div key={item.id} className="flex min-w-0 items-start gap-3 rounded-lg border border-amber-200/70 bg-card px-3 py-2.5"><item.icon className={`mt-0.5 size-4 shrink-0 ${item.tone}`} /><div className="min-w-0"><p className="text-sm font-medium text-foreground">{item.title}</p><p className="text-xs text-muted-foreground">{item.detail}</p></div></div>)}</div></section>}
 
-      {/* Sources of Funds */}
-      <motion.div variants={item}>
-        <GlassPanel padding="p-5 sm:p-6">
-          <SectionHeader title="Paisa Kahan Se Aya" subtitle={`Income sources · ${activeRangeLabel}`} />
-          <div className="flex flex-wrap gap-2 mb-4">
-            <Chip icon={ShoppingCart} label="View Sales" onClick={() => router.push('/?page=sales-list')} />
-            <Chip icon={ArrowDownToLine} label="Receive Payment" onClick={() => router.push('/?page=accounts')} />
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div className="rounded-xl border border-border bg-muted/20 p-4">
-              <div className="flex items-center gap-2 mb-1"><ShoppingCart className="size-4 text-emerald-600" /><span className="text-sm font-medium text-foreground">Sales</span></div>
-              <div className="text-lg font-bold text-foreground" data-num>{todaySales != null ? formatWholeRupees(todaySales) : '—'}</div>
-              <div className="text-[11px] text-muted-foreground mt-0.5">{data.salesByType.counter.count} counter \u00B7 {data.salesByType.online.count} online \u00B7 {data.salesByType.ofc.count} OFC</div>
-            </div>
-            <div className="rounded-xl border border-border bg-muted/20 p-4">
-              <div className="flex items-center gap-2 mb-1"><ArrowDownToLine className="size-4 text-green-600" /><span className="text-sm font-medium text-foreground">Customer Payments</span></div>
-              <div className="text-lg font-bold text-foreground" data-num>{todayCollections != null ? formatWholeRupees(todayCollections) : '—'}</div>
-              <div className="text-[11px] text-muted-foreground mt-0.5">{todayCollections != null ? `Receipts · ${activeRangeLabel}` : 'Data not available'}</div>
-            </div>
-          </div>
-        </GlassPanel>
-      </motion.div>
-
-      {/* Uses of Funds */}
-      <motion.div variants={item}>
-        <GlassPanel padding="p-5 sm:p-6">
-          <SectionHeader title="Paisa Kahan Gaya" subtitle={`Outflows · ${activeRangeLabel}`} />
-          <div className="flex flex-wrap gap-2 mb-4">
-            <Chip icon={Receipt} label="View Purchases" onClick={() => router.push('/?page=purchases')} />
-            <Chip icon={ArrowUpFromLine} label="Add Expense" onClick={() => router.push('/?page=expense-batch')} />
-            <Chip icon={Wallet} label="Pay Vendor" onClick={() => router.push('/?page=vendors')} />
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <div className="rounded-xl border border-border bg-muted/20 p-4">
-              <div className="flex items-center gap-2 mb-1"><Receipt className="size-4 text-amber-600" /><span className="text-sm font-medium text-foreground">Purchases</span></div>
-              <div className="text-lg font-bold text-foreground" data-num>{todayPurchases != null ? formatWholeRupees(todayPurchases) : '—'}</div>
-              <div className="text-[11px] text-muted-foreground mt-0.5">{todayPurchases != null ? `Purchases · ${activeRangeLabel}` : 'Not available'}</div>
-            </div>
-            <div className="rounded-xl border border-border bg-muted/20 p-4">
-              <div className="flex items-center gap-2 mb-1"><ArrowUpFromLine className="size-4 text-red-600" /><span className="text-sm font-medium text-foreground">Expenses</span></div>
-              <div className="text-lg font-bold text-foreground" data-num>{todayExpenses != null ? formatWholeRupees(todayExpenses) : '—'}</div>
-              <div className="text-[11px] text-muted-foreground mt-0.5">{todayExpenses != null ? `Expenses · ${activeRangeLabel}` : 'Not available'}</div>
-            </div>
-            <div className="rounded-xl border border-border bg-muted/20 p-4">
-              <div className="flex items-center gap-2 mb-1"><Wallet className="size-4 text-amber-600" /><span className="text-sm font-medium text-foreground">Current Payables</span></div>
-              <div className="text-lg font-bold text-foreground" data-num>{totalPayables != null ? formatWholeRupees(totalPayables) : '—'}</div>
-              <div className="text-[11px] text-muted-foreground mt-0.5">{totalPayables != null ? 'Current balance' : 'Not available'}</div>
-            </div>
-          </div>
-        </GlassPanel>
-      </motion.div>
-
-      {/* Outstanding Obligations */}
-      <motion.div variants={item}>
-        <GlassPanel padding="p-5 sm:p-6">
-          <SectionHeader title="Outstanding Obligations" subtitle="Current receivables, payables and stock alerts" />
-          <div className="flex flex-wrap gap-2 mb-4">
-            <Chip icon={ArrowDownToLine} label="Receive Payment" onClick={() => router.push('/?page=accounts')} />
-            <Chip icon={Wallet} label="Pay Vendor" onClick={() => router.push('/?page=vendors')} />
-            <Chip icon={Package} label="View Inventory" onClick={() => router.push('/?page=inventory')} />
-            <Chip icon={ShoppingCart} label="View Orders" onClick={() => router.push('/?page=sales-list')} />
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-            <PendingCard icon={Users} label="Current Receivables" value={totalReceivables != null ? formatWholeRupees(totalReceivables) : '—'} sub={totalReceivables != null ? 'Current balance' : 'Not available'} accent="text-violet-600" />
-            <PendingCard icon={Wallet} label="Current Payables" value={totalPayables != null ? formatWholeRupees(totalPayables) : '—'} sub={totalPayables != null ? 'Current balance' : 'Not available'} accent="text-amber-600" />
-            <PendingCard icon={AlertTriangle} label="Current Low / Negative Stock" value={lowStockCount != null && negativeStockCount != null ? `${lowStockCount + negativeStockCount} items` : '—'} sub={negativeStockCount != null ? `${negativeStockCount} negative` : 'Not available'} accent={((lowStockCount ?? 0) + (negativeStockCount ?? 0)) > 0 ? 'text-red-600' : 'text-green-600'} />
-            <PendingCard icon={ShoppingCart} label="Online Orders" value={`${data.salesByType.online.count} in period`} sub={`Online orders · ${activeRangeLabel}`} accent="text-sky-600" />
-          </div>
-        </GlassPanel>
-      </motion.div>
-
-      {/* Advanced Activity (collapsed) */}
-      <motion.div variants={item}>
-        <GlassPanel padding="p-5 sm:p-6">
-          <button onClick={() => setShowAdvanced(!showAdvanced)} className="w-full flex items-center justify-between">
-            <div>
-              <h3 className="text-sm font-semibold text-foreground text-left">Advanced Activity</h3>
-              <p className="text-[11px] text-muted-foreground text-left">Recent invoices, purchases, stock alerts and audit trail</p>
-            </div>
-            {showAdvanced ? <ChevronDown className="size-4 text-muted-foreground" /> : <ChevronRight className="size-4 text-muted-foreground" />}
-          </button>
-
-          {showAdvanced && (
-            <div className="mt-4 space-y-6">
-              {/* Recent Invoices + Purchases */}
-              <div className="grid lg:grid-cols-2 gap-4">
-                <div>
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-xs font-medium text-foreground">Recent Invoices</span>
-                    <button onClick={() => router.push('/?page=sales-list')} className="text-[11px] text-primary hover:underline flex items-center gap-1">View all <ArrowRight className="size-3" /></button>
-                  </div>
-                  {data.recentInvoices.length === 0 ? <EmptyState message="No invoices yet" /> : (
-                    <div className="space-y-1.5">
-                      {data.recentInvoices.map(inv => (
-                        <div key={inv.id} className="flex items-center justify-between p-2.5 rounded-lg bg-white/50 border border-white/10 text-sm">
-                          <div className="flex items-center gap-2 min-w-0">
-                            <FileText className="size-3.5 text-primary shrink-0" />
-                            <span className="font-medium truncate">{inv.invoiceNo}</span>
-                            <span className="text-[11px] text-muted-foreground">{inv.customerName || 'Walk-in'}</span>
-                          </div>
-                          <span className="font-semibold shrink-0 ml-2">{formatWholeRupees(Number(inv.total))}</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-                <div>
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-xs font-medium text-foreground">Recent Purchases</span>
-                    <button onClick={() => router.push('/?page=purchases')} className="text-[11px] text-primary hover:underline flex items-center gap-1">View all <ArrowRight className="size-3" /></button>
-                  </div>
-                  {data.recentPurchases.length === 0 ? <EmptyState message="No purchases yet" /> : (
-                    <div className="space-y-1.5">
-                      {data.recentPurchases.map(pur => (
-                        <div key={pur.id} className="flex items-center justify-between p-2.5 rounded-lg bg-white/50 border border-white/10 text-sm">
-                          <div className="flex items-center gap-2 min-w-0">
-                            <Receipt className="size-3.5 text-amber-600 shrink-0" />
-                            <span className="font-medium truncate">{pur.purchaseNo}</span>
-                            <span className="text-[11px] text-muted-foreground">{pur.vendorName || '—'}</span>
-                          </div>
-                          <span className="font-semibold shrink-0 ml-2">{formatWholeRupees(Number(pur.total))}</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Stock Alerts in Advanced */}
-              {((lowStockCount ?? 0) + (negativeStockCount ?? 0)) > 0 && (
-                <div>
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-xs font-medium text-foreground">Stock Alerts</span>
-                    <button onClick={() => router.push('/?page=inventory')} className="text-[11px] text-primary hover:underline flex items-center gap-1">Manage <ArrowRight className="size-3" /></button>
-                  </div>
-                  <div className="space-y-1.5">
-                    {data.negativeStockProducts.slice(0, 3).map(p => (
-                      <div key={p.id} className="flex items-center gap-2 p-2.5 rounded-lg bg-red-500/5 border border-red-500/10 text-sm">
-                        <AlertTriangle className="size-3.5 text-red-600 shrink-0" />
-                        <span className="font-medium truncate">{p.name}</span>
-                        <span className="text-[11px] text-red-600 font-medium">Negative: {p.currentStock}</span>
-                      </div>
-                    ))}
-                    {data.lowStockProducts.slice(0, 3).map(p => (
-                      <div key={p.id} className="flex items-center gap-2 p-2.5 rounded-lg bg-amber-500/5 border border-amber-500/10 text-sm">
-                        <Package className="size-3.5 text-amber-600 shrink-0" />
-                        <span className="font-medium truncate">{p.name}</span>
-                        <span className="text-[11px] text-amber-600 font-medium">Low: {p.currentStock}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Audit Logs in Advanced */}
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-xs font-medium text-foreground">Audit Trail</span>
-                  <span className="text-[11px] text-muted-foreground">{data.auditLogs.length} entries</span>
-                </div>
-                {data.auditLogs.length === 0 ? <EmptyState message="No activity yet" /> : (
-                  <div className="space-y-1 max-h-48 overflow-y-auto">
-                    {data.auditLogs.slice(0, 10).map(log => (
-                      <div key={log.id} className="flex items-center justify-between p-2 rounded-lg bg-white/40 border border-white/5 text-xs">
-                        <span className="text-muted-foreground capitalize">{log.action.replace(/_/g, ' ')}</span>
-                        <span className="text-muted-foreground">{formatDateTime(log.timestamp)}</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-        </GlassPanel>
-      </motion.div>
-    </motion.div>
+      <section className="grid gap-4 lg:grid-cols-[1.15fr_0.85fr]">
+        <ActivityList title="Recent invoices" icon={ClipboardList} emptyMessage="No invoices in this period." onViewAll={() => router.push('/?page=sales-list')} items={data.recentInvoices.map((invoice) => ({ id: invoice.id, label: invoice.invoiceNo, sublabel: invoice.customerName ?? 'Walk-in customer', amount: invoice.total }))} />
+        <section className="rounded-xl border border-border bg-card p-4"><div className="flex items-center gap-2"><Building2 className="size-4 text-primary" /><h2 className="text-sm font-semibold">Sales by channel</h2></div><p className="mt-1 text-xs text-muted-foreground">Posted sales in {activeRangeLabel}.</p><div className="mt-3 grid grid-cols-2 gap-2">{[['Counter', data.salesByType.counter], ['Online', data.salesByType.online], ['OFC', data.salesByType.ofc], ['Other', data.salesByType.other]].map(([label, value]) => <div key={label as string} className="rounded-lg bg-muted/50 p-3"><p className="text-xs text-muted-foreground">{label as string}</p><p className="mt-1 text-sm font-semibold" data-num>{formatWholeRupees(Number((value as { amount: string }).amount))}</p><p className="text-xs text-muted-foreground">{(value as { count: number }).count} invoices</p></div>)}</div></section>
+      </section>
+      <ActivityList title="Recent purchases" icon={Receipt} emptyMessage="No purchases in this period." onViewAll={() => router.push('/?page=purchases')} items={data.recentPurchases.map((purchase) => ({ id: purchase.id, label: purchase.purchaseNo, sublabel: purchase.vendorName ?? 'Vendor not recorded', amount: purchase.total }))} />
+    </main>
   )
 }

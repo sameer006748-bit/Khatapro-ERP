@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query'
+import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { bizPresetDateRange, dashboardDateRangeQuery, type BusinessDateRange } from '@/lib/dates'
 import { apiFetchJson, shouldRetryApiRequest } from '@/lib/api-client'
 
@@ -57,6 +57,7 @@ export interface OwnerDashboardData {
     lowStockCount: boolean
     negativeStockCount: boolean
   }
+  metricStates: Record<string, 'available' | 'not-tracked' | 'error'>
   salesByType: {
     counter: { count: number; amount: string }
     online: { count: number; amount: string }
@@ -113,6 +114,7 @@ export function useOwnerDashboard(range: BusinessDateRange = bizPresetDateRange(
     queryFn: ({ signal }) => fetchOwnerDashboard(range, signal),
     staleTime: 30_000,
     refetchInterval: 60_000,
+    placeholderData: keepPreviousData,
     retry: shouldRetryApiRequest,
   })
 }
