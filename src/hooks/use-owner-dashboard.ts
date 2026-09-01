@@ -1,11 +1,35 @@
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { bizPresetDateRange, dashboardDateRangeQuery, type BusinessDateRange } from '@/lib/dates'
 import { apiFetchJson, shouldRetryApiRequest } from '@/lib/api-client'
+import type { CashPosition } from '@/lib/dashboard/cash-position'
+import type { OperationalPulseKey, OperationalPulseState } from '@/lib/dashboard/operational-pulse'
+import type { MetricComparison } from '@/lib/dashboard/trends'
+
+/** A hero KPI's optional history. Both members are null when unsupported. */
+export type DashboardMetricTrend = {
+  series: number[] | null
+  comparison: MetricComparison | null
+}
+
+export type DashboardTrendMetricKey =
+  | 'todaySales'
+  | 'todayNetCashFlow'
+  | 'totalReceivables'
+  | 'totalPayables'
 
 export interface OwnerDashboardData {
   today: string
   range: BusinessDateRange
   dataSource: 'uuid-ledger' | 'operational-fallback'
+  trends: {
+    previousRange: BusinessDateRange | null
+    metrics: Record<DashboardTrendMetricKey, DashboardMetricTrend>
+  }
+  cashPosition: CashPosition
+  operationalCounts: {
+    counts: Record<OperationalPulseKey, number | null>
+    states: Record<OperationalPulseKey, OperationalPulseState>
+  }
   kpis: {
     todaySales: number | null
     todaySalesPaisas: string | null

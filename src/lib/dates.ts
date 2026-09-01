@@ -41,6 +41,39 @@ function calendarDaysBefore(dateStr: string, count: number): string {
   return addBusinessDays(dateStr, -count)
 }
 
+/** Inclusive number of calendar days a business date range covers. */
+export function businessDaySpan(range: BusinessDateRange): number {
+  if (!isBusinessDateRange(range)) throw new Error('INVALID_DATE_RANGE')
+  const from = Date.parse(`${range.from}T00:00:00Z`)
+  const to = Date.parse(`${range.to}T00:00:00Z`)
+  return Math.round((to - from) / 86_400_000) + 1
+}
+
+/**
+ * The equally long range immediately before `range`. Every supported selection
+ * reduces to this single rule: Today → the previous day, a 7-day window → the
+ * 7 days before it, month-to-date → the equally long window before the 1st,
+ * and a custom range → the preceding range of identical length. Returns null
+ * for an invalid range so callers omit the comparison rather than guess.
+ */
+export function bizPreviousDateRange(range: BusinessDateRange): BusinessDateRange | null {
+  if (!isBusinessDateRange(range)) return null
+  const span = businessDaySpan(range)
+  return { from: addBusinessDays(range.from, -span), to: addBusinessDays(range.from, -1) }
+}
+
+/**
+ * Every date label in a range, ascending, for day-bucketed trend series.
+ * Returns null past `limit` days: a window that long has no readable
+ * per-day shape in a compact sparkline, so the caller omits the chart.
+ */
+export function businessDateLabels(range: BusinessDateRange, limit = 92): string[] | null {
+  if (!isBusinessDateRange(range)) return null
+  const span = businessDaySpan(range)
+  if (span > limit) return null
+  return Array.from({ length: span }, (_, index) => addBusinessDays(range.from, index))
+}
+
 export function isBusinessDateLabel(label: string): boolean {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(label)
   if (!match) return false

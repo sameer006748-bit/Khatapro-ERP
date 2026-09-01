@@ -1,5 +1,7 @@
+import type { MetricComparison } from './trends'
+
 export type DashboardInsight = {
-  id: 'negative-cash' | 'negative-stock' | 'low-stock' | 'payment-account'
+  id: 'negative-cash' | 'sales-trend' | 'cash-trend'
   title: string
   detail: string
   destination: string
@@ -8,19 +10,35 @@ export type DashboardInsight = {
 }
 
 /**
- * Uses only values already present in the dashboard payload. These are factual
- * signals, not predictions or inferred thresholds.
+ * Interpreted signals only — a relation between measured values, never a raw
+ * value repeated from another section.
+ *
+ * Stock counts and the missing-payment-account condition used to live here as
+ * well. They are actionable problems, so Needs Attention owns them: keeping a
+ * second copy here restated the same rows one card lower. Everything below is
+ * derived from values the payload actually measured, and a signal is dropped
+ * outright rather than approximated.
+ *
+ * `formatAmount` is injected so this module stays free of UI dependencies and
+ * so money is rendered by the app's single canonical formatter.
  */
 export function buildDashboardInsights(input: {
   netCashMovement: number | null
   netCashMovementAvailable: boolean
-  negativeStockCount: number | null
-  lowStockCount: number | null
-  paymentAccounts: { activeCount: number | null; state: 'available' | 'not-tracked' | 'error' }
+  salesComparison: MetricComparison | null
+  netCashComparison: MetricComparison | null
+  previousPeriodLabel: string | null
+  formatAmount: (paisas: number) => string
 }) {
   const insights: DashboardInsight[] = []
+  const label = input.previousPeriodLabel
+  const money = input.formatAmount
 
-  if (input.netCashMovementAvailable && input.netCashMovement !== null && input.netCashMovement < 0) {
+  const negativeCash = input.netCashMovementAvailable
+    && input.netCashMovement !== null
+    && input.netCashMovement < 0
+
+  if (negativeCash) {
     insights.push({
       id: 'negative-cash',
       title: 'Cash movement is negative for this period.',
@@ -30,34 +48,34 @@ export function buildDashboardInsights(input: {
       priority: 0,
     })
   }
-  if ((input.negativeStockCount ?? 0) > 0) {
+
+  if (label && input.salesComparison && input.salesComparison.direction !== 'flat') {
+    const { direction, percent, delta, previous } = input.salesComparison
     insights.push({
-      id: 'negative-stock',
-      title: `${input.negativeStockCount} product${input.negativeStockCount === 1 ? '' : 's'} have negative stock.`,
-      detail: 'Stock quantity needs correction.',
-      destination: '/?page=inventory',
-      actionLabel: 'Review Stock',
+      id: 'sales-trend',
+      title: percent === null
+        ? `Sales are ${money(Math.abs(delta))} ${direction === 'up' ? 'higher' : 'lower'} than the ${label}.`
+        : `Sales are ${direction === 'up' ? 'up' : 'down'} ${Math.abs(percent)}% versus the ${label}.`,
+      detail: `The ${label} recorded ${money(previous)}.`,
+      destination: '/?page=sales-list',
+      actionLabel: 'View Sales',
       priority: 1,
     })
   }
-  if ((input.lowStockCount ?? 0) > 0) {
+
+  // Direction versus the previous period only adds something when the sign of
+  // the current period is not already the headline.
+  if (!negativeCash && label && input.netCashComparison && input.netCashComparison.direction !== 'flat') {
+    const { direction, percent, delta, previous } = input.netCashComparison
     insights.push({
-      id: 'low-stock',
-      title: `${input.lowStockCount} item${input.lowStockCount === 1 ? '' : 's'} are below their stock threshold.`,
-      detail: 'Each threshold is configured per product.',
-      destination: '/?page=inventory',
-      actionLabel: 'Review Stock',
+      id: 'cash-trend',
+      title: percent === null
+        ? `Net cash movement is ${money(Math.abs(delta))} ${direction === 'up' ? 'higher' : 'lower'} than the ${label}.`
+        : `Net cash movement is ${direction === 'up' ? 'up' : 'down'} ${Math.abs(percent)}% versus the ${label}.`,
+      detail: `The ${label} recorded ${money(previous)}.`,
+      destination: '/?page=accounts',
+      actionLabel: 'View Money',
       priority: 2,
-    })
-  }
-  if (input.paymentAccounts.state === 'available' && input.paymentAccounts.activeCount === 0) {
-    insights.push({
-      id: 'payment-account',
-      title: 'No active payment account is available.',
-      detail: 'Add or activate an account to receive payments.',
-      destination: '/?page=business-accounts',
-      actionLabel: 'Open Business Accounts',
-      priority: 3,
     })
   }
 

@@ -1,6 +1,7 @@
 import { getAdminSupabase } from '@/lib/supabase/admin'
 import { getAccountByCode } from '@/lib/accounting/data-access'
 import { listLegacyBusinessAccounts } from '@/lib/accounting/legacy-business-accounts'
+import { normalizeBusinessAccountType } from '@/lib/accounting/business-account-types'
 import { db } from '@/lib/db'
 import {
   reportCashFlow,
@@ -11,13 +12,19 @@ import {
 } from '@/lib/reports/data-access'
 import { isSupabaseConfigured } from '@/lib/supabase/config'
 import { usesLegacyTransactionSchema } from '@/lib/identity/legacy-bridge'
+import { bizDateString, bizPreviousDateRange, businessDateLabels } from '@/lib/dates'
 import {
   detectLedgerCapability,
   isolateDashboardMetric,
   isSchemaUnavailableError,
   type PostgrestLikeError,
 } from './compatibility'
+import { buildCashPosition, type CashPositionAccount, type CashPositionState } from './cash-position'
+import { buildDailySeries, buildMetricComparison, type SeriesPoint } from './trends'
 import { buildRecentDashboardActivity } from './recent-activity'
+
+/** reportSalesDetail caps at 500 rows; a capped read cannot back a per-day series. */
+const SALES_DETAIL_ROW_LIMIT = 500
 
 type Range = { from: string; to: string }
 type Metric<T> = { value: T | null; available: boolean }
@@ -69,6 +76,42 @@ function isPostedInvoice(row: any): boolean {
   return !['cancelled', 'returned'].includes(String(row.status ?? '').toLowerCase())
 }
 
+/**
+ * Trend shaping for the hero KPIs.
+ *
+ * Receivables and payables are listed with explicit nulls: they are
+ * point-in-time balances with no per-day history and no measured "balance as
+ * of the previous period" in this payload, so they are never compared here.
+ * A flow metric only gets a series when the dated source it is bucketed from
+ * is the same source the headline value was summed from.
+ */
+function buildTrends(input: {
+  previousRange: Range | null
+  labels: string[] | null
+  sales: number | null
+  salesPoints: SeriesPoint[] | null
+  previousSales: number | null
+  netCash: number | null
+  netCashPoints: SeriesPoint[] | null
+  previousNetCash: number | null
+}) {
+  return {
+    previousRange: input.previousRange,
+    metrics: {
+      todaySales: {
+        series: buildDailySeries({ labels: input.labels, points: input.salesPoints }),
+        comparison: buildMetricComparison({ current: input.sales, previous: input.previousSales }),
+      },
+      todayNetCashFlow: {
+        series: buildDailySeries({ labels: input.labels, points: input.netCashPoints }),
+        comparison: buildMetricComparison({ current: input.netCash, previous: input.previousNetCash }),
+      },
+      totalReceivables: { series: null as number[] | null, comparison: null },
+      totalPayables: { series: null as number[] | null, comparison: null },
+    },
+  }
+}
+
 async function buildLocalOperationalPayload(input: {
   businessId: string
   profileId: string
@@ -79,7 +122,9 @@ async function buildLocalOperationalPayload(input: {
   const startedAt = Date.now()
   const from = new Date(`${input.range.from}T00:00:00+05:00`)
   const to = new Date(`${input.range.to}T23:59:59.999+05:00`)
-  const [invoices, purchases, products, auditLogs, activePaymentAccountCount] = await Promise.all([
+  const previousRange = bizPreviousDateRange(input.range)
+  const seriesLabels = businessDateLabels(input.range)
+  const [invoices, purchases, products, auditLogs, paymentAccountRows, previousInvoices] = await Promise.all([
     db.invoice.findMany({
       where: { businessId: input.businessId, invoiceDate: { gte: from, lte: to } },
       select: {
@@ -130,12 +175,33 @@ async function buildLocalOperationalPayload(input: {
       orderBy: { timestamp: 'desc' },
       take: 20,
     }),
-    db.businessAccount.count({ where: { businessId: input.businessId, isActive: true } }),
+    db.businessAccount.findMany({
+      where: { businessId: input.businessId },
+      select: { type: true, isActive: true, account: { select: { balanceCache: true } } },
+    }),
+    previousRange
+      ? db.invoice.findMany({
+        where: {
+          businessId: input.businessId,
+          invoiceDate: {
+            gte: new Date(`${previousRange.from}T00:00:00+05:00`),
+            lte: new Date(`${previousRange.to}T23:59:59.999+05:00`),
+          },
+        },
+        select: { total: true, isCancelled: true, isReturned: true },
+      })
+      : Promise.resolve(null),
   ])
   const postedInvoices = invoices.filter(invoice => !invoice.isCancelled && !invoice.isReturned)
   const postedPurchases = purchases.filter(purchase => purchase.status.toLowerCase() !== 'cancelled')
   const todaySales = Number(postedInvoices.reduce((total, invoice) => total + invoice.total, 0n))
   const todayPurchases = Number(postedPurchases.reduce((total, purchase) => total + purchase.total, 0n))
+  const previousSales = previousInvoices === null
+    ? null
+    : Number(previousInvoices
+      .filter(invoice => !invoice.isCancelled && !invoice.isReturned)
+      .reduce((total, invoice) => total + invoice.total, 0n))
+  const activePaymentAccountCount = paymentAccountRows.filter(account => account.isActive).length
   const saleTypes = {
     counter: { count: 0, amount: 0n },
     online: { count: 0, amount: 0n },
@@ -193,10 +259,54 @@ async function buildLocalOperationalPayload(input: {
     count: item.count,
     amount: item.amount.toString(),
   })
+  // Local balances come from the same account.balanceCache the Business
+  // Accounts page reads, so the panel cannot disagree with that page.
+  const cashPosition = buildCashPosition({
+    state: 'available',
+    normalizeType: normalizeBusinessAccountType,
+    accounts: paymentAccountRows.map(row => ({
+      type: row.type,
+      isActive: row.isActive,
+      balancePaisas: row.account.balanceCache.toString(),
+    })),
+  })
+  const trends = buildTrends({
+    previousRange,
+    labels: seriesLabels,
+    sales: todaySales,
+    salesPoints: postedInvoices.map(invoice => ({
+      date: bizDateString(invoice.invoiceDate),
+      value: Number(invoice.total),
+    })),
+    previousSales,
+    netCash: null,
+    netCashPoints: null,
+    previousNetCash: null,
+  })
   return {
     today: input.today,
     range: input.range,
     dataSource: 'operational-fallback',
+    trends,
+    cashPosition,
+    operationalCounts: {
+      counts: {
+        invoices: postedInvoices.length,
+        collections: null,
+        expenses: null,
+        purchases: postedPurchases.length,
+        salesReturns: null,
+        purchaseReturns: null,
+      },
+      states: {
+        invoices: 'available' as const,
+        collections: 'not-tracked' as const,
+        expenses: 'not-tracked' as const,
+        purchases: 'available' as const,
+        salesReturns: 'not-tracked' as const,
+        purchaseReturns: 'not-tracked' as const,
+      },
+    },
     kpis: {
       todaySales,
       todaySalesPaisas: String(todaySales),
@@ -296,10 +406,12 @@ export async function buildOwnerDashboardPayload(input: {
   const { businessId: bid, range } = input
   const capability = await detectLedgerCapability(admin, bid, range.to)
   const legacyReports = capability.path === 'operational-fallback' && await usesLegacyTransactionSchema()
+  const previousRange = bizPreviousDateRange(range)
+  const seriesLabels = businessDateLabels(range)
 
   // One query per operational source. Each optional metric is isolated, while
   // authentication and business-scope errors still fail the request.
-  const [invoiceQ, recentInvoiceQ, paymentQ, cashFlowQ, expenseQ, purchaseQ, salesReturnQ, purchaseReturnQ, customerQ, payableQ, paymentAccountsQ, productQ, auditQ] = await Promise.all([
+  const [invoiceQ, recentInvoiceQ, paymentQ, cashFlowQ, expenseQ, purchaseQ, salesReturnQ, purchaseReturnQ, customerQ, payableQ, paymentAccountsQ, productQ, auditQ, prevSalesQ, prevCashQ, prevPaymentQ, prevExpenseQ] = await Promise.all([
     legacyReports
       ? isolated('todaySales', unavailable, () => reportSalesSummary(bid, range.from, range.to))
       : isolated('todaySales', unavailable, async () => rowsOrThrow(await admin.from('invoices')
@@ -347,6 +459,31 @@ export async function buildOwnerDashboardPayload(input: {
     isolated('auditLogs', unavailable, async () => rowsOrThrow(await admin.from('audit_logs')
       .select('id, timestamp, action, entity, entity_id, details').eq('business_id', bid)
       .order('timestamp', { ascending: false }).limit(20))),
+    // Prior-period reads run inside the same bounded batch and always hit the
+    // same source as the current-period headline, so a comparison can never
+    // mix two definitions of the same metric.
+    previousRange === null
+      ? Promise.resolve<Metric<any[]> | null>(null)
+      : legacyReports
+        ? isolated('previousSales', unavailable, () => reportSalesSummary(bid, previousRange.from, previousRange.to))
+        : isolated('previousSales', unavailable, async () => rowsOrThrow(await admin.from('invoices')
+          // Unfiltered on purpose: the current-period headline sums every row
+          // this same select returns, so the comparison base must match it.
+          .select('total').eq('business_id', bid)
+          .gte('invoice_date', previousRange.from).lte('invoice_date', previousRange.to))),
+    previousRange !== null && legacyReports
+      ? isolated('previousNetCash', unavailable, () => reportCashFlow(bid, previousRange.from, previousRange.to))
+      : Promise.resolve<Metric<any[]> | null>(null),
+    previousRange !== null && !legacyReports
+      ? isolated('previousCollections', unavailable, async () => rowsOrThrow(await admin.from('payments')
+        .select('amount, direction').eq('business_id', bid)
+        .gte('created_at', boundary(previousRange.from)).lte('created_at', boundary(previousRange.to, true))))
+      : Promise.resolve<Metric<any[]> | null>(null),
+    previousRange !== null && !legacyReports
+      ? isolated('previousExpenses', unavailable, async () => rowsOrThrow(await admin.from('expenses')
+        .select('total_amount, status').eq('business_id', bid)
+        .gte('expense_date', previousRange.from).lte('expense_date', previousRange.to)))
+      : Promise.resolve<Metric<any[]> | null>(null),
   ])
 
   const invoices = legacyReports
@@ -398,6 +535,49 @@ export async function buildOwnerDashboardPayload(input: {
   const netCashMovement = legacyReports
     ? cashFlowQ?.available ? Number((cashFlowQ.value ?? []).reduce((total, row) => total + BigInt(row.total_debit ?? 0) - BigInt(row.total_credit ?? 0), 0n)) : null
     : received !== null && expenses !== null ? received - expenses : null
+
+  // Prior-period totals, each read from the source that produced the headline.
+  const previousSales = prevSalesQ?.available
+    ? sum(prevSalesQ.value ?? [], legacyReports ? 'total_subtotal' : 'total')
+    : null
+  const previousReceived = prevPaymentQ?.available
+    ? sum((prevPaymentQ.value ?? []).filter(row => String(row.direction).toLowerCase() === 'received'), 'amount')
+    : null
+  const previousExpenses = prevExpenseQ?.available
+    ? sum((prevExpenseQ.value ?? []).filter(row => String(row.status ?? '').toLowerCase() !== 'cancelled'), 'total_amount')
+    : null
+  const previousNetCash = legacyReports
+    ? prevCashQ?.available
+      ? Number((prevCashQ.value ?? []).reduce((total, row) => total + BigInt(row.total_debit ?? 0) - BigInt(row.total_credit ?? 0), 0n))
+      : null
+    : previousReceived !== null && previousExpenses !== null ? previousReceived - previousExpenses : null
+
+  // A series is built only from a dated read of the very same source. On the
+  // legacy path reportSalesDetail sums to report_sales_summary's subtotal, but
+  // only while it is under its own row cap; past that the series is dropped.
+  const salesDetailRows = recentInvoiceQ?.value ?? null
+  const salesPoints: SeriesPoint[] | null = legacyReports
+    ? salesDetailRows && salesDetailRows.length < SALES_DETAIL_ROW_LIMIT
+      ? salesDetailRows.map(row => ({ date: row.invoice_date ?? null, value: Number(BigInt(row.subtotal ?? 0)) }))
+      : null
+    : invoiceQ.available
+      ? (invoiceQ.value ?? []).map(row => ({ date: row.invoice_date ?? null, value: Number(BigInt(row.total ?? 0)) }))
+      : null
+  // Legacy net cash comes from report_cash_flow, which reports no dates, so it
+  // has no per-day history and is deliberately left without a sparkline.
+  const netCashPoints: SeriesPoint[] | null = legacyReports || !paymentQ.available || !expenseQ.available
+    ? null
+    : [
+      ...(paymentQ.value ?? [])
+        .filter(row => String(row.direction).toLowerCase() === 'received')
+        .map(row => ({
+          date: row.created_at ? bizDateString(row.created_at) : null,
+          value: Number(BigInt(row.amount ?? 0)),
+        })),
+      ...(expenseQ.value ?? [])
+        .filter(row => String(row.status ?? '').toLowerCase() !== 'cancelled')
+        .map(row => ({ date: row.expense_date ?? null, value: -Number(BigInt(row.total_amount ?? 0)) })),
+    ]
   let cashBalance: number | null = null
   let bankBalance: number | null = null
   let cashMovement: Movement | null = null
@@ -481,9 +661,56 @@ export async function buildOwnerDashboardPayload(input: {
     unavailableMetrics: Array.from(unavailable.keys()),
   })
   const saleType = (item: { count: number; amount: bigint }) => ({ count: item.count, amount: item.amount.toString() })
+  const paymentAccountsState: CashPositionState = !legacyReports
+    ? 'not-tracked'
+    : paymentAccountsQ?.available ? 'available' : unavailable.get('paymentAccounts') === 'not-tracked' ? 'not-tracked' : 'error'
+  // Same rows the Business Accounts page reads, already fetched above: the
+  // panel adds no request and inherits that page's detection unchanged.
+  const cashPosition = buildCashPosition({
+    state: paymentAccountsState,
+    normalizeType: normalizeBusinessAccountType,
+    accounts: paymentAccountsState !== 'available' ? null : (paymentAccountsQ?.value ?? []).map((account): CashPositionAccount => ({
+      type: account.type,
+      isActive: account.isActive,
+      balancePaisas: account.balancePaisas,
+    })),
+  })
+  const pulseState = (available: boolean, metric: string): MetricState =>
+    available ? 'available' : unavailable.get(metric) ?? 'not-tracked'
+  const receivedPayments = (paymentQ.value ?? []).filter(row => String(row.direction).toLowerCase() === 'received')
+  const postedExpenses = (expenseQ.value ?? []).filter(row => String(row.status ?? '').toLowerCase() !== 'cancelled')
 
   return {
     today: input.today, range, dataSource: capability.path,
+    trends: buildTrends({
+      previousRange,
+      labels: seriesLabels,
+      sales,
+      salesPoints,
+      previousSales,
+      netCash: netCashMovement,
+      netCashPoints,
+      previousNetCash,
+    }),
+    cashPosition,
+    operationalCounts: {
+      counts: {
+        invoices: invoiceQ.available ? Object.values(saleTypes).reduce((count, bucket) => count + bucket.count, 0) : null,
+        collections: paymentQ.available ? receivedPayments.length : null,
+        expenses: expenseQ.available ? postedExpenses.length : null,
+        purchases: purchaseQ.available ? periodPurchases.length : null,
+        salesReturns: salesReturnQ.available ? (salesReturnQ.value ?? []).length : null,
+        purchaseReturns: purchaseReturnQ.available ? (purchaseReturnQ.value ?? []).length : null,
+      },
+      states: {
+        invoices: pulseState(invoiceQ.available, 'todaySales'),
+        collections: pulseState(paymentQ.available, 'todayCollections'),
+        expenses: pulseState(expenseQ.available, 'todayExpenses'),
+        purchases: pulseState(purchaseQ.available, 'todayPurchases'),
+        salesReturns: pulseState(salesReturnQ.available, 'periodSalesReturns'),
+        purchaseReturns: pulseState(purchaseReturnQ.available, 'periodPurchaseReturns'),
+      },
+    },
     kpis: {
       todaySales: sales, todaySalesPaisas: sales === null ? null : String(sales),
       todayCollections: received, todayExpenses: expenses,

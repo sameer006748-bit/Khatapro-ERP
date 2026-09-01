@@ -83,3 +83,22 @@ export function buildDashboardAttention(input: {
 
   return sortDashboardAttention(items)
 }
+
+/**
+ * The payload lists a bounded sample of affected products but counts them all.
+ * Business Insights used to restate those totals as its own card; stating the
+ * remainder here keeps the total visible without a duplicate section.
+ */
+export function describeAttentionOverflow(input: {
+  negativeStockProducts: StockProduct[]
+  lowStockProducts: StockProduct[]
+  negativeStockCount: number | null
+  lowStockCount: number | null
+}): string | null {
+  const parts: string[] = []
+  const negativeHidden = (input.negativeStockCount ?? 0) - input.negativeStockProducts.length
+  const lowHidden = (input.lowStockCount ?? 0) - input.lowStockProducts.length
+  if (negativeHidden > 0) parts.push(`${negativeHidden} more with negative stock`)
+  if (lowHidden > 0) parts.push(`${lowHidden} more below their stock threshold`)
+  return parts.length === 0 ? null : `${parts.join(' and ')} are not listed here.`
+}

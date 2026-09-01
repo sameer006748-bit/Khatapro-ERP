@@ -50,7 +50,6 @@ import dynamic from 'next/dynamic'
 import type { MeUser } from '@/components/erp/erp-app'
 import { KhataProLogo } from '@/components/erp/logo'
 import { OwnerDashboard } from '@/components/erp/views/owner-dashboard'
-import { AccountantDashboard } from '@/components/erp/views/accountant-dashboard'
 import { SalesmanDashboard } from '@/components/erp/views/salesman-dashboard'
 import { RiderDashboard } from '@/components/erp/views/rider-dashboard'
 import { SetupView } from '@/components/erp/views/setup-view'
@@ -896,8 +895,9 @@ function ViewRouter({
   }
 
   if (active === 'home') {
-    if (user.roleName === 'Owner/Admin') return <OwnerDashboard user={user} />
-    if (user.roleName === 'Accountant') return <AccountantDashboard user={user} />
+    // One shared command center for both business-wide roles; section order and
+    // section visibility are derived from permissions inside the component.
+    if (user.roleName === 'Owner/Admin' || user.roleName === 'Accountant') return <OwnerDashboard user={user} />
     if (user.roleName === 'Salesman') return <SalesmanDashboard user={user} />
     if (user.roleName === 'Rider') return <RiderDashboard user={user} />
     // No Owner fallback: unknown roles must never see Owner-only business data.

@@ -159,7 +159,7 @@ test('command center has four non-duplicated hero metrics with clear state seman
 })
 
 test('Needs Attention is conditional and every live stock condition links to inventory', () => {
-  assert.match(page, /attentionItems\.length > 0/)
+  assert.match(page, /attentionItems\.length === 0 \? null/)
   assert.match(attention, /negativeStockProducts/)
   assert.match(attention, /lowStockProducts/)
   assert.match(attention, /destination: '\/\?page=inventory'/)

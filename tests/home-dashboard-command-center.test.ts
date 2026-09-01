@@ -50,7 +50,7 @@ test('only supported hero KPIs expose existing drill-down destinations', () => {
   ]) {
     assert.match(page, new RegExp(`label: '${label}'[\\s\\S]*destination: '${destination.replace(/[/?]/g, '\\$&')}'`))
   }
-  assert.match(page, /onOpen=\{\(\) => router\.push\(metric\.destination\)\}/)
+  assert.match(page, /onOpen=\{canOpen\(destination\) \? \(\) => router\.push\(destination\) : undefined\}/)
 })
 
 test('dashboard refresh retains existing content and exposes keyboard-accessible actions', () => {

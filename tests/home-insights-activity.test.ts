@@ -8,42 +8,57 @@ const page = await readFile('src/components/erp/views/owner-dashboard.tsx', 'utf
 const summary = await readFile('src/lib/dashboard/owner-summary.ts', 'utf8')
 const hook = await readFile('src/hooks/use-owner-dashboard.ts', 'utf8')
 const route = await readFile('src/app/api/dashboard/owner/route.ts', 'utf8')
+const insightSource = await readFile('src/lib/dashboard/insights.ts', 'utf8')
 
 const clearInsightInput = {
   netCashMovement: 0,
   netCashMovementAvailable: true,
-  negativeStockCount: 0,
-  lowStockCount: 0,
-  paymentAccounts: { activeCount: 1, state: 'available' as const },
+  salesComparison: null,
+  netCashComparison: null,
+  previousPeriodLabel: 'previous day',
+  formatAmount: (paisas: number) => `Rs ${paisas / 100}`,
 }
 
 test('Business Insights are deterministic and hidden when no supported condition is true', () => {
   assert.deepEqual(buildDashboardInsights(clearInsightInput), [])
-  assert.match(page, /insights\.length > 0/)
-  assert.doesNotMatch(page, /AI-generated insight|sparkline|trend chart/i)
+  assert.match(page, /insights\.length === 0/)
+  assert.doesNotMatch(page, /AI-generated insight|trend chart/i)
 })
 
-test('Business Insights cover negative cash, configured stock conditions, and missing payment accounts', () => {
+test('Business Insights no longer restate the rows Needs Attention already owns', () => {
   const insights = buildDashboardInsights({
+    ...clearInsightInput,
     netCashMovement: -5000,
-    netCashMovementAvailable: true,
-    negativeStockCount: 2,
-    lowStockCount: 3,
-    paymentAccounts: { activeCount: 0, state: 'available' },
   })
 
   assert.deepEqual(insights.map((item) => [item.id, item.destination]), [
     ['negative-cash', '/?page=accounts'],
-    ['negative-stock', '/?page=inventory'],
-    ['low-stock', '/?page=inventory'],
-    ['payment-account', '/?page=business-accounts'],
   ])
   assert.deepEqual(buildDashboardInsights({ ...clearInsightInput, netCashMovement: -1, netCashMovementAvailable: false }), [])
+  assert.doesNotMatch(insightSource, /id: 'negative-stock'|id: 'low-stock'|id: 'payment-account'/)
 })
 
-test('no comparison insight is fabricated when only the current period payload is available', () => {
-  assert.doesNotMatch(page, /prior period|previous period|comparison/i)
-  assert.doesNotMatch(summary, /previousRange|priorRange/)
+test('comparison wording appears only for a measured prior period', () => {
+  // A comparison object with no period label, and a label with no comparison,
+  // must both stay silent: interpreted wording needs both halves measured.
+  assert.deepEqual(buildDashboardInsights({
+    ...clearInsightInput,
+    previousPeriodLabel: null,
+    salesComparison: { previous: 1000, delta: 500, direction: 'up', percent: 50 },
+  }), [])
+  const [salesTrend] = buildDashboardInsights({
+    ...clearInsightInput,
+    salesComparison: { previous: 1000, delta: 500, direction: 'up', percent: 50 },
+  })
+  assert.equal(salesTrend.id, 'sales-trend')
+  assert.match(salesTrend.title, /up 50% versus the previous day/)
+  // A zero base carries no defensible percentage, so the wording states rupees.
+  const [zeroBase] = buildDashboardInsights({
+    ...clearInsightInput,
+    salesComparison: { previous: 0, delta: 500, direction: 'up', percent: null },
+  })
+  assert.doesNotMatch(zeroBase.title, /%/)
+  assert.match(summary, /previousRange/)
 })
 
 test('Recent Activity keeps only meaningful business events, in newest-first order', () => {
