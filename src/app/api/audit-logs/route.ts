@@ -10,6 +10,17 @@ import { loadSessionUser, requirePermission } from '@/lib/auth/permissions'
 import { isSupabaseConfigured } from '@/lib/supabase/config'
 import { resolveRequestId, safeApiError, withObservability } from '@/lib/observability'
 
+const SECRET_DETAIL_KEY = /(?:password|secret|token|api[_-]?key|authorization|cookie|credential)/i
+
+function safeDetails(raw: unknown): Record<string, unknown> | null {
+  if (!raw) return null
+  try {
+    const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null
+    return Object.fromEntries(Object.entries(parsed as Record<string, unknown>).filter(([key]) => !SECRET_DETAIL_KEY.test(key)))
+  } catch { return null }
+}
+
 export const GET = withObservability('/api/audit-logs', async (req: Request) => {
   const requestId = resolveRequestId(req)
   const session = await getServerSession(authOptions)
@@ -24,9 +35,10 @@ export const GET = withObservability('/api/audit-logs', async (req: Request) => 
   if (isSupabaseConfigured()) {
     const { getAdminSupabase } = await import('@/lib/supabase/admin')
     const admin = getAdminSupabase()
+    const auditFields = ['id', 'timestamp', 'action', 'entity', 'entity_id', 'user_id', 'details'].join(', ')
     const { data, error } = await admin
       .from('audit_logs')
-      .select('id, timestamp, action, entity, entity_id, user_id')
+      .select(auditFields)
       .eq('business_id', su.businessId)
       .order('timestamp', { ascending: false })
       .limit(200)
@@ -47,6 +59,7 @@ export const GET = withObservability('/api/audit-logs', async (req: Request) => 
         entity: r.entity,
         entityId: r.entity_id,
         actorCategory: r.user_id ? 'Authenticated user' : 'System',
+        details: safeDetails(r.details),
       })),
     })
   }
@@ -65,6 +78,7 @@ export const GET = withObservability('/api/audit-logs', async (req: Request) => 
       entity: r.entity,
       entityId: r.entityId,
       actorCategory: r.userId ? 'Authenticated user' : 'System',
+      details: safeDetails(r.details),
     })),
   })
 })

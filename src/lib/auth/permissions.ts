@@ -231,6 +231,17 @@ export async function noOwnerExists(): Promise<boolean> {
 }
 
 /** Audit log helper — used by every mutating API route. */
+const AUDIT_SECRET_KEY = /(?:password|secret|token|api[_-]?key|authorization|cookie|credential)/i
+
+/** Remove credential-like values before audit metadata ever reaches storage. */
+export function sanitizeAuditDetails(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(sanitizeAuditDetails)
+  if (!value || typeof value !== 'object') return value
+  return Object.fromEntries(Object.entries(value as Record<string, unknown>)
+    .filter(([key]) => !AUDIT_SECRET_KEY.test(key))
+    .map(([key, item]) => [key, sanitizeAuditDetails(item)]))
+}
+
 export async function writeAudit(args: {
   businessId: string
   userId?: string | null
@@ -239,6 +250,7 @@ export async function writeAudit(args: {
   entityId?: string | null
   details?: Record<string, unknown> | null
 }) {
+  const safeDetails = args.details ? sanitizeAuditDetails(args.details) as Record<string, unknown> : null
   if (!isSupabaseConfigured()) {
     if (process.env.VERCEL) {
       const error = new Error('Serverless local database fallback is prohibited.')
@@ -252,7 +264,7 @@ export async function writeAudit(args: {
         action: args.action,
         entity: args.entity,
         entityId: args.entityId ?? null,
-        details: args.details ? JSON.stringify(args.details) : null,
+        details: safeDetails ? JSON.stringify(safeDetails) : null,
       },
     })
     return
@@ -268,7 +280,7 @@ export async function writeAudit(args: {
     action: args.action,
     entity: args.entity,
     entity_id: args.entityId ?? null,
-    details: args.details ? JSON.stringify(args.details) : null,
+    details: safeDetails ? JSON.stringify(safeDetails) : null,
   })
 
   if (error) {

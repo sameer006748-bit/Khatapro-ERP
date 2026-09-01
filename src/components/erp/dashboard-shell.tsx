@@ -59,12 +59,12 @@ import { BusinessAccountsView } from '@/components/erp/views/business-accounts-v
 import { AuditLogView } from '@/components/erp/views/audit-log-view'
 import { BizDayTestView } from '@/components/erp/views/biz-day-test-view'
 import { PermissionMatrixView } from '@/components/erp/views/permission-matrix-view'
-import { JournalVoucherView } from '@/components/erp/views/journal-voucher-view'
+import { VouchersView } from '@/components/erp/views/vouchers-view'
 import { TrialBalanceView } from '@/components/erp/views/trial-balance-view'
 import { LedgerDrilldownView } from '@/components/erp/views/ledger-drilldown-view'
 import { OpeningBalanceView } from '@/components/erp/views/opening-balance-view'
 import { DayBookView } from '@/components/erp/views/day-book-view'
-import { PaymentVoucherView, ReceiptVoucherView, ContraEntryView, OwnerCapitalView } from '@/components/erp/views/voucher-forms-view'
+import { OwnerCapitalView } from '@/components/erp/views/voucher-forms-view'
 import { ExpenseBatchView } from '@/components/erp/views/expense-batch-view'
 import { PettyCashView } from '@/components/erp/views/petty-cash-view'
 import { VoucherDetailView } from '@/components/erp/views/voucher-detail-view'
@@ -174,10 +174,7 @@ const NAV_CATEGORIES: NavCategory[] = [
     icon: NotebookTabs,
     items: [
       { key: 'day-book', label: 'Day Book', short: 'Day Book', icon: BookOpen, perm: 'can_view_day_book' },
-      { key: 'journal-voucher', label: 'Journal Voucher', short: 'Journal', icon: NotebookTabs, perm: 'can_create_journal_voucher' },
-      { key: 'receipt-voucher', label: 'Receipt Voucher', short: 'Receipt', icon: ArrowDownToLine, perm: 'can_create_receipt_voucher' },
-      { key: 'payment-voucher', label: 'Payment Voucher', short: 'Payment', icon: ArrowUpFromLine, perm: 'can_create_payment_voucher' },
-      { key: 'contra-entry', label: 'Contra Entry', short: 'Contra', icon: ArrowLeftRight, perm: 'can_create_contra' },
+      { key: 'vouchers', label: 'Vouchers', short: 'Vouchers', icon: NotebookTabs, perm: 'can_view_day_book' },
       { key: 'trial-balance', label: 'Trial Balance', short: 'TB', icon: Scale, perm: 'can_view_trial_balance' },
       { key: 'opening-balance', label: 'Opening Balance', short: 'Opening', icon: BookPlus, perm: 'can_post_opening_voucher' },
       { key: 'coa', label: 'Chart of Accounts', short: 'Accounts', icon: ListTree, perm: 'can_view_setup' },
@@ -206,6 +203,15 @@ const INTERNAL_PAGES: SubItem[] = [
   { key: 'biz-day-test', label: 'Business Day Diagnostic', short: 'Business Day', icon: Clock, ownerOnly: true },
 ]
 
+// Legacy deep links stay available for tours, bookmarks and contextual actions;
+// the visible navigation is consolidated under the single Vouchers workspace.
+const LEGACY_VOUCHER_PAGES: SubItem[] = [
+  { key: 'journal-voucher', label: 'Vouchers', short: 'Vouchers', icon: NotebookTabs, perm: 'can_create_journal_voucher' },
+  { key: 'receipt-voucher', label: 'Vouchers', short: 'Vouchers', icon: ArrowDownToLine, perm: 'can_create_receipt_voucher' },
+  { key: 'payment-voucher', label: 'Vouchers', short: 'Vouchers', icon: ArrowUpFromLine, perm: 'can_create_payment_voucher' },
+  { key: 'contra-entry', label: 'Vouchers', short: 'Vouchers', icon: ArrowLeftRight, perm: 'can_create_contra' },
+]
+
 /** Flat map of every registered page key to its SubItem for quick lookup. */
 const PAGE_REGISTRY: Map<string, SubItem> = new Map()
 for (const cat of NAV_CATEGORIES) {
@@ -214,6 +220,7 @@ for (const cat of NAV_CATEGORIES) {
   }
 }
 for (const item of INTERNAL_PAGES) PAGE_REGISTRY.set(item.key, item)
+for (const item of LEGACY_VOUCHER_PAGES) PAGE_REGISTRY.set(item.key, item)
 
 function isItemVisible(user: MeUser, item: SubItem): boolean {
   if (item.ownerOnly) return user.roleName === 'Owner/Admin'
@@ -925,10 +932,11 @@ function ViewRouter({
   if (active === 'coa') return <CoaView />
   if (active === 'users') return <UsersView user={user} />
   if (active === 'permissions') return <PermissionMatrixView user={user} />
-  if (active === 'journal-voucher') return <JournalVoucherView user={user} />
-  if (active === 'receipt-voucher') return <ReceiptVoucherView user={user} />
-  if (active === 'payment-voucher') return <PaymentVoucherView user={user} />
-  if (active === 'contra-entry') return <ContraEntryView user={user} />
+  if (active === 'vouchers') return <VouchersView user={user} />
+  if (active === 'journal-voucher') return <VouchersView user={user} initialTab="journal" />
+  if (active === 'receipt-voucher') return <VouchersView user={user} initialTab="receipt" />
+  if (active === 'payment-voucher') return <VouchersView user={user} initialTab="payment" />
+  if (active === 'contra-entry') return <VouchersView user={user} initialTab="contra" />
   if (active === 'owner-capital') return <OwnerCapitalView user={user} />
   if (active === 'petty-cash') return <PettyCashView user={user} />
   if (active === 'expense-batch') return <ExpenseBatchView user={user} />
