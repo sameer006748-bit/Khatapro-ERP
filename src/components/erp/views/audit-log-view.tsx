@@ -26,8 +26,85 @@ const ACTION_BADGE: Record<string, string> = {
   CANCEL: 'bg-rose-100 text-rose-700',
 }
 
+/**
+ * Plain-English names for the account classification entries. The recorded
+ * action and record type are technical (`ACCOUNT_CATEGORY_REACTIVATE` on
+ * `account_category`), so the log shows these labels instead.
+ */
+const ACTION_LABELS: Record<string, string> = {
+  ACCOUNT_CATEGORY_CREATE: 'Category created',
+  ACCOUNT_CATEGORY_RENAME: 'Category renamed',
+  ACCOUNT_CATEGORY_DEACTIVATE: 'Category deactivated',
+  ACCOUNT_CATEGORY_REACTIVATE: 'Category reactivated',
+  ACCOUNT_CATEGORY_DELETE: 'Category deleted',
+  ACCOUNT_SUBCATEGORY_CREATE: 'Subcategory created',
+  ACCOUNT_SUBCATEGORY_RENAME: 'Subcategory renamed',
+  ACCOUNT_SUBCATEGORY_DEACTIVATE: 'Subcategory deactivated',
+  ACCOUNT_SUBCATEGORY_REACTIVATE: 'Subcategory reactivated',
+  ACCOUNT_SUBCATEGORY_DELETE: 'Subcategory deleted',
+  MANUAL_LEDGER_ACCOUNT_CREATE: 'Account created',
+  MANUAL_LEDGER_ACCOUNT_RENAME: 'Account renamed',
+  MANUAL_LEDGER_ACCOUNT_CLASSIFY: 'Account classification changed',
+  MANUAL_LEDGER_ACCOUNT_ACTIVATE: 'Account reactivated',
+  MANUAL_LEDGER_ACCOUNT_DEACTIVATE: 'Account deactivated',
+}
+
+const ENTITY_LABELS: Record<string, string> = {
+  account_category: 'Category',
+  account_subcategory: 'Subcategory',
+  manual_ledger_account: 'Ledger account',
+}
+
 function actionLabel(row: Row) {
-  return `${row.entity.replaceAll('_', ' ')} ${row.action.replaceAll('_', ' ')}`.replace(/\b\w/g, letter => letter.toUpperCase())
+  return ACTION_LABELS[row.action]
+    ?? `${row.entity.replaceAll('_', ' ')} ${row.action.replaceAll('_', ' ')}`.replace(/\b\w/g, letter => letter.toUpperCase())
+}
+
+function entityLabel(entity: string) {
+  return ENTITY_LABELS[entity] ?? entity.replaceAll('_', ' ')
+}
+
+/** Create and delete keep their usual colours; the rest read as an update. */
+function badgeClass(action: string) {
+  if (ACTION_BADGE[action]) return ACTION_BADGE[action]
+  if (action.endsWith('_CREATE')) return ACTION_BADGE.CREATE
+  if (action.endsWith('_DELETE')) return ACTION_BADGE.DELETE
+  if (ACTION_LABELS[action]) return ACTION_BADGE.UPDATE
+  return 'bg-muted text-muted-foreground'
+}
+
+/** The before/after snapshots the classification entries record. */
+function snapshots(details: Record<string, unknown> | null) {
+  const pick = (value: unknown) => (value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null)
+  return { before: pick(details?.before), after: pick(details?.after) }
+}
+
+function readableValue(value: unknown, key: string) {
+  if (typeof value === 'boolean') return key === 'isActive' ? (value ? 'Active' : 'Inactive') : (value ? 'Yes' : 'No')
+  if (typeof value === 'string' || typeof value === 'number') return String(value)
+  return null
+}
+
+/**
+ * What changed, read off the snapshots. Only fields that mean something to an
+ * accountant are shown — internal identifiers and structural columns are not.
+ */
+function snapshotChanges(row: Row) {
+  const { before, after } = snapshots(row.details)
+  if (!before && !after) return []
+  const fields = row.entity === 'manual_ledger_account'
+    ? [{ key: 'code', label: 'Account code' }, { key: 'name', label: 'Name' }, { key: 'isActive', label: 'Status' }]
+    : [{ key: 'name', label: 'Name' }, { key: 'isActive', label: 'Status' }]
+  const changes: Array<{ label: string; value: string }> = []
+  for (const field of fields) {
+    const from = readableValue(before?.[field.key], field.key)
+    const to = readableValue(after?.[field.key], field.key)
+    if (from === null && to === null) continue
+    if (to === null) changes.push({ label: field.label, value: from! })
+    else if (from === null || from === to) changes.push({ label: field.label, value: to })
+    else changes.push({ label: field.label, value: `${from} → ${to}` })
+  }
+  return changes
 }
 
 function referenceLabel(row: Row) {
@@ -35,13 +112,20 @@ function referenceLabel(row: Row) {
   for (const key of ['name', 'voucher_no', 'payment_no', 'receipt_no', 'replacement_no', 'ledgerCode']) {
     if (typeof details[key] === 'string' || typeof details[key] === 'number') return String(details[key])
   }
-  return row.entity.replaceAll('_', ' ')
+  const { before, after } = snapshots(row.details)
+  const name = after?.name ?? before?.name
+  if (typeof name === 'string' && name.trim()) return name
+  return entityLabel(row.entity)
 }
 
-function DetailSummary({ details }: { details: Record<string, unknown> | null }) {
-  const items = Object.entries(details ?? {}).filter(([, value]) => ['string', 'number', 'boolean'].includes(typeof value)).slice(0, 4)
+function DetailSummary({ row }: { row: Row }) {
+  const changes = snapshotChanges(row)
+  const items = changes.length ? changes : Object.entries(row.details ?? {})
+    .filter(([, value]) => ['string', 'number', 'boolean'].includes(typeof value))
+    .slice(0, 4)
+    .map(([key, value]) => ({ label: key.replaceAll('_', ' '), value: String(value) }))
   if (!items.length) return null
-  return <details className="mt-1 text-[10px] text-muted-foreground"><summary className="cursor-pointer hover:text-foreground">View details</summary><dl className="mt-1 grid gap-1 rounded border border-border bg-muted/25 p-2">{items.map(([key, value]) => <div key={key} className="flex justify-between gap-3"><dt className="capitalize">{key.replaceAll('_', ' ')}</dt><dd className="break-all text-right text-foreground">{String(value)}</dd></div>)}</dl></details>
+  return <details className="mt-1 text-[10px] text-muted-foreground"><summary className="cursor-pointer hover:text-foreground">View details</summary><dl className="mt-1 grid gap-1 rounded border border-border bg-muted/25 p-2">{items.map(item => <div key={item.label} className="flex justify-between gap-3"><dt className="capitalize">{item.label}</dt><dd className="break-all text-right text-foreground">{item.value}</dd></div>)}</dl></details>
 }
 
 export function AuditLogView() {
@@ -59,7 +143,7 @@ export function AuditLogView() {
   return (
     <div className="space-y-6">
       <PageHeader title="Audit Log" description="Review the most recent 200 recorded business changes and actions." />
-      {q.data?.rows?.length ? <div className="flex flex-wrap gap-2 rounded-lg border border-border bg-card p-3"><select aria-label="Filter by action" value={action} onChange={event => setAction(event.target.value)} className="h-8 rounded-md border border-border bg-background px-2 text-xs"><option value="all">All actions</option>{actions.map(item => <option key={item} value={item}>{item.replaceAll('_', ' ')}</option>)}</select><select aria-label="Filter by record type" value={entity} onChange={event => setEntity(event.target.value)} className="h-8 rounded-md border border-border bg-background px-2 text-xs"><option value="all">All records</option>{entities.map(item => <option key={item} value={item}>{item.replaceAll('_', ' ')}</option>)}</select></div> : null}
+      {q.data?.rows?.length ? <div className="flex flex-wrap gap-2 rounded-lg border border-border bg-card p-3"><select aria-label="Filter by action" value={action} onChange={event => setAction(event.target.value)} className="h-8 rounded-md border border-border bg-background px-2 text-xs"><option value="all">All actions</option>{actions.map(item => <option key={item} value={item}>{ACTION_LABELS[item] ?? item.replaceAll('_', ' ')}</option>)}</select><select aria-label="Filter by record type" value={entity} onChange={event => setEntity(event.target.value)} className="h-8 rounded-md border border-border bg-background px-2 text-xs"><option value="all">All records</option>{entities.map(item => <option key={item} value={item}>{entityLabel(item)}</option>)}</select></div> : null}
 
       {q.isLoading ? (
         <div className="card-3d p-8 text-sm text-muted-foreground">Loading…</div>
@@ -99,16 +183,14 @@ export function AuditLogView() {
                       </td>
                       <td className="p-3.5">
                         <span
-                          className={`text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-md font-medium ${
-                            ACTION_BADGE[r.action] ?? 'bg-muted text-muted-foreground'
-                          }`}
+                          className={`text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-md font-medium ${badgeClass(r.action)}`}
                           data-num
                         >
                           {actionLabel(r)}
                         </span>
                       </td>
                       <td className="p-3.5 text-xs text-foreground">
-                        <div className="font-medium capitalize">{referenceLabel(r)}</div><DetailSummary details={r.details} />
+                        <div className="font-medium capitalize">{referenceLabel(r)}</div><DetailSummary row={r} />
                       </td>
                       <td className="p-3.5 text-xs text-muted-foreground">
                         {r.actorCategory}
@@ -131,9 +213,7 @@ export function AuditLogView() {
                     </div>
                     <div className="min-w-0">
                       <span
-                        className={`inline-block text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-md font-medium ${
-                          ACTION_BADGE[r.action] ?? 'bg-muted text-muted-foreground'
-                        }`}
+                        className={`inline-block text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-md font-medium ${badgeClass(r.action)}`}
                         data-num
                       >
                         {actionLabel(r)}
@@ -148,7 +228,7 @@ export function AuditLogView() {
                   </span>
                 </div>
                 <div className="mt-3 pt-3 border-t border-border text-xs text-muted-foreground">
-                  Actor: {r.actorCategory}<DetailSummary details={r.details} />
+                  Actor: {r.actorCategory}<DetailSummary row={r} />
                 </div>
               </div>
             ))}

@@ -39,6 +39,7 @@ import {
   ArrowUpFromLine,
   Sparkles,
   ListTree,
+  FolderTree,
   FileChartColumn,
   PanelTop,
   UserCog,
@@ -55,6 +56,7 @@ import { RiderDashboard } from '@/components/erp/views/rider-dashboard'
 import { SetupView } from '@/components/erp/views/setup-view'
 import { UsersView } from '@/components/erp/views/users-view'
 import { CoaView } from '@/components/erp/views/coa-view'
+import { AccountClassificationView } from '@/components/erp/views/account-classification-view'
 import { BusinessAccountsView } from '@/components/erp/views/business-accounts-view'
 import { AuditLogView } from '@/components/erp/views/audit-log-view'
 import { BizDayTestView } from '@/components/erp/views/biz-day-test-view'
@@ -203,6 +205,12 @@ const INTERNAL_PAGES: SubItem[] = [
   { key: 'biz-day-test', label: 'Business Day Diagnostic', short: 'Business Day', icon: Clock, ownerOnly: true },
 ]
 
+// Setup detail pages: opened from the Setup overview cards (and by deep link)
+// instead of taking a slot of their own in the main navigation.
+const SETUP_DETAIL_PAGES: SubItem[] = [
+  { key: 'account-classification', label: 'Account Classification', short: 'Classification', icon: FolderTree, perm: 'can_view_setup' },
+]
+
 // Legacy deep links stay available for tours, bookmarks and contextual actions;
 // the visible navigation is consolidated under the single Vouchers workspace.
 const LEGACY_VOUCHER_PAGES: SubItem[] = [
@@ -220,6 +228,7 @@ for (const cat of NAV_CATEGORIES) {
   }
 }
 for (const item of INTERNAL_PAGES) PAGE_REGISTRY.set(item.key, item)
+for (const item of SETUP_DETAIL_PAGES) PAGE_REGISTRY.set(item.key, item)
 for (const item of LEGACY_VOUCHER_PAGES) PAGE_REGISTRY.set(item.key, item)
 
 function isItemVisible(user: MeUser, item: SubItem): boolean {
@@ -930,6 +939,7 @@ function ViewRouter({
   />
   if (active === 'business-accounts') return <BusinessAccountsView user={user} />
   if (active === 'coa') return <CoaView />
+  if (active === 'account-classification') return <AccountClassificationView user={user} />
   if (active === 'users') return <UsersView user={user} />
   if (active === 'permissions') return <PermissionMatrixView user={user} />
   if (active === 'vouchers') return <VouchersView user={user} />

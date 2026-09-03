@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, Fragment, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -8,11 +8,173 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { formatMoney } from '@/lib/format'
 import { bizDate, bizDateString } from '@/lib/dates'
-import { BarChart3, FileText, Scale, Wallet, Package, Users, Bike, ScrollText, TrendingUp, TrendingDown, Download, Printer, ChevronRight, AlertTriangle, CheckCircle2, ShieldAlert } from 'lucide-react'
+import { BarChart3, FileText, Scale, Wallet, Package, Users, Bike, ScrollText, TrendingUp, TrendingDown, Download, Printer, ChevronRight, AlertTriangle, CheckCircle2, ShieldAlert, Filter, List, ListTree, RotateCcw } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import type { MeUser } from '@/components/erp/erp-app'
 import { apiFetchJson } from '@/lib/api-client'
 import { PageHeader } from '@/components/erp/page-header'
+
+/**
+ * Reporting-side view of the custom account classification. It is a labelling
+ * and navigation layer only: the fixed accounting root still decides where an
+ * account appears, and no total on this screen is derived from it.
+ */
+type ReportClassification = {
+  hasCustomClassification: boolean
+  categories: Array<{ id: string; name: string; rootId: string; isActive: boolean }>
+  subcategories: Array<{ id: string; name: string; rootId: string; categoryId: string; isActive: boolean }>
+  accounts: Record<string, {
+    categoryId: string
+    categoryName: string | null
+    subcategoryId: string | null
+    subcategoryName: string | null
+  }>
+}
+
+/** Radix has no empty option, so each report selector keeps an explicit "all" value. */
+const ALL = '__all__'
+
+type StatementRow = { account_code: string }
+
+type ReportGroup<T> = {
+  key: string
+  label: string
+  total: bigint
+  subs: Array<{ key: string; label: string; total: bigint; rows: T[] }>
+}
+
+const lastIf = (isLast: boolean) => (isLast ? 1 : 0)
+
+/**
+ * Partition one statement section into Category → Subcategory buckets. Every
+ * row lands in exactly one bucket, so the subtotals add up to the section total
+ * the statement already prints — grouping never recomputes a figure.
+ */
+function groupByClassification<T extends StatementRow>(
+  rows: T[],
+  classification: ReportClassification | null,
+  amountOf: (row: T) => bigint,
+): Array<ReportGroup<T>> {
+  const groups: Array<ReportGroup<T>> = []
+  for (const row of rows) {
+    const label = classification?.accounts[row.account_code] ?? null
+    const amount = amountOf(row)
+    const categoryKey = label?.categoryId ?? 'ungrouped'
+    let group = groups.find((entry) => entry.key === categoryKey)
+    if (!group) {
+      group = {
+        key: categoryKey,
+        label: label?.categoryName ?? 'Not grouped in a category',
+        total: 0n,
+        subs: [],
+      }
+      groups.push(group)
+    }
+    group.total += amount
+    const subKey = label?.subcategoryId ?? 'direct'
+    let sub = group.subs.find((entry) => entry.key === subKey)
+    if (!sub) {
+      sub = { key: subKey, label: label?.subcategoryName ?? 'Direct accounts', total: 0n, rows: [] }
+      group.subs.push(sub)
+    }
+    sub.total += amount
+    sub.rows.push(row)
+  }
+  groups.sort((a, b) =>
+    lastIf(a.key === 'ungrouped') - lastIf(b.key === 'ungrouped') || a.label.localeCompare(b.label))
+  for (const group of groups) {
+    group.subs.sort((a, b) =>
+      lastIf(a.key === 'direct') - lastIf(b.key === 'direct') || a.label.localeCompare(b.label))
+  }
+  return groups
+}
+
+/** "Category › Subcategory" next to an account name; nothing when unclassified. */
+function ClassPath({ code, classification }: { code: string; classification: ReportClassification | null }) {
+  const label = classification?.accounts[code] ?? null
+  const path = label ? [label.categoryName, label.subcategoryName].filter(Boolean).join(' › ') : ''
+  return path ? <span className="ml-1.5 text-[10px] text-muted-foreground">{path}</span> : null
+}
+
+/** Compact drill-down switch, shown only when the business classifies accounts. */
+function GroupToggle({ grouped, onToggle }: { grouped: boolean; onToggle: () => void }) {
+  return (
+    <Button variant="outline" size="sm" className="h-8 px-2 text-xs" onClick={onToggle}>
+      {grouped
+        ? <><List className="size-3.5" /> Flat list</>
+        : <><ListTree className="size-3.5" /> Group by category</>}
+    </Button>
+  )
+}
+
+/** Compact report filter — a labelled trigger with an explicit "all" option. */
+function ReportFilterSelect({ label, allLabel, value, options, onChange }: {
+  label: string
+  allLabel: string
+  value: string
+  options: Array<{ id: string; name: string; isActive: boolean }>
+  onChange: (value: string) => void
+}) {
+  return (
+    <Select value={value} onValueChange={onChange}>
+      <SelectTrigger className="h-8 w-full sm:w-44 bg-background text-xs" aria-label={label}>
+        <SelectValue placeholder={allLabel} />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value={ALL}>{allLabel}</SelectItem>
+        {options.map((option) => (
+          <SelectItem key={option.id} value={option.id}>
+            {option.isActive ? option.name : `${option.name} (inactive)`}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  )
+}
+
+/**
+ * Account lines of one section, flat or grouped by classification. `renderRow`
+ * keeps each statement's own line markup, so only the order and the added
+ * subtotals differ between the two modes.
+ */
+function StatementLines<T extends StatementRow>({ rows, grouped, classification, amountOf, renderRow, emptyMessage }: {
+  rows: T[]
+  grouped: boolean
+  classification: ReportClassification | null
+  amountOf: (row: T) => bigint
+  renderRow: (row: T) => ReactNode
+  emptyMessage: string
+}) {
+  if (rows.length === 0) return <p className="text-xs text-muted-foreground">{emptyMessage}</p>
+  if (!grouped) {
+    return <>{rows.map((row) => <Fragment key={row.account_code}>{renderRow(row)}</Fragment>)}</>
+  }
+  return (
+    <>
+      {groupByClassification(rows, classification, amountOf).map((group) => (
+        <div key={group.key} className="mt-3 first:mt-0">
+          <div className="flex justify-between text-[11px] uppercase tracking-wider font-medium text-foreground py-1 border-b border-border">
+            <span>{group.label}</span>
+            <span data-num>{formatMoney(group.total, false)}</span>
+          </div>
+          {group.subs.map((sub) => (
+            <Fragment key={sub.key}>
+              {(group.subs.length > 1 || sub.key !== 'direct') && (
+                <div className="flex justify-between text-[11px] text-muted-foreground pt-1.5 pl-2">
+                  <span>{sub.label}</span>
+                  <span data-num>{formatMoney(sub.total, false)}</span>
+                </div>
+              )}
+              <div className="pl-2">
+                {sub.rows.map((row) => <Fragment key={row.account_code}>{renderRow(row)}</Fragment>)}
+              </div>
+            </Fragment>
+          ))}
+        </div>
+      ))}
+    </>
+  )
+}
 
 type Category = 'overview' | 'financial' | 'sales' | 'purchases' | 'inventory' | 'parties' | 'delivery' | 'audit'
 type ReportType = 'overview' | 'profit-loss' | 'balance-sheet' | 'trial-balance' | 'cash-flow' | 'expense' | 'sales-summary' | 'sales-detail' | 'customer-outstanding' | 'vendor-outstanding' | 'inventory-valuation' | 'stock-movements' | 'product-profitability' | 'purchase-detail' | 'delivery-summary' | 'cod-settlements' | 'exceptions'
@@ -182,14 +344,15 @@ function ReportContent({ type, fromDate, toDate, user }: { type: ReportType; fro
 
   const rows = q.data?.rows ?? []
   const kpis = q.data?.kpis
+  const classification: ReportClassification | null = q.data?.classification ?? null
 
   switch (type) {
     case 'overview': return <OverviewReport kpis={kpis} bs={q.data} />
-    case 'profit-loss': return <ProfitLossReport rows={rows} />
-    case 'balance-sheet': return <BalanceSheetReport rows={rows} />
+    case 'profit-loss': return <ProfitLossReport rows={rows} classification={classification} />
+    case 'balance-sheet': return <BalanceSheetReport rows={rows} classification={classification} />
     case 'trial-balance': return <TrialBalanceReport rows={rows} />
     case 'cash-flow': return <CashFlowReport rows={rows} />
-    case 'expense': return <ExpenseReport rows={rows} />
+    case 'expense': return <ExpenseReport rows={rows} classification={classification} />
     case 'sales-summary': return <SalesSummaryReport rows={rows} />
     case 'sales-detail': return <SalesDetailReport rows={rows} />
     case 'customer-outstanding': return <CustomerOutstandingReport rows={rows} />
@@ -241,7 +404,9 @@ function OverviewReport({ kpis, bs }: { kpis: any; bs: any }) {
   )
 }
 
-function ProfitLossReport({ rows }: { rows: any[] }) {
+function ProfitLossReport({ rows, classification }: { rows: any[]; classification: ReportClassification | null }) {
+  const [grouped, setGrouped] = useState(false)
+  const canGroup = classification?.hasCustomClassification === true
   const revenue = rows.filter(r => r.section === 'REVENUE')
   const cogsRows = rows.filter(r => r.section === 'COST_OF_GOODS_SOLD')
   const expenses = rows.filter(r => r.section === 'EXPENSE')
@@ -250,6 +415,17 @@ function ProfitLossReport({ rows }: { rows: any[] }) {
   const totalExpenses = expenses.reduce((sum, row) => sum + BigInt(row.amount ?? 0), 0n)
   const grossProfit = totalRevenue - totalCogs
   const netProfit = grossProfit - totalExpenses
+  const amountOf = (row: any) => BigInt(row.amount ?? 0)
+  /** Every section keeps its own line markup; only the ordering changes. */
+  const line = (r: any) => (
+    <div className="flex justify-between text-xs py-1 border-b border-border/30">
+      <span>
+        <span data-num>{r.account_code}</span> · {r.account_name}
+        <ClassPath code={r.account_code} classification={classification} />
+      </span>
+      <span className="font-medium" data-num>{formatMoney(BigInt(r.amount), false)}</span>
+    </div>
+  )
   return (
     <div className="space-y-3">
       <div className="card-3d p-3 border-amber-200 bg-amber-50">
@@ -258,44 +434,45 @@ function ProfitLossReport({ rows }: { rows: any[] }) {
           Historical gross profit may be incomplete or estimated where sale-time cost was not recorded.
         </span>
       </div>
+      {canGroup && (
+        <div className="flex items-center justify-end">
+          <GroupToggle grouped={grouped} onToggle={() => setGrouped((on) => !on)} />
+        </div>
+      )}
       <div className="card-3d p-4">
         <h3 className="text-sm font-semibold text-foreground mb-3">Revenue</h3>
-        {revenue.length === 0 ? <p className="text-xs text-muted-foreground">No revenue in this period.</p> : revenue.map(r => (
-          <div key={r.account_code} className="flex justify-between text-xs py-1 border-b border-border/30">
-            <span><span data-num>{r.account_code}</span> · {r.account_name}</span>
-            <span className="font-medium" data-num>{formatMoney(BigInt(r.amount), false)}</span>
-          </div>
-        ))}
+        <StatementLines
+          rows={revenue} grouped={grouped} classification={classification}
+          amountOf={amountOf} renderRow={line} emptyMessage="No revenue in this period."
+        />
         <div className="flex justify-between text-sm font-bold mt-2 pt-2 border-t border-border">
           <span>Total Revenue</span><span data-num>{formatMoney(totalRevenue)}</span>
         </div>
       </div>
       <div className="card-3d p-4">
         <h3 className="text-sm font-semibold text-foreground mb-3">Cost of Goods Sold</h3>
-        {cogsRows.length === 0 ? <p className="text-xs text-muted-foreground">No COGS in this period.</p> : cogsRows.map(row => (
-          <div key={row.account_code} className="flex justify-between text-xs py-1 border-b border-border/30">
-            <span><span data-num>{row.account_code}</span> · {row.account_name}</span>
-            <span className="font-medium" data-num>{formatMoney(BigInt(row.amount), false)}</span>
-          </div>
-        ))}
+        <StatementLines
+          rows={cogsRows} grouped={grouped} classification={classification}
+          amountOf={amountOf} renderRow={line} emptyMessage="No COGS in this period."
+        />
         <div className="flex justify-between text-sm font-bold mt-2 pt-2 border-t border-border"><span>Total COGS</span><span data-num>{formatMoney(totalCogs)}</span></div>
         <div className="flex justify-between text-sm font-bold mt-2 pt-2 border-t border-border"><span>Gross Profit</span><span data-num>{formatMoney(grossProfit)}</span></div>
       </div>
       <div className="card-3d p-4">
         <h3 className="text-sm font-semibold text-foreground mb-3">Operating Expenses</h3>
-        {expenses.length === 0 ? <p className="text-xs text-muted-foreground">No expenses in this period.</p> : expenses.map(r => (
-          <div key={r.account_code} className="flex justify-between text-xs py-1 border-b border-border/30">
-            <span><span data-num>{r.account_code}</span> · {r.account_name}</span>
-            <span className="font-medium" data-num>{formatMoney(BigInt(r.amount), false)}</span>
-          </div>
-        ))}
+        <StatementLines
+          rows={expenses} grouped={grouped} classification={classification}
+          amountOf={amountOf} renderRow={line} emptyMessage="No expenses in this period."
+        />
         <div className="flex justify-between text-sm font-bold mt-2 pt-2 border-t border-border"><span>Net Profit</span><span className={netProfit >= 0n ? 'text-emerald-600' : 'text-rose-600'} data-num>{formatMoney(netProfit)}</span></div>
       </div>
     </div>
   )
 }
 
-function BalanceSheetReport({ rows }: { rows: any[] }) {
+function BalanceSheetReport({ rows, classification }: { rows: any[]; classification: ReportClassification | null }) {
+  const [grouped, setGrouped] = useState(false)
+  const canGroup = classification?.hasCustomClassification === true
   const assets = rows.filter(r => r.section === 'ASSET')
   const liabilities = rows.filter(r => r.section === 'LIABILITY')
   const equity = rows.filter(r => r.section === 'EQUITY')
@@ -320,9 +497,14 @@ function BalanceSheetReport({ rows }: { rows: any[] }) {
           </span>
         </div>
       </div>
-      <Section title="Assets" rows={assets} total={totalAssets} />
-      <Section title="Liabilities" rows={liabilities} total={totalLiabilities} />
-      <Section title="Equity" rows={permanentEquity} total={totalPermanentEquity} />
+      {canGroup && (
+        <div className="flex items-center justify-end">
+          <GroupToggle grouped={grouped} onToggle={() => setGrouped((on) => !on)} />
+        </div>
+      )}
+      <Section title="Assets" rows={assets} total={totalAssets} grouped={grouped} classification={classification} />
+      <Section title="Liabilities" rows={liabilities} total={totalLiabilities} grouped={grouped} classification={classification} />
+      <Section title="Equity" rows={permanentEquity} total={totalPermanentEquity} grouped={grouped} classification={classification} />
       {currentEarnings && (
         <div className="card-3d p-4 border-sky-200 bg-sky-50/30">
           <div className="flex items-center justify-between">
@@ -356,25 +538,42 @@ function BalanceSheetReport({ rows }: { rows: any[] }) {
   )
 }
 
-function Section({ title, rows, total }: { title: string; rows: any[]; total: bigint }) {
+/**
+ * One Balance Sheet section. `total` stays the caller's own section total, so
+ * the grouped view can only re-order the same lines and add subtotals — the
+ * fixed accounting root still decides what belongs in this section.
+ */
+function Section({ title, rows, total, grouped, classification }: {
+  title: string
+  rows: any[]
+  total: bigint
+  grouped?: boolean
+  classification?: ReportClassification | null
+}) {
+  const line = (r: any) => {
+    const balance = BigInt(r.balance)
+    const isAbnormal = (r.section === 'ASSET' && balance < 0n) || ((r.section === 'LIABILITY' || r.section === 'EQUITY') && balance < 0n)
+    return (
+      <div className="flex justify-between text-xs py-1 border-b border-border/30">
+        <span>
+          <span data-num>{r.account_code}</span> · {r.account_name}
+          <ClassPath code={r.account_code} classification={classification ?? null} />
+          {r.section === 'ASSET' && balance < 0n && <span className="ml-1 text-[9px] text-amber-600">(Credit Balance — abnormal)</span>}
+          {r.section === 'LIABILITY' && balance < 0n && <span className="ml-1 text-[9px] text-amber-600">(Debit Balance — advance/drawing)</span>}
+          {r.section === 'EQUITY' && balance < 0n && <span className="ml-1 text-[9px] text-amber-600">(Net Loss / Drawing)</span>}
+        </span>
+        <span className={`font-medium ${isAbnormal ? 'text-amber-700' : ''}`} data-num>{formatMoney(BigInt(r.balance), false)}</span>
+      </div>
+    )
+  }
   return (
     <div className="card-3d p-4">
       <h3 className="text-sm font-semibold text-foreground mb-3">{title}</h3>
-      {rows.length === 0 ? <p className="text-xs text-muted-foreground">No accounts with balance.</p> : rows.map(r => {
-        const balance = BigInt(r.balance)
-        const isAbnormal = (r.section === 'ASSET' && balance < 0n) || ((r.section === 'LIABILITY' || r.section === 'EQUITY') && balance < 0n)
-        return (
-          <div key={r.account_code} className="flex justify-between text-xs py-1 border-b border-border/30">
-            <span>
-              <span data-num>{r.account_code}</span> · {r.account_name}
-              {r.section === 'ASSET' && balance < 0n && <span className="ml-1 text-[9px] text-amber-600">(Credit Balance — abnormal)</span>}
-              {r.section === 'LIABILITY' && balance < 0n && <span className="ml-1 text-[9px] text-amber-600">(Debit Balance — advance/drawing)</span>}
-              {r.section === 'EQUITY' && balance < 0n && <span className="ml-1 text-[9px] text-amber-600">(Net Loss / Drawing)</span>}
-            </span>
-            <span className={`font-medium ${isAbnormal ? 'text-amber-700' : ''}`} data-num>{formatMoney(BigInt(r.balance), false)}</span>
-          </div>
-        )
-      })}
+      <StatementLines
+        rows={rows} grouped={grouped === true} classification={classification ?? null}
+        amountOf={(r) => BigInt(r.balance ?? 0)} renderRow={line}
+        emptyMessage="No accounts with balance."
+      />
       <div className="flex justify-between text-sm font-bold mt-2 pt-2 border-t border-border"><span>Total {title}</span><span data-num>{formatMoney(total)}</span></div>
     </div>
   )
@@ -397,18 +596,86 @@ function CashFlowReport({ rows }: { rows: any[] }) {
   )
 }
 
-function ExpenseReport({ rows }: { rows: any[] }) {
-  const total = rows.reduce((s, r) => s + Number(r.total_amount), 0)
+/**
+ * The one financial report that can safely be filtered: it is a flat expense
+ * breakdown with its own total, not a statement whose sections have to add up.
+ */
+function ExpenseReport({ rows, classification }: { rows: any[]; classification: ReportClassification | null }) {
+  const [categoryFilter, setCategoryFilter] = useState(ALL)
+  const [subcategoryFilter, setSubcategoryFilter] = useState(ALL)
+  const canFilter = classification?.hasCustomClassification === true
+  const total = rows.reduce((sum, r) => sum + BigInt(r.total_amount ?? 0), 0n)
+
+  const present = new Set(rows
+    .map((r) => classification?.accounts[r.account_code]?.categoryId)
+    .filter((id): id is string => Boolean(id)))
+  const categoryOptions = (classification?.categories ?? []).filter((c) => present.has(c.id))
+  const subcategoryOptions = (classification?.subcategories ?? []).filter((s) => categoryFilter === ALL
+    ? present.has(s.categoryId)
+    : s.categoryId === categoryFilter)
+
+  const filtersActive = canFilter && (categoryFilter !== ALL || subcategoryFilter !== ALL)
+  const visible = !filtersActive ? rows : rows.filter((r) => {
+    const label = classification?.accounts[r.account_code] ?? null
+    if (categoryFilter !== ALL && label?.categoryId !== categoryFilter) return false
+    if (subcategoryFilter !== ALL && label?.subcategoryId !== subcategoryFilter) return false
+    return true
+  })
+  const visibleTotal = visible.reduce((sum, r) => sum + BigInt(r.total_amount ?? 0), 0n)
+
+  function selectCategory(value: string) {
+    setCategoryFilter(value)
+    setSubcategoryFilter(ALL)
+  }
+  function resetFilters() {
+    setCategoryFilter(ALL)
+    setSubcategoryFilter(ALL)
+  }
+
   return (
-    <div className="card-3d p-4">
-      <h3 className="text-sm font-semibold text-foreground mb-3">Expense Breakdown</h3>
-      {rows.length === 0 ? <p className="text-xs text-muted-foreground">No expenses in this period.</p> : rows.map(r => (
-        <div key={r.account_code} className="flex justify-between text-xs py-2 border-b border-border/30">
-          <div><span data-num>{r.account_code}</span> · {r.account_name} <span className="text-muted-foreground">({r.entry_count} entries)</span></div>
-          <span className="font-medium" data-num>{formatMoney(BigInt(r.total_amount), false)}</span>
+    <div className="space-y-3">
+      {canFilter && (
+        <div className="card-3d p-3 flex flex-wrap items-center gap-2">
+          <span className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground px-1">
+            <Filter className="size-3.5" /> Filter
+          </span>
+          <ReportFilterSelect
+            label="Category" allLabel="All categories" value={categoryFilter}
+            options={categoryOptions} onChange={selectCategory}
+          />
+          <ReportFilterSelect
+            label="Subcategory" allLabel="All subcategories" value={subcategoryFilter}
+            options={subcategoryOptions} onChange={setSubcategoryFilter}
+          />
+          {filtersActive && (
+            <Button variant="ghost" size="sm" className="h-8 px-2 text-xs" onClick={resetFilters}>
+              <RotateCcw className="size-3.5" /> Reset
+            </Button>
+          )}
         </div>
-      ))}
-      <div className="flex justify-between text-sm font-bold mt-2 pt-2 border-t border-border"><span>Total Expenses</span><span data-num>{formatMoney(BigInt(total))}</span></div>
+      )}
+      <div className="card-3d p-4">
+        <h3 className="text-sm font-semibold text-foreground mb-3">Expense Breakdown</h3>
+        {visible.length === 0 ? (
+          <p className="text-xs text-muted-foreground">
+            {filtersActive ? 'No expenses match these filters.' : 'No expenses in this period.'}
+          </p>
+        ) : visible.map(r => (
+          <div key={r.account_code} className="flex justify-between text-xs py-2 border-b border-border/30">
+            <div>
+              <span data-num>{r.account_code}</span> · {r.account_name} <span className="text-muted-foreground">({r.entry_count} entries)</span>
+              <ClassPath code={r.account_code} classification={classification} />
+            </div>
+            <span className="font-medium" data-num>{formatMoney(BigInt(r.total_amount), false)}</span>
+          </div>
+        ))}
+        {filtersActive && (
+          <div className="flex justify-between text-xs font-medium mt-2 pt-2 border-t border-border/60 text-muted-foreground">
+            <span>Filtered total</span><span data-num>{formatMoney(visibleTotal)}</span>
+          </div>
+        )}
+        <div className="flex justify-between text-sm font-bold mt-2 pt-2 border-t border-border"><span>Total Expenses</span><span data-num>{formatMoney(total)}</span></div>
+      </div>
     </div>
   )
 }

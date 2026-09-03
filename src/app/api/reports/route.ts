@@ -7,8 +7,63 @@ import { resolveRequestId, safeApiError, withObservability } from '@/lib/observa
 import { bizDateString } from '@/lib/dates'
 import { isSchemaUnavailableError } from '@/lib/dashboard/compatibility'
 import { getAccountingAvailability, unavailableAccountingPayload } from '@/lib/accounting/availability'
+import { buildClassificationOverlay, tryListAccountClassification } from '@/lib/accounting/legacy-account-classification'
 import { usesLegacyTransactionSchema } from '@/lib/identity/legacy-bridge'
 import { isSupabaseConfigured } from '@/lib/supabase/config'
+
+/**
+ * Reports whose rows are one-per-ledger-account, so the custom classification
+ * can be attached as labels. The rows themselves — and therefore every total,
+ * section and statement placement — are returned exactly as the report RPC
+ * produced them.
+ */
+const CLASSIFIABLE_REPORTS = new Set(['profit-loss', 'balance-sheet', 'expense'])
+
+type ReportClassification = {
+  hasCustomClassification: boolean
+  categories: Array<{ id: string; name: string; rootId: string; isActive: boolean }>
+  subcategories: Array<{ id: string; name: string; rootId: string; categoryId: string; isActive: boolean }>
+  /** Keyed by account code, because the legacy report RPCs return codes. */
+  accounts: Record<string, {
+    categoryId: string
+    categoryName: string | null
+    subcategoryId: string | null
+    subcategoryName: string | null
+  }>
+}
+
+const EMPTY_CLASSIFICATION: ReportClassification = {
+  hasCustomClassification: false, categories: [], subcategories: [], accounts: {},
+}
+
+/** Best-effort; null keeps a report byte-identical to its pre-classification output. */
+async function reportClassification(
+  type: string,
+  businessId: string,
+  actorProfileId: string,
+): Promise<ReportClassification | null> {
+  if (!CLASSIFIABLE_REPORTS.has(type)) return null
+  const tree = await tryListAccountClassification(businessId, actorProfileId)
+  if (!tree) return null
+  const overlay = buildClassificationOverlay(tree)
+  if (!overlay.hasCustomClassification) return EMPTY_CLASSIFICATION
+  const accounts: ReportClassification['accounts'] = {}
+  for (const [code, label] of Object.entries(overlay.byAccountCode)) {
+    if (!label.categoryId) continue
+    accounts[code] = {
+      categoryId: label.categoryId,
+      categoryName: label.categoryName,
+      subcategoryId: label.subcategoryId,
+      subcategoryName: label.subcategoryName,
+    }
+  }
+  return {
+    hasCustomClassification: true,
+    categories: overlay.categories,
+    subcategories: overlay.subcategories,
+    accounts,
+  }
+}
 
 export const GET = withObservability('/api/reports', async (req: Request) => {
   const requestId = resolveRequestId(req)
@@ -68,13 +123,22 @@ export const GET = withObservability('/api/reports', async (req: Request) => {
       }
     }
     switch (type) {
-      case 'profit-loss': return NextResponse.json({ rows: await reportProfitLoss(bid, fromDate, toDate) })
-      case 'balance-sheet': return NextResponse.json({ rows: await reportBalanceSheet(bid, toDate) })
+      case 'profit-loss': return NextResponse.json({
+        rows: await reportProfitLoss(bid, fromDate, toDate),
+        classification: await reportClassification(type, bid, loaded.profileId),
+      })
+      case 'balance-sheet': return NextResponse.json({
+        rows: await reportBalanceSheet(bid, toDate),
+        classification: await reportClassification(type, bid, loaded.profileId),
+      })
       case 'trial-balance': return NextResponse.json({ rows: await reportTrialBalance(bid, fromDate, toDate) })
       case 'sales-summary': return NextResponse.json({ rows: await reportSalesSummary(bid, fromDate, toDate) })
       case 'inventory-valuation': return NextResponse.json({ rows: await reportInventoryValuation(bid) })
       case 'cash-flow': return NextResponse.json({ rows: await reportCashFlow(bid, fromDate, toDate) })
-      case 'expense': return NextResponse.json({ rows: await reportExpenseSummary(bid, fromDate, toDate) })
+      case 'expense': return NextResponse.json({
+        rows: await reportExpenseSummary(bid, fromDate, toDate),
+        classification: await reportClassification(type, bid, loaded.profileId),
+      })
       case 'customer-outstanding': return NextResponse.json({ rows: await reportCustomerOutstanding(bid) })
       case 'vendor-outstanding': return NextResponse.json({ rows: await reportVendorOutstanding(bid) })
       case 'sales-detail': return NextResponse.json({ rows: await reportSalesDetail(bid, fromDate, toDate) })

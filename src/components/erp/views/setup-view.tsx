@@ -1,7 +1,7 @@
 'use client'
 
 import type { MeUser } from '@/components/erp/erp-app'
-import { WalletCards, ListTree, UserCog, ShieldCheck, History, ArrowRight, Lock } from 'lucide-react'
+import { WalletCards, ListTree, FolderTree, UserCog, ShieldCheck, History, ArrowRight, Lock } from 'lucide-react'
 import { PageHeader } from '@/components/erp/page-header'
 
 export function SetupView({
@@ -27,6 +27,13 @@ export function SetupView({
       desc: 'Organize the accounts used to classify assets, liabilities, equity, income and expenses.',
       route: 'coa',
       icon: ListTree,
+      ownerOnly: false,
+    },
+    {
+      title: 'Account Classification',
+      desc: 'Create the categories and subcategories that group your ledger accounts.',
+      route: 'account-classification',
+      icon: FolderTree,
       ownerOnly: false,
     },
     {

@@ -13,6 +13,9 @@ import { getAccountById } from '@/lib/accounting/data-access'
 const isUuid = (s: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s)
 const LineSchema = z.object({
   expenseAccountId: z.string().min(1),
+  // Optional: the category the screen cascaded from. Sent so the server can
+  // confirm the account really sits under it — UI filtering is never trusted.
+  categoryId: z.string().trim().min(1).max(64).optional(),
   description: z.string().optional(),
   amount: z.string().min(1),
 })
@@ -55,6 +58,33 @@ export async function POST(req: Request) {
   }
   if (expenseAccounts.some((account) => !account?.isActive || account.category.type !== 'Expense')) {
     return NextResponse.json({ error: 'INVALID_EXPENSE_ACCOUNT' }, { status: 400 })
+  }
+  // System-managed expense accounts (Purchases / COGS, Salesman Commission
+  // Expense, …) are posted by their own workflows. They stay visible in the
+  // reports, but a manual batch may never target them. Business (cash / bank /
+  // wallet) and party accounts are not manual expense destinations either.
+  if (expenseAccounts.some((account) => account?.isSystem === true
+    || account?.isBusinessAccount === true
+    || account?.isPartyAccount === true)) {
+    return NextResponse.json({
+      error: 'INVALID_EXPENSE_ACCOUNT',
+      message: 'One selected account is maintained by the system and cannot be used for a manual expense.',
+    }, { status: 400 })
+  }
+  // The account must really belong to the category the line was cascaded from,
+  // whether it is linked to that category directly or to one of its
+  // subcategories.
+  const classificationMismatch = parsed.data.lines.some((line, index) => {
+    if (!line.categoryId) return false
+    const category = expenseAccounts[index]?.category
+    if (!category) return true
+    return category.depth === 2 ? category.parentId !== line.categoryId : category.id !== line.categoryId
+  })
+  if (classificationMismatch) {
+    return NextResponse.json({
+      error: 'INVALID_EXPENSE_ACCOUNT',
+      message: 'One selected account does not belong to the chosen category.',
+    }, { status: 400 })
   }
   const requestId = resolveRequestId(req)
   try {

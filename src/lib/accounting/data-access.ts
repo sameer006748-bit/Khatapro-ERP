@@ -40,7 +40,23 @@ export type AccountRow = {
   isPartyAccount: boolean
   partyType: string | null
   balanceCache: bigint
-  category: { id: string; code: string; name: string; type: string }
+  /**
+   * Set on the legacy production schema only: true for ledger accounts the
+   * posting engine maintains itself (e.g. Purchases / COGS, Salesman
+   * Commission Expense). Such accounts must stay visible in reports but must
+   * never be offered as a manual posting destination.
+   */
+  isSystem?: boolean
+  category: {
+    id: string
+    code: string
+    name: string
+    type: string
+    /** 0 = fixed accounting root, 1 = category, 2 = subcategory. */
+    depth?: number
+    parentId?: string | null
+    rootId?: string | null
+  }
 }
 
 export type CategoryWithAccounts = {
@@ -48,6 +64,9 @@ export type CategoryWithAccounts = {
   code: string
   name: string
   type: string
+  depth?: number
+  parentId?: string | null
+  rootId?: string | null
   accounts: AccountRow[]
 }
 
@@ -72,38 +91,47 @@ async function getChartOfAccountsFromLegacySupabase(businessId: string): Promise
   const [{ data: cats, error: categoryError }, { data: accts, error: accountError }] = await Promise.all([
     admin
       .from('account_categories')
-      .select('id, code, name, type')
+      .select('id, code, name, type, depth, parent_id, root_id')
       .eq('business_id', businessId)
       .order('code'),
     admin
       .from('accounts')
-      .select('id, code, name, category_id, is_active, is_business_account, is_party_account, party_type, balance_cache')
+      .select('id, code, name, category_id, is_active, is_system, is_business_account, is_party_account, party_type, balance_cache')
       .eq('business_id', businessId)
       .order('code'),
   ])
   if (categoryError) throw new Error(`Chart of accounts categories failed: ${categoryError.message}`)
   if (accountError) throw new Error(`Chart of accounts failed: ${accountError.message}`)
 
-  return (cats ?? []).map((category) => ({
-    id: category.id,
-    code: category.code,
-    name: category.name,
-    type: category.type,
-    accounts: (accts ?? [])
-      .filter((account) => account.category_id === category.id)
-      .map((account) => ({
-        id: account.id,
-        code: account.code,
-        name: account.name,
-        categoryId: account.category_id,
-        isActive: account.is_active,
-        isBusinessAccount: account.is_business_account,
-        isPartyAccount: account.is_party_account,
-        partyType: account.party_type,
-        balanceCache: BigInt(account.balance_cache ?? 0),
-        category: { id: category.id, code: category.code, name: category.name, type: category.type },
-      })),
-  }))
+  return (cats ?? []).map((category) => {
+    const identity = {
+      id: category.id,
+      code: category.code,
+      name: category.name,
+      type: category.type,
+      depth: category.depth ?? 0,
+      parentId: category.parent_id ?? null,
+      rootId: category.root_id ?? category.id,
+    }
+    return {
+      ...identity,
+      accounts: (accts ?? [])
+        .filter((account) => account.category_id === category.id)
+        .map((account) => ({
+          id: account.id,
+          code: account.code,
+          name: account.name,
+          categoryId: account.category_id,
+          isActive: account.is_active,
+          isBusinessAccount: account.is_business_account,
+          isPartyAccount: account.is_party_account,
+          partyType: account.party_type,
+          balanceCache: BigInt(account.balance_cache ?? 0),
+          isSystem: account.is_system === true,
+          category: identity,
+        })),
+    }
+  })
 }
 
 async function getChartOfAccountsFromPrisma(businessId: string): Promise<CategoryWithAccounts[]> {
@@ -205,14 +233,14 @@ export async function getAccountById(businessId: string, accountId: string): Pro
     const admin = getAdminSupabase()
     const { data, error } = await admin
       .from('accounts')
-      .select('id, code, name, category_id, is_active, is_business_account, is_party_account, party_type, balance_cache')
+      .select('id, code, name, category_id, is_active, is_system, is_business_account, is_party_account, party_type, balance_cache')
       .eq('id', accountId)
       .eq('business_id', businessId)
       .maybeSingle()
     if (error || !data) return null
     const { data: category, error: categoryError } = await admin
       .from('account_categories')
-      .select('id, code, name, type')
+      .select('id, code, name, type, depth, parent_id, root_id')
       .eq('id', data.category_id)
       .eq('business_id', businessId)
       .maybeSingle()
@@ -227,7 +255,16 @@ export async function getAccountById(businessId: string, accountId: string): Pro
       isPartyAccount: data.is_party_account,
       partyType: data.party_type,
       balanceCache: BigInt(data.balance_cache ?? 0),
-      category: { id: category.id, code: category.code, name: category.name, type: category.type },
+      isSystem: data.is_system === true,
+      category: {
+        id: category.id,
+        code: category.code,
+        name: category.name,
+        type: category.type,
+        depth: category.depth ?? 0,
+        parentId: category.parent_id ?? null,
+        rootId: category.root_id ?? category.id,
+      },
     }
   }
   if (await isSupabaseLive()) {

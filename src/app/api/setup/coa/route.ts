@@ -27,6 +27,10 @@ export async function GET() {
   }
   const cats = await getChartOfAccounts(su.businessId)
 
+  // Additive fields only. `depth`/`rootId`/`parentId` let a screen tell a fixed
+  // accounting root apart from a user-created category or subcategory, and
+  // `isSystem` marks accounts the posting engine maintains itself. Existing
+  // consumers that read code/name/type/accounts are unaffected.
   return NextResponse.json({
     availability: { accounting: true },
     categories: cats.map((c) => ({
@@ -34,6 +38,9 @@ export async function GET() {
       code: c.code,
       name: c.name,
       type: c.type,
+      depth: c.depth ?? 0,
+      parentId: c.parentId ?? null,
+      rootId: c.rootId ?? c.id,
       accounts: c.accounts.map((a) => ({
         id: a.id,
         code: a.code,
@@ -41,6 +48,7 @@ export async function GET() {
         isActive: a.isActive,
         isBusinessAccount: a.isBusinessAccount,
         isPartyAccount: a.isPartyAccount,
+        isSystem: a.isSystem === true,
         partyType: a.partyType,
         balancePaisas: a.balanceCache.toString(),
       })),

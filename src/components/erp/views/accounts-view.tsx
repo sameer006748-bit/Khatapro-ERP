@@ -16,7 +16,7 @@ import { apiFetchJson } from '@/lib/api-client'
 import { ACCOUNT_CATEGORY_DEFINITIONS, UNCATEGORIZED_CATEGORY, classifyMoneyActivity, matchesAccountSubcategory, summarizeAccountSubcategories, type MoneyActivity } from '@/lib/money/account-subcategories'
 import { PageHeader } from '@/components/erp/page-header'
 
-type Account = { id: string; code: string; name: string; isBusinessAccount: boolean; isPartyAccount: boolean; partyType: string | null; categoryCode: string; categoryType: string }
+type Account = { id: string; code: string; name: string; isBusinessAccount: boolean; isPartyAccount: boolean; isSystem: boolean; partyType: string | null; categoryCode: string; categoryType: string }
 type Category = { id: string; code: string; name: string; type: string; accounts: Account[] }
 
 type AccountGroup = 'Cash' | 'Bank' | 'Mobile Wallets' | 'Other'
@@ -45,9 +45,12 @@ export function AccountsView({ user }: { user: MeUser }) {
   const [advancedOpen, setAdvancedOpen] = useState(false)
 
   const coaQ = useQuery<any>({ queryKey: ['coa'], queryFn: ({ signal }) => apiFetchJson<any>('/api/setup/coa', { signal }), staleTime: 300_000, retry: false })
-  const accounts: Account[] = useMemo(() => (coaQ.data?.categories ?? []).flatMap((c: any) => c.accounts.filter((a: any) => a.isActive).map((a: any) => ({ id: a.id, code: a.code, name: a.name, isBusinessAccount: a.isBusinessAccount, isPartyAccount: a.isPartyAccount, partyType: a.partyType, categoryCode: c.code, categoryType: c.type }))), [coaQ.data])
+  const accounts: Account[] = useMemo(() => (coaQ.data?.categories ?? []).flatMap((c: any) => c.accounts.filter((a: any) => a.isActive).map((a: any) => ({ id: a.id, code: a.code, name: a.name, isBusinessAccount: a.isBusinessAccount, isPartyAccount: a.isPartyAccount, isSystem: a.isSystem === true, partyType: a.partyType, categoryCode: c.code, categoryType: c.type }))), [coaQ.data])
   const businessAccounts = accounts.filter(a => a.categoryType === 'Asset' && a.isBusinessAccount)
-  const expenseAccounts = accounts.filter(a => a.categoryType === 'Expense')
+  // Accounts the posting engine maintains itself (Purchases / COGS, Salesman
+  // Commission Expense) are never manual expense destinations — the server
+  // rejects them, so they must not be offered here either.
+  const expenseAccounts = accounts.filter(a => a.categoryType === 'Expense' && !a.isSystem && !a.isBusinessAccount && !a.isPartyAccount)
 
   // Trial balance for balances (mutations invalidate ['trial-balance'], so a
   // short staleTime only skips refetches on plain navigation revisits)
