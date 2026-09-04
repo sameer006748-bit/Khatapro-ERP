@@ -2,6 +2,11 @@
 
 Last updated: 2026-09-05
 
+## Current version
+**Version 1 — final client stabilization and handover.**
+
+The intelligent/proactive product vision is intentionally deferred to **Version 2**, which starts only after the client receives and approves Version 1.
+
 ## Current phase
 **Final release stabilization / client handover.**
 
@@ -10,6 +15,13 @@ Close the last verified client-facing navigation regressions, then complete fina
 
 ## Why this is next
 The ERP is substantially implemented and deployed. The highest-value work now is not adding new product features; it is removing known release blockers and proving the client paths work on real production/mobile usage.
+
+## Version 1 rule
+Until client handover and approval:
+- fix bugs before adding features,
+- do not begin Version 2 AI/intelligence implementation,
+- do not refactor accepted workflows solely for future architecture,
+- do not expand scope beyond production correctness, cleanup, role/mobile/print verification and handover readiness unless the client requests it.
 
 ## Already complete in this phase
 - verified release branch merged to `main`,
@@ -62,7 +74,7 @@ Required code gates:
 - User manually verifies the browser behavior.
 
 ## Immediately after the hotfix
-Run **one final closeout batch** rather than many small feature tasks. It should cover:
+Run **one final Version 1 closeout batch** rather than many small feature tasks. It should cover:
 - QA/demo production data cleanup with reference inspection before delete/deactivate,
 - Rider real-data mapping / assigned-order UAT status,
 - opening-stock `00012` reality check (no blind apply),
@@ -76,6 +88,16 @@ Run **one final closeout batch** rather than many small feature tasks. It should
 - stable client URL and explicit remaining blockers.
 
 **Do not assign browser automation to that final closeout agent. Browser verification remains manual/user-owned unless the user explicitly changes this.**
+
+## Version 1 exit gate
+Version 1 is not considered closed until:
+- known P0/P1 client blockers are resolved,
+- manual user browser checks pass,
+- final production data/role/print/handover checks are complete,
+- the client receives the system,
+- and the client approves the delivered Version 1.
+
+Only then should `CURRENT_WORK.md` be advanced to a Version 2 phase from `ROADMAP.md`.
 
 ## Known blockers / data realities
 - Rider code supports mapping, but a real Rider login must be linked to the intended Rider row and real delivery orders must exist for meaningful delivery-outcome UAT.
@@ -91,9 +113,12 @@ Run **one final closeout batch** rather than many small feature tasks. It should
 - Do not remove audit history for posted/used records.
 - Do not replace readable account identities with numeric ledger codes.
 - Do not let AI become the authoritative accounting calculator.
+- Do not start Version 2 intelligence work before Version 1 client approval.
 
 ## Exact next task
-**Finish the current navigation/invoice hotfix, collect its final report, manually verify the affected browser paths, then run the single final closeout/handover batch described above.**
+**Finish the current navigation/invoice hotfix, collect its final report, manually verify the affected browser paths, then run the single final Version 1 closeout/handover batch described above.**
+
+After client approval, move to the first approved Version 2 phase in `ROADMAP.md`.
 
 ## Future agent bootstrap
 Before meaningful work, read:
