@@ -47,7 +47,7 @@ import {
   CircleUserRound,
   type LucideIcon,
 } from 'lucide-react'
-import { useRouter, useSearchParams } from 'next/navigation'
+import { useSearchParams } from 'next/navigation'
 import dynamic from 'next/dynamic'
 import type { MeUser } from '@/components/erp/erp-app'
 import { KhataProLogo } from '@/components/erp/logo'
@@ -342,7 +342,6 @@ function resolveInitialPage(searchParams: URLSearchParams, user: MeUser): string
 export function DashboardShell({ user, onSignOut }: { user: MeUser; onSignOut: () => void }) {
   const [moreOpen, setMoreOpen] = useState(false)
   const tourNavigationState = useRef<{ expanded: Set<string>; moreOpen: boolean } | null>(null)
-  const router = useRouter()
   const searchParams = useSearchParams()
   const queryString = searchParams.toString()
   const ledgerAccountId = searchParams.get('ledger')
@@ -415,14 +414,29 @@ export function DashboardShell({ user, onSignOut }: { user: MeUser; onSignOut: (
     ? 'voucher-detail'
     : active
 
-  // When active changes, auto-expand its category and sync ?page= to URL.
+  // Single navigation entry point for the shell: the desktop sidebar, the mobile
+  // "More" sheet and the product tour all land here.
+  //
+  // This writes the URL with the App Router's patched history.pushState rather
+  // than router.push(). The shell renders whatever ?page= useSearchParams()
+  // reports, and useSearchParams() is derived from the router's canonical URL.
+  // pushState updates that URL synchronously and locally. router.push() only
+  // updates it once it has resolved the target route from the server, and when
+  // that resolution fails Next discards the navigation silently — the tap then
+  // changes nothing, shows no error and leaves the previous page rendered. The
+  // primary mobile tabs are prefetched <Link>s, which resolve from the route
+  // cache, which is why they kept working while every surface routed through
+  // this function stopped. Keep this on pushState.
   function selectItem(key: string) {
+    const item = PAGE_REGISTRY.get(key)
+    if (!item || !isItemVisible(user, item)) return
     const url = new URL(window.location.href)
     url.searchParams.delete('ledger')
     url.searchParams.delete('invoice')
     url.searchParams.delete('voucher')
     url.searchParams.set('page', key)
-    router.push(`${url.pathname}?${url.searchParams.toString()}`)
+    window.history.pushState({}, '', `${url.pathname}?${url.searchParams.toString()}`)
+    window.dispatchEvent(new PopStateEvent('popstate'))
     const cat = categoryForKey(key)
     if (cat) {
       setExpanded((prev) => {

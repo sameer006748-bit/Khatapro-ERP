@@ -706,21 +706,39 @@ export async function listInvoices(businessId: string, opts?: { type?: string; s
 export async function getInvoice(businessId: string, invoiceId: string): Promise<InvoiceRow | null> {
   if (await isPhase4Live()) {
     const admin = getAdminSupabase()
-    const { data: inv, error } = await admin.from('invoices').select('id, invoice_no, invoice_type, invoice_date, customer_name, customer_phone, customer_address, customer_city, subtotal, discount, total, paid, status, memo, salesmen(name), invoice_items(id, product_id, product_name, qty, returned_qty, unit_price, line_total, is_temporary)').eq('id', invoiceId).eq('business_id', businessId).single()
-    if (error || !inv) return null
+    const { data: inv, error } = await admin.from('invoices').select('id, invoice_no, invoice_type, invoice_date, customer_name, customer_phone, customer_address, customer_city, subtotal, discount, total, paid, status, memo, salesmen(name), invoice_items(id, product_id, product_name, qty, returned_qty, unit_price, line_total, is_temporary)').eq('id', invoiceId).eq('business_id', businessId).maybeSingle()
+    // A failed read is not a missing invoice. maybeSingle() reports "no such row"
+    // as data: null with no error, so the two stay distinguishable: a real
+    // database failure is raised (and logged with its relation/column/code)
+    // instead of reaching the user as "Invoice not found".
+    if (error) throw new Error(`Supabase invoice: ${error.message}`)
+    if (!inv) return null
     const r = inv as any
     const { data: payments, error: paymentError } = await admin.from('payments').select('id, amount, direction, payment_mode').eq('business_id', businessId).eq('invoice_id', invoiceId).order('created_at')
     if (paymentError) throw new Error(`Supabase invoice payments: ${paymentError.message}`)
-    const { data: returns, error: returnError } = await admin.from('sales_returns').select('id, return_no, return_date, total, settlement_status, reason').eq('business_id', businessId).eq('original_invoice_id', invoiceId).order('return_date')
+    // Return numbers, dates, totals and reasons live in columns the base schema
+    // always has, so the money on this document — returned total, outstanding —
+    // is always exact. `settlement_status` and the per-line breakdown arrive with
+    // a later migration and are printed detail only, so they are read separately
+    // and allowed to be absent: a database that has not caught up must still be
+    // able to open its own invoices.
+    const { data: returns, error: returnError } = await admin.from('sales_returns').select('id, return_no, return_date, total, reason').eq('business_id', businessId).eq('original_invoice_id', invoiceId).order('return_date')
     if (returnError) throw new Error(`Supabase invoice returns: ${returnError.message}`)
     const returnIds = (returns ?? []).map((sr: any) => sr.id)
+    const settlementByReturn = new Map<string, string>()
     let returnLines: any[] = []
     if (returnIds.length > 0) {
-      const { data: lines, error: lineError } = await admin.from('sales_return_lines')
+      const { data: settlements } = await admin.from('sales_returns')
+        .select('id, settlement_status')
+        .eq('business_id', businessId)
+        .in('id', returnIds)
+      for (const row of (settlements ?? []) as any[]) {
+        if (row.settlement_status) settlementByReturn.set(row.id, row.settlement_status)
+      }
+      const { data: lines } = await admin.from('sales_return_lines')
         .select('sales_return_id, original_invoice_item_id, returned_qty')
         .eq('business_id', businessId)
-        .in('sale_return_id', returnIds)
-      if (lineError) throw new Error(`Supabase invoice return lines: ${lineError.message}`)
+        .in('sales_return_id', returnIds)
       returnLines = lines ?? []
     }
     const sourceItems = new Map((r.invoice_items ?? []).map((it: any) => [it.id, it]))
@@ -728,7 +746,7 @@ export async function getInvoice(businessId: string, invoiceId: string): Promise
       returnNo: sr.return_no,
       returnDate: sr.return_date,
       total: String(sr.total),
-      settlementStatus: sr.settlement_status ?? 'POSTED',
+      settlementStatus: settlementByReturn.get(sr.id) ?? 'POSTED',
       reason: sr.reason ?? null,
       lines: returnLines.filter(line => line.sales_return_id === sr.id).map(line => {
         const source = sourceItems.get(line.original_invoice_item_id) as any

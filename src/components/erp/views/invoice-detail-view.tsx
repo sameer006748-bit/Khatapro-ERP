@@ -67,6 +67,23 @@ const EVENT_LABEL: Record<string, string> = {
   reversal: 'Reversed by return',
 }
 
+/**
+ * Carries the HTTP status of a failed invoice fetch so the screen can tell the
+ * user which of four different things actually happened — the invoice does not
+ * exist, it is not theirs, their session lapsed, or the server could not read
+ * it — instead of reporting all four as "Invoice not found".
+ */
+class InvoiceLoadError extends Error {
+  constructor(
+    readonly status: number,
+    readonly code: string | null,
+    readonly requestId: string | null,
+  ) {
+    super(`Invoice request failed with ${status}`)
+    this.name = 'InvoiceLoadError'
+  }
+}
+
 const TYPE_BADGE: Record<string, string> = {
   COUNTER: 'bg-emerald-100 text-emerald-700',
   ONLINE: 'bg-sky-100 text-sky-700',
@@ -90,9 +107,21 @@ export function InvoiceDetailView({ invoiceId, openReturn = false }: { invoiceId
 
   const q = useQuery<{ invoice: Invoice; business?: { name: string; phone: string | null; address: string | null } | null }>({
     queryKey: ['invoice', invoiceId],
-    queryFn: () => fetch(`/api/sales/${invoiceId}`).then(r => r.json()),
+    // The status has to be read here. Resolving the promise on a 404 or a 500
+    // hands the query an object with no `invoice`, which is indistinguishable
+    // from a genuinely missing invoice — that is how a server-side failure ended
+    // up being reported to the user as "Invoice not found".
+    queryFn: async () => {
+      const res = await fetch(`/api/sales/${invoiceId}`)
+      const body = await res.json().catch(() => null)
+      if (!res.ok) throw new InvoiceLoadError(res.status, body?.error ?? null, body?.requestId ?? res.headers.get('x-request-id'))
+      return body
+    },
     enabled: !!invoiceId,
-    retry: 1,
+    // Retrying tells the user nothing new when the answer was "no", "not yours"
+    // or "sign in again".
+    retry: (failureCount, error) =>
+      failureCount < 1 && !(error instanceof InvoiceLoadError && error.status < 500),
     retryDelay: 500,
   })
 
@@ -173,17 +202,24 @@ export function InvoiceDetailView({ invoiceId, openReturn = false }: { invoiceId
     </div>
   )
   if (q.isError || !q.data?.invoice) {
-    const errorData = q.data as any
-    const errorMsg = errorData?.error === 'FORBIDDEN'
+    const failure = q.error instanceof InvoiceLoadError ? q.error : null
+    const errorMsg = failure?.status === 403 || failure?.code === 'FORBIDDEN'
       ? 'You do not have permission to view this invoice.'
-      : errorData?.error === 'UNAUTHORIZED'
+      : failure?.status === 401 || failure?.code === 'UNAUTHORIZED'
       ? 'Please sign in again.'
+      : failure?.status === 404
+      ? 'Invoice not found.'
+      : failure
+      ? 'This invoice exists, but the server could not read it. Please retry — if it keeps failing, share the reference below with support.'
       : q.isError
       ? 'Unable to load invoice. Please try again.'
       : 'Invoice not found.'
     return (
       <div className="card-3d p-8 text-center">
         <p className="text-sm text-destructive mb-4">{errorMsg}</p>
+        {failure?.requestId && failure.status >= 500 ? (
+          <p className="text-xs text-muted-foreground mb-4">Reference: {failure.requestId}</p>
+        ) : null}
         <Button variant="outline" size="sm" className="press-sm" onClick={() => q.refetch()}>Retry</Button>
       </div>
     )
