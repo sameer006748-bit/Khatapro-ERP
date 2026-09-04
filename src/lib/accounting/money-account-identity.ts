@@ -10,14 +10,9 @@
  * (1010, 1060, …) stays exactly as it is and remains the accounting number and
  * the posting key; nothing here replaces it, and no UUID is ever shown.
  *
- * STORAGE: there is no identity column on `business_accounts` (or `accounts`)
- * in either data path yet, so every identity below is *derived*. Derivation is
- * deterministic and server-side, so one account reads the same on every screen.
- * The seeded chart accounts are keyed on their immutable ledger code, so those
- * identities are already rename-proof; a user-created account is keyed on its
- * name, so its identity follows a rename until the proposed column exists.
- * `assignMoneyIdentities` therefore prefers a stored identity whenever a row
- * carries one, which is the only change the migration needs on the read path.
+ * STORAGE: production persists this on `business_accounts.identity`. This
+ * module remains the rollout fallback and the matching pre-insert validator;
+ * whenever a row carries a valid stored identity, that value wins outright.
  */
 import { normalizeBusinessAccountType } from './business-account-types.ts'
 
@@ -54,6 +49,12 @@ export function moneyIdentityToken(raw: string | null | undefined): string {
     .replace(/-{2,}/g, '-')
 }
 
+/** A user-created account must contribute a real readable word. */
+export function hasReadableMoneyIdentitySource(raw: string | null | undefined): boolean {
+  const token = moneyIdentityToken(raw)
+  return Boolean(token && /^[A-Z]/.test(token) && !/^[0-9-]+$/.test(token))
+}
+
 /** Trim on a hyphen boundary so a shortened identity still reads as words. */
 function clamp(identity: string): string {
   if (identity.length <= MONEY_IDENTITY_MAX_LENGTH) return identity
@@ -79,7 +80,9 @@ export function deriveMoneyIdentity(input: MoneyIdentityInput): string {
   if (seeded) return seeded
   const type = normalizeBusinessAccountType(String(input.type ?? ''))
   const base = moneyIdentityToken(input.name)
-  if (!base || /^[0-9-]+$/.test(base)) return type.toUpperCase()
+  if (!hasReadableMoneyIdentitySource(input.name)) {
+    throw new Error('A readable money-account identity cannot be derived from this name')
+  }
   if (type === 'Bank' && !base.startsWith('BANK')) return clamp(`BANK-${base}`)
   return clamp(base)
 }
@@ -89,20 +92,30 @@ export function deriveMoneyIdentity(input: MoneyIdentityInput): string {
  * words first (`BANK-UBL` → `BANK-UBL-KORANGI`), then a readable `-ALT` ladder.
  * A meaningless numeric identity such as `ACCOUNT-1060` is never produced.
  */
+function withSuffix(base: string, rawSuffix: string): string | null {
+  const suffix = clamp(moneyIdentityToken(rawSuffix).slice(0, 20))
+  if (!hasReadableMoneyIdentitySource(suffix)) return null
+  const budget = MONEY_IDENTITY_MAX_LENGTH - suffix.length - 1
+  if (budget < 1) return null
+  let prefix = base.slice(0, budget)
+  if (base.length > budget && prefix.includes('-')) prefix = prefix.slice(0, prefix.lastIndexOf('-'))
+  prefix = prefix.replace(/-+$/, '')
+  return prefix ? `${prefix}-${suffix}` : null
+}
+
 function* candidates(base: string, hints: readonly string[]): Generator<string> {
   yield base
   const seen = new Set([base])
   for (const hint of hints) {
-    const token = moneyIdentityToken(hint)
-    if (!token) continue
-    const candidate = clamp(`${base}-${token}`)
+    const candidate = withSuffix(base, hint)
+    if (!candidate) continue
     if (!seen.has(candidate)) {
       seen.add(candidate)
       yield candidate
     }
   }
-  yield clamp(`${base}-ALT`)
-  for (let n = 2; n <= 99; n += 1) yield clamp(`${base}-ALT-${n}`)
+  yield withSuffix(base, 'ALT')!
+  for (let n = 2; n <= 99; n += 1) yield withSuffix(base, `ALT-${n}`)!
 }
 
 export type MoneyIdentityRow = MoneyIdentityInput & {
@@ -132,13 +145,14 @@ export function assignMoneyIdentities(rows: readonly MoneyIdentityRow[]): string
     }
     const base = deriveMoneyIdentity(row)
     const hints = (row.hints ?? []).filter((hint): hint is string => Boolean(hint && String(hint).trim()))
-    let chosen = base
+    let chosen: string | undefined
     for (const candidate of candidates(base, hints)) {
       if (!taken.has(candidate)) {
         chosen = candidate
         break
       }
     }
+    if (!chosen) throw new Error('No safe unique readable money-account identity is available')
     taken.add(chosen)
     assigned.push(chosen)
   }

@@ -51,7 +51,7 @@ test('unlimited accounts can be created under either type', () => {
   // Nothing counts, caps or de-duplicates accounts per type: the create route
   // validates a name and a type and allocates the next ledger code.
   assert.match(createRoute, /z\.enum\(BUSINESS_ACCOUNT_TYPES\)/)
-  assert.match(createRoute, /name: z\.string\(\)\.min\(1\)\.max\(80\)/)
+  assert.match(createRoute, /name: z\.string\(\)\.trim\(\)\.min\(1\)\.max\(80\)\.refine\(hasReadableMoneyIdentitySource/)
   assert.doesNotMatch(createRoute, /ACCOUNT_LIMIT|MAX_ACCOUNTS|already exists/)
   assert.match(createRoute, /let nextNum = 1060/)
   // Both screens offer the two types from the one vocabulary module.
@@ -169,7 +169,7 @@ test('audit records readable money-account events without backend metadata', () 
   assert.match(itemRoute, /action: 'MONEY_ACCOUNT_DELETE'/)
   // Before/after snapshots carry the name, code, type and status — not ids or
   // the raw request payload.
-  assert.match(itemRoute, /type MoneyAccountSnapshot = \{ code: string; name: string; type: string; isActive: boolean \}/)
+  assert.match(itemRoute, /type MoneyAccountSnapshot = \{[\s\S]*code: string[\s\S]*identity: string[\s\S]*name: string[\s\S]*type: string[\s\S]*isActive: boolean[\s\S]*\}/)
   assert.doesNotMatch(itemRoute, /details: \{ patch/)
   assert.doesNotMatch(itemRoute, /ledgerAccountId/)
   assert.doesNotMatch(createRoute, /ledgerAccountId/)

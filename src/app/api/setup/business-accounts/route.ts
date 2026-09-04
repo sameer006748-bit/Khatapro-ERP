@@ -10,8 +10,8 @@
  *     They are listed here as `linked: false` and become fully manageable once
  *     linked, which reuses the existing ledger row and never creates a second.
  *
- * Every row also carries a readable `identity` (`CASH`, `PETTY-CASH`,
- * `BANK-UBL`) derived server-side so one account reads the same everywhere. The
+ * Every row also carries a readable stored `identity` (`CASH`, `PETTY-CASH`,
+ * `BANK-UBL`). Server-side derivation remains only as a rollout fallback. The
  * numeric ledger code stays the accounting number and the posting key.
  *
  * Creating a money account atomically creates a linked sub-account under Asset
@@ -28,7 +28,11 @@ import {
   BUSINESS_ACCOUNT_TYPES,
   moneyTypeFromLedgerAccount,
 } from '@/lib/accounting/business-account-types'
-import { assignMoneyIdentities, deriveMoneyIdentity } from '@/lib/accounting/money-account-identity'
+import {
+  assignMoneyIdentities,
+  deriveMoneyIdentity,
+  hasReadableMoneyIdentitySource,
+} from '@/lib/accounting/money-account-identity'
 import { getChartOfAccounts } from '@/lib/accounting/data-access'
 import { isSupabaseConfigured } from '@/lib/supabase/config'
 import { usesLegacyTransactionSchema } from '@/lib/identity/legacy-bridge'
@@ -41,7 +45,9 @@ import {
 } from '@/lib/accounting/legacy-business-accounts'
 
 const CreateSchema = z.object({
-  name: z.string().min(1).max(80),
+  name: z.string().trim().min(1).max(80).refine(hasReadableMoneyIdentitySource, {
+    message: 'Name must contain a readable word for the account identity.',
+  }),
   type: z.enum(BUSINESS_ACCOUNT_TYPES),
   accountHolder: z.string().max(80).optional(),
   bankName: z.string().max(80).optional(),
@@ -79,10 +85,13 @@ function unavailableResponse() {
   )
 }
 
-function serializeLegacy(row: BusinessAccountRecord): Omit<MoneyAccountRow, 'identity'> {
+type MoneyAccountIdentitySource = Omit<MoneyAccountRow, 'identity'> & { identity?: string | null }
+
+function serializeLegacy(row: BusinessAccountRecord): MoneyAccountIdentitySource {
   return {
     id: row.id,
     linked: true,
+    identity: row.identity,
     name: row.name,
     type: row.type,
     accountHolder: row.accountHolder,
@@ -110,14 +119,14 @@ function serializeLegacy(row: BusinessAccountRecord): Omit<MoneyAccountRow, 'ide
 async function listUnlinkedLedgerMoneyAccounts(
   businessId: string,
   linkedLedgerAccountIds: ReadonlySet<string>,
-): Promise<Omit<MoneyAccountRow, 'identity'>[]> {
+): Promise<MoneyAccountIdentitySource[]> {
   let chart
   try {
     chart = await getChartOfAccounts(businessId)
   } catch {
     return []
   }
-  const rows: Omit<MoneyAccountRow, 'identity'>[] = []
+  const rows: MoneyAccountIdentitySource[] = []
   for (const category of chart) {
     if (category.type !== 'Asset') continue
     for (const account of category.accounts) {
@@ -152,16 +161,17 @@ async function listUnlinkedLedgerMoneyAccounts(
 }
 
 /**
- * Identity is assigned across the whole business at once, in ledger-code order.
- * Codes are immutable and allocated upward, so a new account never takes an
- * identity an existing one already reads by.
+ * Stored identity is authoritative. During an application-first rollout (and
+ * for unlinked seeded ledger rows), fallback identities are assigned across the
+ * whole business at once without taking a persisted identity.
  */
-function withIdentities(rows: Omit<MoneyAccountRow, 'identity'>[]): MoneyAccountRow[] {
+function withIdentities(rows: MoneyAccountIdentitySource[]): MoneyAccountRow[] {
   const ordered = [...rows].sort((a, b) => a.ledger.code.localeCompare(b.ledger.code, 'en', { numeric: true }))
   const identities = assignMoneyIdentities(ordered.map((row) => ({
     name: row.name,
     type: row.type,
     ledgerCode: row.ledger.code,
+    identity: row.identity,
     hints: [row.bankName, row.accountHolder],
   })))
   return ordered.map((row, index) => ({ ...row, identity: identities[index] }))
@@ -196,7 +206,7 @@ export async function GET() {
     orderBy: [{ isActive: 'desc' }, { createdAt: 'asc' }],
   })
 
-  const managed: Omit<MoneyAccountRow, 'identity'>[] = rows.map((r) => ({
+  const managed: MoneyAccountIdentitySource[] = rows.map((r) => ({
     id: r.id,
     linked: true,
     name: r.name,
@@ -251,7 +261,8 @@ export async function POST(req: Request) {
         accountNumber,
       })
       const row = serializeLegacy(created)
-      return NextResponse.json({ row: { ...row, identity: deriveMoneyIdentity({ name, type, ledgerCode: row.ledger.code }) } })
+      const identity = row.identity ?? deriveMoneyIdentity({ name, type, ledgerCode: row.ledger.code })
+      return NextResponse.json({ row: { ...row, identity } })
     } catch (error) {
       if (error instanceof LegacyBusinessAccountsUnavailableError) return unavailableResponse()
       throw error

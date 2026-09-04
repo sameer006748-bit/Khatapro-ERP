@@ -15,6 +15,7 @@ import {
   SEEDED_MONEY_IDENTITY_BY_LEDGER_CODE,
   assignMoneyIdentities,
   deriveMoneyIdentity,
+  hasReadableMoneyIdentitySource,
   isMoneyIdentity,
   moneyAccountContext,
   moneyIdentityToken,
@@ -31,16 +32,20 @@ const expenseView = await readFile('src/components/erp/views/expense-batch-view.
 const expenseRoute = await readFile('src/app/api/expense-batch/route.ts', 'utf8')
 const auditView = await readFile('src/components/erp/views/audit-log-view.tsx', 'utf8')
 const prismaSchema = await readFile('prisma/schema.prisma', 'utf8')
+const identityMigration = await readFile(
+  'supabase/migrations/20260904161347_persist_business_account_identity.sql',
+  'utf8',
+)
 
 // ===========================================================================
 // Identity rules
 // ===========================================================================
 
-test('every money account gets a readable identity, and it is never a number', () => {
-  // A name that is only digits, or missing entirely, still yields a word.
-  assert.equal(deriveMoneyIdentity({ name: '1060', type: 'Cash' }), 'CASH')
-  assert.equal(deriveMoneyIdentity({ name: '', type: 'Bank' }), 'BANK')
-  assert.equal(deriveMoneyIdentity({ name: '  ---  ', type: 'Cash' }), 'CASH')
+test('every accepted money account gets a readable identity, and numeric-only sources are rejected', () => {
+  for (const bad of ['1060', '', '  ---  ', '9 cash']) {
+    assert.equal(hasReadableMoneyIdentitySource(bad), false)
+    assert.throws(() => deriveMoneyIdentity({ name: bad, type: 'Cash' }), /cannot be derived/)
+  }
   assert.equal(deriveMoneyIdentity({ name: 'Till Cash', type: 'Cash' }), 'TILL-CASH')
   assert.equal(deriveMoneyIdentity({ name: 'UBL', type: 'Bank' }), 'BANK-UBL')
   assert.equal(deriveMoneyIdentity({ name: 'Bank Al Habib', type: 'Bank' }), 'BANK-AL-HABIB')
@@ -297,17 +302,24 @@ test('expense accounting semantics are unchanged by the layout work', () => {
   assert.doesNotMatch(expenseRoute, /moneyAccountContext|deriveMoneyIdentity|MONEY_IDENTITY/)
 })
 
-test('no identity column is written or required — the read path prefers one if it lands', () => {
-  // The migration gate: nothing here adds a column, so identity is derived and
-  // the feature ships on the schema that is already deployed.
+test('stored production identity is authoritative with an application-first fallback', () => {
+  // The local SQLite fallback stays schema-compatible; production persistence
+  // is introduced by the gated legacy migration.
   assert.doesNotMatch(prismaSchema, /^\s*identity\s+String/m)
-  assert.match(identityModule, /there is no identity column on `business_accounts`/)
-  // Derived server-side in one place, so every screen reads the same value.
-  assert.match(listRoute, /function withIdentities\(rows: Omit<MoneyAccountRow, 'identity'>\[\]\): MoneyAccountRow\[\]/)
+  assert.match(identityMigration, /alter table public\.business_accounts add column identity text/)
+  assert.match(identityMigration, /alter column identity set not null/)
+  assert.match(identityMigration, /unique \(business_id, identity\)/)
+  assert.match(identityMigration, /Business Account identity is immutable/)
+  assert.match(identityMigration, /create or replace function public\.list_business_accounts_v2/)
+  assert.match(legacyAccess, /rpc\('list_business_accounts_v2'/)
+  assert.match(legacyAccess, /rpc\('list_business_accounts'/)
+  // Stored values are reserved before any rollout fallback is derived.
+  assert.match(listRoute, /function withIdentities\(rows: MoneyAccountIdentitySource\[\]\): MoneyAccountRow\[\]/)
   assert.match(listRoute, /ordered\.sort|\[\.\.\.rows\]\.sort/)
+  assert.match(listRoute, /identity: row\.identity/)
   assert.match(listRoute, /identity: string/)
-  // Audit entries carry the identity and keep the code as a secondary reference.
-  assert.match(itemRoute, /identity: deriveMoneyIdentity\(\{/)
+  // Audit entries carry stored identity and keep code as a secondary reference.
+  assert.match(itemRoute, /identity: input\.after\.identity/)
   assert.match(itemRoute, /ledgerCode: input\.after\.code/)
   assert.match(auditView, /changes\.push\(\{ label: 'Identity', value: identity \}\)/)
 })

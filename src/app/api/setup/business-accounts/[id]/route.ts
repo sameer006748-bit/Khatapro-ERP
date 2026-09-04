@@ -95,6 +95,11 @@ function serialize(row: {
 function serializeLegacy(row: BusinessAccountRecord) {
   return {
     id: row.id,
+    identity: row.identity ?? deriveMoneyIdentity({
+      name: row.name,
+      type: row.type,
+      ledgerCode: row.accountCode,
+    }),
     name: row.name,
     type: row.type,
     accountHolder: row.accountHolder,
@@ -117,7 +122,13 @@ function serializeLegacy(row: BusinessAccountRecord) {
  * The four things an owner reads back off an audit entry. Bank name, account
  * holder and account number are deliberately absent, and so are internal ids.
  */
-type MoneyAccountSnapshot = { code: string; name: string; type: string; isActive: boolean }
+type MoneyAccountSnapshot = {
+  code: string
+  identity: string
+  name: string
+  type: string
+  isActive: boolean
+}
 
 /**
  * Name the event after what actually changed, so the audit log reads as
@@ -153,11 +164,7 @@ async function auditMoneyAccountUpdate(input: {
       name: input.after.name,
       // The identity the account reads by, alongside the ledger code it posts
       // to — the two references an owner recognises the account from.
-      identity: deriveMoneyIdentity({
-        name: input.after.name,
-        type: input.after.type,
-        ledgerCode: input.after.code,
-      }),
+      identity: input.after.identity,
       ledgerCode: input.after.code,
       ...(input.before ? { before: input.before } : {}),
       after: input.after,
@@ -178,7 +185,17 @@ async function legacySnapshotBefore(
     const rows = await listLegacyBusinessAccounts(su.businessId, su.profileId)
     const row = rows.find((candidate) => candidate.id === businessAccountId)
     return row
-      ? { code: row.accountCode, name: row.name, type: row.type, isActive: row.isActive }
+      ? {
+          code: row.accountCode,
+          identity: row.identity ?? deriveMoneyIdentity({
+            name: row.name,
+            type: row.type,
+            ledgerCode: row.accountCode,
+          }),
+          name: row.name,
+          type: row.type,
+          isActive: row.isActive,
+        }
       : null
   } catch {
     return null
@@ -215,7 +232,17 @@ export async function PATCH(req: Request, ctx: Ctx) {
         su,
         businessAccountId: id,
         before,
-        after: { code: row.accountCode, name: row.name, type: row.type, isActive: row.isActive },
+        after: {
+          code: row.accountCode,
+          identity: row.identity ?? deriveMoneyIdentity({
+            name: row.name,
+            type: row.type,
+            ledgerCode: row.accountCode,
+          }),
+          name: row.name,
+          type: row.type,
+          isActive: row.isActive,
+        },
       })
       return NextResponse.json({ row: serializeLegacy(row) })
     } catch (error) {
@@ -264,12 +291,24 @@ export async function PATCH(req: Request, ctx: Ctx) {
     businessAccountId: existing.id,
     before: {
       code: existing.account.code,
+      identity: deriveMoneyIdentity({
+        name: existing.name,
+        type: existing.type,
+        ledgerCode: existing.account.code,
+      }),
       name: existing.name,
       type: existing.type,
       isActive: existing.isActive,
     },
     after: {
       code: updated.account.code,
+      // The local fallback has no persisted column. Preserve the identity from
+      // the pre-update snapshot so its audit still proves rename/type stability.
+      identity: deriveMoneyIdentity({
+        name: existing.name,
+        type: existing.type,
+        ledgerCode: existing.account.code,
+      }),
       name: updated.name,
       type: updated.type,
       isActive: updated.isActive,

@@ -85,7 +85,7 @@ export async function POST(req: Request) {
           entityId: row.id,
           details: {
             name: row.name,
-            identity: deriveMoneyIdentity({ name: row.name, type: row.type, ledgerCode: row.accountCode }),
+            identity: row.identity ?? deriveMoneyIdentity({ name: row.name, type: row.type, ledgerCode: row.accountCode }),
             ledgerCode: row.accountCode,
             after: { code: row.accountCode, name: row.name, type: row.type, isActive: row.isActive },
           },

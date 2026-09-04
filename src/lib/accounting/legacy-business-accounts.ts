@@ -18,6 +18,8 @@ export class LegacyBusinessAccountsUnavailableError extends Error {
 export type BusinessAccountRecord = {
   id: string
   accountId: string
+  /** Null only while application code is deployed ahead of migration rollout. */
+  identity: string | null
   name: string
   type: string
   accountHolder: string | null
@@ -34,6 +36,7 @@ export type BusinessAccountRecord = {
 type LegacyRow = {
   id: string
   account_id: string
+  identity?: string | null
   name: string
   type: string
   account_holder: string | null
@@ -58,6 +61,7 @@ function mapRow(row: LegacyRow): BusinessAccountRecord {
   return {
     id: row.id,
     accountId: row.account_id,
+    identity: row.identity ?? null,
     name: row.name,
     type: row.type,
     accountHolder: row.account_holder ?? null,
@@ -73,12 +77,20 @@ function mapRow(row: LegacyRow): BusinessAccountRecord {
 }
 
 export async function listLegacyBusinessAccounts(businessId: string, actorProfileId: string) {
-  const { data, error } = await getAdminSupabase().rpc('list_business_accounts', {
+  const admin = getAdminSupabase()
+  const args = {
     p_business_id: businessId,
     p_actor_profile_id: actorProfileId,
-  })
-  if (error) unavailable(error)
-  return ((data ?? []) as LegacyRow[]).map(mapRow)
+  }
+  const v2 = await admin.rpc('list_business_accounts_v2', args)
+  if (!v2.error) return ((v2.data ?? []) as LegacyRow[]).map(mapRow)
+  if (classifyPostgrestCompatibilityError(v2.error) !== 'missing-rpc') unavailable(v2.error)
+
+  // Deploy-safe fallback: old callers and application-first rollouts continue
+  // to use the original return contract until the migration is applied.
+  const legacy = await admin.rpc('list_business_accounts', args)
+  if (legacy.error) unavailable(legacy.error)
+  return ((legacy.data ?? []) as LegacyRow[]).map(mapRow)
 }
 
 /**
@@ -96,8 +108,8 @@ export type LinkLedgerMoneyAccountResult =
  *
  * The ledger row is reused, never recreated — its id, its numeric code, its
  * balance and every posted entry referencing it stay exactly as they are. This
- * is a plain insert of the columns the table has had since the first migration,
- * so no schema change is involved.
+ * remains a plain legacy-compatible insert. After the identity migration, the
+ * database trigger assigns the immutable identity in that same transaction.
  *
  * Idempotent twice over: an existing row is detected first, and `account_id`
  * carries a unique constraint, so a concurrent second attempt cannot produce a
@@ -179,7 +191,10 @@ export async function createLegacyBusinessAccount(input: {
     p_idempotency_key: input.idempotencyKey,
   })
   if (error) unavailable(error)
-  return mapRow(data as LegacyRow)
+  const created = mapRow(data as LegacyRow)
+  const stored = (await listLegacyBusinessAccounts(input.businessId, input.actorProfileId))
+    .find((row) => row.id === created.id)
+  return stored ?? created
 }
 
 export async function updateLegacyBusinessAccount(input: {
@@ -214,7 +229,10 @@ export async function updateLegacyBusinessAccount(input: {
     p_actor_profile_id: input.actorProfileId,
   })
   if (error) unavailable(error)
-  return mapRow(data as LegacyRow)
+  const updated = mapRow(data as LegacyRow)
+  const stored = (await listLegacyBusinessAccounts(input.businessId, input.actorProfileId))
+    .find((row) => row.id === updated.id)
+  return stored ?? updated
 }
 
 export async function deleteLegacyBusinessAccount(input: {

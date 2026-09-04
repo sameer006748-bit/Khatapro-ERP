@@ -11,13 +11,16 @@ import { isSupabaseConfigured } from '@/lib/supabase/config'
 import { resolveRequestId, safeApiError, withObservability } from '@/lib/observability'
 
 const SECRET_DETAIL_KEY = /(?:password|secret|token|api[_-]?key|authorization|cookie|credential)/i
+const INTERNAL_DETAIL_KEY = /^(?:ledgerAccountId|accountId|businessId|userId|profileId|categoryId|subcategoryId|idempotencyKey)$/
 
 function safeDetails(raw: unknown): Record<string, unknown> | null {
   if (!raw) return null
   try {
     const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null
-    return Object.fromEntries(Object.entries(parsed as Record<string, unknown>).filter(([key]) => !SECRET_DETAIL_KEY.test(key)))
+    return Object.fromEntries(Object.entries(parsed as Record<string, unknown>).filter(
+      ([key]) => !SECRET_DETAIL_KEY.test(key) && !INTERNAL_DETAIL_KEY.test(key),
+    ))
   } catch { return null }
 }
 
