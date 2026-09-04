@@ -5,6 +5,7 @@ import { authOptions } from '@/lib/auth/authOptions'
 import { loadSessionUser, requirePermission, hasPermission } from '@/lib/auth/permissions'
 import { postPurchase, listPurchases } from '@/lib/purchases/data-access'
 import { withObservability, resolveRequestId, safeMutationError } from '@/lib/observability'
+import { isSupabaseConfigured } from '@/lib/supabase/config'
 
 const isUuid = (s: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s)
 
@@ -30,8 +31,10 @@ export async function POST(req: Request) {
   const body = await req.json().catch(() => null)
   const parsed = Schema.safeParse(body)
   if (!parsed.success) return NextResponse.json({ error: 'INVALID_INPUT', details: parsed.error.flatten() }, { status: 400 })
-  // Validate payment account UUIDs
-  for (const p of parsed.data.payments) { if (p.paymentType !== 'credit' && (!p.accountId || !isUuid(p.accountId))) return NextResponse.json({ error: `Invalid account ID (not UUID): ${p.accountId ?? ''}` }, { status: 400 }) }
+  // Validate payment account UUIDs in Supabase mode only; local Prisma uses CUIDs.
+  if (isSupabaseConfigured()) {
+    for (const p of parsed.data.payments) { if (p.paymentType !== 'credit' && (!p.accountId || !isUuid(p.accountId))) return NextResponse.json({ error: `Invalid account ID (not UUID): ${p.accountId ?? ''}` }, { status: 400 }) }
+  }
   const requestId = resolveRequestId(req)
   try {
     const result = await postPurchase({

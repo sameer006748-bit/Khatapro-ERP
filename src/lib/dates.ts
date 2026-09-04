@@ -17,16 +17,121 @@ export const BUSINESS_TZ = 'Asia/Karachi'
 /** Asia/Karachi is permanently UTC+5 (no DST). */
 const KHI_OFFSET_MINUTES = 5 * 60
 
+export type BusinessDateRange = { from: string; to: string }
+
+type DateSearchParams = { get(name: string): string | null }
+
+function addBusinessDays(label: string, days: number): string {
+  const [year, month, day] = label.split('-').map(Number)
+  const date = new Date(Date.UTC(year, month - 1, day + days))
+  return date.toISOString().slice(0, 10)
+}
+
+/** Preset date-only ranges in the business timezone; safe for URL/API use. */
+export function bizPresetDateRange(preset: 'today' | 'last3' | 'last7' | 'month', now: Date = new Date()): BusinessDateRange {
+  const today = bizDateString(now)
+  if (preset === 'today') return { from: today, to: today }
+  if (preset === 'last3') return { from: calendarDaysBefore(today, 2), to: today }
+  if (preset === 'last7') return { from: calendarDaysBefore(today, 6), to: today }
+  if (preset === 'month') return { from: `${today.slice(0, 8)}01`, to: today }
+  throw new Error(`Unknown preset: ${preset}`)
+}
+
+function calendarDaysBefore(dateStr: string, count: number): string {
+  return addBusinessDays(dateStr, -count)
+}
+
+/** Inclusive number of calendar days a business date range covers. */
+export function businessDaySpan(range: BusinessDateRange): number {
+  if (!isBusinessDateRange(range)) throw new Error('INVALID_DATE_RANGE')
+  const from = Date.parse(`${range.from}T00:00:00Z`)
+  const to = Date.parse(`${range.to}T00:00:00Z`)
+  return Math.round((to - from) / 86_400_000) + 1
+}
+
+/**
+ * The equally long range immediately before `range`. Every supported selection
+ * reduces to this single rule: Today → the previous day, a 7-day window → the
+ * 7 days before it, month-to-date → the equally long window before the 1st,
+ * and a custom range → the preceding range of identical length. Returns null
+ * for an invalid range so callers omit the comparison rather than guess.
+ */
+export function bizPreviousDateRange(range: BusinessDateRange): BusinessDateRange | null {
+  if (!isBusinessDateRange(range)) return null
+  const span = businessDaySpan(range)
+  return { from: addBusinessDays(range.from, -span), to: addBusinessDays(range.from, -1) }
+}
+
+/**
+ * Every date label in a range, ascending, for day-bucketed trend series.
+ * Returns null past `limit` days: a window that long has no readable
+ * per-day shape in a compact sparkline, so the caller omits the chart.
+ */
+export function businessDateLabels(range: BusinessDateRange, limit = 92): string[] | null {
+  if (!isBusinessDateRange(range)) return null
+  const span = businessDaySpan(range)
+  if (span > limit) return null
+  return Array.from({ length: span }, (_, index) => addBusinessDays(range.from, index))
+}
+
+export function isBusinessDateLabel(label: string): boolean {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(label)
+  if (!match) return false
+  const year = Number(match[1])
+  const month = Number(match[2])
+  const day = Number(match[3])
+  const calendarDate = new Date(Date.UTC(year, month - 1, day))
+  return calendarDate.getUTCFullYear() === year
+    && calendarDate.getUTCMonth() === month - 1
+    && calendarDate.getUTCDate() === day
+}
+
+export function isBusinessDateRange(value: BusinessDateRange): boolean {
+  return isBusinessDateLabel(value.from)
+    && isBusinessDateLabel(value.to)
+    && value.from <= value.to
+}
+
+/** Serialize the one supported dashboard URL contract: from/to date-only labels. */
+export function dashboardDateRangeQuery(range: BusinessDateRange): string {
+  if (!isBusinessDateRange(range)) throw new Error('INVALID_DATE_RANGE')
+  return new URLSearchParams({ from: range.from, to: range.to }).toString()
+}
+
+/**
+ * Parse the dashboard URL contract. Missing/blank dates default to Karachi
+ * Today; either single supplied date becomes an inclusive one-day range.
+ * `today` remains a read-only compatibility alias for old bookmarked URLs.
+ */
+export function resolveDashboardDateRange(
+  params: DateSearchParams,
+  now: Date = new Date(),
+): BusinessDateRange | null {
+  const defaultDate = bizDateString(now)
+  const from = params.get('from')?.trim() || ''
+  const to = params.get('to')?.trim() || ''
+  const legacyToday = params.get('today')?.trim() || ''
+  const single = from || to || legacyToday || defaultDate
+  const range = {
+    from: from || (to ? to : single),
+    to: to || (from ? from : single),
+  }
+  return isBusinessDateRange(range) ? range : null
+}
+
 /** Format a Date as yyyy-MM-dd in Asia/Karachi. */
 export function bizDateString(date: Date | string | number): string {
   const d = typeof date === 'string' || typeof date === 'number' ? new Date(date) : date
-  // toLocaleString with en-CA gives yyyy-MM-dd format.
-  return d.toLocaleString('en-CA', {
+  if (Number.isNaN(d.getTime())) throw new Error('Invalid Date')
+  const parts = new Intl.DateTimeFormat('en-US', {
     timeZone: BUSINESS_TZ,
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
-  })
+  }).formatToParts(d)
+  const part = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find(item => item.type === type)?.value
+  return `${part('year')}-${part('month')}-${part('day')}`
 }
 
 /** Format a Date as yyyy-MM in Asia/Karachi. */

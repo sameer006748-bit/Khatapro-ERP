@@ -39,6 +39,7 @@ export const loadSessionUser = cache(_loadSessionUser)
 
 async function _loadSessionUser(userId: string): Promise<SessionUser | null> {
   if (!isSupabaseConfigured()) {
+    if (process.env.VERCEL) return null
     // Local development fallback: Prisma + SQLite
     const u = await db.user.findUnique({
       where: { id: userId },
@@ -195,6 +196,7 @@ export async function requireOwner(s: SessionUser | null): Promise<SessionUser> 
  */
 export async function noOwnerExists(): Promise<boolean> {
   if (!isSupabaseConfigured()) {
+    if (process.env.VERCEL) return false
     const ownerRole = await db.role.findFirst({
       where: { name: 'Owner/Admin', isSystem: true },
     })
@@ -229,6 +231,17 @@ export async function noOwnerExists(): Promise<boolean> {
 }
 
 /** Audit log helper — used by every mutating API route. */
+const AUDIT_SECRET_KEY = /(?:password|secret|token|api[_-]?key|authorization|cookie|credential)/i
+
+/** Remove credential-like values before audit metadata ever reaches storage. */
+export function sanitizeAuditDetails(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(sanitizeAuditDetails)
+  if (!value || typeof value !== 'object') return value
+  return Object.fromEntries(Object.entries(value as Record<string, unknown>)
+    .filter(([key]) => !AUDIT_SECRET_KEY.test(key))
+    .map(([key, item]) => [key, sanitizeAuditDetails(item)]))
+}
+
 export async function writeAudit(args: {
   businessId: string
   userId?: string | null
@@ -237,7 +250,13 @@ export async function writeAudit(args: {
   entityId?: string | null
   details?: Record<string, unknown> | null
 }) {
+  const safeDetails = args.details ? sanitizeAuditDetails(args.details) as Record<string, unknown> : null
   if (!isSupabaseConfigured()) {
+    if (process.env.VERCEL) {
+      const error = new Error('Serverless local database fallback is prohibited.')
+      error.name = 'ServerlessDatabaseProhibitedError'
+      throw error
+    }
     await db.auditLog.create({
       data: {
         businessId: args.businessId,
@@ -245,7 +264,7 @@ export async function writeAudit(args: {
         action: args.action,
         entity: args.entity,
         entityId: args.entityId ?? null,
-        details: args.details ? JSON.stringify(args.details) : null,
+        details: safeDetails ? JSON.stringify(safeDetails) : null,
       },
     })
     return
@@ -261,7 +280,7 @@ export async function writeAudit(args: {
     action: args.action,
     entity: args.entity,
     entity_id: args.entityId ?? null,
-    details: args.details ? JSON.stringify(args.details) : null,
+    details: safeDetails ? JSON.stringify(safeDetails) : null,
   })
 
   if (error) {

@@ -7,6 +7,8 @@ import { requireSameOrigin } from '@/lib/ai/ai-settings-auth'
 import { getAiApiKey } from '@/lib/ai/ai-settings-store'
 import { AI_LIMITS, AI_PROVIDER } from '@/lib/ai/config'
 import { buildAiContext } from '@/lib/ai/ai-context'
+import { AI_PERIOD_PRESETS, resolveAiPeriod } from '@/lib/ai/ai-period'
+import { financialAnswerIsSupported, type AllowedFinancialValue } from '@/lib/ai/financial-safety'
 import { generateGeminiAnswer, GeminiClientError } from '@/lib/ai/gemini-client'
 import { consumeAiRequest } from '@/lib/ai/rate-limit'
 import {
@@ -14,6 +16,7 @@ import {
   AI_MODES,
   AI_SCREENS,
   canUseAiForScreen,
+  resolveAnswerLanguage,
   sanitizeFieldMetadata,
   validatePrompt,
 } from '@/lib/ai/safety-core'
@@ -24,6 +27,7 @@ const requestSchema = z.object({
   language: z.enum(AI_LANGUAGES).default('roman-urdu'),
   mode: z.enum(AI_MODES).default('ask'),
   screen: z.enum(AI_SCREENS).default('home'),
+  period: z.object({ preset: z.enum(AI_PERIOD_PRESETS), from: z.string().optional(), to: z.string().optional() }).strict().optional(),
   field: z.unknown().optional(),
 }).strict()
 
@@ -52,6 +56,12 @@ async function post(req: NextRequest) {
   if (!parsed.success) return response('VALIDATION_ERROR', 'Please enter a shorter valid question.', 400, requestId)
 
   const field = parsed.data.mode === 'field-help' ? sanitizeFieldMetadata(parsed.data.field) : null
+  let period
+  try {
+    period = resolveAiPeriod(parsed.data.period)
+  } catch {
+    return response('INVALID_PERIOD', 'Please choose a valid business date range.', 400, requestId)
+  }
   if (parsed.data.mode === 'field-help' && (!field || field.currentScreen !== parsed.data.screen)) {
     return response('FIELD_CONTEXT_INVALID', 'Field help context is invalid.', 400, requestId)
   }
@@ -64,47 +74,57 @@ async function post(req: NextRequest) {
   if (validation === 'too_long') return response('PROMPT_TOO_LONG', 'Please shorten your question.', 400, requestId)
   if (validation === 'write_request') return response('READ_ONLY_REQUEST', 'KhataPro AI is read-only and cannot post or change ERP records.', 400, requestId)
   if (validation === 'secret_or_injection') return response('UNSAFE_REQUEST', 'KhataPro AI cannot reveal secrets or bypass safety rules.', 400, requestId)
-  if (!consumeAiRequest(session.userId)) return response('RATE_LIMITED', 'Too many AI requests. Please wait one minute.', 429, requestId)
+  if (!consumeAiRequest(session.userId)) return response('RATE_LIMITED', 'KhataPro AI is temporarily unavailable. Please try again later.', 429, requestId)
 
   const apiKey = await getAiApiKey(session.businessId, AI_PROVIDER)
-  if (!apiKey) return response('AI_NOT_CONFIGURED', 'Gemini is not configured. Ask an Owner/Admin to connect it.', 409, requestId)
+  if (!apiKey) return response('AI_NOT_CONFIGURED', 'KhataPro AI is not configured. Please update the AI settings.', 409, requestId)
 
   try {
+    const answerLanguage = resolveAnswerLanguage(parsed.data.prompt, parsed.data.language)
     const context = await buildAiContext({
       session,
       screen: parsed.data.screen,
       mode: parsed.data.mode,
       prompt: parsed.data.prompt,
       field,
+      period,
     })
-    const answer = await generateGeminiAnswer({
+    const generated = await generateGeminiAnswer({
       apiKey,
-      language: parsed.data.language,
+      language: answerLanguage,
       prompt: parsed.data.prompt,
       context,
+      screen: parsed.data.screen,
+      mode: parsed.data.mode,
+      requestId,
     })
+    const values = Array.isArray(context.allowedFinancialValues) ? context.allowedFinancialValues as AllowedFinancialValue[] : []
+    const answer = financialAnswerIsSupported(generated, values)
+      ? generated
+      : JSON.stringify({
+        simpleAnswer: answerLanguage === 'roman-urdu' ? 'Is period ke liye yeh figure available nahi hai.' : 'This figure is not available for the selected period.',
+        accountingEffect: '',
+        nextCheck: answerLanguage === 'roman-urdu' ? 'Period aur available business data check karein.' : 'Check the selected period and available business data.',
+      })
 
     return NextResponse.json(
-      { answer, language: parsed.data.language, readOnly: true },
+      { answer, language: answerLanguage, readOnly: true, period },
       { headers: { 'Cache-Control': 'no-store', 'X-Request-Id': requestId } },
     )
   } catch (error) {
     if (error instanceof GeminiClientError) {
-      if (error.category === 'invalid_api_key') return response('AI_INVALID_KEY', 'The Gemini key is invalid. An Owner/Admin should test or replace it.', 502, requestId)
-      if (error.category === 'permission_denied') return response('AI_ACCESS_DENIED', 'Gemini access is denied for the configured key.', 502, requestId)
-      if (error.category === 'quota_exceeded') return response('AI_QUOTA_EXHAUSTED', 'The Gemini quota is exhausted.', 429, requestId)
-      if (error.category === 'rate_limited') return response('AI_RATE_LIMITED', 'Gemini is rate limited. Please wait and retry.', 429, requestId)
-      if (error.category === 'model_not_found') return response('AI_MODEL_UNAVAILABLE', 'The configured Gemini model is unavailable.', 502, requestId)
-      if (error.category === 'timeout') return response('AI_TIMEOUT', 'Gemini took too long. Please retry once.', 504, requestId)
-      if (error.category === 'malformed_request') return response('AI_REQUEST_INVALID', 'Gemini rejected the request format.', 502, requestId)
-      if (error.category === 'truncated') return response('AI_RESPONSE_TRUNCATED', 'The AI answer was too long and got cut off. Please ask a more specific question.', 502, requestId)
-      return response('AI_CONNECTION_ERROR', 'Gemini is temporarily unavailable. Please retry once.', 502, requestId)
+      if (error.category === 'invalid_api_key') return response('AI_INVALID_KEY', 'AI connection is not authorized. Please update the AI settings.', 502, requestId)
+      if (error.category === 'permission_denied') return response('AI_ACCESS_DENIED', 'You do not have permission to use this feature.', 502, requestId)
+      if (error.category === 'quota_exceeded' || error.category === 'rate_limited') return response('AI_TEMPORARILY_UNAVAILABLE', 'KhataPro AI is temporarily unavailable. Please try again later.', 429, requestId)
+      if (error.category === 'timeout' || error.category === 'model_not_found' || error.category === 'provider_unavailable') return response('AI_CONNECTION_ERROR', 'KhataPro AI could not respond right now. Please try again.', 502, requestId)
+      if (error.category === 'truncated') return response('AI_RESPONSE_INCOMPLETE', 'KhataPro AI could not complete this explanation. Please try again.', 502, requestId)
+      return response('AI_REQUEST_FAILED', 'Something went wrong. Please try again.', 502, requestId)
     }
     return safeApiError({
       route: '/api/ai/ask',
       requestId,
       errorCode: 'AI_REQUEST_FAILED',
-      userMessage: 'AI help could not be generated.',
+      userMessage: 'KhataPro AI could not respond right now. Please try again.',
       error,
       method: 'POST',
     })

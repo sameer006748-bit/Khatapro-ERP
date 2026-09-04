@@ -1,16 +1,157 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, Fragment, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { formatMoney } from '@/lib/format'
-import { bizDate } from '@/lib/dates'
-import { BarChart3, FileText, Scale, Wallet, Package, Users, Bike, ScrollText, TrendingUp, TrendingDown, Download, Printer, ChevronRight, AlertTriangle, CheckCircle2, ShieldAlert } from 'lucide-react'
+import { bizDate, bizDateString } from '@/lib/dates'
+import { BarChart3, FileText, Scale, Wallet, Package, Users, Bike, ScrollText, TrendingUp, TrendingDown, Download, Printer, ChevronRight, AlertTriangle, CheckCircle2, ShieldAlert, Filter, List, ListTree, RotateCcw } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import type { MeUser } from '@/components/erp/erp-app'
+import { apiFetchJson } from '@/lib/api-client'
+import { PageHeader } from '@/components/erp/page-header'
+
+/**
+ * Reporting-side view of the custom account classification. It is a labelling
+ * and navigation layer only: the fixed accounting root still decides where an
+ * account appears, and no total on this screen is derived from it.
+ */
+type ReportClassification = {
+  hasCustomClassification: boolean
+  categories: Array<{ id: string; name: string; rootId: string; isActive: boolean }>
+  accounts: Record<string, {
+    categoryId: string
+    categoryName: string | null
+    subcategoryId: string | null
+    subcategoryName: string | null
+  }>
+}
+
+/** Radix has no empty option, so each report selector keeps an explicit "all" value. */
+const ALL = '__all__'
+
+type StatementRow = { account_code: string }
+
+type ReportGroup<T> = {
+  key: string
+  label: string
+  total: bigint
+  rows: T[]
+}
+
+const lastIf = (isLast: boolean) => (isLast ? 1 : 0)
+
+/**
+ * Partition one statement section into its categories. Every row lands in
+ * exactly one bucket, so the subtotals add up to the section total the
+ * statement already prints — grouping never recomputes a figure.
+ */
+function groupByClassification<T extends StatementRow>(
+  rows: T[],
+  classification: ReportClassification | null,
+  amountOf: (row: T) => bigint,
+): Array<ReportGroup<T>> {
+  const groups: Array<ReportGroup<T>> = []
+  for (const row of rows) {
+    const label = classification?.accounts[row.account_code] ?? null
+    const categoryKey = label?.categoryId ?? 'ungrouped'
+    let group = groups.find((entry) => entry.key === categoryKey)
+    if (!group) {
+      group = {
+        key: categoryKey,
+        label: label?.categoryName ?? 'Not grouped in a category',
+        total: 0n,
+        rows: [],
+      }
+      groups.push(group)
+    }
+    group.total += amountOf(row)
+    group.rows.push(row)
+  }
+  groups.sort((a, b) =>
+    lastIf(a.key === 'ungrouped') - lastIf(b.key === 'ungrouped') || a.label.localeCompare(b.label))
+  return groups
+}
+
+/** "Category › Subcategory" next to an account name; nothing when unclassified. */
+function ClassPath({ code, classification }: { code: string; classification: ReportClassification | null }) {
+  const label = classification?.accounts[code] ?? null
+  const path = label ? [label.categoryName, label.subcategoryName].filter(Boolean).join(' › ') : ''
+  return path ? <span className="ml-1.5 text-[10px] text-muted-foreground">{path}</span> : null
+}
+
+/** Compact drill-down switch, shown only when the business classifies accounts. */
+function GroupToggle({ grouped, onToggle }: { grouped: boolean; onToggle: () => void }) {
+  return (
+    <Button variant="outline" size="sm" className="h-8 px-2 text-xs" onClick={onToggle}>
+      {grouped
+        ? <><List className="size-3.5" /> Flat list</>
+        : <><ListTree className="size-3.5" /> Group by category</>}
+    </Button>
+  )
+}
+
+/** Compact report filter — a labelled trigger with an explicit "all" option. */
+function ReportFilterSelect({ label, allLabel, value, options, onChange }: {
+  label: string
+  allLabel: string
+  value: string
+  options: Array<{ id: string; name: string; isActive: boolean }>
+  onChange: (value: string) => void
+}) {
+  return (
+    <Select value={value} onValueChange={onChange}>
+      <SelectTrigger className="h-8 w-full sm:w-44 bg-background text-xs" aria-label={label}>
+        <SelectValue placeholder={allLabel} />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value={ALL}>{allLabel}</SelectItem>
+        {options.map((option) => (
+          <SelectItem key={option.id} value={option.id}>
+            {option.isActive ? option.name : `${option.name} (inactive)`}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  )
+}
+
+/**
+ * Account lines of one section, flat or grouped by classification. `renderRow`
+ * keeps each statement's own line markup, so only the order and the added
+ * subtotals differ between the two modes.
+ */
+function StatementLines<T extends StatementRow>({ rows, grouped, classification, amountOf, renderRow, emptyMessage }: {
+  rows: T[]
+  grouped: boolean
+  classification: ReportClassification | null
+  amountOf: (row: T) => bigint
+  renderRow: (row: T) => ReactNode
+  emptyMessage: string
+}) {
+  if (rows.length === 0) return <p className="text-xs text-muted-foreground">{emptyMessage}</p>
+  if (!grouped) {
+    return <>{rows.map((row) => <Fragment key={row.account_code}>{renderRow(row)}</Fragment>)}</>
+  }
+  return (
+    <>
+      {groupByClassification(rows, classification, amountOf).map((group) => (
+        <div key={group.key} className="mt-3 first:mt-0">
+          <div className="flex justify-between text-[11px] uppercase tracking-wider font-medium text-foreground py-1 border-b border-border">
+            <span>{group.label}</span>
+            <span data-num>{formatMoney(group.total, false)}</span>
+          </div>
+          <div className="pl-2">
+            {group.rows.map((row) => <Fragment key={row.account_code}>{renderRow(row)}</Fragment>)}
+          </div>
+        </div>
+      ))}
+    </>
+  )
+}
 
 type Category = 'overview' | 'financial' | 'sales' | 'purchases' | 'inventory' | 'parties' | 'delivery' | 'audit'
 type ReportType = 'overview' | 'profit-loss' | 'balance-sheet' | 'trial-balance' | 'cash-flow' | 'expense' | 'sales-summary' | 'sales-detail' | 'customer-outstanding' | 'vendor-outstanding' | 'inventory-valuation' | 'stock-movements' | 'product-profitability' | 'purchase-detail' | 'delivery-summary' | 'cod-settlements' | 'exceptions'
@@ -52,19 +193,23 @@ const CATEGORIES: Array<{ id: Category; label: string; icon: any; reports: Array
 export function ReportsView({ user }: { user: MeUser }) {
   const [category, setCategory] = useState<Category>('overview')
   const [reportType, setReportType] = useState<ReportType>('overview')
-  const [fromDate, setFromDate] = useState(() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01` })
-  const [toDate, setToDate] = useState(new Date().toISOString().slice(0, 10))
+  const [fromDate, setFromDate] = useState(() => `${bizDateString(new Date()).slice(0, 8)}01`)
+  const [toDate, setToDate] = useState(() => bizDateString(new Date()))
 
   const visibleCategories = CATEGORIES.filter(c => c.reports.some(r => user.permissions.includes(r.perm)) || c.id === 'overview' || c.id === 'audit')
 
   function setPreset(preset: string) {
-    const today = new Date()
-    const toDateStr = today.toISOString().slice(0, 10)
+    const toDateStr = bizDateString(new Date())
+    const year = Number(toDateStr.slice(0, 4))
+    const month = Number(toDateStr.slice(5, 7))
     let fromStr = toDateStr
     if (preset === 'today') fromStr = toDateStr
-    else if (preset === 'thisMonth') fromStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-01`
-    else if (preset === 'lastMonth') { const d = new Date(today.getFullYear(), today.getMonth() - 1, 1); fromStr = d.toISOString().slice(0, 10) }
-    else if (preset === 'thisYear') fromStr = `${today.getFullYear()}-01-01`
+    else if (preset === 'thisMonth') fromStr = `${toDateStr.slice(0, 8)}01`
+    else if (preset === 'lastMonth') {
+      const previousYear = month === 1 ? year - 1 : year
+      const previousMonth = month === 1 ? 12 : month - 1
+      fromStr = `${previousYear}-${String(previousMonth).padStart(2, '0')}-01`
+    } else if (preset === 'thisYear') fromStr = `${year}-01-01`
     setFromDate(fromStr); setToDate(toDateStr)
   }
 
@@ -96,13 +241,15 @@ export function ReportsView({ user }: { user: MeUser }) {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-end justify-between gap-3 flex-wrap">
-        <div><h1 className="text-xl font-semibold tracking-tight text-foreground">Reports</h1><p className="text-xs text-muted-foreground mt-0.5">Financial, sales, purchase, inventory and delivery reports</p></div>
-        <div className="flex gap-2">
+      <PageHeader
+        compact
+        title="Reports"
+        description="Financial, sales, purchase, inventory and delivery reports."
+        actions={<>
           <Button variant="outline" size="sm" onClick={exportCsv}><Download className="size-3.5" /> CSV</Button>
           <Button variant="outline" size="sm" onClick={() => window.print()}><Printer className="size-3.5" /> Print</Button>
-        </div>
-      </div>
+        </>}
+      />
 
       {/* Date filters */}
       <div className="flex flex-wrap gap-2 items-end">
@@ -155,29 +302,34 @@ export function ReportsView({ user }: { user: MeUser }) {
 }
 
 function ReportContent({ type, fromDate, toDate, user }: { type: ReportType; fromDate: string; toDate: string; user: MeUser }) {
-  const q = useQuery({
+  const isFinancialReport = ['profit-loss', 'balance-sheet', 'trial-balance', 'cash-flow', 'expense'].includes(type)
+  const q = useQuery<any>({
     queryKey: ['report', type, fromDate, toDate],
-    queryFn: () => fetch(`/api/reports?type=${type}&fromDate=${fromDate}&toDate=${toDate}`).then(r => r.json()),
+    queryFn: ({ signal }) => apiFetchJson<any>(`/api/reports?type=${type}&fromDate=${fromDate}&toDate=${toDate}`, { signal }),
     enabled: !!type,
-    retry: 1, retryDelay: 500,
+    retry: false,
     staleTime: 60_000,
     gcTime: 5 * 60_000,
   })
 
   if (q.isLoading) return <div className="card-3d p-8 text-center text-sm text-muted-foreground animate-pulse">Loading report…</div>
-  if (q.isError || !q.data) return <div className="card-3d p-8 text-center"><p className="text-sm text-destructive mb-3">Unable to load report.</p><Button variant="outline" size="sm" onClick={() => q.refetch()}>Retry</Button></div>
+  if (q.isError || !q.data) return <div className="card-3d p-8 text-center"><p className="text-sm text-destructive mb-3">{isFinancialReport ? 'Unable to load financial report.' : 'Unable to load report.'}</p><Button variant="outline" size="sm" onClick={() => q.refetch()}>Retry</Button></div>
   if (q.data.error === 'FORBIDDEN') return <div className="card-3d p-8 text-center"><p className="text-sm text-amber-600">You do not have permission to view this report.</p></div>
+  if (q.data.availability?.accounting === false) {
+    return <div className="card-3d p-8 text-center"><p className="text-sm text-amber-700">{isFinancialReport ? 'Financial report is not available for this business.' : 'This accounting feature is currently unavailable.'}</p></div>
+  }
 
   const rows = q.data?.rows ?? []
   const kpis = q.data?.kpis
+  const classification: ReportClassification | null = q.data?.classification ?? null
 
   switch (type) {
     case 'overview': return <OverviewReport kpis={kpis} bs={q.data} />
-    case 'profit-loss': return <ProfitLossReport rows={rows} />
-    case 'balance-sheet': return <BalanceSheetReport rows={rows} />
+    case 'profit-loss': return <ProfitLossReport rows={rows} classification={classification} />
+    case 'balance-sheet': return <BalanceSheetReport rows={rows} classification={classification} />
     case 'trial-balance': return <TrialBalanceReport rows={rows} />
     case 'cash-flow': return <CashFlowReport rows={rows} />
-    case 'expense': return <ExpenseReport rows={rows} />
+    case 'expense': return <ExpenseReport rows={rows} classification={classification} />
     case 'sales-summary': return <SalesSummaryReport rows={rows} />
     case 'sales-detail': return <SalesDetailReport rows={rows} />
     case 'customer-outstanding': return <CustomerOutstandingReport rows={rows} />
@@ -229,64 +381,85 @@ function OverviewReport({ kpis, bs }: { kpis: any; bs: any }) {
   )
 }
 
-function ProfitLossReport({ rows }: { rows: any[] }) {
+function ProfitLossReport({ rows, classification }: { rows: any[]; classification: ReportClassification | null }) {
+  const [grouped, setGrouped] = useState(false)
+  const canGroup = classification?.hasCustomClassification === true
   const revenue = rows.filter(r => r.section === 'REVENUE')
+  const cogsRows = rows.filter(r => r.section === 'COST_OF_GOODS_SOLD')
   const expenses = rows.filter(r => r.section === 'EXPENSE')
-  const totalRevenue = revenue.reduce((s, r) => s + Number(r.amount), 0)
-  const totalExpenses = expenses.reduce((s, r) => s + Number(r.amount), 0)
-  const cogs = rows.find(r => r.account_code === '5010')?.amount || '0'
-  const grossProfit = totalRevenue - Number(cogs)
-  const netProfit = totalRevenue - totalExpenses
+  const totalRevenue = revenue.reduce((sum, row) => sum + BigInt(row.amount ?? 0), 0n)
+  const totalCogs = cogsRows.reduce((sum, row) => sum + BigInt(row.amount ?? 0), 0n)
+  const totalExpenses = expenses.reduce((sum, row) => sum + BigInt(row.amount ?? 0), 0n)
+  const grossProfit = totalRevenue - totalCogs
+  const netProfit = grossProfit - totalExpenses
+  const amountOf = (row: any) => BigInt(row.amount ?? 0)
+  /** Every section keeps its own line markup; only the ordering changes. */
+  const line = (r: any) => (
+    <div className="flex justify-between text-xs py-1 border-b border-border/30">
+      <span>
+        <span data-num>{r.account_code}</span> · {r.account_name}
+        <ClassPath code={r.account_code} classification={classification} />
+      </span>
+      <span className="font-medium" data-num>{formatMoney(BigInt(r.amount), false)}</span>
+    </div>
+  )
   return (
     <div className="space-y-3">
       <div className="card-3d p-3 border-amber-200 bg-amber-50">
         <AlertTriangle className="size-4 text-amber-600 inline mr-2" />
         <span className="text-xs text-amber-700">
-          Historical gross profit before the perpetual-inventory migration may be incomplete or estimated because sale-time cost was not captured.
+          Historical gross profit may be incomplete or estimated where sale-time cost was not recorded.
         </span>
       </div>
+      {canGroup && (
+        <div className="flex items-center justify-end">
+          <GroupToggle grouped={grouped} onToggle={() => setGrouped((on) => !on)} />
+        </div>
+      )}
       <div className="card-3d p-4">
         <h3 className="text-sm font-semibold text-foreground mb-3">Revenue</h3>
-        {revenue.length === 0 ? <p className="text-xs text-muted-foreground">No revenue in this period.</p> : revenue.map(r => (
-          <div key={r.account_code} className="flex justify-between text-xs py-1 border-b border-border/30">
-            <span><span data-num>{r.account_code}</span> · {r.account_name}</span>
-            <span className="font-medium" data-num>{formatMoney(BigInt(r.amount), false)}</span>
-          </div>
-        ))}
+        <StatementLines
+          rows={revenue} grouped={grouped} classification={classification}
+          amountOf={amountOf} renderRow={line} emptyMessage="No revenue in this period."
+        />
         <div className="flex justify-between text-sm font-bold mt-2 pt-2 border-t border-border">
-          <span>Total Revenue</span><span data-num>{formatMoney(BigInt(totalRevenue))}</span>
+          <span>Total Revenue</span><span data-num>{formatMoney(totalRevenue)}</span>
         </div>
       </div>
       <div className="card-3d p-4">
         <h3 className="text-sm font-semibold text-foreground mb-3">Cost of Goods Sold</h3>
-        {Number(cogs) > 0 ? <div className="flex justify-between text-xs py-1"><span>5010 · Purchases / COGS</span><span className="font-medium" data-num>{formatMoney(BigInt(cogs), false)}</span></div> : <p className="text-xs text-muted-foreground">No COGS in this period.</p>}
-        <div className="flex justify-between text-sm font-bold mt-2 pt-2 border-t border-border"><span>Gross Profit</span><span data-num>{formatMoney(BigInt(grossProfit))}</span></div>
+        <StatementLines
+          rows={cogsRows} grouped={grouped} classification={classification}
+          amountOf={amountOf} renderRow={line} emptyMessage="No COGS in this period."
+        />
+        <div className="flex justify-between text-sm font-bold mt-2 pt-2 border-t border-border"><span>Total COGS</span><span data-num>{formatMoney(totalCogs)}</span></div>
+        <div className="flex justify-between text-sm font-bold mt-2 pt-2 border-t border-border"><span>Gross Profit</span><span data-num>{formatMoney(grossProfit)}</span></div>
       </div>
       <div className="card-3d p-4">
         <h3 className="text-sm font-semibold text-foreground mb-3">Operating Expenses</h3>
-        {expenses.filter(r => r.account_code !== '5010').length === 0 ? <p className="text-xs text-muted-foreground">No expenses in this period.</p> : expenses.filter(r => r.account_code !== '5010').map(r => (
-          <div key={r.account_code} className="flex justify-between text-xs py-1 border-b border-border/30">
-            <span><span data-num>{r.account_code}</span> · {r.account_name}</span>
-            <span className="font-medium" data-num>{formatMoney(BigInt(r.amount), false)}</span>
-          </div>
-        ))}
-        <div className="flex justify-between text-sm font-bold mt-2 pt-2 border-t border-border"><span>Net Profit</span><span className={netProfit >= 0 ? 'text-emerald-600' : 'text-rose-600'} data-num>{formatMoney(BigInt(netProfit))}</span></div>
+        <StatementLines
+          rows={expenses} grouped={grouped} classification={classification}
+          amountOf={amountOf} renderRow={line} emptyMessage="No expenses in this period."
+        />
+        <div className="flex justify-between text-sm font-bold mt-2 pt-2 border-t border-border"><span>Net Profit</span><span className={netProfit >= 0n ? 'text-emerald-600' : 'text-rose-600'} data-num>{formatMoney(netProfit)}</span></div>
       </div>
     </div>
   )
 }
 
-function BalanceSheetReport({ rows }: { rows: any[] }) {
+function BalanceSheetReport({ rows, classification }: { rows: any[]; classification: ReportClassification | null }) {
+  const [grouped, setGrouped] = useState(false)
+  const canGroup = classification?.hasCustomClassification === true
   const assets = rows.filter(r => r.section === 'ASSET')
   const liabilities = rows.filter(r => r.section === 'LIABILITY')
   const equity = rows.filter(r => r.section === 'EQUITY')
   // Split equity into permanent (Owner Capital, Drawings, Opening Balance) and Current Earnings (calculated)
   const permanentEquity = equity.filter(r => r.is_calculated !== true)
   const currentEarnings = equity.find(r => r.is_calculated === true)
-  const totalAssets = assets.reduce((s, r) => s + Number(r.balance), 0)
-  const totalLiabilities = liabilities.reduce((s, r) => s + Number(r.balance), 0)
-  const totalPermanentEquity = permanentEquity.reduce((s, r) => s + Number(r.balance), 0)
-  const currentEarningsAmount = currentEarnings ? Number(currentEarnings.balance) : 0
+  const totalAssets = assets.reduce((sum, row) => sum + BigInt(row.balance ?? 0), 0n)
+  const totalLiabilities = liabilities.reduce((sum, row) => sum + BigInt(row.balance ?? 0), 0n)
+  const totalPermanentEquity = permanentEquity.reduce((sum, row) => sum + BigInt(row.balance ?? 0), 0n)
+  const currentEarningsAmount = currentEarnings ? BigInt(currentEarnings.balance) : 0n
   const totalEquity = totalPermanentEquity + currentEarningsAmount
   const balanced = totalAssets === totalLiabilities + totalEquity
   return (
@@ -297,13 +470,18 @@ function BalanceSheetReport({ rows }: { rows: any[] }) {
           <span className="font-medium">
             {balanced
               ? 'Balanced — Assets = Liabilities + Equity (incl. Current Earnings)'
-              : `Difference: ${formatMoney(BigInt(totalAssets - totalLiabilities - totalEquity))}`}
+              : `Difference: ${formatMoney(totalAssets - totalLiabilities - totalEquity)}`}
           </span>
         </div>
       </div>
-      <Section title="Assets" rows={assets} total={totalAssets} />
-      <Section title="Liabilities" rows={liabilities} total={totalLiabilities} />
-      <Section title="Equity" rows={permanentEquity} total={totalPermanentEquity} />
+      {canGroup && (
+        <div className="flex items-center justify-end">
+          <GroupToggle grouped={grouped} onToggle={() => setGrouped((on) => !on)} />
+        </div>
+      )}
+      <Section title="Assets" rows={assets} total={totalAssets} grouped={grouped} classification={classification} />
+      <Section title="Liabilities" rows={liabilities} total={totalLiabilities} grouped={grouped} classification={classification} />
+      <Section title="Equity" rows={permanentEquity} total={totalPermanentEquity} grouped={grouped} classification={classification} />
       {currentEarnings && (
         <div className="card-3d p-4 border-sky-200 bg-sky-50/30">
           <div className="flex items-center justify-between">
@@ -313,8 +491,8 @@ function BalanceSheetReport({ rows }: { rows: any[] }) {
                 Calculated from Income − Expense vouchers up to selected date. Not a posted voucher.
               </p>
             </div>
-            <span className={`text-sm font-bold ${currentEarningsAmount >= 0 ? 'text-emerald-600' : 'text-rose-600'}`} data-num>
-              {formatMoney(BigInt(currentEarningsAmount))}
+            <span className={`text-sm font-bold ${currentEarningsAmount >= 0n ? 'text-emerald-600' : 'text-rose-600'}`} data-num>
+              {formatMoney(currentEarningsAmount)}
             </span>
           </div>
         </div>
@@ -322,41 +500,58 @@ function BalanceSheetReport({ rows }: { rows: any[] }) {
       <div className="card-3d p-4 bg-muted/30">
         <div className="flex justify-between text-sm font-bold">
           <span>Liabilities + Equity</span>
-          <span data-num>{formatMoney(BigInt(totalLiabilities + totalEquity))}</span>
+          <span data-num>{formatMoney(totalLiabilities + totalEquity)}</span>
         </div>
         <div className="flex justify-between text-xs text-muted-foreground mt-1">
           <span>Assets</span>
-          <span data-num>{formatMoney(BigInt(totalAssets))}</span>
+          <span data-num>{formatMoney(totalAssets)}</span>
         </div>
         <div className={`flex justify-between text-xs font-medium mt-1 ${balanced ? 'text-emerald-600' : 'text-amber-600'}`}>
           <span>Difference</span>
-          <span data-num>{formatMoney(BigInt(totalAssets - totalLiabilities - totalEquity))}</span>
+          <span data-num>{formatMoney(totalAssets - totalLiabilities - totalEquity)}</span>
         </div>
       </div>
     </div>
   )
 }
 
-function Section({ title, rows, total }: { title: string; rows: any[]; total: number }) {
+/**
+ * One Balance Sheet section. `total` stays the caller's own section total, so
+ * the grouped view can only re-order the same lines and add subtotals — the
+ * fixed accounting root still decides what belongs in this section.
+ */
+function Section({ title, rows, total, grouped, classification }: {
+  title: string
+  rows: any[]
+  total: bigint
+  grouped?: boolean
+  classification?: ReportClassification | null
+}) {
+  const line = (r: any) => {
+    const balance = BigInt(r.balance)
+    const isAbnormal = (r.section === 'ASSET' && balance < 0n) || ((r.section === 'LIABILITY' || r.section === 'EQUITY') && balance < 0n)
+    return (
+      <div className="flex justify-between text-xs py-1 border-b border-border/30">
+        <span>
+          <span data-num>{r.account_code}</span> · {r.account_name}
+          <ClassPath code={r.account_code} classification={classification ?? null} />
+          {r.section === 'ASSET' && balance < 0n && <span className="ml-1 text-[9px] text-amber-600">(Credit Balance — abnormal)</span>}
+          {r.section === 'LIABILITY' && balance < 0n && <span className="ml-1 text-[9px] text-amber-600">(Debit Balance — advance/drawing)</span>}
+          {r.section === 'EQUITY' && balance < 0n && <span className="ml-1 text-[9px] text-amber-600">(Net Loss / Drawing)</span>}
+        </span>
+        <span className={`font-medium ${isAbnormal ? 'text-amber-700' : ''}`} data-num>{formatMoney(BigInt(r.balance), false)}</span>
+      </div>
+    )
+  }
   return (
     <div className="card-3d p-4">
       <h3 className="text-sm font-semibold text-foreground mb-3">{title}</h3>
-      {rows.length === 0 ? <p className="text-xs text-muted-foreground">No accounts with balance.</p> : rows.map(r => {
-        const balance = Number(r.balance)
-        const isAbnormal = (r.section === 'ASSET' && balance < 0) || ((r.section === 'LIABILITY' || r.section === 'EQUITY') && balance < 0)
-        return (
-          <div key={r.account_code} className="flex justify-between text-xs py-1 border-b border-border/30">
-            <span>
-              <span data-num>{r.account_code}</span> · {r.account_name}
-              {r.section === 'ASSET' && balance < 0 && <span className="ml-1 text-[9px] text-amber-600">(Credit Balance — abnormal)</span>}
-              {r.section === 'LIABILITY' && balance < 0 && <span className="ml-1 text-[9px] text-amber-600">(Debit Balance — advance/drawing)</span>}
-              {r.section === 'EQUITY' && balance < 0 && <span className="ml-1 text-[9px] text-amber-600">(Net Loss / Drawing)</span>}
-            </span>
-            <span className={`font-medium ${isAbnormal ? 'text-amber-700' : ''}`} data-num>{formatMoney(BigInt(r.balance), false)}</span>
-          </div>
-        )
-      })}
-      <div className="flex justify-between text-sm font-bold mt-2 pt-2 border-t border-border"><span>Total {title}</span><span data-num>{formatMoney(BigInt(total))}</span></div>
+      <StatementLines
+        rows={rows} grouped={grouped === true} classification={classification ?? null}
+        amountOf={(r) => BigInt(r.balance ?? 0)} renderRow={line}
+        emptyMessage="No accounts with balance."
+      />
+      <div className="flex justify-between text-sm font-bold mt-2 pt-2 border-t border-border"><span>Total {title}</span><span data-num>{formatMoney(total)}</span></div>
     </div>
   )
 }
@@ -378,18 +573,71 @@ function CashFlowReport({ rows }: { rows: any[] }) {
   )
 }
 
-function ExpenseReport({ rows }: { rows: any[] }) {
-  const total = rows.reduce((s, r) => s + Number(r.total_amount), 0)
+/**
+ * The one financial report that can safely be filtered: it is a flat expense
+ * breakdown with its own total, not a statement whose sections have to add up.
+ */
+function ExpenseReport({ rows, classification }: { rows: any[]; classification: ReportClassification | null }) {
+  const [categoryFilter, setCategoryFilter] = useState(ALL)
+  const canFilter = classification?.hasCustomClassification === true
+  const total = rows.reduce((sum, r) => sum + BigInt(r.total_amount ?? 0), 0n)
+
+  const present = new Set(rows
+    .map((r) => classification?.accounts[r.account_code]?.categoryId)
+    .filter((id): id is string => Boolean(id)))
+  const categoryOptions = (classification?.categories ?? []).filter((c) => present.has(c.id))
+
+  const filtersActive = canFilter && categoryFilter !== ALL
+  const visible = !filtersActive ? rows : rows.filter((r) => {
+    const label = classification?.accounts[r.account_code] ?? null
+    return label?.categoryId === categoryFilter
+  })
+  const visibleTotal = visible.reduce((sum, r) => sum + BigInt(r.total_amount ?? 0), 0n)
+
+  function resetFilters() {
+    setCategoryFilter(ALL)
+  }
+
   return (
-    <div className="card-3d p-4">
-      <h3 className="text-sm font-semibold text-foreground mb-3">Expense Breakdown</h3>
-      {rows.length === 0 ? <p className="text-xs text-muted-foreground">No expenses in this period.</p> : rows.map(r => (
-        <div key={r.account_code} className="flex justify-between text-xs py-2 border-b border-border/30">
-          <div><span data-num>{r.account_code}</span> · {r.account_name} <span className="text-muted-foreground">({r.entry_count} entries)</span></div>
-          <span className="font-medium" data-num>{formatMoney(BigInt(r.total_amount), false)}</span>
+    <div className="space-y-3">
+      {canFilter && (
+        <div className="card-3d p-3 flex flex-wrap items-center gap-2">
+          <span className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground px-1">
+            <Filter className="size-3.5" /> Filter
+          </span>
+          <ReportFilterSelect
+            label="Category" allLabel="All categories" value={categoryFilter}
+            options={categoryOptions} onChange={setCategoryFilter}
+          />
+          {filtersActive && (
+            <Button variant="ghost" size="sm" className="h-8 px-2 text-xs" onClick={resetFilters}>
+              <RotateCcw className="size-3.5" /> Reset
+            </Button>
+          )}
         </div>
-      ))}
-      <div className="flex justify-between text-sm font-bold mt-2 pt-2 border-t border-border"><span>Total Expenses</span><span data-num>{formatMoney(BigInt(total))}</span></div>
+      )}
+      <div className="card-3d p-4">
+        <h3 className="text-sm font-semibold text-foreground mb-3">Expense Breakdown</h3>
+        {visible.length === 0 ? (
+          <p className="text-xs text-muted-foreground">
+            {filtersActive ? 'No expenses match these filters.' : 'No expenses in this period.'}
+          </p>
+        ) : visible.map(r => (
+          <div key={r.account_code} className="flex justify-between text-xs py-2 border-b border-border/30">
+            <div>
+              <span data-num>{r.account_code}</span> · {r.account_name} <span className="text-muted-foreground">({r.entry_count} entries)</span>
+              <ClassPath code={r.account_code} classification={classification} />
+            </div>
+            <span className="font-medium" data-num>{formatMoney(BigInt(r.total_amount), false)}</span>
+          </div>
+        ))}
+        {filtersActive && (
+          <div className="flex justify-between text-xs font-medium mt-2 pt-2 border-t border-border/60 text-muted-foreground">
+            <span>Filtered total</span><span data-num>{formatMoney(visibleTotal)}</span>
+          </div>
+        )}
+        <div className="flex justify-between text-sm font-bold mt-2 pt-2 border-t border-border"><span>Total Expenses</span><span data-num>{formatMoney(total)}</span></div>
+      </div>
     </div>
   )
 }
@@ -651,7 +899,7 @@ function ProductProfitabilityReport({ rows }: { rows: any[] }) {
         <div className="flex items-start gap-2">
           <AlertTriangle className="size-4 text-amber-600 mt-0.5" />
           <div className="text-xs text-amber-800">
-            <p className="font-medium">Historical gross profit before the perpetual-inventory migration may be incomplete or estimated because sale-time cost was not captured.</p>
+            <p className="font-medium">Historical gross profit may be incomplete or estimated where sale-time cost was not recorded.</p>
             <p className="mt-1 text-amber-700">Totals below include only products with real cost data. Products with unavailable historical cost are listed separately and excluded from margin calculations to avoid misleading margins above 100%.</p>
           </div>
         </div>
@@ -678,7 +926,7 @@ function ProductProfitabilityReport({ rows }: { rows: any[] }) {
       <div className="card-3d overflow-hidden">
         <div className="p-3 border-b border-border bg-muted/30">
           <h3 className="text-sm font-semibold text-foreground">Products with Exact Cost Data</h3>
-          <p className="text-[10px] text-muted-foreground mt-0.5">Post-migration sales with captured sale-time WAC</p>
+          <p className="text-[10px] text-muted-foreground mt-0.5">Sales with recorded sale-time cost</p>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-xs">
@@ -730,7 +978,7 @@ function ProductProfitabilityReport({ rows }: { rows: any[] }) {
           <div className="p-3 border-b border-border bg-zinc-50/70">
             <h3 className="text-sm font-semibold text-foreground">Products with Historical Cost Unavailable</h3>
             <p className="text-[10px] text-muted-foreground mt-0.5">
-              Pre-migration sales where sale-time WAC was not captured. Sales shown for reference; COGS and Gross Profit not claimed.
+              Earlier sales where sale-time cost was not recorded. Sales are shown for reference; cost and gross profit are not calculated.
             </p>
           </div>
           <div className="overflow-x-auto">

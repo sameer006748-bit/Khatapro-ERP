@@ -7,17 +7,46 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { toast } from 'sonner'
-import { Plus, Wallet, ArrowDownToLine, ArrowUpFromLine, Receipt as ReceiptIcon, ArrowLeftRight, Coffee, Settings2, TrendingUp, TrendingDown, BookOpen, ChevronRight, X, CheckCircle2, AlertCircle } from 'lucide-react'
+import { Plus, Wallet, WalletCards, Banknote, Landmark, Smartphone, CircleDollarSign, ArrowDownToLine, ArrowUpFromLine, Receipt as ReceiptIcon, ArrowLeftRight, Coffee, Settings2, TrendingUp, TrendingDown, BookOpen, ChevronDown, ChevronRight, X, CheckCircle2, AlertCircle } from 'lucide-react'
 import { formatMoney, parseMoney } from '@/lib/format'
 import { bizDate, bizDateString } from '@/lib/dates'
 import { motion, AnimatePresence } from 'framer-motion'
 import type { MeUser } from '@/components/erp/erp-app'
+import { apiFetchJson } from '@/lib/api-client'
+import { ACCOUNT_CATEGORY_DEFINITIONS, UNCATEGORIZED_CATEGORY, classifyMoneyActivity, matchesAccountSubcategory, summarizeAccountSubcategories, type MoneyActivity } from '@/lib/money/account-subcategories'
+import { moneyTypeFromLedgerAccount, normalizeBusinessAccountType, type BusinessAccountType } from '@/lib/accounting/business-account-types'
+import { PageHeader } from '@/components/erp/page-header'
 
-type Account = { id: string; code: string; name: string; isBusinessAccount: boolean; isPartyAccount: boolean; partyType: string | null; categoryCode: string; categoryType: string }
+type Account = { id: string; code: string; name: string; isBusinessAccount: boolean; isPartyAccount: boolean; isSystem: boolean; partyType: string | null; categoryCode: string; categoryType: string }
 type Category = { id: string; code: string; name: string; type: string; accounts: Account[] }
 
-const BUSINESS_ACCOUNT_ICONS: Record<string, string> = {
-  '1010': '💵', '1020': '🪙', '1030': '🏦', '1040': '📱', '1050': '📲',
+/**
+ * Money sits in one of two places: cash the business holds, or a bank account.
+ * Every account the user creates — "Petty Cash", "Till Cash", "Easypaisa",
+ * "Meezan Bank" — is filed under one of these two, so there are no other
+ * sections here.
+ */
+type AccountGroup = BusinessAccountType
+
+const ACCOUNT_GROUPS: AccountGroup[] = ['Cash', 'Bank']
+
+/**
+ * The stored money type decides the section. Only the ledger accounts seeded
+ * with the chart have no money-account row of their own, and those fall back to
+ * the shared code/name rule.
+ */
+function accountGroup(account: Account, storedTypes: Map<string, string>): AccountGroup {
+  const stored = storedTypes.get(account.code)
+  return stored ? normalizeBusinessAccountType(stored) : moneyTypeFromLedgerAccount(account)
+}
+
+/** Bank accounts read as a bank; cash accounts keep a hint of what they are. */
+function AccountIcon({ account, group }: { account: Account; group: AccountGroup }) {
+  const identity = `${account.code} ${account.name}`.toLowerCase()
+  if (group === 'Bank') return <Landmark className="size-4 text-foreground" aria-hidden />
+  if (account.code === '1020' || identity.includes('petty')) return <WalletCards className="size-4 text-foreground" aria-hidden />
+  if (/(easypaisa|jazzcash|wallet|mobile)/.test(identity)) return <Smartphone className="size-4 text-foreground" aria-hidden />
+  return <Banknote className="size-4 text-foreground" aria-hidden />
 }
 
 export function AccountsView({ user }: { user: MeUser }) {
@@ -25,22 +54,57 @@ export function AccountsView({ user }: { user: MeUser }) {
   const [entryModal, setEntryModal] = useState<null | 'receive' | 'pay' | 'expense' | 'transfer' | 'petty-topup' | 'petty-expense' | 'adjustment'>(null)
   const [advancedOpen, setAdvancedOpen] = useState(false)
 
-  const coaQ = useQuery({ queryKey: ['coa'], queryFn: () => fetch('/api/setup/coa').then(r => r.json()), staleTime: 300_000 })
-  const accounts: Account[] = useMemo(() => (coaQ.data?.categories ?? []).flatMap((c: any) => c.accounts.filter((a: any) => a.isActive).map((a: any) => ({ id: a.id, code: a.code, name: a.name, isBusinessAccount: a.isBusinessAccount, isPartyAccount: a.isPartyAccount, partyType: a.partyType, categoryCode: c.code, categoryType: c.type }))), [coaQ.data])
+  const coaQ = useQuery<any>({ queryKey: ['coa'], queryFn: ({ signal }) => apiFetchJson<any>('/api/setup/coa', { signal }), staleTime: 300_000, retry: false })
+  const accounts: Account[] = useMemo(() => (coaQ.data?.categories ?? []).flatMap((c: any) => c.accounts.filter((a: any) => a.isActive).map((a: any) => ({ id: a.id, code: a.code, name: a.name, isBusinessAccount: a.isBusinessAccount, isPartyAccount: a.isPartyAccount, isSystem: a.isSystem === true, partyType: a.partyType, categoryCode: c.code, categoryType: c.type }))), [coaQ.data])
   const businessAccounts = accounts.filter(a => a.categoryType === 'Asset' && a.isBusinessAccount)
-  const expenseAccounts = accounts.filter(a => a.categoryType === 'Expense')
+
+  // Which of the two money types an account is filed under is stored on the
+  // business account, not on the ledger row the Chart of Accounts returns. Every
+  // sale screen already caches this exact list under the same key, so reading it
+  // here shares that cache instead of adding a request, and nothing new is put
+  // on screen — only the Cash/Bank heading each account sits under.
+  const moneyAccountsQ = useQuery<{ rows?: Array<{ type: string; identity?: string | null; ledger?: { code?: string | null } | null }> }>({
+    queryKey: ['business-accounts'],
+    queryFn: ({ signal }) => apiFetchJson('/api/setup/business-accounts', { signal }),
+    staleTime: 300_000,
+    retry: false,
+  })
+  const storedMoneyTypes = useMemo(() => {
+    const byLedgerCode = new Map<string, string>()
+    for (const row of moneyAccountsQ.data?.rows ?? []) {
+      const code = row?.ledger?.code
+      if (code && typeof row.type === 'string' && row.type.trim()) byLedgerCode.set(code, row.type)
+    }
+    return byLedgerCode
+  }, [moneyAccountsQ.data?.rows])
+
+  // The readable identity an account is referred to by (CASH, PETTY-CASH,
+  // BANK-UBL). Assigned once, by the money accounts endpoint, so one account
+  // reads the same here as it does on the management screen.
+  const moneyIdentities = useMemo(() => {
+    const byLedgerCode = new Map<string, string>()
+    for (const row of moneyAccountsQ.data?.rows ?? []) {
+      const code = row?.ledger?.code
+      if (code && typeof row.identity === 'string' && row.identity.trim()) byLedgerCode.set(code, row.identity)
+    }
+    return byLedgerCode
+  }, [moneyAccountsQ.data?.rows])
+  // Accounts the posting engine maintains itself (Purchases / COGS, Salesman
+  // Commission Expense) are never manual expense destinations — the server
+  // rejects them, so they must not be offered here either.
+  const expenseAccounts = accounts.filter(a => a.categoryType === 'Expense' && !a.isSystem && !a.isBusinessAccount && !a.isPartyAccount)
 
   // Trial balance for balances (mutations invalidate ['trial-balance'], so a
   // short staleTime only skips refetches on plain navigation revisits)
-  const tbQ = useQuery({ queryKey: ['trial-balance'], queryFn: () => fetch('/api/trial-balance').then(r => r.json()), staleTime: 30_000 })
+  const tbQ = useQuery<any>({ queryKey: ['trial-balance'], queryFn: ({ signal }) => apiFetchJson<any>('/api/trial-balance', { signal }), staleTime: 30_000, retry: false })
   const tbRows: any[] = tbQ.data?.rows ?? []
-  const getBalance = (code: string): bigint => {
+  const getBalance = (code: string): bigint | null => {
     const row = tbRows.find((r: any) => r.accountCode === code)
-    return row ? BigInt(row.balance) : 0n
+    return row ? BigInt(row.balance) : null
   }
 
   // Day book for recent activity (invalidated by every posting mutation)
-  const dayBookQ = useQuery({ queryKey: ['day-book'], queryFn: () => fetch('/api/day-book').then(r => r.json()), staleTime: 30_000 })
+  const dayBookQ = useQuery<any>({ queryKey: ['day-book'], queryFn: ({ signal }) => apiFetchJson<any>('/api/day-book', { signal }), staleTime: 30_000, retry: false })
   const recentVouchers: any[] = (dayBookQ.data?.rows ?? []).slice(0, 15)
 
   // Today's summary (Asia/Karachi date)
@@ -61,9 +125,26 @@ export function AccountsView({ user }: { user: MeUser }) {
 
   // Pending: standard receivable/payable control accounts from trial balance
   const receivablesBal = getBalance('1200')
-  const payablesBal = getBalance('2010') + getBalance('2020')
-  const totalAvailable = businessAccounts.reduce((s, a) => s + getBalance(a.code), 0n)
-  const balancesReady = !tbQ.isLoading && tbRows.length > 0
+  const payableBalances = [getBalance('2010'), getBalance('2020')]
+  const payablesBal = payableBalances.every((balance) => balance !== null)
+    ? payableBalances.reduce<bigint>((sum, balance) => sum + (balance ?? 0n), 0n)
+    : null
+  const businessBalances = businessAccounts.map((account) => getBalance(account.code))
+  const allBusinessBalancesTracked = businessBalances.every((balance) => balance !== null)
+  const totalAvailable = businessBalances.reduce<bigint>((sum, balance) => sum + (balance ?? 0n), 0n)
+  const balancesReady = tbQ.isSuccess && tbQ.data?.availability?.accounting !== false
+  const usableAccountingData = accounts.length > 0 || tbRows.length > 0 || recentVouchers.length > 0
+  const declaredUnavailable = !usableAccountingData && (
+    coaQ.data?.availability?.accounting === false
+    || tbQ.data?.availability?.accounting === false
+    || dayBookQ.data?.availability?.accounting === false
+  )
+  const hasLoadError = coaQ.isError || tbQ.isError || dayBookQ.isError
+  const activitySummary = (value: bigint) => dayBookQ.isLoading
+    ? 'Loading…'
+    : dayBookQ.isError || dayBookQ.data?.availability?.accounting === false
+      ? 'Unavailable'
+      : formatMoney(value)
 
   const canPostReceipt = user.permissions.includes('can_create_receipt_voucher')
   const canPostPayment = user.permissions.includes('can_create_payment_voucher')
@@ -71,27 +152,50 @@ export function AccountsView({ user }: { user: MeUser }) {
   const canPostContra = user.permissions.includes('can_create_contra')
   const canManagePetty = user.permissions.includes('can_manage_petty_cash')
   const canPostJournal = user.permissions.includes('can_create_journal_voucher')
+  // Adding, renaming and (de)activating money accounts lives in Business
+  // Accounts, behind the same permission the server enforces.
+  const canManageAccounts = user.permissions.includes('can_manage_setup')
 
   function openLedger(accountId: string) {
     window.history.pushState({}, '', `/?ledger=${accountId}`)
     window.dispatchEvent(new PopStateEvent('popstate'))
   }
 
+  function openBusinessAccounts() {
+    window.history.pushState({}, '', '/?page=business-accounts')
+    window.dispatchEvent(new PopStateEvent('popstate'))
+  }
+
   return (
     <div className="space-y-5">
-      {/* Header */}
-      <div className="flex items-end justify-between gap-3 flex-wrap">
-        <div>
-          <h1 className="text-xl font-semibold tracking-tight text-foreground">Money Summary</h1>
-          <p className="text-xs text-muted-foreground mt-0.5">Current balances, today's money movement and pending amounts</p>
+      {(declaredUnavailable || hasLoadError) && (
+        <div className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          <div className="flex items-center justify-between gap-3">
+            <span>{declaredUnavailable ? 'Account information is currently unavailable.' : 'Some account information could not be loaded.'}</span>
+            {hasLoadError && <button className="font-medium underline underline-offset-2" onClick={() => { void coaQ.refetch(); void tbQ.refetch(); void dayBookQ.refetch() }}>Retry</button>}
+          </div>
         </div>
-        <Button size="sm" className="h-8 press-sm shadow-sm" onClick={() => setEntryModal('receive')}><Plus className="size-3.5" /> New Entry</Button>
-      </div>
+      )}
+      {/* Header */}
+      <PageHeader
+        compact
+        title="Accounts & Balances"
+        description="Current balances, today’s money movement and pending amounts."
+        actions={<Button size="sm" className="h-8 shadow-sm" onClick={() => setEntryModal('receive')}><Plus className="size-3.5" /> New Entry</Button>}
+      />
 
       {/* Current Money */}
       <div>
-        <h2 className="text-sm font-semibold text-foreground mb-2">Current Money</h2>
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-2">
+        <div className="mb-3 flex items-end justify-between gap-3">
+          <div><h2 className="text-sm font-semibold text-foreground">Current Money</h2><p className="mt-0.5 text-xs text-muted-foreground">Cash you hold and money at the bank.</p></div>
+          {balancesReady && businessAccounts.length > 0 && (
+            <div className={`rounded-lg border bg-card px-3 py-2 text-right ${allBusinessBalancesTracked && totalAvailable < 0n ? 'border-destructive/40' : 'border-primary/30'}`}>
+              <div className="flex items-center justify-end gap-1.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground"><CircleDollarSign className="size-3.5" /> Total Available</div>
+              <div className={`mt-0.5 text-lg font-semibold ${allBusinessBalancesTracked && totalAvailable < 0n ? 'text-destructive' : 'text-foreground'}`} data-num>{allBusinessBalancesTracked ? formatMoney(totalAvailable) : 'Not fully tracked'}</div>
+            </div>
+          )}
+        </div>
+        <div className="space-y-4">
           {(coaQ.isLoading || tbQ.isLoading) && businessAccounts.length === 0 && [1, 2, 3, 4, 5].map(i => (
             <div key={i} className="border border-border rounded-lg bg-card p-3 animate-pulse" role="status" aria-label="Loading balances">
               <div className="h-5 w-5 rounded bg-muted mb-2" />
@@ -99,38 +203,35 @@ export function AccountsView({ user }: { user: MeUser }) {
               <div className="h-4 w-20 rounded bg-muted" />
             </div>
           ))}
-          {businessAccounts.map(a => {
-            const bal = getBalance(a.code)
-            const icon = BUSINESS_ACCOUNT_ICONS[a.code] ?? '💼'
-            const isNegative = bal < 0n
-            return (
-              <div key={a.id} className={`border rounded-lg bg-card p-3 cursor-pointer hover:bg-muted/20 press-sm ${isNegative ? 'border-amber-300' : 'border-border'}`} onClick={() => openLedger(a.id)}>
-                <div className="flex items-center justify-between mb-1">
-                  <span className="text-lg">{icon}</span>
-                  {isNegative && <span className="text-[8px] uppercase bg-amber-100 text-amber-700 px-1 py-0.5 rounded font-medium">Overdrawn</span>}
-                </div>
-                <div className="text-[10px] uppercase tracking-wider text-muted-foreground truncate">{a.name}</div>
-                <div className={`text-base font-bold ${isNegative ? 'text-amber-700' : 'text-foreground'}`} data-num>{formatMoney(bal)}</div>
+          {ACCOUNT_GROUPS.map(group => {
+            const groupedAccounts = businessAccounts.filter(account => accountGroup(account, storedMoneyTypes) === group)
+            if (groupedAccounts.length === 0) return null
+            return <section key={group} aria-label={`${group} accounts`}>
+              <h3 className="mb-2 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">{group}</h3>
+              <div className="grid grid-cols-1 min-[420px]:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2">
+                {groupedAccounts.map(a => <FinanceAccountCard key={a.id} account={a} group={group} identity={moneyIdentities.get(a.code) ?? null} balance={getBalance(a.code)} isLoading={tbQ.isLoading} unavailable={tbQ.isError || tbQ.data?.availability?.accounting === false} onOpen={() => openLedger(a.id)} onManage={canManageAccounts ? openBusinessAccounts : undefined} />)}
               </div>
-            )
+            </section>
           })}
-          {balancesReady && businessAccounts.length > 0 && (
-            <div className="border border-primary/40 rounded-lg bg-card p-3">
-              <div className="flex items-center justify-between mb-1"><span className="text-lg">💰</span></div>
-              <div className="text-[10px] uppercase tracking-wider text-muted-foreground truncate">Total Available</div>
-              <div className={`text-base font-bold ${totalAvailable < 0n ? 'text-amber-700' : 'text-primary'}`} data-num>{formatMoney(totalAvailable)}</div>
+          {coaQ.isSuccess && businessAccounts.length === 0 && (
+            <div className="border border-dashed border-border rounded-lg bg-card p-4 text-sm text-muted-foreground">
+              No business accounts configured.
+              {canManageAccounts && <> <button type="button" className="font-medium text-primary underline underline-offset-2" onClick={openBusinessAccounts}>Add a Cash or Bank account</button>.</>}
             </div>
           )}
         </div>
       </div>
 
       {/* Daily summary */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-        <SummaryCard icon={TrendingUp} label="Money In Today" value={formatMoney(moneyInToday)} color="text-emerald-600" />
-        <SummaryCard icon={TrendingDown} label="Money Out Today" value={formatMoney(moneyOutToday)} color="text-amber-600" />
-        <SummaryCard icon={ReceiptIcon} label="Expenses Today" value={formatMoney(expensesToday)} color="text-rose-600" />
-        <SummaryCard icon={Wallet} label="Net Movement" value={formatMoney(moneyInToday - moneyOutToday - expensesToday)} color={moneyInToday - moneyOutToday - expensesToday >= 0n ? 'text-emerald-600' : 'text-amber-600'} />
-      </div>
+      <section className="overflow-hidden rounded-lg border border-border bg-card" aria-label="Today movement">
+        <div className="border-b border-border px-4 py-2.5"><h2 className="text-sm font-semibold text-foreground">Todayâ€™s Movement</h2></div>
+        <div className="grid grid-cols-2 divide-x divide-y divide-border md:grid-cols-4 md:divide-y-0">
+          <SummaryCard icon={TrendingUp} label="Money In Today" value={activitySummary(moneyInToday)} color="text-emerald-700" />
+          <SummaryCard icon={TrendingDown} label="Money Out Today" value={activitySummary(moneyOutToday)} color="text-amber-700" />
+          <SummaryCard icon={ReceiptIcon} label="Expenses Today" value={activitySummary(expensesToday)} color="text-destructive" />
+          <SummaryCard icon={Wallet} label="Net Movement" value={activitySummary(moneyInToday - moneyOutToday - expensesToday)} color={moneyInToday - moneyOutToday - expensesToday >= 0n ? 'text-emerald-700' : 'text-destructive'} />
+        </div>
+      </section>
 
       {/* Paisa Kahan Se Aya / Kahan Gaya (recent, from loaded day book) */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
@@ -143,9 +244,9 @@ export function AccountsView({ user }: { user: MeUser }) {
             {dayBookQ.isLoading && <p className="p-3 text-xs text-muted-foreground" role="status">Loading…</p>}
             {!dayBookQ.isLoading && inflowVouchers.length === 0 && <p className="p-3 text-xs text-muted-foreground">No money received yet — use Receive Payment below to record one.</p>}
             {inflowVouchers.slice(0, 6).map((v: any) => (
-              <div key={v.voucherId} className="px-4 py-2 flex items-center justify-between gap-2">
-                <div className="min-w-0"><div className="text-sm text-foreground truncate">{v.memo || 'Money received'}</div><div className="text-[10px] text-muted-foreground" data-num>{bizDate(v.voucherDate)}</div></div>
-                <span className="text-sm font-medium text-emerald-600 shrink-0" data-num>+{formatMoney(BigInt(v.totalDebit), false)}</span>
+              <div key={v.voucherId} className="px-4 py-2.5 flex items-center justify-between gap-3">
+                <div className="min-w-0"><div className="text-sm font-medium text-foreground truncate">{v.memo || 'Money received'}</div><div className="mt-0.5 flex gap-2 text-[10px] text-muted-foreground"><span data-num>{bizDate(v.voucherDate)}</span><span className="truncate">{v.voucherNo || v.sourceLabel || 'Receipt'}</span></div></div>
+                <span className="text-sm font-semibold text-emerald-700 shrink-0" data-num>+{formatMoney(BigInt(v.totalDebit), false)}</span>
               </div>
             ))}
           </div>
@@ -159,9 +260,9 @@ export function AccountsView({ user }: { user: MeUser }) {
             {dayBookQ.isLoading && <p className="p-3 text-xs text-muted-foreground" role="status">Loading…</p>}
             {!dayBookQ.isLoading && outflowVouchers.length === 0 && <p className="p-3 text-xs text-muted-foreground">No payments or expenses yet — use Pay Vendor or Add Expense below.</p>}
             {outflowVouchers.slice(0, 6).map((v: any) => (
-              <div key={v.voucherId} className="px-4 py-2 flex items-center justify-between gap-2">
-                <div className="min-w-0"><div className="text-sm text-foreground truncate">{v.memo || (v.voucherType === 'EX' ? 'Expense' : 'Payment')}</div><div className="text-[10px] text-muted-foreground" data-num>{bizDate(v.voucherDate)}</div></div>
-                <span className="text-sm font-medium text-amber-600 shrink-0" data-num>−{formatMoney(BigInt(v.totalCredit), false)}</span>
+              <div key={v.voucherId} className="px-4 py-2.5 flex items-center justify-between gap-3">
+                <div className="min-w-0"><div className="text-sm font-medium text-foreground truncate">{v.memo || (v.voucherType === 'EX' ? 'Expense' : 'Payment')}</div><div className="mt-0.5 flex gap-2 text-[10px] text-muted-foreground"><span data-num>{bizDate(v.voucherDate)}</span><span className="truncate">{v.voucherNo || v.sourceLabel || 'Payment'}</span></div></div>
+                <span className="text-sm font-semibold text-amber-700 shrink-0" data-num>−{formatMoney(BigInt(v.totalCredit), false)}</span>
               </div>
             ))}
           </div>
@@ -175,15 +276,17 @@ export function AccountsView({ user }: { user: MeUser }) {
           <div className="grid grid-cols-1 sm:grid-cols-2 divide-y sm:divide-y-0 sm:divide-x divide-border/40">
             <div className="p-3 flex items-center justify-between gap-2">
               <div><div className="text-sm text-foreground">To collect from customers</div><div className="text-[10px] text-muted-foreground">Receivables</div></div>
-              <span className="text-sm font-semibold text-emerald-600" data-num>{formatMoney(receivablesBal)}</span>
+              <span className="text-sm font-semibold text-emerald-600" data-num>{receivablesBal === null ? 'Not tracked' : formatMoney(receivablesBal)}</span>
             </div>
             <div className="p-3 flex items-center justify-between gap-2">
               <div><div className="text-sm text-foreground">To pay vendors</div><div className="text-[10px] text-muted-foreground">Payables</div></div>
-              <span className="text-sm font-semibold text-amber-600" data-num>{formatMoney(payablesBal)}</span>
+              <span className="text-sm font-semibold text-amber-600" data-num>{payablesBal === null ? 'Not tracked' : formatMoney(payablesBal)}</span>
             </div>
           </div>
         </div>
       )}
+
+      <AccountSubcategoryPanel activities={postedVouchers} accounts={accounts} user={user} />
 
       {/* Primary actions */}
       <div className="flex flex-wrap gap-2">
@@ -285,12 +388,116 @@ export function AccountsView({ user }: { user: MeUser }) {
   )
 }
 
+function AccountSubcategoryPanel({ activities, accounts, user }: { activities: MoneyActivity[]; accounts: Account[]; user: MeUser }) {
+  const [expanded, setExpanded] = useState<string | null>('expenses')
+  const [filter, setFilter] = useState<{ parentId: string; subcategoryId?: string } | null>(null)
+  const [parentCode, setParentCode] = useState('expenses')
+  const [newName, setNewName] = useState('')
+  const [newCode, setNewCode] = useState('')
+  const [accountId, setAccountId] = useState('')
+  const [subcategoryId, setSubcategoryId] = useState('uncategorized')
+  const categoryQ = useQuery<{
+    parentCategories: Array<{ id: string; code: string; label: string }>
+    categories: Array<{ id: string; parentCode: string; name: string; code: string | null; reportClass: string; isActive: boolean; archivedAt: string | null }>
+    assignments: Array<{ accountId: string; parentCode: string; subcategoryId: string | null }>
+  }>({
+    queryKey: ['account-subcategories'],
+    queryFn: ({ signal }) => apiFetchJson('/api/account-subcategories', { cache: 'no-store', signal }),
+    retry: false,
+  })
+  const canManage = user.roleName === 'Owner' || user.roleName === 'Admin'
+    || user.permissions.includes('can_manage_account_categories')
+    || user.permissions.includes('can_manage_chart_of_accounts')
+  const categoryMutation = useMutation({
+    mutationFn: async (body: Record<string, unknown>) => {
+      const response = await fetch('/api/account-subcategories', {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
+      })
+      const result = await response.json()
+      if (!response.ok) throw new Error(result?.message ?? result?.error ?? 'Category change failed')
+      return result
+    },
+    onSuccess: () => {
+      toast.success('Account classification saved.')
+      void categoryQ.refetch()
+      setNewName('')
+      setNewCode('')
+    },
+    onError: (error: Error) => toast.error(error.message),
+  })
+  const activeCategories = (categoryQ.data?.categories ?? []).filter(category => category.isActive)
+  const selectedParentCategories = activeCategories.filter(category => category.parentCode === parentCode)
+  const classified = useMemo(() => activities.map(classifyMoneyActivity), [activities])
+  const summaries = useMemo(() => summarizeAccountSubcategories(activities), [activities])
+  const summary = (parentId: string, subcategoryId?: string) => summaries.find(item => item.parentId === parentId && item.subcategoryId === subcategoryId) ?? { parentId, subcategoryId, amount: 0n, activityCount: 0 }
+  const parents = [...ACCOUNT_CATEGORY_DEFINITIONS, UNCATEGORIZED_CATEGORY]
+  const filtered = filter ? classified.filter(item => matchesAccountSubcategory(item, filter.parentId, filter.subcategoryId)) : []
+
+  return <div className="border border-border rounded-lg bg-card overflow-hidden">
+    <div className="px-4 py-3 border-b border-border"><h2 className="text-sm font-semibold text-foreground">Account Categories</h2><p className="text-[11px] text-muted-foreground">One-level reporting classification. Moving an account never changes its balance or historical entries.</p></div>
+    {canManage && <div className="p-3 border-b border-border space-y-3 bg-muted/10">
+      <div className="grid grid-cols-1 sm:grid-cols-[180px_1fr_auto] gap-2 items-end">
+        <div><Label className="text-[10px]">Approved parent</Label><Select value={parentCode} onValueChange={value => { setParentCode(value); setSubcategoryId('uncategorized') }}><SelectTrigger className="h-8 bg-background"><SelectValue /></SelectTrigger><SelectContent>{ACCOUNT_CATEGORY_DEFINITIONS.map(parent => <SelectItem key={parent.id} value={parent.id}>{parent.label} · {parent.code}</SelectItem>)}</SelectContent></Select></div>
+        <div><Label className="text-[10px]">New subcategory</Label><Input value={newName} onChange={event => setNewName(event.target.value)} className="h-8 bg-background" placeholder="One level only" /></div>
+        <div><Label className="text-[10px]">Code Word</Label><Input value={newCode} onChange={event => setNewCode(event.target.value)} className="h-8 bg-background uppercase" placeholder="EXP-COMM" maxLength={40} /></div>
+        <Button size="sm" className="h-8" disabled={!newName.trim() || !newCode.trim() || categoryMutation.isPending} onClick={() => categoryMutation.mutate({ action: 'create', parentCode, name: newName, code: newCode })}>Create</Button>
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-[1fr_180px_180px_auto] gap-2 items-end">
+        <div><Label className="text-[10px]">Account</Label><Select value={accountId} onValueChange={setAccountId}><SelectTrigger className="h-8 bg-background"><SelectValue placeholder="Select account" /></SelectTrigger><SelectContent>{accounts.map(account => <SelectItem key={account.id} value={account.id}>{account.code} · {account.name}</SelectItem>)}</SelectContent></Select></div>
+        <div><Label className="text-[10px]">Parent</Label><Select value={parentCode} onValueChange={value => { setParentCode(value); setSubcategoryId('uncategorized') }}><SelectTrigger className="h-8 bg-background"><SelectValue /></SelectTrigger><SelectContent>{ACCOUNT_CATEGORY_DEFINITIONS.map(parent => <SelectItem key={parent.id} value={parent.id}>{parent.label} · {parent.code}</SelectItem>)}</SelectContent></Select></div>
+        <div><Label className="text-[10px]">Subcategory</Label><Select value={subcategoryId} onValueChange={setSubcategoryId}><SelectTrigger className="h-8 bg-background"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="uncategorized">Uncategorized</SelectItem>{selectedParentCategories.map(category => <SelectItem key={category.id} value={category.id}>{category.name}</SelectItem>)}</SelectContent></Select></div>
+        <Button size="sm" className="h-8" disabled={!accountId || categoryMutation.isPending} onClick={() => categoryMutation.mutate({ action: subcategoryId === 'uncategorized' ? 'uncategorize' : 'move', parentCode, accountId, subcategoryId: subcategoryId === 'uncategorized' ? null : subcategoryId })}>Assign</Button>
+      </div>
+      {categoryQ.isError && <p className="text-[10px] text-amber-700">Saving categories is currently unavailable.</p>}
+      {categoryQ.data && <div className="flex flex-wrap gap-1.5">{categoryQ.data.parentCategories.map(parent => <span key={parent.id} className="inline-flex items-center gap-1 rounded border border-primary/30 bg-primary/5 px-2 py-1 text-[10px] font-medium">{parent.label} · {parent.code}</span>)}{categoryQ.data.categories.map(category => <span key={category.id} className={`inline-flex items-center gap-1 rounded border px-2 py-1 text-[10px] ${category.isActive ? 'border-border bg-background' : 'border-border text-muted-foreground line-through'}`}>{ACCOUNT_CATEGORY_DEFINITIONS.find(parent => parent.id === category.parentCode)?.label}: {category.name}{category.code ? <span className="font-medium tracking-wide"> · {category.code}</span> : null}{category.isActive && <><button className="text-primary hover:underline" onClick={() => { const name = window.prompt('Rename subcategory', category.name); if (name?.trim()) categoryMutation.mutate({ action: 'rename', subcategoryId: category.id, name }) }}>Rename</button><button className="text-primary hover:underline" onClick={() => { const raw = window.prompt('Edit code word (letters, numbers, hyphens — e.g. EXP-COMM)', category.code ?? ''); if (raw?.trim()) categoryMutation.mutate({ action: 'rename', subcategoryId: category.id, name: category.name, code: raw }) }}>Edit code</button><button className="text-destructive hover:underline" onClick={() => categoryMutation.mutate({ action: 'archive', subcategoryId: category.id })}>Archive</button></>}</span>)}</div>}
+    </div>}
+    <div className="divide-y divide-border/50">
+      {parents.map(parent => {
+        const parentSummary = summary(parent.id)
+        const isExpanded = expanded === parent.id
+        return <div key={parent.id}>
+          <button onClick={() => setExpanded(isExpanded ? null : parent.id)} className="w-full px-4 py-2.5 flex items-center justify-between gap-3 text-left hover:bg-muted/20"><span className="text-sm font-medium text-foreground">{parent.label} · {parent.code}</span><span className="flex items-center gap-2"><span className="text-xs text-muted-foreground" data-num>{formatMoney(parentSummary.amount, false)} · {parentSummary.activityCount}</span>{isExpanded ? <ChevronDown className="size-4 text-muted-foreground" /> : <ChevronRight className="size-4 text-muted-foreground" />}</span></button>
+          {isExpanded && <div className="px-4 pb-3 flex flex-wrap gap-2">{parent.subcategories.length === 0 ? <button onClick={() => setFilter({ parentId: parent.id })} className={`rounded-md border px-2.5 py-1.5 text-xs ${filter?.parentId === parent.id && !filter.subcategoryId ? 'border-primary bg-primary/10 text-primary' : 'border-border bg-background'}`}>Uncategorized</button> : parent.subcategories.map(subcategory => { const child = summary(parent.id, subcategory.id); const selected = filter?.parentId === parent.id && filter?.subcategoryId === subcategory.id; return <button key={subcategory.id} onClick={() => setFilter(selected ? null : { parentId: parent.id, subcategoryId: subcategory.id })} className={`rounded-md border px-2.5 py-1.5 text-xs ${selected ? 'border-primary bg-primary/10 text-primary' : 'border-border bg-background hover:bg-muted/20'}`}>{subcategory.label} <span data-num>({formatMoney(child.amount, false)})</span></button> })}</div>}
+        </div>
+      })}
+    </div>
+    {filter && <div className="border-t border-border"><div className="px-4 py-2 flex items-center justify-between"><span className="text-xs text-muted-foreground">Filtered recent activity ({filtered.length})</span><button onClick={() => setFilter(null)} className="text-xs text-primary hover:underline">Clear filter</button></div>{filtered.length === 0 ? <p className="px-4 pb-3 text-xs text-muted-foreground">No recent activity in this subcategory.</p> : <div className="divide-y divide-border/40">{filtered.slice(0, 6).map(item => <div key={item.activity.voucherId} className="px-4 py-2 flex items-center justify-between gap-2"><div className="min-w-0"><div className="text-sm truncate">{item.activity.memo || item.activity.sourceLabel || 'Activity'}</div><div className="text-[10px] text-muted-foreground" data-num>{item.activity.voucherDate ?? ''}</div></div><span className="text-sm font-medium shrink-0" data-num>{formatMoney(item.amount, false)}</span></div>)}</div>}</div>}
+  </div>
+}
+
+function FinanceAccountCard({ account, group, identity, balance: bal, isLoading, unavailable, onOpen, onManage }: { account: Account; group: AccountGroup; identity: string | null; balance: bigint | null; isLoading: boolean; unavailable: boolean; onOpen: () => void; onManage?: () => void }) {
+  const isNegative = bal !== null && bal < 0n
+  const isZero = bal === 0n
+  const status = isLoading ? 'Loading' : unavailable ? 'Unavailable' : bal === null ? 'Not tracked' : isNegative ? 'Overdrawn' : isZero ? 'Zero' : 'Normal'
+  const balanceLabel = isLoading ? 'Loading…' : unavailable ? 'Unavailable' : bal === null ? 'Not tracked' : formatMoney(bal)
+  const statusClass = isNegative ? 'border-destructive/30 bg-destructive/5 text-destructive' : isZero ? 'border-border bg-muted/50 text-muted-foreground' : 'border-emerald-700/20 bg-emerald-700/5 text-emerald-700'
+
+  return <div className={`min-h-28 overflow-hidden rounded-lg border bg-card ${isNegative ? 'border-destructive/40' : 'border-border'}`}>
+    <button type="button" className="block w-full p-3 text-left transition-colors hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={onOpen}>
+      <div className="flex items-start justify-between gap-3">
+        <div className="grid size-8 place-items-center rounded-md border border-border bg-muted/35"><AccountIcon account={account} group={group} /></div>
+        <span className={`rounded border px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide ${statusClass}`}>{status}</span>
+      </div>
+      <div className="mt-3 truncate text-sm font-medium text-foreground">{account.name}</div>
+      {identity && <div className="mt-1"><span className="inline-flex rounded border border-primary/30 bg-primary/5 px-1.5 py-0.5 text-[9px] font-semibold tracking-wide text-primary" title={`Identity: ${identity}`}>{identity}</span></div>}
+      <div className="mt-1 flex items-end justify-between gap-2"><span className={`text-lg font-semibold ${isNegative ? 'text-destructive' : 'text-foreground'}`} data-num>{balanceLabel}</span><span className="text-[10px] text-muted-foreground" data-num>Account {account.code}</span></div>
+    </button>
+    {onManage && (
+      <div className="border-t border-border/60 px-3 py-1.5 text-right">
+        <button type="button" className="inline-flex items-center gap-1 text-[10px] font-medium text-muted-foreground hover:text-foreground" onClick={onManage} title={`Manage ${account.name}`}>
+          <Settings2 className="size-3" /> Manage
+        </button>
+      </div>
+    )}
+  </div>
+}
+
 function SummaryCard({ icon: Icon, label, value, color }: { icon: React.ComponentType<{ className?: string }>; label: string; value: string; color: string }) {
-  return <div className="border border-border rounded-lg bg-card p-3"><div className="flex items-center gap-1.5 mb-1"><Icon className={`size-3 ${color}`} /><span className="text-[9px] uppercase tracking-wider text-muted-foreground">{label}</span></div><div className={`text-sm font-bold ${color}`} data-num>{value}</div></div>
+  return <div className="min-h-20 p-3"><div className="flex items-center gap-1.5"><Icon className={`size-3.5 ${color}`} /><span className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</span></div><div className={`mt-2 text-sm font-semibold ${color}`} data-num>{value}</div></div>
 }
 
 function QuickAction({ icon: Icon, label, onClick }: { icon: React.ComponentType<{ className?: string }>; label: string; onClick: () => void }) {
-  return <button onClick={onClick} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border bg-card text-xs font-medium hover:bg-muted/20 press-sm"><Icon className="size-3.5 text-primary" /> {label}</button>
+  return <button onClick={onClick} className="flex min-h-9 items-center gap-1.5 rounded-md border border-border bg-card px-3 py-1.5 text-xs font-medium hover:bg-muted/30"><Icon className="size-3.5 text-muted-foreground" /> {label}</button>
 }
 
 function TypeBadge({ type, label }: { type: string; label: string }) {
@@ -334,12 +541,12 @@ function MoneyReceivedModal({ accounts, businessAccounts, onClose }: { accounts:
   const [reference, setReference] = useState('')
   const [notes, setNotes] = useState('')
   const [result, setResult] = useState<{ ok: boolean; receiptNo?: string; error?: string } | null>(null)
+  const [idempotencyKey, setIdempotencyKey] = useState(() => crypto.randomUUID())
 
   const mut = useMutation({
     mutationFn: async () => {
       const creditAccount = accounts.find(a => a.code === purposeCode)
       if (!creditAccount) throw new Error('Invalid purpose')
-      const idempotencyKey = `ar-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
       const r = await fetch('/api/receipt-voucher', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ receiptDate: date, receivedIntoAccountId: receivedIntoId, creditAccountId: creditAccount.id, amount, reference: reference || undefined, notes: notes || undefined, idempotencyKey }) })
       const j = await r.json(); if (!r.ok) throw new Error(j?.error ?? 'Failed'); return j
     },
@@ -350,9 +557,9 @@ function MoneyReceivedModal({ accounts, businessAccounts, onClose }: { accounts:
   const canPost = receivedIntoId && amt > 0n
   const creditAccount = accounts.find(a => a.code === purposeCode)
 
-  if (result?.ok) return <Shell title="Money Received" onClose={onClose}><div className="text-center py-4"><CheckCircle2 className="size-12 text-primary mx-auto mb-3" /><p className="text-xs text-muted-foreground mb-1">Receipt posted</p><p className="text-2xl font-bold text-primary" data-num>{result.receiptNo}</p><Button variant="ghost" size="sm" className="mt-4" onClick={() => { setResult(null); setAmount(''); setReference(''); setNotes('') }}>New Receipt</Button></div></Shell>
+  if (result?.ok) return <Shell title="Money Received" onClose={onClose}><div className="text-center py-4"><CheckCircle2 className="size-12 text-primary mx-auto mb-3" /><p className="text-xs text-muted-foreground mb-1">Receipt posted</p><p className="text-2xl font-bold text-primary" data-num>{result.receiptNo}</p><Button variant="ghost" size="sm" className="mt-4" onClick={() => { setResult(null); setAmount(''); setReference(''); setNotes(''); setIdempotencyKey(crypto.randomUUID()) }}>New Receipt</Button></div></Shell>
 
-  return <Shell title="Money Received" subtitle="Record cash, bank or wallet money received" onClose={onClose}>
+  return <Shell title="Money Received" subtitle="Record cash or bank money received" onClose={onClose}>
     <div className="space-y-3">
       <div className="grid grid-cols-2 gap-2">
         <div><Label className="text-xs text-muted-foreground">Date</Label><Input type="date" value={date} onChange={e => setDate(e.target.value)} className="h-9 bg-background" data-num /></div>
@@ -379,12 +586,13 @@ function MoneyPaidModal({ accounts, businessAccounts, onClose }: { accounts: Acc
   const [reference, setReference] = useState('')
   const [notes, setNotes] = useState('')
   const [result, setResult] = useState<{ ok: boolean; paymentNo?: string; error?: string } | null>(null)
+  const [idempotencyKey, setIdempotencyKey] = useState(() => crypto.randomUUID())
 
   const mut = useMutation({
     mutationFn: async () => {
       const debitAccount = accounts.find(a => a.code === purposeCode)
       if (!debitAccount) throw new Error('Invalid purpose')
-      const r = await fetch('/api/payment-voucher', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ paymentDate: date, paidFromAccountId: paidFromId, debitAccountId: debitAccount.id, amount, reference: reference || undefined, notes: notes || undefined }) })
+      const r = await fetch('/api/payment-voucher', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ paymentDate: date, paidFromAccountId: paidFromId, debitAccountId: debitAccount.id, amount, reference: reference || undefined, notes: notes || undefined, idempotencyKey }) })
       const j = await r.json(); if (!r.ok) throw new Error(j?.error ?? 'Failed'); return j
     },
     onSuccess: (j) => { toast.success(`Money paid: ${j.paymentNo}`); setResult({ ok: true, paymentNo: j.paymentNo }); void qc.invalidateQueries({ queryKey: ['day-book'] }); void qc.invalidateQueries({ queryKey: ['trial-balance'] }) },
@@ -394,7 +602,7 @@ function MoneyPaidModal({ accounts, businessAccounts, onClose }: { accounts: Acc
   const canPost = paidFromId && amt > 0n
   const debitAccount = accounts.find(a => a.code === purposeCode)
 
-  if (result?.ok) return <Shell title="Money Paid" onClose={onClose}><div className="text-center py-4"><CheckCircle2 className="size-12 text-primary mx-auto mb-3" /><p className="text-xs text-muted-foreground mb-1">Payment posted</p><p className="text-2xl font-bold text-primary" data-num>{result.paymentNo}</p><Button variant="ghost" size="sm" className="mt-4" onClick={() => { setResult(null); setAmount(''); setReference(''); setNotes('') }}>New Payment</Button></div></Shell>
+  if (result?.ok) return <Shell title="Money Paid" onClose={onClose}><div className="text-center py-4"><CheckCircle2 className="size-12 text-primary mx-auto mb-3" /><p className="text-xs text-muted-foreground mb-1">Payment posted</p><p className="text-2xl font-bold text-primary" data-num>{result.paymentNo}</p><Button variant="ghost" size="sm" className="mt-4" onClick={() => { setResult(null); setAmount(''); setReference(''); setNotes(''); setIdempotencyKey(crypto.randomUUID()) }}>New Payment</Button></div></Shell>
 
   return <Shell title="Money Paid" subtitle="Record a payment made from a business account" onClose={onClose}>
     <div className="space-y-3">
@@ -422,6 +630,7 @@ function ExpenseModal({ expenseAccounts, businessAccounts, presetPaidFrom, onClo
   const [reference, setReference] = useState('')
   const [notes, setNotes] = useState('')
   const [result, setResult] = useState<{ ok: boolean; expenseNo?: string; error?: string } | null>(null)
+  const [idempotencyKey, setIdempotencyKey] = useState(() => crypto.randomUUID())
 
   const total = lines.reduce((s, l) => s + (parseMoney(l.amount) ?? 0n), 0n)
   const QUICK_CATEGORIES = ['Rent', 'Packing', 'Tea', 'Fuel', 'Loading', 'Delivery', 'Utilities', 'Salary/Wages', 'Repairs', 'Miscellaneous']
@@ -433,7 +642,7 @@ function ExpenseModal({ expenseAccounts, businessAccounts, presetPaidFrom, onClo
   const mut = useMutation({
     mutationFn: async () => {
       const validLines = lines.filter(l => l.expenseAccountId && ((parseMoney(l.amount) ?? 0n) > 0n))
-      const r = await fetch('/api/expense-batch', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ expenseDate: date, paymentAccountId: paidFromId, lines: validLines.map(l => ({ expenseAccountId: l.expenseAccountId, description: l.description || undefined, amount: l.amount })), reference: reference || undefined, notes: notes || undefined }) })
+      const r = await fetch('/api/expense-batch', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ expenseDate: date, paymentAccountId: paidFromId, lines: validLines.map(l => ({ expenseAccountId: l.expenseAccountId, description: l.description || undefined, amount: l.amount })), reference: reference || undefined, notes: notes || undefined, idempotencyKey }) })
       const j = await r.json(); if (!r.ok) throw new Error(j?.error ?? 'Failed'); return j
     },
     onSuccess: (j) => { toast.success(`Expenses posted: ${j.expenseNo}`); setResult({ ok: true, expenseNo: j.expenseNo }); void qc.invalidateQueries({ queryKey: ['day-book'] }); void qc.invalidateQueries({ queryKey: ['trial-balance'] }) },
@@ -441,7 +650,7 @@ function ExpenseModal({ expenseAccounts, businessAccounts, presetPaidFrom, onClo
   })
   const canPost = paidFromId && lines.length >= 1 && lines.every(l => l.expenseAccountId && (parseMoney(l.amount) ?? 0n) > 0n) && total > 0n
 
-  if (result?.ok) return <Shell title="Record Expenses" onClose={onClose}><div className="text-center py-4"><CheckCircle2 className="size-12 text-primary mx-auto mb-3" /><p className="text-xs text-muted-foreground mb-1">Expense batch posted</p><p className="text-2xl font-bold text-primary" data-num>{result.expenseNo}</p><Button variant="ghost" size="sm" className="mt-4" onClick={() => { setResult(null); setLines([{ key: '1', expenseAccountId: '', description: '', amount: '' }]); setReference(''); setNotes('') }}>New Batch</Button></div></Shell>
+  if (result?.ok) return <Shell title="Record Expenses" onClose={onClose}><div className="text-center py-4"><CheckCircle2 className="size-12 text-primary mx-auto mb-3" /><p className="text-xs text-muted-foreground mb-1">Expense batch posted</p><p className="text-2xl font-bold text-primary" data-num>{result.expenseNo}</p><Button variant="ghost" size="sm" className="mt-4" onClick={() => { setResult(null); setLines([{ key: '1', expenseAccountId: '', description: '', amount: '' }]); setReference(''); setNotes(''); setIdempotencyKey(crypto.randomUUID()) }}>New Batch</Button></div></Shell>
 
   return <Shell title="Record Expenses" subtitle="One or multiple expenses paid from one account" onClose={onClose} wide>
     <div className="space-y-3">
@@ -480,10 +689,11 @@ function TransferModal({ businessAccounts, presetTo, onClose }: { businessAccoun
   const [reference, setReference] = useState('')
   const [notes, setNotes] = useState('')
   const [result, setResult] = useState<{ ok: boolean; contraNo?: string; error?: string } | null>(null)
+  const [idempotencyKey, setIdempotencyKey] = useState(() => crypto.randomUUID())
 
   const mut = useMutation({
     mutationFn: async () => {
-      const r = await fetch('/api/contra-entry', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ contraDate: date, fromAccountId: fromId, toAccountId: toId, amount, reference: reference || undefined, notes: notes || undefined }) })
+      const r = await fetch('/api/contra-entry', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ contraDate: date, fromAccountId: fromId, toAccountId: toId, amount, reference: reference || undefined, notes: notes || undefined, idempotencyKey }) })
       const j = await r.json(); if (!r.ok) throw new Error(j?.error ?? 'Failed'); return j
     },
     onSuccess: (j) => { toast.success(`Transfer posted: ${j.contraNo}`); setResult({ ok: true, contraNo: j.contraNo }); void qc.invalidateQueries({ queryKey: ['day-book'] }); void qc.invalidateQueries({ queryKey: ['trial-balance'] }) },
@@ -492,9 +702,9 @@ function TransferModal({ businessAccounts, presetTo, onClose }: { businessAccoun
   const amt = parseMoney(amount) ?? 0n
   const canPost = fromId && toId && amt > 0n && fromId !== toId
 
-  if (result?.ok) return <Shell title="Transfer Money" onClose={onClose}><div className="text-center py-4"><CheckCircle2 className="size-12 text-primary mx-auto mb-3" /><p className="text-xs text-muted-foreground mb-1">Transfer posted</p><p className="text-2xl font-bold text-primary" data-num>{result.contraNo}</p><Button variant="ghost" size="sm" className="mt-4" onClick={() => { setResult(null); setAmount(''); setReference(''); setNotes('') }}>New Transfer</Button></div></Shell>
+  if (result?.ok) return <Shell title="Transfer Money" onClose={onClose}><div className="text-center py-4"><CheckCircle2 className="size-12 text-primary mx-auto mb-3" /><p className="text-xs text-muted-foreground mb-1">Transfer posted</p><p className="text-2xl font-bold text-primary" data-num>{result.contraNo}</p><Button variant="ghost" size="sm" className="mt-4" onClick={() => { setResult(null); setAmount(''); setReference(''); setNotes(''); setIdempotencyKey(crypto.randomUUID()) }}>New Transfer</Button></div></Shell>
 
-  return <Shell title="Transfer Money" subtitle="Move funds between Cash, Bank or Wallet accounts" onClose={onClose}>
+  return <Shell title="Transfer Money" subtitle="Move funds between Cash and Bank accounts" onClose={onClose}>
     <div className="space-y-3">
       <div><Label className="text-xs text-muted-foreground">Date</Label><Input type="date" value={date} onChange={e => setDate(e.target.value)} className="h-9 bg-background" data-num /></div>
       <div className="grid grid-cols-2 gap-2">
@@ -519,6 +729,7 @@ function AdjustmentModal({ accounts, onClose }: { accounts: Account[]; onClose: 
   const [amount, setAmount] = useState('')
   const [reason, setReason] = useState('')
   const [result, setResult] = useState<{ ok: boolean; voucherNo?: string; error?: string } | null>(null)
+  const [idempotencyKey, setIdempotencyKey] = useState(() => crypto.randomUUID())
 
   const mut = useMutation({
     mutationFn: async () => {
@@ -534,7 +745,7 @@ function AdjustmentModal({ accounts, onClose }: { accounts: Account[]; onClose: 
       const lines = direction === 'increase'
         ? [{ accountId: targetAccount.id, debit: amt.toString(), credit: '0', memo: `Increase ${targetAccount.name}` }, { accountId: equityAccount.id, debit: '0', credit: amt.toString(), memo: 'Adjustment offset' }]
         : [{ accountId: equityAccount.id, debit: amt.toString(), credit: '0', memo: 'Adjustment offset' }, { accountId: targetAccount.id, debit: '0', credit: amt.toString(), memo: `Decrease ${targetAccount.name}` }]
-      const r = await fetch('/api/journal-voucher', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jvDate: date, memo: reason || `Adjustment: ${direction} ${targetAccount.name}`, lines }) })
+      const r = await fetch('/api/journal-voucher', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jvDate: date, memo: reason || `Adjustment: ${direction} ${targetAccount.name}`, lines, idempotencyKey }) })
       const j = await r.json(); if (!r.ok) throw new Error(j?.error ?? 'Failed'); return j
     },
     onSuccess: (j) => { toast.success(`Adjustment posted: ${j.voucherNo}`); setResult({ ok: true, voucherNo: j.voucherNo }); void qc.invalidateQueries({ queryKey: ['day-book'] }); void qc.invalidateQueries({ queryKey: ['trial-balance'] }) },
@@ -543,7 +754,7 @@ function AdjustmentModal({ accounts, onClose }: { accounts: Account[]; onClose: 
   const amt = parseMoney(amount) ?? 0n
   const canPost = accountId && amt > 0n && reason
 
-  if (result?.ok) return <Shell title="Adjustment" onClose={onClose}><div className="text-center py-4"><CheckCircle2 className="size-12 text-primary mx-auto mb-3" /><p className="text-xs text-muted-foreground mb-1">Adjustment posted</p><p className="text-2xl font-bold text-primary" data-num>{result.voucherNo}</p><Button variant="ghost" size="sm" className="mt-4" onClick={() => { setResult(null); setAmount(''); setReason('') }}>New Adjustment</Button></div></Shell>
+  if (result?.ok) return <Shell title="Adjustment" onClose={onClose}><div className="text-center py-4"><CheckCircle2 className="size-12 text-primary mx-auto mb-3" /><p className="text-xs text-muted-foreground mb-1">Adjustment posted</p><p className="text-2xl font-bold text-primary" data-num>{result.voucherNo}</p><Button variant="ghost" size="sm" className="mt-4" onClick={() => { setResult(null); setAmount(''); setReason(''); setIdempotencyKey(crypto.randomUUID()) }}>New Adjustment</Button></div></Shell>
 
   return <Shell title="Adjustment" subtitle="Advanced correction for accountant use" onClose={onClose}>
     <div className="space-y-3">

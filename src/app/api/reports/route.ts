@@ -4,6 +4,66 @@ import { authOptions } from '@/lib/auth/authOptions'
 import { loadSessionUser, hasPermission } from '@/lib/auth/permissions'
 import { reportProfitLoss, reportBalanceSheet, reportSalesSummary, reportInventoryValuation, reportCashFlow, reportExpenseSummary, reportCustomerOutstanding, reportVendorOutstanding, reportSalesDetail, reportPurchaseDetail, reportStockMovements, reportDeliverySummary, reportCodSettlements, reportProductProfitability, reportTrialBalance, reportExceptions } from '@/lib/reports/data-access'
 import { resolveRequestId, safeApiError, withObservability } from '@/lib/observability'
+import { bizDateString } from '@/lib/dates'
+import { isSchemaUnavailableError } from '@/lib/dashboard/compatibility'
+import { getAccountingAvailability, unavailableAccountingPayload } from '@/lib/accounting/availability'
+import { buildClassificationOverlay, tryListAccountClassification } from '@/lib/accounting/legacy-account-classification'
+import { usesLegacyTransactionSchema } from '@/lib/identity/legacy-bridge'
+import { isSupabaseConfigured } from '@/lib/supabase/config'
+
+/**
+ * Reports whose rows are one-per-ledger-account, so the custom classification
+ * can be attached as labels. The rows themselves — and therefore every total,
+ * section and statement placement — are returned exactly as the report RPC
+ * produced them.
+ */
+const CLASSIFIABLE_REPORTS = new Set(['profit-loss', 'balance-sheet', 'expense'])
+
+type ReportClassification = {
+  hasCustomClassification: boolean
+  categories: Array<{ id: string; name: string; rootId: string; isActive: boolean }>
+  subcategories: Array<{ id: string; name: string; rootId: string; categoryId: string; isActive: boolean }>
+  /** Keyed by account code, because the legacy report RPCs return codes. */
+  accounts: Record<string, {
+    categoryId: string
+    categoryName: string | null
+    subcategoryId: string | null
+    subcategoryName: string | null
+  }>
+}
+
+const EMPTY_CLASSIFICATION: ReportClassification = {
+  hasCustomClassification: false, categories: [], subcategories: [], accounts: {},
+}
+
+/** Best-effort; null keeps a report byte-identical to its pre-classification output. */
+async function reportClassification(
+  type: string,
+  businessId: string,
+  actorProfileId: string,
+): Promise<ReportClassification | null> {
+  if (!CLASSIFIABLE_REPORTS.has(type)) return null
+  const tree = await tryListAccountClassification(businessId, actorProfileId)
+  if (!tree) return null
+  const overlay = buildClassificationOverlay(tree)
+  if (!overlay.hasCustomClassification) return EMPTY_CLASSIFICATION
+  const accounts: ReportClassification['accounts'] = {}
+  for (const [code, label] of Object.entries(overlay.byAccountCode)) {
+    if (!label.categoryId) continue
+    accounts[code] = {
+      categoryId: label.categoryId,
+      categoryName: label.categoryName,
+      subcategoryId: label.subcategoryId,
+      subcategoryName: label.subcategoryName,
+    }
+  }
+  return {
+    hasCustomClassification: true,
+    categories: overlay.categories,
+    subcategories: overlay.subcategories,
+    accounts,
+  }
+}
 
 export const GET = withObservability('/api/reports', async (req: Request) => {
   const requestId = resolveRequestId(req)
@@ -14,8 +74,9 @@ export const GET = withObservability('/api/reports', async (req: Request) => {
 
   const url = new URL(req.url)
   const type = url.searchParams.get('type') || 'overview'
-  const fromDate = url.searchParams.get('fromDate') || new Date().toISOString().slice(0, 8) + '01'
-  const toDate = url.searchParams.get('toDate') || new Date().toISOString().slice(0, 10)
+  const businessToday = bizDateString(new Date())
+  const fromDate = url.searchParams.get('fromDate') || businessToday.slice(0, 8) + '01'
+  const toDate = url.searchParams.get('toDate') || businessToday
 
   // Permission checks based on report type
   const permMap: Record<string, string> = {
@@ -44,14 +105,40 @@ export const GET = withObservability('/api/reports', async (req: Request) => {
 
   try {
     const bid = loaded.businessId
+    const accountingTypes = new Set([
+      'overview', 'profit-loss', 'balance-sheet', 'trial-balance',
+      'cash-flow', 'expense', 'customer-outstanding', 'vendor-outstanding',
+      'product-profitability',
+    ])
+    if (accountingTypes.has(type)) {
+      const capability = await getAccountingAvailability(bid)
+      const legacyReportsSupported = capability.path === 'operational-fallback'
+        && isSupabaseConfigured()
+        && await usesLegacyTransactionSchema()
+      if (capability.path === 'operational-fallback' && !legacyReportsSupported) {
+        return NextResponse.json(unavailableAccountingPayload(
+          { rows: [] },
+          capability.reason,
+        ))
+      }
+    }
     switch (type) {
-      case 'profit-loss': return NextResponse.json({ rows: await reportProfitLoss(bid, fromDate, toDate) })
-      case 'balance-sheet': return NextResponse.json({ rows: await reportBalanceSheet(bid, toDate) })
-      case 'trial-balance': return NextResponse.json({ rows: await reportTrialBalance(bid) })
+      case 'profit-loss': return NextResponse.json({
+        rows: await reportProfitLoss(bid, fromDate, toDate),
+        classification: await reportClassification(type, bid, loaded.profileId),
+      })
+      case 'balance-sheet': return NextResponse.json({
+        rows: await reportBalanceSheet(bid, toDate),
+        classification: await reportClassification(type, bid, loaded.profileId),
+      })
+      case 'trial-balance': return NextResponse.json({ rows: await reportTrialBalance(bid, fromDate, toDate) })
       case 'sales-summary': return NextResponse.json({ rows: await reportSalesSummary(bid, fromDate, toDate) })
       case 'inventory-valuation': return NextResponse.json({ rows: await reportInventoryValuation(bid) })
       case 'cash-flow': return NextResponse.json({ rows: await reportCashFlow(bid, fromDate, toDate) })
-      case 'expense': return NextResponse.json({ rows: await reportExpenseSummary(bid, fromDate, toDate) })
+      case 'expense': return NextResponse.json({
+        rows: await reportExpenseSummary(bid, fromDate, toDate),
+        classification: await reportClassification(type, bid, loaded.profileId),
+      })
       case 'customer-outstanding': return NextResponse.json({ rows: await reportCustomerOutstanding(bid) })
       case 'vendor-outstanding': return NextResponse.json({ rows: await reportVendorOutstanding(bid) })
       case 'sales-detail': return NextResponse.json({ rows: await reportSalesDetail(bid, fromDate, toDate) })
@@ -62,30 +149,28 @@ export const GET = withObservability('/api/reports', async (req: Request) => {
       case 'delivery-summary': return NextResponse.json({ rows: await reportDeliverySummary(bid) })
       case 'cod-settlements': return NextResponse.json({ rows: await reportCodSettlements(bid) })
       case 'overview': {
-        const [pl, bs, inv, cash, sales, expenses] = await Promise.all([
+        const [pl, bs] = await Promise.all([
           reportProfitLoss(bid, fromDate, toDate),
           reportBalanceSheet(bid, toDate),
-          reportInventoryValuation(bid),
-          reportCashFlow(bid, fromDate, toDate),
-          reportSalesSummary(bid, fromDate, toDate),
-          reportExpenseSummary(bid, fromDate, toDate),
         ])
-        const revenue = pl.filter(r => r.section === 'REVENUE').reduce((s, r) => s + Number(r.amount), 0)
-        const expensesTotal = pl.filter(r => r.section === 'EXPENSE').reduce((s, r) => s + Number(r.amount), 0)
-        const cogs = pl.filter(r => r.account_code === '5010').reduce((s, r) => s + Number(r.amount), 0)
-        const assets = bs.filter(r => r.section === 'ASSET').reduce((s, r) => s + Number(r.balance), 0)
-        const liabilities = bs.filter(r => r.section === 'LIABILITY').reduce((s, r) => s + Number(r.balance), 0)
-        const equity = bs.filter(r => r.section === 'EQUITY').reduce((s, r) => s + Number(r.balance), 0)
-        const invValue = inv.reduce((s, r) => s + Number(r.stock_value), 0)
-        const cashBalance = cash.reduce((s, r) => s + Number(r.closing_balance), 0)
-        const custRecv = bs.find(r => r.account_code === '1200')?.balance || '0'
-        const vendorPay = bs.find(r => r.account_code === '2010')?.balance || '0'
-        const riderCod = bs.find(r => r.account_code === '1310')?.balance || '0'
+        const sumAmount = (rows: any[]) => rows.reduce((sum, row) => sum + BigInt(row.amount ?? 0), 0n)
+        const sumBalance = (rows: any[]) => rows.reduce((sum, row) => sum + BigInt(row.balance ?? 0), 0n)
+        const revenue = sumAmount(pl.filter(r => r.section === 'REVENUE'))
+        const cogs = sumAmount(pl.filter(r => r.section === 'COST_OF_GOODS_SOLD'))
+        const expensesTotal = sumAmount(pl.filter(r => r.section === 'EXPENSE'))
+        const assets = sumBalance(bs.filter(r => r.section === 'ASSET'))
+        const liabilities = sumBalance(bs.filter(r => r.section === 'LIABILITY'))
+        const equity = sumBalance(bs.filter(r => r.section === 'EQUITY'))
+        const cashBalance = sumBalance(bs.filter(r => ['1010', '1020', '1030', '1040'].includes(r.account_code)))
+        const custRecv = BigInt(bs.find(r => r.account_code === '1200')?.balance ?? 0)
+        const vendorPay = BigInt(bs.find(r => r.account_code === '2010')?.balance ?? 0)
+        const invValue = BigInt(bs.find(r => r.account_code === '1100')?.balance ?? 0)
+        const riderCod = BigInt(bs.find(r => r.account_code === '1300')?.balance ?? 0)
         return NextResponse.json({
           kpis: {
             netSales: String(revenue),
             grossProfit: String(revenue - cogs),
-            netProfit: String(revenue - expensesTotal),
+            netProfit: String(revenue - cogs - expensesTotal),
             totalExpenses: String(expensesTotal),
             cashBalance: String(cashBalance),
             customerReceivable: String(custRecv),
@@ -102,6 +187,12 @@ export const GET = withObservability('/api/reports', async (req: Request) => {
       default: return NextResponse.json({ error: 'UNKNOWN_REPORT_TYPE' }, { status: 400 })
     }
   } catch (error) {
+    if (isSchemaUnavailableError(error instanceof Error ? error : { message: String(error) })) {
+      return NextResponse.json(unavailableAccountingPayload(
+        { rows: [] },
+        'schema-unavailable',
+      ))
+    }
     return safeApiError({
       route: '/api/reports',
       requestId,

@@ -30,6 +30,7 @@ type Product = {
   isTemporary: boolean
   isActive: boolean
   markedForMerge: boolean
+  commissionRatePaisas: string | null
   createdAt: string
 }
 
@@ -55,6 +56,7 @@ export function ProductsView({ user }: { user: MeUser }) {
     salePrice: '',
     purchasePrice: '',
     openingStock: '0',
+    commissionRatePaisas: '',
     isTemporary: false,
   })
 
@@ -93,6 +95,7 @@ export function ProductsView({ user }: { user: MeUser }) {
           salePrice: form.salePrice ? Number(form.salePrice) : 0,
           purchasePrice: form.purchasePrice ? Number(form.purchasePrice) : 0,
           openingStock: form.openingStock ? parseInt(form.openingStock, 10) : 0,
+          commissionRatePaisas: form.commissionRatePaisas || undefined,
           isTemporary: form.isTemporary,
         }),
       })
@@ -109,7 +112,7 @@ export function ProductsView({ user }: { user: MeUser }) {
       void qc.invalidateQueries({ queryKey: ['negative-stock'] })
       void qc.invalidateQueries({ queryKey: ['pending-stock'] })
       setOpen(false)
-      setForm({ name: '', categoryId: '__none__', salePrice: '', purchasePrice: '', openingStock: '0', isTemporary: false })
+      setForm({ name: '', categoryId: '__none__', salePrice: '', purchasePrice: '', openingStock: '0', commissionRatePaisas: '', isTemporary: false })
     },
     onError: (e: Error) => toast.error(`Failed: ${e.message}`),
   })
@@ -225,6 +228,10 @@ export function ProductsView({ user }: { user: MeUser }) {
             <div className="space-y-1.5">
               <div className="flex items-center"><Label htmlFor="product-purchase-price" className="text-xs font-medium text-muted-foreground">Purchase price (PKR)</Label><AiFieldHelp fieldName="purchasePrice" fieldLabel="Purchase price" currentScreen="products" role={user.roleName} valueCategory="money" accountingContext="cost and WAC" /></div>
               <Input id="product-purchase-price" type="number" step="0.01" value={form.purchasePrice} onChange={(e) => setForm((s) => ({ ...s, purchasePrice: e.target.value }))} className="h-10 bg-background press-sm" data-num />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="product-commission-rate" className="text-xs font-medium text-muted-foreground">Commission per piece (paisas)</Label>
+              <Input id="product-commission-rate" inputMode="numeric" value={form.commissionRatePaisas} onChange={(e) => setForm((s) => ({ ...s, commissionRatePaisas: e.target.value.replace(/\D/g, '') }))} className="h-10 bg-background press-sm" data-num />
             </div>
             <div className="space-y-1.5">
               <div className="flex items-center"><Label htmlFor="product-opening-stock" className="text-xs font-medium text-muted-foreground">Opening stock (pieces)</Label><AiFieldHelp fieldName="openingStock" fieldLabel="Opening stock" currentScreen="products" role={user.roleName} valueCategory="quantity" accountingContext="inventory opening balance" /></div>

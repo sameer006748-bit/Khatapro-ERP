@@ -1,13 +1,13 @@
 'use client'
 
 import { useQuery } from '@tanstack/react-query'
-import { useRouter, useSearchParams } from 'next/navigation'
+import { useRouter } from 'next/navigation'
 import { formatMoney } from '@/lib/format'
 import { bizDate } from '@/lib/dates'
 import { ArrowLeft, BookOpen, FileText } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { useEffect } from 'react'
 import { motion } from 'framer-motion'
+import { apiFetchJson } from '@/lib/api-client'
 
 type Line = {
   lineId: string
@@ -31,7 +31,6 @@ const VOUCHER_BADGE: Record<string, string> = {
 
 export function LedgerDrilldownView({ accountId }: { accountId: string }) {
   const router = useRouter()
-  const params = useSearchParams()
 
   const q = useQuery<{
     account: {
@@ -44,10 +43,11 @@ export function LedgerDrilldownView({ accountId }: { accountId: string }) {
     lines: Line[]
   }>({
     queryKey: ['ledger', accountId],
-    queryFn: () => fetch(`/api/ledger/${accountId}`).then((r) => r.json()),
+    queryFn: ({ signal }) => apiFetchJson(`/api/ledger/${accountId}`, { signal }),
     enabled: !!accountId,
     staleTime: 30_000,
     gcTime: 5 * 60_000,
+    retry: false,
   })
 
   // When the user navigates back, strip ?ledger= from the URL.
@@ -96,10 +96,11 @@ export function LedgerDrilldownView({ accountId }: { accountId: string }) {
   if (q.isError || !q.data) {
     return (
       <div className="card-3d p-8 text-center">
-        <p className="text-sm text-destructive">Failed to load ledger.</p>
-        <Button variant="outline" className="mt-4 press-sm" onClick={back}>
-          Back
-        </Button>
+        <p className="text-sm text-destructive">Unable to load account activity.</p>
+        <div className="mt-4 flex items-center justify-center gap-2">
+          <Button variant="outline" className="press-sm" onClick={() => q.refetch()}>Retry</Button>
+          <Button variant="ghost" className="press-sm" onClick={back}>Back</Button>
+        </div>
       </div>
     )
   }

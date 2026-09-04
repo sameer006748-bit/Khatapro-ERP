@@ -7,8 +7,22 @@ import { getServerSession } from 'next-auth'
 import { db } from '@/lib/db'
 import { authOptions } from '@/lib/auth/authOptions'
 import { loadSessionUser, requirePermission } from '@/lib/auth/permissions'
-import { isUsingSupabase } from '@/lib/accounting/data-access'
+import { isSupabaseConfigured } from '@/lib/supabase/config'
 import { resolveRequestId, safeApiError, withObservability } from '@/lib/observability'
+
+const SECRET_DETAIL_KEY = /(?:password|secret|token|api[_-]?key|authorization|cookie|credential)/i
+const INTERNAL_DETAIL_KEY = /^(?:ledgerAccountId|accountId|businessId|userId|profileId|categoryId|subcategoryId|idempotencyKey)$/
+
+function safeDetails(raw: unknown): Record<string, unknown> | null {
+  if (!raw) return null
+  try {
+    const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null
+    return Object.fromEntries(Object.entries(parsed as Record<string, unknown>).filter(
+      ([key]) => !SECRET_DETAIL_KEY.test(key) && !INTERNAL_DETAIL_KEY.test(key),
+    ))
+  } catch { return null }
+}
 
 export const GET = withObservability('/api/audit-logs', async (req: Request) => {
   const requestId = resolveRequestId(req)
@@ -18,12 +32,16 @@ export const GET = withObservability('/api/audit-logs', async (req: Request) => 
   if (!loaded) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
   const su = await requirePermission(loaded, 'can_view_audit_log')
 
-  if (await isUsingSupabase()) {
+  // Audit history belongs to the supported legacy production schema too. Do
+  // not use the UUID-ledger probe here: its absence must not select a local
+  // serverless fallback when audit_logs is available in production.
+  if (isSupabaseConfigured()) {
     const { getAdminSupabase } = await import('@/lib/supabase/admin')
     const admin = getAdminSupabase()
+    const auditFields = ['id', 'timestamp', 'action', 'entity', 'entity_id', 'user_id', 'details'].join(', ')
     const { data, error } = await admin
       .from('audit_logs')
-      .select('id, timestamp, action, entity, entity_id, user_id')
+      .select(auditFields)
       .eq('business_id', su.businessId)
       .order('timestamp', { ascending: false })
       .limit(200)
@@ -44,6 +62,7 @@ export const GET = withObservability('/api/audit-logs', async (req: Request) => 
         entity: r.entity,
         entityId: r.entity_id,
         actorCategory: r.user_id ? 'Authenticated user' : 'System',
+        details: safeDetails(r.details),
       })),
     })
   }
@@ -62,6 +81,7 @@ export const GET = withObservability('/api/audit-logs', async (req: Request) => 
       entity: r.entity,
       entityId: r.entityId,
       actorCategory: r.userId ? 'Authenticated user' : 'System',
+      details: safeDetails(r.details),
     })),
   })
 })

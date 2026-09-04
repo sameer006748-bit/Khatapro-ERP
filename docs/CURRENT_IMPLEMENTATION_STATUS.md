@@ -1,0 +1,568 @@
+# KhataPro ERP — Current Implementation Status
+
+Last updated: 2026-08-31
+
+This file is the operational handoff/status document. Agents must read it together with:
+
+- `docs/CLIENT_REQUIREMENTS.md`
+- `docs/ACCOUNTING_CODES_AND_IDENTITIES.md`
+
+before starting work on the current branch.
+
+## Repository / Branch Context
+
+Repository: `sameer006748-bit/Khatapro-ERP`
+
+Primary active local branch during current recovery work:
+
+`fix/backend-stock-recovery`
+
+Important remote fact at the time this documentation branch was created:
+
+- remote `fix/backend-stock-recovery` HEAD: `93451af7ef81f7b3bb37e8ac895e6205ce87d08d`
+- local working branch had later unpushed work, including commit `26d1b98b24762ba4b6506c45553d37c3f2722d82` and additional uncommitted fixes
+
+Do not assume GitHub remote HEAD equals the developer's local HEAD. Check before merging/pulling.
+
+## Protected / Local-Only Files
+
+Do not stage or overwrite without explicit instruction:
+
+- `.env`
+- `.env.local`
+- `task_progress.md`
+- `graphify-out/`
+- `.vscode/`
+- `db/custom.db`
+- local database backups
+
+## Production Supabase
+
+Project ref:
+
+`ebcebxwpddltiwrqybqc`
+
+Production is verified to use the legacy/original schema rooted at `business`.
+It is not the newer UUID-ledger schema. Do not apply migrations broadly. Always
+inspect exact pending versions and dependencies first.
+
+Known migration notes:
+
+- migration `00013` is already applied; do not treat it as pending;
+- migration `00033_mixed_sale_returns.sql` is prepared but NOT applied;
+- migration `00033_mixed_sale_returns_inspect.sql` is a read-only inspection companion;
+- migrations `00033`, `00034`, and `00035` are not suitable for direct application
+  to the verified legacy production schema;
+- migration `00036_legacy_transaction_identity_bridge.sql` is the additive
+  legacy-compatible identity bridge and is **APPLIED** in production;
+- migration `00037_legacy_historical_sales_returns.sql` is **APPLIED** in production (2026-08-29);
+- do not use a broad migration command that may unintentionally apply unrelated pending versions.
+
+## Legacy Transaction Identity Bridge
+
+Migration 00036 preserves every existing transaction number and adds one shared,
+business-scoped high-water-mark allocator for new legacy-schema entries. New
+posting prefixes are:
+
+| Flow | Existing history | New prefix after 00036 |
+|---|---|---|
+| Sales invoice | `INV` | `INV` |
+| Purchase | `PUR` | `PUR` |
+| Expense | `EXP` | `EXP` |
+| Receipt | `RV` remains unchanged | `REC` |
+| Payment | `PV` remains unchanged | `PAY` |
+| Contra | `CV` remains unchanged | `CON` |
+| Journal | `JV` remains unchanged | `JRV` |
+| Purchase return | `PRN` remains unchanged | `PRT` |
+| Sales return | stable `SR` backfill | `SRT` |
+| COD submission | `CS` | `CS` |
+
+The migration adds only `sales_returns.return_no`: nullable first, deterministic
+`SR-xxxx` historical backfill, unique per business, then NOT NULL. A trigger
+allocates `SRT-xxxx` for new rows. Identity-aware RPC overloads make retries
+idempotent; before 00036 is applied, existing payment/receipt/journal/contra/
+expense/purchase-return pages retry the original signatures. Sales Return fails
+with an actionable HTTP 409 migration-required response instead of posting an
+unidentified return or returning a generic 500.
+
+Pending because no compatible legacy posting path currently exists: stock
+adjustment (`STA`), stock movement/transfer document (`STM`), opening stock
+(`OPS`), rider settlement (`RDS`), commission settlement (`COM`), capital
+introduced (`CAP`), owner drawings (`DRW`), and delivery outcome (`DO`).
+
+## Production Runtime Recovery
+
+Major production page failures were fixed before the current feature batch.
+
+Shared causes included:
+- database contract drift;
+- Prisma selecting columns absent from deployed DB;
+- optional Supabase columns/RPCs not detected safely;
+- inappropriate serverless fallback paths;
+- retry behavior treating deterministic schema failures as transient;
+- missing Customers API route.
+
+Recovery commit pushed previously:
+
+`93451af7ef81f7b3bb37e8ac895e6205ce87d08d` — `Fix production runtime page failures`
+
+The recovery was runtime verified across core pages with zero unexplained API 400+/console failures at that time.
+
+### Client handover blocker batch 1 — 2026-08-31
+
+- Trial Balance now uses the verified legacy-schema report path when the newer ledger is unavailable, preserving business scope, permissions, and debit/credit totals.
+- Audit Log now reads the supported production audit source without selecting a serverless local fallback.
+- Both views retain the application shell and show a retryable inline error state for a failed request.
+- Client-visible infrastructure and migration wording was replaced with business-facing language.
+- TypeScript, changed-file lint, and the complete local test run passed (499/499). Authenticated browser verification remains pending because no browser surface was available in this session.
+
+## Sales / Returns / Commission / Invoice Batch
+
+Local implementation commit:
+
+`26d1b98b24762ba4b6506c45553d37c3f2722d82` — `Complete sales returns commission and invoice workflow`
+
+At the time of this document, that commit had not yet been pushed to the remote active branch.
+
+### Implemented
+
+- shared sale domain engine used across Counter, Online, OFC, and Other sale paths;
+- professional Counter Sale two-panel POS redesign;
+- sold / returned / net quantity model;
+- stock effect from net quantity;
+- per-product fixed commission;
+- Owner versus Salesman commission attribution;
+- invoice-linked, item-level commission visibility;
+- professional invoice detail;
+- print mode UI for Half A4, Two on A4, Full A4, and 80mm receipt;
+- additive migration `00033` prepared for production mixed sale/return posting.
+
+### Manually Verified Locally
+
+Using test product `Black Cotton Shirt`:
+
+- starting stock: 50;
+- sold: 10;
+- returned: 2;
+- net billed: 8;
+- unit rate: Rs 1,500;
+- gross sale: Rs 15,000;
+- return deduction: Rs 3,000;
+- net sale: Rs 12,000;
+- commission rate: Rs 20/piece;
+- commission: Rs 160;
+- stock after post: 42.
+
+Owner attribution: verified.
+
+Salesman attribution: verified.
+
+Local invoice created:
+
+`INV-0002`
+
+Invoice detail showed:
+- Sold 10;
+- Returned 2;
+- Remaining/Net 8;
+- payment Rs 12,000;
+- outstanding Rs 0;
+- commission details and earned-on-collection status.
+
+## Historical / Pure Sales Return
+
+Implemented in source and locally runtime-verified:
+
+- one shared Sales List workflow searches/selects the original invoice across Counter, Online, OFC, and Other;
+- invoice detail selects the immutable original invoice item and shows sold, previously returned, and remaining returnable quantities;
+- a pure return posts Sold 0 / Return X and preserves both original invoice and item linkage;
+- local Prisma posting is one transaction with business checks, cumulative over-return guards, compare-and-swap protection, exact-once stock restoration, SRT allocation, immutable commission reversal events, user-managed refund accounts, explicit customer-credit status, and idempotent replay;
+- invoice detail shows SRT references, returned total, and Refunded / Customer credit due status;
+- focused historical, mixed-return, and commission tests pass;
+- disposable-database runtime verification created `SRT-0001`, preserved original Sold 10, increased Returned and stock by exactly 1, and replayed the same SRT on retry.
+
+Production activation: migration `00037_legacy_historical_sales_returns.sql` was applied to production (2026-08-29) after a one-line schema correction (`v_invoice.status` → `v_invoice.is_cancelled`, because production `invoices` has no `status` column). Production schema was verified read-only: `returned_qty`, `sales_return_lines`, new `sales_returns` columns, `request_fingerprint`, and the 9-argument `post_sales_return` (SECURITY DEFINER, `search_path = public`, service_role-only grants) all present; 5-arg/6-arg overloads intact. Production browser/UAT runtime verification of a real historical return remains pending (no safe isolated test business exists).
+
+## Payment UI / Business Accounts — Uncommitted Local Work
+
+A later local session implemented payment UI simplification and user-managed payment accounts but did NOT commit/push it.
+
+Reported work includes:
+
+- `src/lib/sales/payment-allocation.ts`
+- `src/components/erp/sales/use-payment-draft.ts`
+- `src/components/erp/sales/payment-panel.tsx`
+- business account management API and UI;
+- Counter/Online/OFC/Other views converted to shared payment allocation;
+- canonical business account types;
+- edit / activate / deactivate / guarded delete;
+- split payment support;
+- no hard-coded Cash/JazzCash/Easypaisa payment assumptions.
+
+Focused payment tests reported 14/14 passing.
+
+Optional BusinessAccount description remains schema-dependent because the model currently has no description field.
+
+### Legacy production compatibility update — 2026-08-31
+
+Business Accounts no longer uses the UUID-ledger availability gate for configured legacy
+production. Additive migration `00040_legacy_business_accounts.sql` is prepared locally and
+adds service-role-only list/create/update/delete RPCs over the existing legacy `accounts`,
+`account_categories`, and `business_accounts` tables. Create is atomic and idempotent, and
+business-account code allocation is serialized per business with a transaction advisory lock.
+Update keeps the linked account name/active state synchronized; used accounts remain protected
+from deletion and must be deactivated instead. Configured deployments never fall through to
+Prisma/SQLite. Missing 00040 returns a generic feature-unavailable response.
+
+`00040` is APPLIED to production (2026-08-31). A live runtime check then surfaced a concrete type
+bug: production `profiles.id` is TEXT while the RPC `p_actor_profile_id` params are uuid, so the
+00040 `p.id = p_actor_profile_id` comparison failed on every call with SQLSTATE 42883
+`operator does not exist: text = uuid`. Additive migration `00041_legacy_business_accounts_type_fix.sql`
+(APPLIED 2026-08-31) recreates the four RPCs with `p.id = p_actor_profile_id::text`, preserving
+SECURITY DEFINER, `search_path = public`, and service_role-only grants. After 00041 the full Business
+Accounts production UAT passed 43/43 (list, create, idempotent create retry, update, deactivate, delete,
+cleanup) with no `ACCOUNTING_MIGRATION_REQUIRED`, no backend wording exposed to the client, and no
+Prisma/SQLite fallback. The temporary zero-balance "UAT Business Account" (code 1060) was deleted; only
+immutable audit/idempotency history remains.
+
+## Local NextAuth Fix — Uncommitted
+
+Local login failed with NextAuth v4 `NO_SECRET` when `NODE_ENV=production` was inherited by the dev process.
+
+Fix made locally:
+
+`src/lib/auth/authOptions.ts`
+
+Explicitly set:
+
+`secret: process.env.NEXTAUTH_SECRET`
+
+Local Owner login was then verified successfully.
+
+This fix was reported as NOT committed/pushed at the time of documentation.
+
+## Counter Sale Post Button Fix — Uncommitted
+
+Local Post Sale remained disabled because the client required payment account IDs to be UUIDs.
+
+Local Prisma business-account IDs are CUIDs, so `isUuid(accountId)` always failed.
+
+Fix made locally in:
+
+`src/components/erp/views/counter-sale-view.tsx`
+
+The client now validates payment account membership against the active business-account list instead of requiring UUID format.
+
+Manual local POST then succeeded:
+
+- invoice: `INV-0002`;
+- same-key retry returned same invoice (idempotent);
+- stock moved 50 → 42;
+- no duplicate invoice.
+
+This fix was reported as NOT committed/pushed at the time of documentation.
+
+## Local DB Test Adjustments
+
+Local test DB work was disclosed and is not production state.
+
+Reported adjustments included:
+- non-destructive local Prisma schema sync;
+- correcting drifted AccountCategory datetime storage to Prisma-compatible values;
+- seeding `IdentitySequence` so existing `INV-0001` would not collide;
+- test users/password setup;
+- test product commission Rs 20/piece and stock 50.
+
+A local backup was created.
+
+Never infer that these local DB mutations were applied to production.
+
+## Tests / Validation from Feature Batch
+
+Reported feature-batch gates before later uncommitted fixes:
+
+- tests: 412 pass / 0 fail;
+- lint: clean;
+- `npx tsc --noEmit`: clean;
+- build: success;
+- `git diff --check`: only protected `.env` trailing-whitespace noise.
+
+After later uncommitted auth/payment/button fixes, rerun focused tests, lint, TypeScript, diff check, and build before committing.
+
+## Print Status
+
+Invoice-detail UI is implemented and manually reviewed.
+
+Print-mode selection UI is implemented.
+
+Final actual browser print-output visual approval is still pending.
+
+Do not mark print complete merely because the print modal opens.
+
+## Accounting Codes / Identities Status
+
+- Invoice identity prefix `INV` exists locally and was observed with `INV-0002`.
+- identity-sequence foundation exists;
+- all transaction classes do NOT yet have verified business prefixes;
+- readable category/subcategory code words are NOT implemented end-to-end;
+- numeric CoA codes such as `1010` are insufficient for the final requirement.
+
+See `docs/ACCOUNTING_CODES_AND_IDENTITIES.md` for the authoritative policy.
+
+## Contra Status
+
+Expandable multi-row Contra remains pending.
+
+This is a high-priority client workflow because internal transfers are a frequent daily operation.
+
+## Rider Status
+
+Rider/runtime foundation exists, but final client workflow remains incomplete/insufficiently verified for:
+
+- multi-day rider settlement;
+- delivered versus outstanding parcels;
+- partial delivery / partial return;
+- extremely simple rider-facing controls.
+
+## Immediate Recommended Work Order
+
+1. Bring these three source-of-truth docs into the local active branch without overwriting local feature work.
+2. Commit the already completed local auth/payment/Post Sale fixes after re-running gates.
+3. Implement pure historical return item UI.
+4. Implement transaction-prefix coverage + readable category/subcategory code words.
+5. Complete/verify Contra.
+6. Complete/verify rider settlement and partial delivery/return.
+7. Visually approve actual A4/80mm print output.
+8. Review and safely apply migration `00033` only when its dependencies and production target are confirmed.
+9. Push and perform final Vercel/production runtime verification.
+
+## Agent Operating Rule
+
+Every new implementation prompt should explicitly instruct the agent to read:
+
+1. `docs/CLIENT_REQUIREMENTS.md`
+2. `docs/ACCOUNTING_CODES_AND_IDENTITIES.md`
+3. `docs/CURRENT_IMPLEMENTATION_STATUS.md`
+
+before coding.
+
+At the end of a completed task, update the relevant status sections in these docs so they remain the source of truth.
+
+## Accounting Codes / Identities Implementation Update — 2026-08-28
+
+- Added shared Prisma IdentitySequence allocator and routed Prisma sales (INV), purchases (PUR), and purchase returns (PRT) through it.
+- Created, but did **not** apply, additive migration  0034_code_words_and_prefix_registry.sql. It preserves historic/legacy prefixes while issuing new readable registry prefixes (SRT, PRT, REC, PAY, CON, JRV, STA, STM, OPS, RDS, COM) on the Supabase paths.
+- Added required readable code-word design for persisted account subcategories: canonical uppercase letters/numbers/hyphens, unique by business, collision-safe backfill, editable code, relational IDs preserved.
+- Account-category UI/API includes Code Word input/display/edit and clear duplicate/invalid validation contracts.
+- Migration-absent compatibility was runtime verified on localhost: authenticated category GET returns ACCOUNTING_MIGRATION_REQUIRED data (200) and attempted create returns CODE_WORD_SCHEMA_REQUIRED (409), never 500.
+- Focused tests passed. Full test sweep has one known pre-existing Counter Sale keyboard assertion failure in an unrelated already-modified file; full lint process did not complete in this environment.
+px tsc --noEmit and build passed.
+- Remaining before final completion claim: explicitly apply  0034 only to a disposable/local approved database, then browser-verify category/subcategory create, duplicate rejection, edit, hierarchy display, and each supported Supabase document posting prefix.
+
+
+## Accounting code-word verification update - 2026-08-29
+
+Implemented: all fixed top-level category families have readable codes; persisted subcategories have normalized, business-unique readable codes; numeric CoA codes remain separate; migration 00035 preserves existing IDs and hierarchy. Focused tests, lint, TypeScript, and build passed.
+
+Not runtime-verified: authenticated category/subcategory CRUD, PostgreSQL migration application, and transaction posting workflows. The local app shell returned 200 and the protected category endpoint returned 401 without a session. No local PostgreSQL endpoint was configured; the non-local disposable URL was not used.
+
+
+## Migration 00036 applied to production — 2026-08-29
+
+`00036_legacy_transaction_identity_bridge.sql` was applied directly to production ref
+`ebcebxwpddltiwrqybqc` via exact-file `psql --single-transaction` (no db push, no broad
+migration up, no repair, no reset). Only 00036 was executed.
+
+Schema verified: `sales_returns.return_no` (text, NOT NULL, business-scoped unique) added;
+bridge tables `legacy_transaction_identity_sequences` (seeded INV=6/PUR=1/EXP=2, others 0)
+and `legacy_transaction_identity_requests` created; identity-aware idempotent overloads +
+base overloads coexist for all eight posting functions; sales-return trigger installed;
+service_role-only grants, no anon/authenticated grants, no UUID-ledger tables.
+
+Historic identities preserved: INV-0001..0006, PUR-0001, EXP-0001/0002, CV-0001, RV-0001,
+JV-0001.. all unchanged.
+
+New-prefix capability verified in a rollback-only transaction (CON/REC/PAY/PRT/SRT/JRV plus
+continuing INV/PUR/EXP); no identity consumed. Live application-layer posting NOT verified —
+production has only the real business `biz-default` and no safe test business, so no
+customer-impacting transaction was created.
+
+Migration history: `supabase_migrations.schema_migrations` does not exist (unmanaged);
+00036 applied directly, history reconciliation pending separately, no mass repair.
+
+## Migration 00037 applied to production — 2026-08-29
+
+`00037_legacy_historical_sales_returns.sql` was applied directly to production ref
+`ebcebxwpddltiwrqybqc` via exact-file `psql` (no db push, no migration up, no repair).
+Only 00037 was executed; the file's own `begin;`/`commit;` provided the single transaction.
+
+Preflight correction applied before application: `if v_invoice.status = 'Cancelled'` was
+changed to `if v_invoice.is_cancelled` because production `invoices` has no `status` column.
+
+Production schema verified read-only after application:
+
+- `invoice_items.returned_qty` integer NOT NULL default 0 with check
+  `returned_qty >= 0 and returned_qty <= qty`;
+- `sales_returns.refund_mode`, `refund_account_id` (FK to accounts, restrict),
+  `settlement_status` added;
+- `legacy_transaction_identity_requests.request_fingerprint` added;
+- `sales_return_lines` created (PK, FKs cascade/restrict, `returned_qty > 0` check,
+  unique `(sales_return_id, original_invoice_item_id)`, business+item index, RLS enabled);
+- 9-argument `post_sales_return(text,text,date,jsonb,text,text,text,uuid,text) → jsonb`
+  created as SECURITY DEFINER, `SET search_path = public`, EXECUTE granted only to
+  `service_role` (and owner `postgres`); anon/authenticated/public revoked;
+- existing 5-arg and 6-arg `post_sales_return` overloads remain intact;
+- the 9-arg body references `v_invoice.is_cancelled` (verified, not `status`);
+- production data unchanged: 1 business, 6 invoices, 11 invoice_items, 0 sales_returns,
+  0 sales_return_lines, 0 historical-return identity rows.
+
+Runtime/UAT: NOT performed against production because only the real business
+`biz-default` exists and no safe isolated test business is available. Browser workflow
+verification for a real historical/partial sales return remains pending manual sign-off.
+
+## Migration 00038 (legacy multi-row Contra + Owner Drawings) — 2026-08-29
+
+`00038_legacy_contra_batch.sql` was added to the repository and is APPLIED to production
+(2026-08-29). It is additive and scoped to the verified legacy production schema.
+
+What it adds:
+
+- `contra_batches` (one readable CON identity per batch) and `contra_batch_entries` (one row
+  per contra/drawings leg), both RLS-enabled with service_role-only grants;
+- `post_contra_batch(text,date,jsonb,text,text,uuid,text)` — SECURITY DEFINER,
+  `SET search_path = public`, service_role-only EXECUTE. It validates every line before the
+  first business write (so one invalid line rolls the whole batch back), posts ONE balanced
+  voucher for the batch, allocates ONE `CON` identity via the shared allocator, and is
+  idempotent via `claim_legacy_transaction_request(..., 'contra_batch', ...)`.
+  - pure contra: debit destination asset, credit source asset (no P&L/equity effect);
+  - drawings: debit Owner Drawings (3020), credit source asset.
+- legacy `list_business_money_accounts` / `list_business_money_activity` RPCs (read from
+  `accounts` / `contra_entries` / batch rows) so the Contra screen loads in production.
+
+Backward compatibility: the existing `post_contra_entry` (single row) and every historic
+`contra_entries` row are untouched. The `/api/contra-entry` route keeps a single pure contra
+row on the live `post_contra_entry` path; a multi-row batch or any drawings row uses
+`post_contra_batch` and therefore fails closed (HTTP 409 migration-required) until 00038 is
+applied.
+
+Verification: focused `tests/contra-batch.test.ts` (13 assertions), `tests/contra-drawings.test.ts`
+(11) and `tests/historical-sales-return.test.ts` (11) all pass (35 total). `node --check` passes on
+the changed `.ts` files. `npx tsc --noEmit` passes clean. ESLint on the changed Contra/app files
+passes clean. `npx eslint .` and `npm run build` (`next build`) could not complete inside this
+sandbox's 30s command window (environmental, large project), so those two still need to be run in
+a normal terminal before final close-out. A real Contra-related type error
+(`src/lib/money/operational-money.ts` — destructured `data` from `Promise<unknown>`) was found and
+fixed with a one-line change; the migration and schema are unaffected.
+
+Application: APPLIED to production (2026-08-29) via exact-file `psql`, after a one-line
+signature fix (all `post_contra_batch` parameters made required — PostgreSQL rejects a
+non-default parameter that follows a defaulted one). Preflight passed; the first attempt
+failed that signature rule and was fully rolled back (no partial objects remained), then the
+corrected file applied cleanly.
+
+## Migration 00038 production verification — 2026-08-29
+
+Read-only verification after application:
+
+- `contra_batches` exists: PK, UNIQUE(business_id, batch_no), FK business CASCADE, FK vouchers
+  SET NULL, `(business_id, batch_date desc)` index, RLS enabled, service_role-only grants
+  (no anon/authenticated/public).
+- `contra_batch_entries` exists: PK, FK business CASCADE, FK contra_batch CASCADE, FK
+  from/to accounts RESTRICT, CHECK amount>0, CHECK entry_kind in ('contra','drawings'),
+  UNIQUE(contra_batch_id, line_no), CHECK from<>to, `(contra_batch_id)` index, RLS enabled.
+- `post_contra_batch(text,date,jsonb,text,text,uuid,text) → jsonb`: SECURITY DEFINER,
+  `SET search_path = public`, owner postgres, EXECUTE only to service_role (+ owner). Body
+  confirmed to: allocate `CON` via `allocate_legacy_transaction_identity`, be idempotent via
+  `claim_legacy_transaction_request(..., 'contra_batch', ...)`, resolve Owner Drawings by
+  `code = '3020'`, post voucher type `CT`, and write the batch header + rows.
+- `list_business_money_accounts(text,uuid)` / `list_business_money_activity(text,uuid)`
+  created (SECURITY DEFINER, search_path=public).
+- Existing `post_contra_entry` (6-arg base + 7-arg idempotent) and the single historic
+  `contra_entries` row (CV-0001, Cash→Petty Cash) remain unchanged (count=1).
+- Read-only screen-loading verified: `list_business_money_accounts('biz-default', NULL)`
+  returns all 5 money accounts (Bank/Cash/Easypaisa/JazzCash/Petty Cash);
+  `list_business_money_activity` returns the historic CV-0001 row.
+
+No financial transaction was created (no safe isolated test business).
+
+## Migration 00039 production verification — 2026-08-30
+
+`00039_legacy_rider_delivery_outcomes.sql` was applied directly to production ref
+`ebcebxwpddltiwrqybqc` via exact-file `psql` with `ON_ERROR_STOP=1`; only that file ran,
+and its own `begin;`/`commit;` provided the single transaction. No migration discovery,
+history operation, repair, reset, or broad push was used.
+
+Read-only catalog verification confirmed `delivery_fee_recognized`, the extended
+`Partially Delivered` status constraint, all three Rider outcome/settlement tables with
+their intended keys/checks/indexes/RLS, and the exact `record_delivery_outcome`,
+`get_rider_cod_balances`, and `settle_rider_cod` signatures. The new RPCs are
+`SECURITY DEFINER`, use `search_path=public`, and are executable only by `service_role`
+(plus owner). Their live bodies use the legacy `business`/`accounts` lineage,
+`post_voucher`, `post_sales_return`, and the shared DO/RDS allocator paths; they do not
+reference `businesses`, `ledger_accounts`, or UUID-ledger posting RPCs.
+
+Historical counts remained unchanged (2 riders, 0 delivery orders/events/COD submissions,
+12 vouchers, 6 invoices, 11 invoice items), DO/RDS high-water values remained 0, all three
+new tables remained empty, and the non-target public-schema fingerprint matched preflight.
+Rider Phase A code/schema is complete. Production financial/browser UAT remains pending:
+only real `biz-default` exists, so no Rider outcome, return, settlement, or voucher was
+created for testing.
+
+## Client Handover Polish Batch 2 — 2026-08-31
+
+Completed on `fix/backend-stock-recovery` as a visual/content-only pass. Existing Lucide
+icons were given semantic page mappings and a consistent 18px / 1.9-stroke navigation
+rhythm. Desktop and mobile navigation now use calmer green-neutral active, hover and focus
+states, clearer labels (`Daily Work`, `Out-of-City Sale`, `Roles & Permissions`), and the
+same semantic icon language.
+
+Client-facing Setup descriptions were simplified and route slugs removed. The business-day
+diagnostic remains implemented as an owner-only direct route but is excluded from normal
+navigation and Setup. The header status no longer exposes raw service messages or vendor
+wording. The `Ask KhataPro AI` launcher and inline AI action use a restrained outline/card
+treatment instead of a black floating action.
+
+Verification: changed-file ESLint passed; `npx tsc --noEmit` passed; focused navigation,
+core permission and Setup tests passed (19/19), with the explicit auth/permission/navigation
+selection passing 38/38; the full suite passed (507/507); and
+`npm run build` passed. Interactive desktop/mobile browser QA was attempted, but no browser
+session was connected in the execution environment, so no screenshot-based visual sign-off
+was possible. Protected local files were left unstaged and untouched by this batch.
+
+## Client Handover Onboarding Batch 3 — 2026-08-31
+
+Implemented a short, role-aware first-login guide without database or API changes. Completion
+uses the versioned, user-scoped client key `khataPro:onboarding:v1:<user-id>` because the
+current profile model has no suitable preference field. Skip and Finish both suppress future
+automatic prompts for that user/version; changing to a different supported role offers the
+correct guide, and My Profile → Restart Product Tour resets only the current user before
+starting again.
+
+Tour scope is intentionally bounded: Owner/Admin 9 steps, Accountant 7, Salesman 5 and Rider
+3. Step generation is filtered against the navigation pages the current session can actually
+see, so inaccessible workspaces are never introduced. Stable `data-tour` targets cover desktop
+and mobile navigation. The shell opens the required category or mobile More sheet during a
+step and restores its prior navigation state afterward. Dialogs retain keyboard focus trapping,
+Escape dismissal, visible text, adequate tap targets and the application-wide reduced-motion
+rules.
+
+A shared contextual-help model now covers 18 major pages: Home; Counter, Online and
+Out-of-City Sale; Sales List; Deliveries & Riders; Purchases; Accounts & Balances; Petty Cash;
+Contra; Products & Stock; Day Book; Ledger; Trial Balance; Chart of Accounts; Financial
+Reports; Users & Roles; and Roles & Permissions.
+
+Verification: TypeScript and changed-file ESLint passed; focused onboarding/help/navigation
+tests passed 33/33; explicit auth/permission/navigation tests passed 38/38; the full suite
+passed 521/521; and `npm run build` passed. Browser verification is NO because no browser
+session was connected, so final Owner/Rider/mobile client-style visual smoke testing remains
+pending. Protected local files were not modified or staged by this batch.
+
+## Counter Sale POS + Payment Account Integration — 2026-08-31
+
+Sale screens now obtain active payment accounts through one cached Business Accounts query (`/api/setup/business-accounts`) rather than filtering the complete Chart of Accounts. This keeps Counter, Online, Out-of-City, and Other Sale compatible with the verified legacy production Business Accounts RPC path and removes the UUID-ledger capability dependency from account selection. The projection exposes only the linked ledger ID, code, name, active state, and optional type. One active account auto-selects; multiple accounts require an explicit choice; inactive accounts are excluded.
+
+Counter Sale now blocks bill construction only after a successful zero-account response. Owners/authorized setup users receive a direct Business Accounts setup action; other roles receive an ask-the-owner message. Loading and load-error states do not masquerade as a zero-account blocker, and no migration/schema/vendor wording is exposed.
+
+The desktop Counter Sale is a fixed-height two-panel workstation: independently scrolling product finder and bill regions, compact seller/customer header, Product / Qty / Total default rows, expandable return/rate/commission/stock details, collapsed editable payment, and an always-visible Net Sale/Post Sale footer. Same-bill return arithmetic, commission attribution/calculation, split payment, optional customer, and keyboard search/add behavior remain on their existing engines.
+
+Verification in this batch: TypeScript and changed-file ESLint passed; focused payment/POS/mixed-return/commission tests passed 77/77; the explicit full suite passed 541/541; and `npm run build` passed. Browser visual verification is NO because no browser session was connected; 1366×720 and narrow-viewport screenshot approval remain pending. No production database or migration was touched.

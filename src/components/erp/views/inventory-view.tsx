@@ -18,6 +18,8 @@ import { formatMoney } from '@/lib/format'
 import { bizDate, bizDateString } from '@/lib/dates'
 import { motion, AnimatePresence } from 'framer-motion'
 import type { MeUser } from '@/components/erp/erp-app'
+import { apiFetchJson } from '@/lib/api-client'
+import { PageHeader } from '@/components/erp/page-header'
 
 type Product = {
   id: string; name: string; categoryId: string | null; categoryName: string | null
@@ -50,9 +52,9 @@ export function InventoryView({ user }: { user: MeUser }) {
     | null
   >(null)
 
-  const productsQ = useQuery<{ rows: Product[] }>({ queryKey: ['products'], queryFn: () => fetch('/api/products').then(r => r.json()) })
-  const catQ = useQuery<{ rows: Category[] }>({ queryKey: ['product-categories'], queryFn: () => fetch('/api/product-categories').then(r => r.json()) })
-  const movementsQ = useQuery<{ rows: Movement[] }>({ queryKey: ['stock-movements'], queryFn: () => fetch('/api/stock-movements').then(r => r.json()) })
+  const productsQ = useQuery<{ rows: Product[] }>({ queryKey: ['products'], queryFn: ({ signal }) => apiFetchJson('/api/products', { signal }) })
+  const catQ = useQuery<{ rows: Category[] }>({ queryKey: ['product-categories'], queryFn: ({ signal }) => apiFetchJson('/api/product-categories', { signal }) })
+  const movementsQ = useQuery<{ rows: Movement[] }>({ queryKey: ['stock-movements'], queryFn: ({ signal }) => apiFetchJson('/api/stock-movements', { signal }) })
 
   const products = productsQ.data?.rows ?? []
   const movements = movementsQ.data?.rows ?? []
@@ -100,18 +102,17 @@ export function InventoryView({ user }: { user: MeUser }) {
   return (
     <div className="space-y-4">
       {/* Header */}
-      <div className="flex items-end justify-between gap-3 flex-wrap">
-        <div>
-          <h1 className="text-xl font-semibold tracking-tight text-foreground">Inventory</h1>
-          <p className="text-xs text-muted-foreground mt-0.5">Products, stock levels and stock movements</p>
-        </div>
-        {canManage && (
-          <div className="flex gap-2">
+      <PageHeader
+        compact
+        title="Inventory"
+        description="Products, stock levels and stock movements."
+        actions={canManage && (
+          <>
             <Button variant="outline" size="sm" className="h-8 press-sm" onClick={() => setModal({ type: 'stockEntry' })}><PackagePlus className="size-3.5" /> Stock Entry</Button>
             <Button size="sm" className="h-8 press-sm shadow-sm" onClick={() => setModal({ type: 'add' })}><Plus className="size-3.5" /> Add Product</Button>
-          </div>
+          </>
         )}
-      </div>
+      />
 
       {/* KPI Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
@@ -435,7 +436,7 @@ function HistoryDrawer({ product, movements, onClose }: { product: Product; move
 function CategoriesModal({ onClose }: { onClose: () => void }) {
   const qc = useQueryClient()
   const [name, setName] = useState('')
-  const catQ = useQuery<{ rows: Category[] }>({ queryKey: ['product-categories'], queryFn: () => fetch('/api/product-categories').then(r => r.json()) })
+  const catQ = useQuery<{ rows: Category[] }>({ queryKey: ['product-categories'], queryFn: ({ signal }) => apiFetchJson('/api/product-categories', { signal }) })
   const mut = useMutation({
     mutationFn: async () => { const r = await fetch('/api/product-categories', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name }) }); const j = await r.json(); if (!r.ok) throw new Error(j?.error ?? 'Failed'); return j },
     onSuccess: () => { toast.success('Category created.'); void qc.invalidateQueries({ queryKey: ['product-categories'] }); setName('') },

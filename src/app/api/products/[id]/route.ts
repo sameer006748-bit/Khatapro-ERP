@@ -7,8 +7,8 @@ import { NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { z } from 'zod'
 import { authOptions } from '@/lib/auth/authOptions'
-import { loadSessionUser, requirePermission } from '@/lib/auth/permissions'
-import { updateProduct } from '@/lib/products/data-access'
+import { loadSessionUser, requirePermission, writeAudit } from '@/lib/auth/permissions'
+import { listProducts, updateProduct } from '@/lib/products/data-access'
 import { resolveRequestId, safeMutationError } from '@/lib/observability'
 
 const UpdateSchema = z.object({
@@ -20,6 +20,7 @@ const UpdateSchema = z.object({
   isActive: z.boolean().optional(),
   markedForMerge: z.boolean().optional(),
   lowStockThreshold: z.number().int().optional(),
+  commissionRatePaisas: z.string().regex(/^\d+$/).nullable().optional(),
 })
 
 export async function PATCH(
@@ -41,7 +42,18 @@ export async function PATCH(
   }
 
   try {
-    await updateProduct(su.businessId, id, parsed.data)
+    const existing = (await listProducts(su.businessId)).find(product => product.id === id)
+    if (!existing) return NextResponse.json({ error: 'NOT_FOUND' }, { status: 404 })
+    await updateProduct(su.businessId, id, { ...parsed.data, commissionRatePaisas: parsed.data.commissionRatePaisas === undefined ? undefined : parsed.data.commissionRatePaisas === null ? null : BigInt(parsed.data.commissionRatePaisas) })
+    const action = parsed.data.isActive === false ? 'DEACTIVATE' : parsed.data.isActive === true && !existing.isActive ? 'REACTIVATE' : 'UPDATE'
+    await writeAudit({
+      businessId: su.businessId,
+      userId: su.userId,
+      action,
+      entity: 'product',
+      entityId: id,
+      details: { name: existing.name, before: { name: existing.name, isActive: existing.isActive, salePrice: existing.salePrice, purchasePrice: existing.purchasePrice }, after: parsed.data },
+    })
     return NextResponse.json({ ok: true })
   } catch (error) {
     return safeMutationError({ route: '/api/products/[id]', requestId, errorCode: 'PRODUCT_UPDATE_FAILED', userMessage: 'The product could not be updated.', error })

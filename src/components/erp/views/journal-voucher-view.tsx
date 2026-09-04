@@ -26,6 +26,7 @@ export function JournalVoucherView({ user }: { user: MeUser }) {
     { key: '2', accountId: '', debit: '', credit: '', memo: '' },
   ])
   const [result, setResult] = useState<{ ok: boolean; voucherNo?: string; error?: string } | null>(null)
+  const [idempotencyKey, setIdempotencyKey] = useState(() => crypto.randomUUID())
 
   const coaQ = useQuery<{ categories: Category[] }>({ queryKey: ['coa'], queryFn: () => fetch('/api/setup/coa').then(r => r.json()) })
 
@@ -43,7 +44,7 @@ export function JournalVoucherView({ user }: { user: MeUser }) {
 
   const mut = useMutation({
     mutationFn: async () => {
-      const r = await fetch('/api/journal-voucher', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jvDate, memo, lines: lines.map(l => ({ accountId: l.accountId, debit: l.debit || undefined, credit: l.credit || undefined, memo: l.memo || undefined })) }) })
+      const r = await fetch('/api/journal-voucher', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jvDate, memo, lines: lines.map(l => ({ accountId: l.accountId, debit: l.debit || undefined, credit: l.credit || undefined, memo: l.memo || undefined })), idempotencyKey }) })
       const j = await r.json(); if (!r.ok) throw new Error(j?.error ?? 'Failed'); return j
     },
     onSuccess: (j) => { toast.success(`Journal Voucher posted: ${j.voucherNo}`); setResult({ ok: true, voucherNo: j.voucherNo }); void qc.invalidateQueries({ queryKey: ['day-book'] }); void qc.invalidateQueries({ queryKey: ['trial-balance'] }); void qc.invalidateQueries({ queryKey: ['vouchers'] }) },
@@ -57,7 +58,7 @@ export function JournalVoucherView({ user }: { user: MeUser }) {
       <CheckCircle2 className="size-12 text-primary mx-auto mb-3" />
       <p className="text-xs text-muted-foreground mb-1">Journal Voucher Posted</p>
       <p className="text-2xl font-bold text-primary" data-num>{result.voucherNo}</p>
-      <Button variant="ghost" size="sm" className="mt-4" onClick={() => { setResult(null); setLines([{ key: '1', accountId: '', debit: '', credit: '', memo: '' }, { key: '2', accountId: '', debit: '', credit: '', memo: '' }]); setMemo('') }}>New JV</Button>
+      <Button variant="ghost" size="sm" className="mt-4" onClick={() => { setResult(null); setLines([{ key: '1', accountId: '', debit: '', credit: '', memo: '' }, { key: '2', accountId: '', debit: '', credit: '', memo: '' }]); setMemo(''); setIdempotencyKey(crypto.randomUUID()) }}>New JV</Button>
     </div>
   )
 

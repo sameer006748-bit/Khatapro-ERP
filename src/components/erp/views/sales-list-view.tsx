@@ -3,11 +3,13 @@
 import { useState, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { formatMoney, formatWholeRupees, formatTableDate } from '@/lib/format'
-import { FileText, Search, Printer, X, ShoppingCart, Plus, ArrowDownToLine, RotateCcw } from 'lucide-react'
+import { FileText, Search, Printer, X, ShoppingCart, Truck, ArrowDownToLine, RotateCcw } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { useRouter } from 'next/navigation'
 import { PrintInvoiceButton } from '@/components/invoice/print-invoice-button'
+import { apiFetchJson } from '@/lib/api-client'
+import { PageHeader } from '@/components/erp/page-header'
 
 type Invoice = {
   id: string
@@ -27,6 +29,7 @@ const TYPE_BADGE: Record<string, string> = {
   COUNTER: 'bg-emerald-100 text-emerald-700',
   ONLINE: 'bg-sky-100 text-sky-700',
   OFC: 'bg-violet-100 text-violet-700',
+  OTHER: 'bg-amber-100 text-amber-700',
 }
 
 export function SalesListView() {
@@ -35,13 +38,14 @@ export function SalesListView() {
   const [typeFilter, setTypeFilter] = useState<string>('')
   const [selected, setSelected] = useState<string[]>([])
   const [selectMode, setSelectMode] = useState(false)
+  const [returnMode, setReturnMode] = useState(false)
 
   const q = useQuery<{ rows: Invoice[] }>({
     queryKey: ['invoices', typeFilter],
-    queryFn: () => {
+    queryFn: ({ signal }) => {
       const params = new URLSearchParams()
       if (typeFilter) params.set('type', typeFilter)
-      return fetch(`/api/sales/counter?${params}`).then(r => r.json())
+      return apiFetchJson(`/api/sales/counter?${params}`, { signal })
     },
   })
 
@@ -83,10 +87,7 @@ export function SalesListView() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div>
-        <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight text-foreground">Sales</h1>
-        <p className="text-sm text-muted-foreground mt-1.5 max-w-2xl">Create, view and manage all sales invoices.</p>
-      </div>
+      <PageHeader title="Sales" description="Create, review and manage all sales invoices." />
 
       {/* Summary bar */}
       <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
@@ -107,21 +108,30 @@ export function SalesListView() {
       {/* Primary action + Quick actions */}
       <div className="flex flex-wrap gap-2">
         <Button size="sm" className="h-10 press-sm shadow-sm" onClick={() => router.push('/?page=counter-sale')}>
-          <Plus className="size-4 mr-1.5" /> New Sale
-        </Button>
-        <Button variant="outline" size="sm" className="h-10 press-sm" onClick={() => router.push('/?page=counter-sale')}>
           <ShoppingCart className="size-4 mr-1.5" /> Counter Sale
         </Button>
         <Button variant="outline" size="sm" className="h-10 press-sm" onClick={() => router.push('/?page=online-sale')}>
           <ShoppingCart className="size-4 mr-1.5" /> Online Sale
         </Button>
         <Button variant="outline" size="sm" className="h-10 press-sm" onClick={() => router.push('/?page=ofc-sale')}>
-          <ShoppingCart className="size-4 mr-1.5" /> OFC Sale
+          <Truck className="size-4 mr-1.5" /> Out-of-City Sale
+        </Button>
+        <Button variant="outline" size="sm" className="h-10 press-sm" onClick={() => router.push('/?page=other-sale')}>
+          <ShoppingCart className="size-4 mr-1.5" /> Other Sale
+        </Button>
+        <Button variant={returnMode ? 'default' : 'outline'} size="sm" className="h-10 press-sm" onClick={() => { setReturnMode(value => !value); setSelectMode(false); setSelected([]) }}>
+          <RotateCcw className="size-4 mr-1.5" /> Historical Return
         </Button>
         <Button variant="outline" size="sm" className="h-10 press-sm" onClick={() => router.push('/?page=receipt-voucher')}>
           <ArrowDownToLine className="size-4 mr-1.5" /> Receive Payment
         </Button>
       </div>
+
+      {returnMode && (
+        <div className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          Search or filter the original invoice, then select it to choose the original line and remaining returnable quantity.
+        </div>
+      )}
 
       {/* Filters */}
       <div className="flex gap-2 flex-wrap">
@@ -133,6 +143,7 @@ export function SalesListView() {
         <Button variant={typeFilter === 'COUNTER' ? 'default' : 'outline'} size="sm" className="h-10 press-sm" onClick={() => setTypeFilter('COUNTER')}>Counter</Button>
         <Button variant={typeFilter === 'ONLINE' ? 'default' : 'outline'} size="sm" className="h-10 press-sm" onClick={() => setTypeFilter('ONLINE')}>Online</Button>
         <Button variant={typeFilter === 'OFC' ? 'default' : 'outline'} size="sm" className="h-10 press-sm" onClick={() => setTypeFilter('OFC')}>OFC</Button>
+        <Button variant={typeFilter === 'OTHER' ? 'default' : 'outline'} size="sm" className="h-10 press-sm" onClick={() => setTypeFilter('OTHER')}>Other</Button>
         <Button
           variant={selectMode ? 'default' : 'outline'}
           size="sm"
@@ -154,9 +165,10 @@ export function SalesListView() {
             )}
             <PrintInvoiceButton
               invoiceIds={selected}
-              label={`Print ${selected.length} Invoice${selected.length === 1 ? '' : 's'}`}
+              label="Print Two Invoices on A4"
               size="sm"
               icon={Printer}
+              disabled={selected.length !== 2}
             />
           </div>
         </div>
@@ -168,7 +180,7 @@ export function SalesListView() {
         <div className="card-3d p-8 text-center">
           <div className="grid place-items-center size-12 rounded-xl icon-3d-muted mx-auto mb-3"><FileText className="size-6 text-muted-foreground" /></div>
           <p className="text-sm text-foreground font-medium">No invoices yet</p>
-          <p className="text-xs text-muted-foreground mt-1">Post a Counter / Online / OFC sale to see it here.</p>
+          <p className="text-xs text-muted-foreground mt-1">Post a Counter, Online or Out-of-City sale to see it here.</p>
         </div>
       ) : (
         <>
@@ -204,7 +216,7 @@ export function SalesListView() {
                           e.stopPropagation()
                           toggleSelect(r.id)
                         } else {
-                          router.push(`/?invoice=${r.id}`)
+                          router.push(`/?invoice=${r.id}${returnMode ? '&return=1' : ''}`)
                         }
                       }}
                       className={`border-b border-border/60 last:border-0 hover:bg-accent/30 transition-colors cursor-pointer ${isSelected ? 'bg-primary/5' : ''}`}
@@ -252,7 +264,7 @@ export function SalesListView() {
                   key={r.id}
                   onClick={() => {
                     if (selectMode) toggleSelect(r.id)
-                    else router.push(`/?invoice=${r.id}`)
+                    else router.push(`/?invoice=${r.id}${returnMode ? '&return=1' : ''}`)
                   }}
                   className={`card-3d card-3d-hover p-4 w-full text-left ${isSelected ? 'border-primary ring-2 ring-primary/20' : ''}`}
                 >

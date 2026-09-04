@@ -7,11 +7,12 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { toast } from 'sonner'
-import { Wallet, ArrowDownToLine, ArrowUpFromLine, BookOpen, Plus, Trash2, CheckCircle2, ChevronRight, AlertCircle, CalendarDays } from 'lucide-react'
+import { WalletCards, ArrowDownToLine, ArrowUpFromLine, BookOpen, Plus, Trash2, CheckCircle2, ChevronRight, AlertCircle, CalendarDays } from 'lucide-react'
 import { formatMoney, parseMoney } from '@/lib/format'
 import { bizDate, bizDateString } from '@/lib/dates'
 import { motion, AnimatePresence } from 'framer-motion'
 import type { MeUser } from '@/components/erp/erp-app'
+import { PageHeader } from '@/components/erp/page-header'
 
 type Account = { id: string; code: string; name: string; categoryType: string }
 type ExpenseLine = { key: string; expenseAccountId: string; description: string; amount: string }
@@ -39,21 +40,21 @@ export function PettyCashView({ user }: { user: MeUser }) {
   const canManage = user.permissions.includes('can_manage_petty_cash')
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-end justify-between gap-3 flex-wrap">
-        <div><h1 className="text-xl font-semibold tracking-tight text-foreground">Petty Cash</h1><p className="text-xs text-muted-foreground mt-0.5">Petty cash workspace — balance derived from voucher_lines</p></div>
-        {canManage && <div className="flex gap-2"><Button size="sm" variant="outline" onClick={() => setModal('topup')}><ArrowDownToLine className="size-3.5" /> Add Funds</Button><Button size="sm" onClick={() => setModal('expense')}><ArrowUpFromLine className="size-3.5" /> Record Expenses</Button></div>}
-      </div>
+    <div className="space-y-5">
+      <PageHeader compact title="Petty Cash" description="Balance, funding and daily petty cash expenses." actions={canManage && <div className="flex gap-2"><Button size="sm" variant="outline" onClick={() => setModal('topup')}><ArrowDownToLine className="size-3.5" /> Add Funds</Button><Button size="sm" onClick={() => setModal('expense')}><ArrowUpFromLine className="size-3.5" /> New Entry</Button></div>} />
 
       {/* Balance card */}
-      <div className="card-3d p-5">
-        <div className="flex items-center gap-3">
-          <div className="icon-3d size-10 grid place-items-center"><Wallet className="size-5 text-primary-foreground" /></div>
-          <div>
-            <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">Current Petty Cash Balance</div>
-            <div className={`text-2xl font-bold ${pettyCashBalance >= 0n ? 'text-foreground' : 'text-destructive'}`} data-num>{formatMoney(pettyCashBalance)}</div>
-            <div className="text-[10px] text-muted-foreground">Account {PETTY_CASH_CODE} · {pettyCashAccount?.name ?? 'Petty Cash'}</div>
+      <div className={`rounded-lg border bg-card p-4 sm:p-5 ${pettyCashBalance < 0n ? 'border-destructive/40' : 'border-border'}`}>
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex min-w-0 items-center gap-3">
+            <div className="grid size-10 place-items-center rounded-md border border-border bg-muted/35"><WalletCards className="size-5 text-foreground" /></div>
+            <div className="min-w-0">
+              <div className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Current Petty Cash Balance</div>
+              <div className={`mt-1 text-2xl font-semibold ${pettyCashBalance < 0n ? 'text-destructive' : 'text-foreground'}`} data-num>{formatMoney(pettyCashBalance)}</div>
+              <div className="mt-1 text-[10px] text-muted-foreground" data-num>Account {PETTY_CASH_CODE} · {pettyCashAccount?.name ?? 'Petty Cash'}</div>
+            </div>
           </div>
+          <span className={`shrink-0 rounded border px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide ${pettyCashBalance < 0n ? 'border-destructive/30 bg-destructive/5 text-destructive' : pettyCashBalance === 0n ? 'border-border bg-muted/50 text-muted-foreground' : 'border-emerald-700/20 bg-emerald-700/5 text-emerald-700'}`}>{pettyCashBalance < 0n ? 'Overdrawn' : pettyCashBalance === 0n ? 'Zero' : 'Normal'}</span>
         </div>
       </div>
 
@@ -96,7 +97,7 @@ function PettyCashHistory({ expenses, isLoading, isError, accounts, ledgerAccoun
   }, [expenses, accounts])
 
   return (
-    <div className="card-3d overflow-hidden">
+    <div className="overflow-hidden rounded-lg border border-border bg-card">
       <div className="px-5 py-3 border-b border-border flex items-center gap-2">
         <CalendarDays className="size-4 text-muted-foreground" />
         <h2 className="text-sm font-semibold text-foreground">Petty Cash Expenses by Date</h2>
@@ -157,10 +158,11 @@ function TopupModal({ pettyCashAccountId, accounts, onClose }: { pettyCashAccoun
   const [amount, setAmount] = useState('')
   const [date, setDate] = useState(bizDateString(new Date()))
   const [reference, setReference] = useState('')
+  const [idempotencyKey] = useState(() => crypto.randomUUID())
 
   const mut = useMutation({
     mutationFn: async () => {
-      const r = await fetch('/api/contra-entry', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ contraDate: date, fromAccountId, toAccountId: pettyCashAccountId, amount, reference: reference || undefined, notes: reference || `Petty cash top-up from ${accounts.find(a => a.id === fromAccountId)?.name}` }) })
+      const r = await fetch('/api/contra-entry', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ contraDate: date, fromAccountId, toAccountId: pettyCashAccountId, amount, reference: reference || undefined, notes: reference || `Petty cash top-up from ${accounts.find(a => a.id === fromAccountId)?.name}`, idempotencyKey }) })
       const j = await r.json(); if (!r.ok) throw new Error(j?.error ?? 'Failed'); return j
     },
     onSuccess: () => { toast.success('Petty cash topped up.'); void qc.invalidateQueries({ queryKey: ['trial-balance'] }); void qc.invalidateQueries({ queryKey: ['day-book'] }); onClose() },
@@ -185,18 +187,19 @@ function PettyExpenseBatchModal({ pettyCashAccountId, expenseAccounts, ledgerAcc
   const [lines, setLines] = useState<ExpenseLine[]>([{ key: '1', expenseAccountId: '', description: '', amount: '' }])
   const [reference, setReference] = useState('')
   const [result, setResult] = useState<{ expenseNo?: string } | null>(null)
+  const [idempotencyKey, setIdempotencyKey] = useState(() => crypto.randomUUID())
 
   const total = lines.reduce((s, l) => s + (parseMoney(l.amount) ?? 0n), 0n)
 
   function addLine() { setLines(ls => [...ls, { key: String(Date.now()), expenseAccountId: '', description: '', amount: '' }]) }
   function removeLine(key: string) { setLines(ls => ls.length <= 1 ? ls : ls.filter(l => l.key !== key)) }
   function updateLine(key: string, field: keyof ExpenseLine, value: string) { setLines(ls => ls.map(l => l.key === key ? { ...l, [field]: value } : l)) }
-  function reset() { setResult(null); setLines([{ key: '1', expenseAccountId: '', description: '', amount: '' }]); setReference(''); setExpenseDate(bizDateString(new Date())) }
+  function reset() { setResult(null); setLines([{ key: '1', expenseAccountId: '', description: '', amount: '' }]); setReference(''); setExpenseDate(bizDateString(new Date())); setIdempotencyKey(crypto.randomUUID()) }
 
   const mut = useMutation({
     mutationFn: async () => {
       const validLines = lines.filter(l => l.expenseAccountId && ((parseMoney(l.amount) ?? 0n) > 0n))
-      const r = await fetch('/api/expense-batch', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ expenseDate, paymentAccountId: pettyCashAccountId, lines: validLines.map(l => ({ expenseAccountId: l.expenseAccountId, description: l.description || undefined, amount: l.amount })), reference: reference || undefined, notes: 'Petty cash daily expenses' }) })
+      const r = await fetch('/api/expense-batch', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ expenseDate, paymentAccountId: pettyCashAccountId, lines: validLines.map(l => ({ expenseAccountId: l.expenseAccountId, description: l.description || undefined, amount: l.amount })), reference: reference || undefined, notes: 'Petty cash daily expenses', idempotencyKey }) })
       const j = await r.json(); if (!r.ok) throw new Error(j?.error ?? 'Failed'); return j
     },
     onSuccess: (j) => {

@@ -1,12 +1,12 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
-import { Bot, ChevronDown, Loader2, RotateCcw, Send, Sparkles, Trash2 } from 'lucide-react'
+import { Bot, Loader2, RotateCcw, Send, Sparkles, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet'
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import type { MeUser } from '@/components/erp/erp-app'
+import type { AiPeriodInput } from '@/lib/ai/ai-period'
 import { AI_SCREENS, parseStructuredAnswer, type AiFieldMetadata, type AiLanguage, type AiMode, type AiScreen, type AiStructuredAnswer } from '@/lib/ai/safety-core'
 
 type OpenAiDetail = {
@@ -17,15 +17,15 @@ type OpenAiDetail = {
   submit?: boolean
 }
 
-type Message = { id: string; kind: 'question' | 'answer' | 'error'; text: string }
+type Message = { id: string; kind: 'question' | 'answer' | 'error'; text: string; periodLabel?: string }
 
 const SCREEN_SET = new Set<string>(AI_SCREENS)
 
 const SUGGESTIONS: Record<string, string[]> = {
-  'Owner/Admin': ['Aaj business ki position kya hai?', 'Profit hai lekin cash kyun kam hai?', 'Recovery aur payables simple words mein batao.'],
-  Accountant: ['Trial Balance ka kya matlab hai?', 'Debit aur credit simple words mein samjhao.', 'P&L aur Balance Sheet mein kya check karun?'],
-  Salesman: ['Meri sales aur collection ka haal kya hai?', 'Outstanding ka simple matlab batao.', 'Invoice fields samjhao.'],
-  Rider: ['Meri assigned deliveries samjhao.', 'COD collection ka kya matlab hai?', 'Delivery status kab use karna chahiye?'],
+  'Owner/Admin': ["Explain today's business position.", 'Why can profit be positive while cash is low?', 'Summarize recoveries and payables.'],
+  Accountant: ['Explain the Trial Balance.', 'Explain debit and credit in simple terms.', 'What should I check in the financial reports?'],
+  Salesman: ['Summarize my sales and collections.', 'Explain the outstanding amount.', 'Explain the invoice fields.'],
+  Rider: ['Explain my assigned deliveries.', 'Explain cash-on-delivery collection.', 'When should each delivery status be used?'],
 }
 
 function normalizeScreen(screen: string): AiScreen {
@@ -40,6 +40,7 @@ async function askAi(payload: {
   mode: AiMode
   screen: AiScreen
   field?: AiFieldMetadata
+  period?: AiPeriodInput
 }) {
   const response = await fetch('/api/ai/ask', {
     method: 'POST',
@@ -49,11 +50,11 @@ async function askAi(payload: {
   })
   const json = await response.json().catch(() => ({}))
   if (!response.ok) {
-    const error = new Error(json?.message ?? 'AI help is unavailable.') as Error & { code?: string }
+    const error = new Error(json?.message ?? 'KhataPro AI could not respond right now. Please try again.') as Error & { code?: string }
     error.code = json?.error
     throw error
   }
-  return String(json.answer ?? '')
+  return { answer: String(json.answer ?? ''), period: json.period as { label?: string } | undefined }
 }
 
 export function AiAssistant({ user, activeScreen }: { user: MeUser; activeScreen: string }) {
@@ -65,11 +66,33 @@ export function AiAssistant({ user, activeScreen }: { user: MeUser; activeScreen
   const [prompt, setPrompt] = useState('')
   const [messages, setMessages] = useState<Message[]>([])
   const [loading, setLoading] = useState(false)
-  const [lastRequest, setLastRequest] = useState<{ prompt: string; language: AiLanguage; mode: AiMode; screen: AiScreen; field?: AiFieldMetadata } | null>(null)
+  const [period, setPeriod] = useState<AiPeriodInput>({ preset: 'this-month' })
+  const [periodLabel, setPeriodLabel] = useState('This Month')
+  const [showRetryingState, setShowRetryingState] = useState(false)
+  const [lastRequest, setLastRequest] = useState<{ prompt: string; language: AiLanguage; mode: AiMode; screen: AiScreen; field?: AiFieldMetadata; period: AiPeriodInput } | null>(null)
+
+  useEffect(() => {
+    const handlePeriod = (event: Event) => {
+      const detail = (event as CustomEvent<{ period?: AiPeriodInput; label?: string }>).detail
+      if (detail?.period) setPeriod(detail.period)
+      if (detail?.label) setPeriodLabel(detail.label)
+    }
+    window.addEventListener('khatapro-ai-period', handlePeriod)
+    return () => window.removeEventListener('khatapro-ai-period', handlePeriod)
+  }, [])
 
   useEffect(() => {
     setScreen(normalizeScreen(activeScreen))
   }, [activeScreen])
+
+  useEffect(() => {
+    if (!loading) {
+      setShowRetryingState(false)
+      return
+    }
+    const timer = window.setTimeout(() => setShowRetryingState(true), 4000)
+    return () => window.clearTimeout(timer)
+  }, [loading])
 
   useEffect(() => {
     function handle(event: Event) {
@@ -86,26 +109,27 @@ export function AiAssistant({ user, activeScreen }: { user: MeUser; activeScreen
         mode: detail.mode ?? 'ask',
         screen: nextScreen,
         field: detail.field,
+        period,
       })
     }
     window.addEventListener('khatapro-ai-open', handle)
     return () => window.removeEventListener('khatapro-ai-open', handle)
-  }, [activeScreen, language])
+  }, [activeScreen, language, period])
 
-  const suggestions = useMemo(() => SUGGESTIONS[user.roleName] ?? ['Is screen ko simple words mein samjhao.'], [user.roleName])
+  const suggestions = useMemo(() => SUGGESTIONS[user.roleName] ?? ['Explain this screen in simple terms.'], [user.roleName])
 
-  async function submit(request?: { prompt: string; language: AiLanguage; mode: AiMode; screen: AiScreen; field?: AiFieldMetadata }) {
-    const next = request ?? { prompt: prompt.trim(), language, mode, screen, field }
+  async function submit(request?: { prompt: string; language: AiLanguage; mode: AiMode; screen: AiScreen; field?: AiFieldMetadata; period: AiPeriodInput }) {
+    const next = request ?? { prompt: prompt.trim(), language, mode, screen, field, period }
     if (!next.prompt || loading) return
     setLoading(true)
     setLastRequest(next)
     setMessages((items) => [...items, { id: crypto.randomUUID(), kind: 'question', text: next.prompt }])
     setPrompt('')
     try {
-      const answer = await askAi(next)
-      setMessages((items) => [...items, { id: crypto.randomUUID(), kind: 'answer', text: answer }])
+      const result = await askAi(next)
+      setMessages((items) => [...items, { id: crypto.randomUUID(), kind: 'answer', text: result.answer, periodLabel: result.period?.label ?? periodLabel }])
     } catch (error) {
-      setMessages((items) => [...items, { id: crypto.randomUUID(), kind: 'error', text: error instanceof Error ? error.message : 'AI help is unavailable.' }])
+      setMessages((items) => [...items, { id: crypto.randomUUID(), kind: 'error', text: error instanceof Error ? error.message : 'KhataPro AI could not respond right now. Please try again.' }])
     } finally {
       setLoading(false)
     }
@@ -115,11 +139,18 @@ export function AiAssistant({ user, activeScreen }: { user: MeUser; activeScreen
     <>
       <Button
         type="button"
+        variant="outline"
         onClick={() => { setScreen(normalizeScreen(activeScreen)); setMode('ask'); setField(undefined); setOpen(true) }}
-        className="fixed z-40 right-4 md:right-6 bottom-24 md:bottom-6 h-12 rounded-full shadow-lg px-4 gap-2"
+        className="fixed z-40 right-4 md:right-6 h-12 rounded-full border-primary/25 bg-card/95 px-4 text-foreground shadow-[0_10px_30px_rgba(15,23,42,0.12)] backdrop-blur-md hover:border-primary/40 hover:bg-primary/10 hover:text-foreground focus-visible:ring-primary/30"
+        // Its slot in the shared bottom stack: above the mobile nav, and clear of
+        // the room every screen reserves for its own primary action.
+        style={{ bottom: 'var(--kp-fab-bottom)' }}
         aria-label="Ask KhataPro AI"
+        aria-haspopup="dialog"
       >
-        <Sparkles className="size-4" />
+        <span className="grid size-7 place-items-center rounded-full bg-primary/[0.12] text-primary">
+          <Sparkles className="size-4" strokeWidth={1.9} />
+        </span>
         <span className="hidden sm:inline">Ask KhataPro AI</span>
       </Button>
 
@@ -127,7 +158,7 @@ export function AiAssistant({ user, activeScreen }: { user: MeUser; activeScreen
         <SheetContent side="right" className="w-full sm:max-w-md p-0 gap-0">
           <SheetHeader className="border-b border-border pr-12">
             <SheetTitle className="flex items-center gap-2"><Bot className="size-5 text-primary" /> Ask KhataPro AI</SheetTitle>
-            <SheetDescription>Read-only help for {user.roleName}. AI cannot post or change records.</SheetDescription>
+            <SheetDescription>Read-only business and accounting assistance. Period: {periodLabel} (Asia/Karachi).</SheetDescription>
           </SheetHeader>
 
           <div className="flex items-center justify-between gap-2 px-4 py-2 border-b border-border bg-muted/20">
@@ -142,7 +173,7 @@ export function AiAssistant({ user, activeScreen }: { user: MeUser; activeScreen
             {!messages.length && (
               <div className="space-y-3">
                 <div className="rounded-xl border border-border bg-muted/20 p-3 text-sm text-muted-foreground">
-                  Short business aur accounting explanation poochain. Sirf aapke authorized aggregates use honge.
+                  Ask for a short business or accounting explanation based on the information you are allowed to view.
                 </div>
                 <div className="space-y-2">
                   {suggestions.map((question) => (
@@ -163,27 +194,35 @@ export function AiAssistant({ user, activeScreen }: { user: MeUser; activeScreen
               const sections = parseStructuredAnswer(message.text)
               return (
                 <div key={message.id} className="rounded-xl border border-border bg-card p-3 text-sm space-y-3">
+                  {message.periodLabel && <div className="text-[11px] text-muted-foreground">Period: {message.periodLabel} (Asia/Karachi)</div>}
                   {sections.simpleAnswer && (
                     <div>
-                      <div className="text-xs font-semibold text-muted-foreground mb-1">Simple answer</div>
+                      <div className="text-xs font-semibold text-muted-foreground mb-1">Summary</div>
                       <p className="whitespace-pre-wrap">{sections.simpleAnswer}</p>
                     </div>
                   )}
                   {sections.accountingEffect && (
-                    <Collapsible>
-                      <CollapsibleTrigger className="flex w-full items-center justify-between rounded-md bg-muted/40 px-2 py-1.5 text-xs font-medium">Accounting Detail <ChevronDown className="size-3.5" /></CollapsibleTrigger>
-                      <CollapsibleContent className="pt-2 whitespace-pre-wrap text-muted-foreground">{sections.accountingEffect}</CollapsibleContent>
-                    </Collapsible>
+                    <div>
+                      <div className="text-xs font-semibold text-muted-foreground mb-1">Accounting Impact</div>
+                      <p className="whitespace-pre-wrap text-muted-foreground">{sections.accountingEffect}</p>
+                    </div>
                   )}
-                  {sections.nextCheck && <div><div className="text-xs font-semibold text-muted-foreground mb-1">What to check next</div><p className="whitespace-pre-wrap">{sections.nextCheck}</p></div>}
+                  {sections.nextCheck && <div><div className="text-xs font-semibold text-muted-foreground mb-1">Recommended Check</div><p className="whitespace-pre-wrap">{sections.nextCheck}</p></div>}
                 </div>
               )
             })}
-            {loading && <div className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="size-4 animate-spin" /> Gemini se safe explanation aa rahi hai…</div>}
+            {loading && (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="size-4 animate-spin" />
+                {showRetryingState
+                  ? 'The response could not be completed. Retrying...'
+                  : 'KhataPro AI is reviewing your business data...'}
+              </div>
+            )}
           </div>
 
           <form className="border-t border-border p-4 space-y-2" onSubmit={(event) => { event.preventDefault(); void submit() }}>
-            <Textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} maxLength={1200} rows={3} placeholder={mode === 'field-help' ? 'Is field ke bare mein kya samajhna hai?' : 'Apna sawal likhein…'} disabled={loading} aria-label="Question for KhataPro AI" />
+            <Textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} maxLength={1200} rows={3} placeholder={mode === 'field-help' ? 'What would you like to understand about this field?' : 'Enter your question...'} disabled={loading} aria-label="Question for KhataPro AI" />
             <div className="flex items-center justify-between gap-2">
               <span className="text-[11px] text-muted-foreground">{prompt.length}/1200 · Read-only</span>
               <Button type="submit" size="sm" disabled={loading || prompt.trim().length < 2}><Send className="size-3.5" /> Ask</Button>

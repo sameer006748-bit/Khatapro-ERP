@@ -1,0 +1,530 @@
+KHATAPRO ERP — CURRENT REMAINING TASKS
+Updated: 21 July 2026
+Production baseline: 15804490a06d901ea6e771537051f788652284ea
+Working branch: fix/backend-stock-recovery
+Current stage: Controlled Client UAT Iteration — Batch 1
+
+IMPORTANT
+This file is the operational roadmap, not a coding prompt.
+Do not start broad implementation until Priority 0 decision gates are resolved.
+Do not claim 99–100% completion while these client requirements remain open.
+
+======================================================================
+PRIORITY 0 — DOCUMENTATION SYNC AND LOCKED BUSINESS DECISIONS
+======================================================================
+
+Documentation:
+- Replace stale Current Summary with the decision-locked 21 July 2026 version.
+- Replace stale Remaining Tasks with this version.
+- No source-code change is required in this documentation step.
+
+Locked decisions:
+
+1. COMMISSION
+- Commission is calculated and accrued when a sale/return bill is posted.
+- Actual payment happens later through a separate settlement/payment entry.
+- Sale adds commission.
+- Return reverses commission against the original seller.
+- Net daily commission movement = current sale commission - return commission.
+- Example: 5 sold at Rs 20 and 2 returned = Rs 60 net commission movement.
+
+2. OWNER COMMISSION
+- Owner commission is a real Commission Expense and separate Owner Commission Payable.
+- It is not mixed with Owner Drawings.
+
+3. SALE + RETURN
+- The current bill may contain positive sale lines and negative return lines.
+- Every negative line references the original posted bill/line.
+- Original posted bills remain immutable.
+- Backend creates linked return/audit/accounting reversal records.
+
+4. OTHER SALE
+- Add "Other Sale" as a fourth sale type.
+- It is customer-account/credit sale.
+- Customer mandatory.
+- Payment may be zero/partial.
+- Remaining amount becomes customer receivable.
+- Later receipts link to customer/bill.
+
+5. RIDER COD
+- Owner/Admin/Accountant and Rider can record permitted delivery/return statuses.
+- All status changes synchronize and are audited.
+- On COD delivery:
+  Rider COD Receivable / Cash with Rider Dr
+  Customer Receivable Cr
+- On settlement:
+  Cash/Bank/Petty Cash Dr
+  Rider COD Receivable / Cash with Rider Cr
+- Partial return adjusts only returned quantity.
+
+6. CONTRA & TRANSFERS
+- One simple UI supports:
+  - Internal Transfer
+  - Owner Drawing
+  - Capital Introduced
+- Backend posts each type correctly.
+- Owner Drawing is never posted as fake cash-to-cash Contra.
+
+Deliverable:
+- decision-locked project handoff files
+- architecture work may now proceed
+
+======================================================================
+PRIORITY 1 — OPENING-STOCK PRODUCTION VERIFICATION
+======================================================================
+
+Known fact:
+- migration 00013 has been applied to the correct Supabase production project:
+  ebcebxwpddltiwrqybqc
+- never modify or reapply migration 00013
+- never touch migration 00009
+- never reapply migrations 00011 or 00012
+- the only remaining opening-stock work is controlled production verification
+
+Production verification:
+- create controlled product at zero stock
+- opening qty 2
+- unit cost Rs 50
+- final stock 2
+- WAC Rs 50
+- inventory value Rs 100
+- Inventory Asset Dr Rs 100
+- Opening Balance Equity Cr Rs 100
+- one movement only
+- one voucher only
+- retry/duplicate does not post twice
+- safe cleanup if approved
+
+Deliverable:
+- opening-stock production verification result
+- do not claim opening-stock production success until the live verification passes
+
+======================================================================
+PRIORITY 2 — FINAL AI MANUAL LIVE VERIFICATION
+======================================================================
+
+Test deployed KhataPro AI:
+
+- Money Summary broad explanation
+- Day Book explanation
+- Trial Balance explanation
+- one English question
+- one professional Roman Urdu question
+- one contextual field-help question
+- one broad question that previously truncated
+
+Expected:
+- only KhataPro AI branding
+- English loading/errors
+- professional English or mixed Roman Urdu answer
+- complete sentences
+- Summary / Accounting Impact / Recommended Check
+- no provider/API/token/backend wording
+- no visible raw truncation error
+- maximum one automatic concise retry
+- no record writes
+
+If failure remains:
+- capture exact request ID and time
+- diagnose from production logs
+- smallest targeted fix only
+
+======================================================================
+PRIORITY 3 — CLIENT UAT BATCH 1 ARCHITECTURE
+======================================================================
+
+Before implementation, map current data model and existing flows only for:
+
+- Home summary/date APIs
+- sale lines and sale returns
+- commission tables/logic
+- seller/owner attribution
+- Online Sale rider link
+- rider/order/COD records
+- receipt/account settlement
+- transaction numbering
+- account-category hierarchy
+- Contra posting
+- invoice/print components
+
+Rules:
+- bounded targeted scan
+- no repo-wide redesign
+- preserve existing accounting engine
+- identify schema changes and migration plan
+- define invariants and rollback
+- produce phased implementation plan
+- no code modification in this architecture step
+
+Deliverable:
+- approved data/accounting architecture
+- exact files/tables/RPCs to change
+- migration sequence
+- test matrix
+
+======================================================================
+PRIORITY 4 — HOME DATE-RANGE BUSINESS SUMMARY
+======================================================================
+
+Requirements:
+- direct date/period selector on Home
+- practical quick options:
+  - Today
+  - Last 3 Days
+  - Last 7 Days
+  - This Month
+  - Custom Range
+- one selected period controls all period-based KPIs consistently
+- clearly distinguish point-in-time balances from period activity
+- preserve business-local dates
+- URL/state should survive refresh where practical
+- mobile-friendly controls
+- avoid full-table reads
+
+Verification:
+- one day
+- 3-day range
+- current month
+- custom start/end
+- empty range
+- timezone boundary
+- matching totals against source reports
+
+======================================================================
+PRIORITY 5 — NET SALE/RETURN AND COMMISSION ENGINE
+======================================================================
+
+Scope:
+- Counter Sale
+- Online Sale
+- OFC Sale
+- Other Sale
+
+Other Sale:
+- mandatory customer
+- zero/partial payment allowed
+- unpaid amount posts to customer receivable
+- later Receipt can link to customer and specific bill
+- same return/commission/identity/reporting rules as other sales
+
+Sale/return:
+- current bill supports positive sale lines and negative return lines
+- every negative line references the original invoice and original line
+- original posted bill remains immutable
+- backend creates linked return/audit/accounting reversal records
+- today's activity separately shows gross sale, return and net movement
+- stock and accounting reverse exactly once
+- customer balance/payment impact remains correct
+- no destructive editing of posted accounting history
+
+Product commission:
+- per-product commission rate in whole rupees per piece
+- calculate/accrue when sale/return bill posts
+- actual payout occurs later through separate payment/settlement
+- sale creates positive commission movement
+- return creates negative commission movement against the original seller
+- separate commission identity number
+- current bill reference
+- original bill reference for return
+- seller/Owner reference
+- product
+- sold qty
+- returned qty
+- net qty
+- rate
+- positive/negative movement
+- running payable balance
+- applies to Counter/Online/OFC/Other Sale
+- Owner commission posts as real Commission Expense + Owner Commission Payable
+- no duplicate commission posting
+
+Critical tests:
+- 10 sold, 2 returned = commission on 8
+- mixed products with different rates
+- zero-rate product
+- partial payment/collection
+- full return
+- repeated submit
+- Owner sale
+- Salesman sale
+- Online/OFC sale
+- cancellation
+- report/ledger reconciliation
+
+======================================================================
+PRIORITY 6 — ONLINE RIDER ASSIGNMENT AND RIDER SETTLEMENT
+======================================================================
+
+Online Sale:
+- assign exactly one rider to one order
+- show COD amount linked to rider/order
+- safe reassignment rules before/after delivery
+
+Rider UI:
+- extremely simple mobile-first assigned-order view
+- large clear action buttons
+- minimal text/fields
+- no Owner/accounting pages
+
+Statuses/actions:
+- Pending/Assigned
+- Delivered
+- Partial Delivery
+- Returned
+- Partial Return
+- Settlement Pending
+- Settled
+
+Partial order example:
+- ordered 2
+- delivered 1
+- returned 1
+
+Settlement:
+- rider visits every 2-3 days
+- Owner/Admin/Accountant and Rider status actions synchronize
+- every action records actor, time and source
+- settlement batch identity
+- assigned count
+- delivered count
+- returned/partial-return count
+- unsettled count
+- COD expected
+- COD received
+- remaining rider-held amount
+- on COD delivery:
+  Rider COD Receivable / Cash with Rider Dr
+  Customer Receivable Cr
+- on settlement:
+  Cash/Bank/Petty Cash Dr
+  Rider COD Receivable / Cash with Rider Cr
+- partial return adjusts only returned quantity
+- linked Receipt/accounting entry
+- no duplicate settlement
+- audit trail per order and batch
+
+Security:
+- rider sees only assigned orders
+- one rider cannot see another rider's orders
+- server-side enforcement
+- missing linkage fails safely
+
+======================================================================
+PRIORITY 7 — READABLE IDENTITY NUMBER FOR EVERY ENTRY
+======================================================================
+
+Audit all transactional entities:
+- Sale invoices
+- Sale returns
+- Purchases
+- Purchase returns
+- Receipts
+- Payments
+- Journals
+- Contra
+- Expenses
+- Petty Cash batches
+- Stock adjustments
+- Opening Stock
+- Commission entries
+- Rider settlements
+- Delivery/return events where needed
+
+Requirements:
+- readable prefix + sequence
+- example PUR-0001
+- no collision under concurrency
+- do not break shared sale invoice sequence
+- define business/year reset behavior
+- show identity consistently in UI, reports, print and audit log
+- database internal UUID remains separate
+
+======================================================================
+PRIORITY 8 — ACCOUNT CATEGORY SUBCATEGORIES
+======================================================================
+
+Requirements:
+- parent category + subcategory support
+- simple expandable UI
+- prevent invalid cycles
+- preserve account type/report classification
+- Trial Balance, Ledger, P&L and Balance Sheet grouping remains correct
+- migration/backfill must preserve existing categories
+- permissions and audit trail
+- avoid unnecessary deep nesting
+
+Verification:
+- create parent
+- create child
+- move/disable safely
+- account assignment
+- report grouping
+- deletion restriction when in use
+
+======================================================================
+PRIORITY 9 — EXPANDED EASY CONTRA & TRANSFERS
+======================================================================
+
+Use one simple screen named "Contra & Transfers".
+
+UX:
+- fast daily entry
+- expandable multi-row batch
+- transaction type per row
+- source account where applicable
+- destination account where applicable
+- amount
+- narration/reference
+- add/remove row
+- running totals
+- duplicate/invalid row prevention
+- save once atomically
+- post-save add another/print/view options
+
+Transaction types and accounting:
+
+1. Internal Transfer
+- Destination Cash/Bank/Petty Cash Dr
+- Source Cash/Bank/Petty Cash Cr
+- no income/expense effect
+
+2. Owner Drawing
+- Drawings Dr
+- selected Cash/Bank/Petty Cash Cr
+- never post as fake cash-to-cash Contra
+
+3. Capital Introduced
+- selected Cash/Bank/Petty Cash Dr
+- Capital Cr
+
+Controls:
+- no self-transfer
+- no negative/zero amount
+- type-specific validation
+- atomic batch
+- readable Contra/Transfer Batch ID and row references
+- correct voucher/posting type selected by backend while UI remains simple
+- balances and reports update correctly
+
+======================================================================
+PRIORITY 10 — PROFESSIONAL INVOICES AND BILLS
+======================================================================
+
+Audit and improve:
+- Counter Sale invoice
+- Online Sale invoice
+- OFC invoice
+- Other Sale invoice
+- Sale Return
+- Purchase bill
+- Purchase Return
+- Receipt/Payment or other print documents where relevant
+
+Requirements:
+- complete business/customer/vendor information
+- readable invoice/reference numbers
+- item, qty, rate, discount, totals, paid, balance
+- Online delivery/COD/rider details where appropriate
+- return/net adjustment presentation
+- clean alignment and spacing
+- professional typography
+- half-A4 layout
+- two-up A4 printing
+- single half-page printing
+- mobile preview
+- no internal secrets or inappropriate accounting fields
+- printer/PDF consistency
+
+Verification:
+- short and long names
+- many line items
+- zero/partial/full payment
+- return adjustment
+- Online/OFC
+- half-A4 and 2-up A4
+- PDF/print preview
+
+======================================================================
+PRIORITY 11 — FULL REGRESSION AND CONTROLLED CLIENT UAT
+======================================================================
+
+Core transaction smoke test:
+- Counter Sale
+- Online Sale
+- OFC Sale
+- Other Sale/credit sale and later receipt
+- sale return/partial return
+- purchase/purchase return
+- commission calculation/adjustment
+- rider assignment/delivery/settlement
+- Receipt/Payment/Journal/Contra
+- Petty Cash
+- Stock In/Out
+- opening stock
+- account subcategories
+- identity numbering
+- invoice printing
+
+Accounting verification:
+- stock mutation exactly once
+- no duplicate vouchers
+- debit = credit
+- customer/vendor/rider balances
+- commission expense/payable
+- Owner sale treatment
+- cash/bank/petty cash
+- Trial Balance
+- P&L
+- Balance Sheet
+
+Role verification:
+- Owner/Admin
+- Accountant
+- Salesman
+- Rider
+- own-record restrictions
+- no Owner fallback
+- field/action permissions
+
+Technical checks:
+- focused tests
+- regression tests
+- lint
+- TypeScript
+- production build
+- diff-check
+- migration safety
+- secret scan
+- production deployment SHA
+- authenticated browser/mobile audit
+
+Final verdict allowed only after:
+- Batch 1 requirements pass
+- opening stock production verification passes
+- AI live retest passes
+- client confirms workflows
+
+======================================================================
+DEFERRED FUTURE ROADMAP
+======================================================================
+
+Do not mix with Client UAT Batch 1:
+
+- full offline queue/sync/conflict resolution
+- backup/restore drills and broader security hardening
+- APK
+- Windows EXE
+- advanced AI actions/automation
+- voice/OCR/WhatsApp AI
+- broad premium redesign
+- next client requirement batch
+
+======================================================================
+NEXT ACTION
+======================================================================
+
+1. Replace the two project handoff files with these locked versions.
+2. Migration 00013 is already applied — do not reapply. Proceed to controlled production verification of opening stock.
+3. Run the bounded Client UAT Batch 1 architecture audit.
+4. Approve the exact schema/RPC/accounting invariants and migration sequence.
+5. Implement in controlled phases, not one uncontrolled mega-change.

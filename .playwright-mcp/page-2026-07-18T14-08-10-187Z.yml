@@ -1,0 +1,47 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e15]:
+    - complementary [ref=e16]:
+      - generic [ref=e22]:
+        - generic [ref=e23]: KhataPro ERP
+        - generic [ref=e24]: Accounting-first
+      - generic [ref=e25]:
+        - heading "Accounting-first ERP for Pakistani garments & SMB." [level=1] [ref=e26]
+        - paragraph [ref=e27]: Counter, Online, and OFC sales in one shared invoice sequence. Double-entry vouchers posted invisibly behind every business form. PKR · Asia/Karachi. Built for Vercel.
+        - generic [ref=e28]:
+          - generic [ref=e29]:
+            - generic [ref=e30]: Double-entry
+            - generic [ref=e31]: Server-enforced balanced vouchers
+          - generic [ref=e32]:
+            - generic [ref=e33]: Role-based
+            - generic [ref=e34]: Owner · Accountant · Salesman · Rider
+          - generic [ref=e35]:
+            - generic [ref=e36]: Negative stock
+            - generic [ref=e37]: Allowed — sales never blocked
+          - generic [ref=e38]:
+            - generic [ref=e39]: Audit trail
+            - generic [ref=e40]: Every mutation logged
+      - generic [ref=e41]: Phase 1 · Foundation — auth, roles, CoA, business accounts, audit
+    - main [ref=e45]:
+      - generic [ref=e46]:
+        - generic [ref=e47]:
+          - generic [ref=e48]:
+            - heading "Sign in" [level=2] [ref=e49]
+            - paragraph [ref=e50]: Welcome back. Use your KhataPro ERP credentials.
+          - generic [ref=e51]:
+            - generic [ref=e52]:
+              - generic [ref=e53]: Email
+              - textbox "Email" [ref=e54]: owner@local.test
+            - generic [ref=e55]:
+              - generic [ref=e56]: Password
+              - textbox "Password" [ref=e57]: S@meer123
+            - button "Signing in…" [disabled]
+          - paragraph [ref=e60]: Public registration is closed. Ask the Owner/Admin to invite you.
+        - paragraph [ref=e61]: © 2026 KhataPro ERP · PKR · Asia/Karachi
+  - region "Notifications alt+T"
+  - alert [ref=e4]
+  - generic [ref=e6]:
+    - generic [ref=e10]:
+      - paragraph [ref=e11]: Install KhataPro ERP
+      - paragraph [ref=e12]: Add to home screen for quick access.
+    - button "Dismiss" [ref=e13]: ✕
+    - button "Install" [ref=e14]

@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { toast } from 'sonner'
-import { ArrowRight, AlertCircle, CheckCircle2, ChevronRight, BookOpen } from 'lucide-react'
+import { ArrowRight, AlertCircle, CheckCircle2, ChevronRight, BookOpen, Plus, Trash2 } from 'lucide-react'
 import { formatMoney, parseMoney } from '@/lib/format'
 import { motion } from 'framer-motion'
 import type { MeUser } from '@/components/erp/erp-app'
@@ -43,6 +43,7 @@ export function PaymentVoucherView({ user }: { user: MeUser }) {
   const [amount, setAmount] = useState('')
   const [reference, setReference] = useState('')
   const [result, setResult] = useState<{ ok: boolean; paymentNo?: string; error?: string } | null>(null)
+  const [idempotencyKey, setIdempotencyKey] = useState(() => crypto.randomUUID())
 
   const coaQ = useQuery({ queryKey: ['coa'], queryFn: () => fetch('/api/setup/coa').then(r => r.json()), staleTime: 300_000 })
   const accounts: Account[] = useMemo(() => (coaQ.data?.categories ?? []).flatMap((c: any) => c.accounts.filter((a: any) => a.isActive).map((a: any) => ({ id: a.id, code: a.code, name: a.name, categoryType: c.type }))), [coaQ.data])
@@ -50,7 +51,7 @@ export function PaymentVoucherView({ user }: { user: MeUser }) {
 
   const mut = useMutation({
     mutationFn: async () => {
-      const r = await fetch('/api/payment-voucher', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ paymentDate, paidFromAccountId, debitAccountId, amount, reference: reference || undefined }) })
+      const r = await fetch('/api/payment-voucher', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ paymentDate, paidFromAccountId, debitAccountId, amount, reference: reference || undefined, idempotencyKey }) })
       const j = await r.json(); if (!r.ok) throw new Error(j?.error ?? 'Failed'); return j
     },
     onSuccess: (j) => { toast.success(`Payment Voucher posted: ${j.paymentNo}`); setResult({ ok: true, paymentNo: j.paymentNo }); void qc.invalidateQueries({ queryKey: ['day-book'] }); void qc.invalidateQueries({ queryKey: ['trial-balance'] }) },
@@ -66,7 +67,7 @@ export function PaymentVoucherView({ user }: { user: MeUser }) {
       <p className="text-xs text-muted-foreground mb-1">Payment Voucher Posted</p>
       <p className="text-2xl font-bold text-primary" data-num>{result.paymentNo}</p>
       <div className="mt-4 flex flex-col gap-2">
-        <Button className="w-full" onClick={() => { setResult(null); setAmount(''); setReference('') }}>New Payment</Button>
+        <Button className="w-full" onClick={() => { setResult(null); setAmount(''); setReference(''); setIdempotencyKey(crypto.randomUUID()) }}>New Payment</Button>
         <Button variant="outline" className="w-full" onClick={() => window.open('/?page=day-book', '_self')}>View in Day Book</Button>
       </div>
     </div>
@@ -104,6 +105,7 @@ export function ReceiptVoucherView({ user }: { user: MeUser }) {
   const [amount, setAmount] = useState('')
   const [reference, setReference] = useState('')
   const [result, setResult] = useState<{ ok: boolean; receiptNo?: string; error?: string } | null>(null)
+  const [idempotencyKey, setIdempotencyKey] = useState(() => crypto.randomUUID())
 
   const coaQ = useQuery({ queryKey: ['coa'], queryFn: () => fetch('/api/setup/coa').then(r => r.json()), staleTime: 300_000 })
   const accounts: Account[] = useMemo(() => (coaQ.data?.categories ?? []).flatMap((c: any) => c.accounts.filter((a: any) => a.isActive).map((a: any) => ({ id: a.id, code: a.code, name: a.name, categoryType: c.type }))), [coaQ.data])
@@ -111,7 +113,7 @@ export function ReceiptVoucherView({ user }: { user: MeUser }) {
 
   const mut = useMutation({
     mutationFn: async () => {
-      const body = { receiptDate, receivedIntoAccountId, creditAccountId, amount, reference: reference || undefined }
+      const body = { receiptDate, receivedIntoAccountId, creditAccountId, amount, reference: reference || undefined, idempotencyKey }
       const r = await fetch('/api/receipt-voucher', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
       const j = await r.json(); if (!r.ok) throw new Error(j?.error ?? 'Failed'); return j
     },
@@ -128,7 +130,7 @@ export function ReceiptVoucherView({ user }: { user: MeUser }) {
       <p className="text-xs text-muted-foreground mb-1">Receipt Voucher Posted</p>
       <p className="text-2xl font-bold text-primary" data-num>{result.receiptNo}</p>
       <div className="mt-4 flex flex-col gap-2">
-        <Button className="w-full" onClick={() => { setResult(null); setAmount(''); setReference('') }}>New Receipt</Button>
+        <Button className="w-full" onClick={() => { setResult(null); setAmount(''); setReference(''); setIdempotencyKey(crypto.randomUUID()) }}>New Receipt</Button>
         <Button variant="outline" className="w-full" onClick={() => window.open('/?page=day-book', '_self')}>View in Day Book</Button>
       </div>
     </div>
@@ -158,7 +160,7 @@ export function ReceiptVoucherView({ user }: { user: MeUser }) {
   )
 }
 
-export function ContraEntryView({ user }: { user: MeUser }) {
+function LegacyContraEntryView({ user }: { user: MeUser }) {
   const qc = useQueryClient()
   const [contraDate, setContraDate] = useState(bizDateString(new Date()))
   const [fromAccountId, setFromAccountId] = useState('')
@@ -219,4 +221,121 @@ export function ContraEntryView({ user }: { user: MeUser }) {
       </div>
     </div>
   )
+}
+
+type OperationalMoneyAccount = { id: string; key: string; name: string; balancePaisas: string; isActive: boolean }
+type OperationalMoneyActivity = { id: string; kind: 'contra' | 'capital' | 'drawings'; date: string; amountPaisas: string; reference: string; note: string | null; sourceName: string | null; destinationName: string | null }
+type OperationalMoneyData = { accounts: OperationalMoneyAccount[]; activity: OperationalMoneyActivity[] }
+
+function OperationalImpact({ kind, source, destination, amount }: { kind: 'contra' | 'capital' | 'drawings'; source?: string; destination?: string; amount: bigint }) {
+  const [open, setOpen] = useState(false)
+  const lines = kind === 'contra'
+    ? [`Money moved from ${source ?? 'Source'} to ${destination ?? 'Destination'}.`, 'Profit impact: None.']
+    : kind === 'capital'
+    ? ['Business funds increase.', 'Owner capital increases.', 'Profit impact: None.']
+    : ['Business funds decrease.', 'Owner capital decreases.', 'Profit impact: None.']
+  return <div className="border border-border rounded-lg overflow-hidden">
+    <button type="button" onClick={() => setOpen(v => !v)} className="w-full px-3 py-2 flex items-center justify-between text-xs font-medium hover:bg-muted/20 press-sm">
+      <span>Accounting Impact</span><ChevronRight className={`size-3.5 text-muted-foreground transition-transform ${open ? 'rotate-90' : ''}`} />
+    </button>
+    {open && <div className="border-t border-border bg-muted/30 px-3 py-2 text-xs text-muted-foreground space-y-1"><p data-num>{formatMoney(amount)}</p>{lines.map(line => <p key={line}>{line}</p>)}</div>}
+  </div>
+}
+
+function RecentOperationalMoney({ activity }: { activity: OperationalMoneyActivity[] }) {
+  if (!activity.length) return <p className="text-xs text-muted-foreground">No recent transfers or owner equity activity.</p>
+  return <div className="divide-y divide-border/60">
+    {activity.slice(0, 6).map(item => <div key={item.id} className="py-2 flex items-center justify-between gap-3 text-xs">
+      <div className="min-w-0"><p className="font-medium text-foreground capitalize">{item.kind}</p><p className="text-muted-foreground truncate">{item.sourceName ? `${item.sourceName} → ${item.destinationName ?? 'Owner'}` : `${item.destinationName ?? 'Business funds'} ← Owner`} · {item.date}</p></div>
+      <div className="text-right shrink-0"><p className="font-medium" data-num>{formatMoney(BigInt(item.amountPaisas))}</p><p className="text-[10px] text-muted-foreground" data-num>{item.reference}</p></div>
+    </div>)}
+  </div>
+}
+
+type ContraRow = { fromAccountId: string; toAccountId: string; amount: string; notes: string }
+
+export function ContraEntryView({ user }: { user: MeUser }) {
+  const qc = useQueryClient()
+  const [date, setDate] = useState(bizDateString(new Date()))
+  const [kind, setKind] = useState<'contra' | 'drawings'>('contra')
+  const [rows, setRows] = useState<ContraRow[]>([{ fromAccountId: '', toAccountId: '', amount: '', notes: '' }])
+  const [idempotencyKey, setIdempotencyKey] = useState(() => crypto.randomUUID())
+  const [result, setResult] = useState<{ reference?: string; error?: string } | null>(null)
+  const moneyQ = useQuery<OperationalMoneyData>({ queryKey: ['operational-money'], queryFn: async () => {
+    const r = await fetch('/api/operational-money'); const j = await r.json(); if (!r.ok) throw new Error(j?.error ?? 'Failed'); return j
+  } })
+  const accounts = (moneyQ.data?.accounts ?? []).filter(a => a.isActive)
+  const update = (i: number, patch: Partial<ContraRow>) => setRows(rs => rs.map((r, idx) => idx === i ? { ...r, ...patch } : r))
+  const remove = (i: number) => setRows(rs => rs.length > 1 ? rs.filter((_, idx) => idx !== i) : rs)
+  const add = () => setRows(rs => [...rs, { fromAccountId: '', toAccountId: '', amount: '', notes: '' }])
+  const switchKind = (k: 'contra' | 'drawings') => { setKind(k); setResult(null); setIdempotencyKey(crypto.randomUUID()); if (k === 'drawings') setRows(rs => rs.map(r => ({ ...r, toAccountId: '' }))) }
+  const total = rows.reduce((acc, r) => acc + (parseMoney(r.amount) ?? 0n), 0n)
+  const selfTransfer = rows.some(r => r.fromAccountId && r.fromAccountId === r.toAccountId)
+  const rowOk = (r: ContraRow) => { const a = parseMoney(r.amount); return !!r.fromAccountId && a !== null && a > 0n && (kind === 'drawings' || (!!r.toAccountId && r.fromAccountId !== r.toAccountId)) }
+  const canPost = user.permissions.includes('can_create_contra') && rows.length > 0 && rows.every(rowOk) && !selfTransfer && total > 0n
+  const mut = useMutation({ mutationFn: async () => {
+    const r = await fetch('/api/contra-entry', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({
+      contraDate: date,
+      lines: rows.map(r => ({ kind, fromAccountId: r.fromAccountId, toAccountId: kind === 'contra' ? r.toAccountId : null, amount: r.amount, notes: r.notes || undefined })),
+      idempotencyKey,
+    }) })
+    const j = await r.json(); if (!r.ok) throw new Error(j?.error ?? 'Failed'); return j
+  }, onSuccess: (j) => { setResult({ reference: j.reference }); setIdempotencyKey(crypto.randomUUID()); toast.success('Transfer posted: ' + j.reference); void qc.invalidateQueries({ queryKey: ['operational-money'] }) }, onError: (error: Error) => setResult({ error: error.message }) })
+  const src = accounts.find(a => a.id === rows[0]?.fromAccountId)
+  const dst = accounts.find(a => a.id === rows[0]?.toAccountId)
+  const impact = kind === 'contra'
+    ? <OperationalImpact kind="contra" source={src?.name} destination={dst?.name} amount={total} />
+    : <OperationalImpact kind="drawings" source={src?.name} amount={total} />
+  return <div className="space-y-4 max-w-2xl">
+    <div><h1 className="text-xl font-semibold tracking-tight text-foreground">Contra / Internal Transfer</h1><p className="text-xs text-muted-foreground mt-0.5">Move money between business accounts, or record an owner withdrawal.</p></div>
+    <div className="card-3d p-4 sm:p-5 space-y-3">
+      <div className="flex gap-2 overflow-x-auto">
+        <Button type="button" size="sm" variant={kind === 'contra' ? 'default' : 'outline'} onClick={() => switchKind('contra')}>Internal Transfer</Button>
+        <Button type="button" size="sm" variant={kind === 'drawings' ? 'default' : 'outline'} onClick={() => switchKind('drawings')}>Owner Drawings</Button>
+      </div>
+      <div className="grid sm:grid-cols-2 gap-3"><div><Label className="text-xs text-muted-foreground">Date</Label><Input type="date" value={date} onChange={e => setDate(e.target.value)} className="h-10 bg-background" data-num /></div><div><Label className="text-xs text-muted-foreground">Total</Label><div className="h-10 flex items-center font-medium" data-num>{formatMoney(total)}</div></div></div>
+      {rows.map((r, i) => { const lineAmt = parseMoney(r.amount ?? '') ?? 0n; return (
+        <div key={i} className="border border-border rounded-lg p-3 space-y-2">
+          <div className="flex items-center justify-between"><p className="text-xs font-medium">{'Row ' + (i + 1)}{kind === 'drawings' ? ' · Owner Drawings' : ' · Internal Transfer'}</p><div className="flex items-center gap-1"><span data-num className="text-xs text-muted-foreground">{formatMoney(lineAmt)}</span>{rows.length > 1 && <Button type="button" size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => remove(i)} aria-label="Remove row"><Trash2 className="size-3.5" /></Button>}</div></div>
+          <div className="grid sm:grid-cols-2 gap-3"><div><Label className="text-xs text-muted-foreground">From account</Label><Select value={r.fromAccountId} onValueChange={(v) => update(i, { fromAccountId: v })}><SelectTrigger className="h-10 bg-background"><SelectValue placeholder="Select account…" /></SelectTrigger><SelectContent>{accounts.map(x => <SelectItem key={x.id} value={x.id}>{x.name} · {formatMoney(BigInt(x.balancePaisas))}</SelectItem>)}</SelectContent></Select></div>{kind === 'contra' ? <div><Label className="text-xs text-muted-foreground">To account</Label><Select value={r.toAccountId} onValueChange={(v) => update(i, { toAccountId: v })}><SelectTrigger className="h-10 bg-background"><SelectValue placeholder="Select account…" /></SelectTrigger><SelectContent>{accounts.map(x => <SelectItem key={x.id} value={x.id}>{x.name} · {formatMoney(BigInt(x.balancePaisas))}</SelectItem>)}</SelectContent></Select></div> : <div><Label className="text-xs text-muted-foreground">To account</Label><div className="h-10 flex items-center text-xs text-muted-foreground">Owner Drawings (3020)</div></div>}</div>
+          <div className="grid sm:grid-cols-2 gap-3"><div><Label className="text-xs text-muted-foreground">Amount (Rs)</Label><Input value={r.amount} onChange={e => update(i, { amount: e.target.value })} inputMode="decimal" placeholder="0.00" className="h-10 bg-background" data-num /></div><div><Label className="text-xs text-muted-foreground">Note <span className="text-muted-foreground/70">(optional)</span></Label><Input value={r.notes} onChange={e => update(i, { notes: e.target.value })} maxLength={500} className="h-10 bg-background" /></div></div>
+        </div>
+      ) })}
+      <Button type="button" size="sm" variant="outline" className="w-full" onClick={add}><Plus className="size-3.5" /> Add Row</Button>
+      {selfTransfer && <p className="text-xs text-destructive">A source and destination account cannot be the same.</p>}
+      {impact}
+      {result?.error && <p className="text-xs text-destructive">{result.error}</p>}
+      {result?.reference && <p className="text-xs text-primary">Transfer posted: <span data-num>{result.reference}</span></p>}
+      <Button className="w-full" disabled={!canPost || mut.isPending} onClick={() => mut.mutate()}>{mut.isPending ? 'Posting…' : (kind === 'drawings' ? 'Save Drawings' : 'Save Contra')}</Button>
+    </div>
+    <div className="card-3d p-4"><h2 className="text-sm font-semibold mb-2">Recent transfers</h2><RecentOperationalMoney activity={(moneyQ.data?.activity ?? []).filter(a => a.kind === 'contra')} /></div>
+  </div>
+}
+
+export function OwnerCapitalView({ user }: { user: MeUser }) {
+  const qc = useQueryClient()
+  const [action, setAction] = useState<'capital' | 'drawings'>('capital')
+  const [accountId, setAccountId] = useState('')
+  const [date, setDate] = useState(bizDateString(new Date()))
+  const [amount, setAmount] = useState('')
+  const [note, setNote] = useState('')
+  const [idempotencyKey, setIdempotencyKey] = useState(() => crypto.randomUUID())
+  const [result, setResult] = useState<{ reference?: string; error?: string } | null>(null)
+  const moneyQ = useQuery<OperationalMoneyData>({ queryKey: ['operational-money'], queryFn: async () => { const r = await fetch('/api/operational-money'); const j = await r.json(); if (!r.ok) throw new Error(j?.error ?? 'Failed'); return j } })
+  const accounts = (moneyQ.data?.accounts ?? []).filter(a => a.isActive)
+  const amountPaisas = parseMoney(amount) ?? 0n
+  const mut = useMutation({ mutationFn: async () => { const r = await fetch('/api/owner-equity', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action, accountId, date, amount, note: note || undefined, idempotencyKey }) }); const j = await r.json(); if (!r.ok) throw new Error(j?.error ?? 'Failed'); return j }, onSuccess: (j) => { setResult({ reference: j.reference }); setIdempotencyKey(crypto.randomUUID()); toast.success(`${action === 'capital' ? 'Capital added' : 'Drawings posted'}: ${j.reference}`); void qc.invalidateQueries({ queryKey: ['operational-money'] }) }, onError: (error: Error) => setResult({ error: error.message }) })
+  const selected = accounts.find(a => a.id === accountId)
+  const title = action === 'capital' ? 'Add Capital' : 'Withdraw / Drawings'
+  return <div className="space-y-4 max-w-2xl">
+    <div><h1 className="text-xl font-semibold tracking-tight text-foreground">Owner Capital & Drawings</h1><p className="text-xs text-muted-foreground mt-0.5">Add owner funds or record personal withdrawals. Neither affects profit.</p></div>
+    <div className="card-3d p-4 sm:p-5 space-y-3"><div className="flex gap-2 overflow-x-auto"><Button type="button" size="sm" variant={action === 'capital' ? 'default' : 'outline'} onClick={() => { setAction('capital'); setResult(null); setIdempotencyKey(crypto.randomUUID()) }}>Add Capital</Button><Button type="button" size="sm" variant={action === 'drawings' ? 'default' : 'outline'} onClick={() => { setAction('drawings'); setResult(null); setIdempotencyKey(crypto.randomUUID()) }}>Withdraw / Drawings</Button></div>
+      <div className="grid sm:grid-cols-2 gap-3"><div><Label className="text-xs text-muted-foreground">Account</Label><Select value={accountId} onValueChange={setAccountId}><SelectTrigger className="h-10 bg-background"><SelectValue placeholder="Select Cash, Bank or Wallet…" /></SelectTrigger><SelectContent>{accounts.map(a => <SelectItem key={a.id} value={a.id}>{a.name} · {formatMoney(BigInt(a.balancePaisas))}</SelectItem>)}</SelectContent></Select></div><div><Label className="text-xs text-muted-foreground">Amount (Rs)</Label><Input value={amount} onChange={e => setAmount(e.target.value)} inputMode="decimal" placeholder="0.00" className="h-10 bg-background" data-num /></div></div>
+      <div className="grid sm:grid-cols-2 gap-3"><div><Label className="text-xs text-muted-foreground">Date</Label><Input type="date" value={date} onChange={e => setDate(e.target.value)} className="h-10 bg-background" data-num /></div><div><Label className="text-xs text-muted-foreground">Note <span className="text-muted-foreground/70">(optional)</span></Label><Input value={note} onChange={e => setNote(e.target.value)} maxLength={500} className="h-10 bg-background" /></div></div>
+      {amountPaisas > 0n && selected && <OperationalImpact kind={action} source={action === 'drawings' ? selected.name : undefined} destination={action === 'capital' ? selected.name : undefined} amount={amountPaisas} />}
+      {result?.error && <p className="text-xs text-destructive">{result.error}</p>}{result?.reference && <p className="text-xs text-primary">Posted: <span data-num>{result.reference}</span></p>}
+      <Button className="w-full" disabled={!accountId || amountPaisas <= 0n || mut.isPending} onClick={() => mut.mutate()}>{mut.isPending ? 'Posting…' : title}</Button>
+    </div>
+    <div className="card-3d p-4"><h2 className="text-sm font-semibold mb-2">Recent owner capital & drawings</h2><RecentOperationalMoney activity={(moneyQ.data?.activity ?? []).filter(a => a.kind !== 'contra')} /></div>
+  </div>
 }

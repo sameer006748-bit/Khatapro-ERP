@@ -4,6 +4,7 @@ import { authOptions } from '@/lib/auth/authOptions'
 import { loadSessionUser, hasPermission } from '@/lib/auth/permissions'
 import { listExpenses } from '@/lib/vouchers/data-access'
 import { withObservability } from '@/lib/observability'
+import { getAccountingAvailability, unavailableAccountingPayload } from '@/lib/accounting/availability'
 
 const getExpenses = async () => {
   const session = await getServerSession(authOptions)
@@ -13,8 +14,12 @@ const getExpenses = async () => {
   if (!hasPermission(loaded, 'can_view_day_book') && !hasPermission(loaded, 'can_view_vouchers')) {
     return NextResponse.json({ error: 'FORBIDDEN' }, { status: 403 })
   }
+  const capability = await getAccountingAvailability(loaded.businessId)
+  if (capability.path === 'operational-fallback') {
+    return NextResponse.json(unavailableAccountingPayload({ rows: [] }, capability.reason))
+  }
   const rows = await listExpenses(loaded.businessId)
-  return NextResponse.json({ rows })
+  return NextResponse.json({ rows, availability: { accounting: true } })
 }
 
 export const GET = withObservability('/api/expenses', getExpenses)

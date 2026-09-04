@@ -39,6 +39,8 @@ export type PostVoucherInput = {
   referenceId?: string | null
   referenceType?: string | null
   postedBy?: string | null
+  /** Stable retry key. Production callers should supply one per source action. */
+  idempotencyKey?: string | null
 }
 
 export class VoucherError extends Error {

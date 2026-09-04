@@ -19,6 +19,7 @@ const Schema = z.object({
   memo: z.string().optional(),
   lines: z.array(LineSchema).min(2),
   reference: z.string().optional(),
+  idempotencyKey: z.string().uuid().optional(),
 })
 
 export async function POST(req: Request) {
@@ -57,6 +58,7 @@ export async function POST(req: Request) {
       lines: linesOut,
       reference: parsed.data.reference ?? null,
       createdBy: su.userId,
+      idempotencyKey: parsed.data.idempotencyKey ?? crypto.randomUUID(),
     })
     return NextResponse.json({ ok: true, ...result })
   } catch (error) {

@@ -1,0 +1,96 @@
+- generic [ref=e1]:
+  - generic [ref=e5]:
+    - banner [ref=e6]:
+      - generic [ref=e7]: KhataPro ERP
+      - generic [ref=e14]:
+        - 'generic "Supabase live: https://ebcebxwpddltiwrqybqc.supabase.co" [ref=e15]': Supabase live
+        - generic [ref=e19]: 19/07/2026, 20:57:08
+        - button "Sign out" [ref=e20]
+    - generic [ref=e21]:
+      - complementary [ref=e22]:
+        - navigation [ref=e23]:
+          - generic [ref=e24]:
+            - button "Home" [ref=e25]
+            - generic [ref=e33]:
+              - button "Daily Work" [ref=e34]
+              - generic [ref=e129]:
+                - button "Counter Sale" [ref=e130]
+                - button "Online Sale" [ref=e136]
+                - button "OFC Sale" [ref=e142]
+                - button "Sales List" [ref=e148]
+                - button "Delivery / Riders" [ref=e153]
+                - button "Purchase Bills" [ref=e160]
+                - button "Vendors" [ref=e165]
+                - button "Add Expense" [ref=e172]
+                - button "Salesman Reports" [ref=e177]
+            - button "Money" [ref=e42]
+            - button "Inventory" [ref=e49]
+            - button "Advanced Accounting" [ref=e56]
+            - button "Settings" [ref=e63]
+        - generic [ref=e73]:
+          - generic [ref=e74]: B
+          - generic [ref=e75]:
+            - generic [ref=e76]: Bilal Khan
+            - generic [ref=e77]: owner@test.local
+      - main [ref=e78]:
+        - generic [ref=e569]:
+          - generic [ref=e570]:
+            - heading "Expense Batch" [level=1] [ref=e571]
+            - paragraph [ref=e572]: Multiple expense lines paid from one account — single credit to payment account
+          - generic [ref=e573]:
+            - generic [ref=e574]:
+              - generic [ref=e575]:
+                - generic [ref=e576]: Date
+                - textbox [ref=e577]: 2026-07-19
+              - generic [ref=e578]:
+                - generic [ref=e579]: Paid From (business account)
+                - combobox [active] [ref=e580]:
+                  - generic:
+                    - generic: "1010"
+                    - text: · Cash
+            - generic [ref=e581]:
+              - generic [ref=e582]:
+                - generic [ref=e583]: Reference
+                - textbox "Optional" [ref=e584]
+              - generic [ref=e585]:
+                - generic [ref=e586]: Notes
+                - textbox "Optional" [ref=e587]
+          - generic [ref=e588]:
+            - generic [ref=e589]:
+              - heading "Expense Lines (1)" [level=2] [ref=e590]:
+                - text: Expense Lines
+                - generic [ref=e591]: (1)
+              - button "Add line" [ref=e592]
+            - table [ref=e594]:
+              - rowgroup [ref=e595]:
+                - row [ref=e596]:
+                  - columnheader "Expense Account" [ref=e597]
+                  - columnheader "Description" [ref=e598]
+                  - columnheader "Amount (Rs)" [ref=e599]
+                  - columnheader [ref=e600]
+              - rowgroup [ref=e601]:
+                - row [ref=e602]:
+                  - cell [ref=e603]:
+                    - combobox [ref=e604]:
+                      - generic: Select…
+                  - cell [ref=e605]:
+                    - textbox "Optional" [ref=e606]
+                  - cell [ref=e607]:
+                    - textbox "0.00" [ref=e608]
+                  - cell [ref=e609]:
+                    - button [disabled] [ref=e610]
+              - rowgroup [ref=e614]:
+                - row [ref=e615]:
+                  - cell "Total (1 lines)" [ref=e616]
+                  - cell "0.00" [ref=e617]
+                  - cell [ref=e618]
+          - generic [ref=e619]:
+            - button "Post Expense Batch" [disabled]
+  - region "Notifications alt+T"
+  - alert [ref=e4]
+  - generic [ref=e119]:
+    - generic [ref=e123]:
+      - paragraph [ref=e124]: Install KhataPro ERP
+      - paragraph [ref=e125]: Add to home screen for quick access.
+    - button "Dismiss" [ref=e126]: ✕
+    - button "Install" [ref=e127]

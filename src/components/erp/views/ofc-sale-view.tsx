@@ -14,9 +14,13 @@ import { motion } from 'framer-motion'
 import { PrintInvoiceButton } from '@/components/invoice/print-invoice-button'
 import { CURRENT_DATABASE_CAPABILITIES } from '@/lib/supabase/rpc-compatibility'
 import type { MeUser } from '@/components/erp/erp-app'
+import { apiFetchJson } from '@/lib/api-client'
+import { PaymentPanel } from '@/components/erp/sales/payment-panel'
+import { usePaymentDraft } from '@/components/erp/sales/use-payment-draft'
+import { usePaymentAccounts } from '@/components/erp/sales/use-payment-accounts'
+import { userFacingError } from '@/lib/user-facing-error'
 
 type Product = { id: string; name: string; salePrice: number }
-type Account = { id: string; code: string; name: string }
 type Salesman = { id: string; name: string; commissionPct: number; isActive?: boolean }
 type Item = { key: string; productId: string; productName: string; qty: string; unitPrice: string }
 
@@ -28,36 +32,23 @@ export function OfcSaleView({ user }: { user: MeUser }) {
   const [salesmanId, setSalesmanId] = useState('')
   const [form, setForm] = useState({
     customerName: '', customerPhone: '', customerCity: '', customerAddress: '',
-    courierNote: '', advanceReceived: '', discountRupees: '',
+    courierNote: '', discountRupees: '',
     invoiceDate: bizDateString(new Date()),
   })
   const [items, setItems] = useState<Item[]>([{ key: '1', productId: '', productName: '', qty: '1', unitPrice: '' }])
-  const [paymentAccountId, setPaymentAccountId] = useState('')
   const [result, setResult] = useState<{ ok: boolean; invoiceNo?: string; invoiceId?: string; error?: string } | null>(null)
   const [idempotencyKey, setIdempotencyKey] = useState(() => crypto.randomUUID())
 
-  const coaQ = useQuery({ queryKey: ['coa'], queryFn: () => fetch('/api/setup/coa').then(r => r.json()), staleTime: 300_000 })
-  const productsQ = useQuery<{ rows: Product[] }>({ queryKey: ['products'], queryFn: () => fetch('/api/products').then(r => r.json()), staleTime: 30_000 })
-  const salesmenQ = useQuery<{ rows: Salesman[] }>({ queryKey: ['salesmen'], queryFn: () => fetch('/api/salesmen').then(r => r.json()), staleTime: 300_000, enabled: mustPickSalesman })
+  const paymentAccountsQ = usePaymentAccounts()
+  const productsQ = useQuery<{ rows: Product[] }>({ queryKey: ['products'], queryFn: ({ signal }) => apiFetchJson('/api/products', { signal }), staleTime: 30_000 })
+  const salesmenQ = useQuery<{ rows: Salesman[] }>({ queryKey: ['salesmen'], queryFn: ({ signal }) => apiFetchJson('/api/salesmen', { signal }), staleTime: 300_000, enabled: mustPickSalesman })
 
   const activeSalesmen = useMemo(() => (salesmenQ.data?.rows ?? []).filter(s => s.isActive !== false), [salesmenQ.data])
   // Same rule as Counter Sale: auto-select only when there is exactly ONE
   // active salesman (unambiguous) — never guess among several.
   const effectiveSalesmanId = useMemo(() => salesmanId || (activeSalesmen.length === 1 ? activeSalesmen[0].id : ''), [salesmanId, activeSalesmen])
 
-  const businessAccounts: Account[] = useMemo(() => {
-    if (!coaQ.data?.categories) return []
-    return coaQ.data.categories.flatMap((c: any) => c.accounts).filter((a: any) => a.isBusinessAccount && a.isActive).map((a: any) => ({ id: a.id, code: a.code, name: a.name }))
-  }, [coaQ.data])
-
-  const effectivePaymentAccountId = useMemo(() => {
-    if (paymentAccountId) return paymentAccountId
-    if (businessAccounts.length > 0) {
-      const bank = businessAccounts.find(a => a.name === 'Bank' || a.code === '1030') ?? businessAccounts[0]
-      return bank.id
-    }
-    return ''
-  }, [paymentAccountId, businessAccounts])
+  const businessAccounts = paymentAccountsQ.accounts
 
   // ── Phase 9.1 totals with discount ──
   const subtotal = items.reduce((acc, it) => acc + (parseMoney(it.unitPrice) ?? 0n) * BigInt(parseInt(it.qty) || 0), 0n)
@@ -69,9 +60,15 @@ export function OfcSaleView({ user }: { user: MeUser }) {
   const discountError = discountPaisas < 0n ? 'Discount cannot be negative' : discountPaisas > subtotal ? 'Discount exceeds subtotal' : null
   const finalTotal = subtotal - discountPaisas
 
-  // Advance
-  const advanceReceived = parseMoney(form.advanceReceived) ?? 0n
-  const changeAmount = advanceReceived > finalTotal ? advanceReceived - finalTotal : 0n
+  // Advance — the same shared payment implementation every channel uses; OFC's
+  // own rule (full advance) is applied below, not inside the payment engine.
+  const advance = usePaymentDraft({
+    accounts: businessAccounts,
+    netPayablePaisas: finalTotal,
+    requirePayment: true,
+  })
+  const advanceReceived = advance.paidPaisas
+  const changeAmount = advance.changePaisas
   const netCollected = advanceReceived - changeAmount
   const outstanding = finalTotal > netCollected ? finalTotal - netCollected : 0n
 
@@ -81,12 +78,7 @@ export function OfcSaleView({ user }: { user: MeUser }) {
 
   const postMut = useMutation({
     mutationFn: async () => {
-      const payments: Array<{ accountId: string; amount: string; isChange?: boolean }> = [
-        { accountId: effectivePaymentAccountId, amount: advanceReceived.toString() },
-      ]
-      if (changeAmount > 0n) {
-        payments.push({ accountId: effectivePaymentAccountId, amount: changeAmount.toString(), isChange: true })
-      }
+      const payments = advance.serializedPayments
 
       const r = await fetch('/api/sales/ofc', {
         method: 'POST', headers: { 'content-type': 'application/json' },
@@ -123,7 +115,7 @@ export function OfcSaleView({ user }: { user: MeUser }) {
 
       if (!r.ok) {
         const serverMsg = parsed && typeof parsed.error === 'string' ? parsed.error : null
-        let msg = serverMsg ?? 'Could not post OFC sale. Please try again.'
+        let msg = serverMsg ?? 'Could not post the out-of-city sale. Please try again.'
         if (requestId) msg += ` (Ref: ${requestId})`
         throw new Error(msg)
       }
@@ -131,13 +123,17 @@ export function OfcSaleView({ user }: { user: MeUser }) {
       return parsed
     },
     onSuccess: (j) => {
-      toast.success(`OFC sale posted: ${j.invoiceNo}`)
+      toast.success(`Out-of-city sale posted: ${j.invoiceNo}`)
       setResult({ ok: true, invoiceNo: j.invoiceNo, invoiceId: j.invoiceId })
       void qc.invalidateQueries({ queryKey: ['invoices'] })
       void qc.invalidateQueries({ queryKey: ['trial-balance'] })
       void qc.invalidateQueries({ queryKey: ['products'] })
     },
-    onError: (e: Error) => { setResult({ ok: false, error: e.message }); toast.error(`Failed: ${e.message}`) },
+    onError: (e: Error) => {
+      const message = userFacingError(e, 'The sale could not be posted. Please review the details and try again.')
+      setResult({ ok: false, error: message })
+      toast.error(message)
+    },
   })
 
   function onProductSelect(key: string, productId: string) {
@@ -150,7 +146,7 @@ export function OfcSaleView({ user }: { user: MeUser }) {
       <div className="space-y-6">
         <motion.div initial={{ opacity: 0, scale: 0.96 }} animate={{ opacity: 1, scale: 1 }} className="card-3d border-primary/40 p-8 text-center max-w-md mx-auto">
           <div className="grid place-items-center size-16 rounded-2xl icon-3d mx-auto mb-4"><CheckCircle2 className="size-8 text-primary-foreground" /></div>
-          <h2 className="text-xl font-semibold text-foreground">OFC Sale Posted!</h2>
+          <h2 className="text-xl font-semibold text-foreground">Out-of-City Sale Posted!</h2>
           <p className="text-3xl font-bold text-primary mt-1" data-num>{result.invoiceNo}</p>
           <div className="mt-6 flex flex-col gap-2">
             <Button className="press-md shadow-sm" onClick={() => window.open(`/?invoice=${result.invoiceId}`, '_self')}><FileText className="size-4" /> View Invoice</Button>
@@ -158,7 +154,8 @@ export function OfcSaleView({ user }: { user: MeUser }) {
             <Button variant="ghost" className="press-sm" onClick={() => {
               setResult(null)
               setItems([{ key: String(Date.now()), productId: '', productName: '', qty: '1', unitPrice: '' }])
-              setForm({ customerName: '', customerPhone: '', customerCity: '', customerAddress: '', courierNote: '', advanceReceived: '', discountRupees: '', invoiceDate: bizDateString(new Date()) })
+              setForm({ customerName: '', customerPhone: '', customerCity: '', customerAddress: '', courierNote: '', discountRupees: '', invoiceDate: bizDateString(new Date()) })
+              advance.reset()
               setIdempotencyKey(crypto.randomUUID())
             }}><Truck className="size-4" /> New Sale</Button>
           </div>
@@ -170,15 +167,27 @@ export function OfcSaleView({ user }: { user: MeUser }) {
   const canPost = form.customerName && form.customerPhone && form.customerAddress && form.customerCity &&
     items.some(it => it.productId || it.productName) &&
     (!mustPickSalesman || !!effectiveSalesmanId) &&
+    advance.isValid &&
     !discountError && (form.discountRupees === '' || discountPaisas >= 0n)
 
   return (
-    <div className="space-y-4">
-      <h1 className="text-xl font-semibold tracking-tight text-foreground">OFC Sale</h1>
+    <div className="space-y-3">
+      <div>
+        <h1 className="text-xl font-semibold tracking-tight text-foreground">Out-of-City Sale</h1>
+        <p className="mt-0.5 text-xs text-muted-foreground">Record an advance-paid sale with customer and courier details.</p>
+      </div>
 
       {/* ── Salesman ── */}
+      {paymentAccountsQ.isError && (
+        <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-muted-foreground">
+          Payment accounts could not be loaded. Try again before recording an advance.
+        </div>
+      )}
+
+      <div className="grid gap-3 lg:grid-cols-[minmax(0,1.65fr)_minmax(360px,1fr)] lg:items-start">
+        <div className="min-w-0 space-y-3">
       {mustPickSalesman && (
-        <div className="card-3d p-4 space-y-2">
+        <div className="card-3d p-3 space-y-2">
           <h2 className="text-sm font-semibold text-foreground">Salesman *</h2>
           <Select value={salesmanId} onValueChange={setSalesmanId}>
             <SelectTrigger className="h-11 bg-background press-sm text-sm"><SelectValue placeholder="Select salesman…" /></SelectTrigger>
@@ -191,19 +200,19 @@ export function OfcSaleView({ user }: { user: MeUser }) {
       )}
 
       {/* ── Customer ── */}
-      <div className="card-3d p-4 space-y-3">
+      <div className="card-3d p-3 space-y-2">
         <h2 className="text-sm font-semibold text-foreground">Customer</h2>
         <div className="grid sm:grid-cols-2 gap-2">
-          <Input value={form.customerName} onChange={e => setForm(s => ({ ...s, customerName: e.target.value }))} placeholder="Name *" className="h-9 bg-background press-sm" />
-          <Input value={form.customerPhone} onChange={e => setForm(s => ({ ...s, customerPhone: e.target.value }))} placeholder="Phone *" className="h-9 bg-background press-sm" data-num />
-          <Input value={form.customerAddress} onChange={e => setForm(s => ({ ...s, customerAddress: e.target.value }))} placeholder="Address *" className="h-9 bg-background press-sm" />
-          <Input value={form.customerCity} onChange={e => setForm(s => ({ ...s, customerCity: e.target.value }))} placeholder="City *" className="h-9 bg-background press-sm" />
+          <div><Label className="text-xs text-muted-foreground">Customer name *</Label><Input value={form.customerName} onChange={e => setForm(s => ({ ...s, customerName: e.target.value }))} placeholder="Customer name" className="h-9 bg-background press-sm mt-1" /></div>
+          <div><Label className="text-xs text-muted-foreground">Phone *</Label><Input value={form.customerPhone} onChange={e => setForm(s => ({ ...s, customerPhone: e.target.value }))} placeholder="Phone number" className="h-9 bg-background press-sm mt-1" data-num /></div>
+          <div><Label className="text-xs text-muted-foreground">Address *</Label><Input value={form.customerAddress} onChange={e => setForm(s => ({ ...s, customerAddress: e.target.value }))} placeholder="Delivery address" className="h-9 bg-background press-sm mt-1" /></div>
+          <div><Label className="text-xs text-muted-foreground">City *</Label><Input value={form.customerCity} onChange={e => setForm(s => ({ ...s, customerCity: e.target.value }))} placeholder="City" className="h-9 bg-background press-sm mt-1" /></div>
         </div>
-        <div>
+        <div className="lg:hidden">
           <Label className="text-[10px] text-muted-foreground">Courier Note (optional)</Label>
           <Input value={form.courierNote} onChange={e => setForm(s => ({ ...s, courierNote: e.target.value }))} placeholder="Courier name, tracking # etc." className="h-9 bg-background press-sm text-sm" />
         </div>
-        <div>
+        <div className="lg:hidden">
           <Label className="text-[10px] text-muted-foreground">Discount (Rs, optional)</Label>
           <Input type="text" value={form.discountRupees} onChange={e => setForm(s => ({ ...s, discountRupees: e.target.value }))} placeholder="0" className="h-8 bg-background press-sm text-sm max-w-[200px]" data-num />
           {discountError && <div className="text-[10px] text-destructive mt-0.5">{discountError}</div>}
@@ -211,12 +220,19 @@ export function OfcSaleView({ user }: { user: MeUser }) {
       </div>
 
       {/* ── Items ── */}
-      <div className="card-3d p-4 space-y-3">
+      <div className="card-3d p-3 space-y-2">
         <h2 className="text-sm font-semibold text-foreground">Items</h2>
-        <div className="space-y-1.5">
+        {/* Compact column headers */}
+        <div className="grid grid-cols-[minmax(0,2fr)_0.7fr_minmax(0,1fr)_auto] gap-1.5 mb-1 px-1">
+          <span className="text-[10px] text-muted-foreground font-medium">Product</span>
+          <span className="text-[10px] text-muted-foreground font-medium">Qty</span>
+          <span className="text-[10px] text-muted-foreground font-medium">Price (Rs)</span>
+          <span className="text-[10px] text-muted-foreground font-medium">Remove</span>
+        </div>
+        <div className="space-y-1.5 lg:max-h-[calc(100dvh-25rem)] lg:overflow-y-auto lg:pr-1">
           {items.map((it) => (
-            <div key={it.key} className="grid grid-cols-4 gap-1.5 items-end">
-              <div className="col-span-2">
+            <div key={it.key} className="grid grid-cols-[minmax(0,2fr)_0.7fr_minmax(0,1fr)_auto] gap-1.5 items-end">
+              <div>
                 <Select value={it.productId} onValueChange={v => onProductSelect(it.key, v)}>
                   <SelectTrigger className="h-9 bg-background press-sm text-sm"><SelectValue placeholder="Product…" /></SelectTrigger>
                   <SelectContent>{productsQ.data?.rows.map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}</SelectContent>
@@ -234,25 +250,32 @@ export function OfcSaleView({ user }: { user: MeUser }) {
       </div>
 
       {/* ── Advance ── */}
-      <div className="card-3d p-4 space-y-3">
-        <h2 className="text-sm font-semibold text-foreground">Advance Payment</h2>
-        <div className="grid sm:grid-cols-2 gap-2">
-          <div>
-            <Label className="text-[10px] text-muted-foreground">Advance Received (Rs)</Label>
-            <Input type="text" value={form.advanceReceived} onChange={e => setForm(s => ({ ...s, advanceReceived: e.target.value }))} placeholder="0" className="h-9 bg-background press-sm" data-num />
-          </div>
-          <div>
-            <Label className="text-[10px] text-muted-foreground">Payment Account</Label>
-            <Select value={paymentAccountId} onValueChange={setPaymentAccountId}>
-              <SelectTrigger className="h-9 bg-background press-sm text-sm"><SelectValue /></SelectTrigger>
-              <SelectContent>{businessAccounts.map(a => <SelectItem key={a.id} value={a.id}>{a.name} ({a.code})</SelectItem>)}</SelectContent>
-            </Select>
-          </div>
+        </div>
+        <div className="min-w-0 space-y-3 lg:sticky lg:top-3">
+      <div className="card-3d hidden space-y-2 p-3 lg:block">
+        <h2 className="text-sm font-semibold text-foreground">Courier & Discount</h2>
+        <div>
+          <Label className="text-[10px] text-muted-foreground">Courier Note (optional)</Label>
+          <Input value={form.courierNote} onChange={e => setForm(s => ({ ...s, courierNote: e.target.value }))} placeholder="Courier name, tracking # etc." className="mt-1 h-9 bg-background press-sm text-sm" />
+        </div>
+        <div>
+          <Label className="text-[10px] text-muted-foreground">Discount (Rs, optional)</Label>
+          <Input type="text" value={form.discountRupees} onChange={e => setForm(s => ({ ...s, discountRupees: e.target.value }))} placeholder="0" className="mt-1 h-8 bg-background press-sm text-sm" data-num />
+          {discountError && <div className="mt-0.5 text-[10px] text-destructive">{discountError}</div>}
         </div>
       </div>
+      <PaymentPanel
+        accounts={businessAccounts}
+        {...advance.panelProps}
+        error={advance.error}
+        paidLabel="Advance Received (Rs)"
+        paidPlaceholder={formatWholeRupees(finalTotal, false)}
+        idPrefix="ofc-advance"
+        onPayFull={() => advance.setPaidAmount(formatWholeRupees(finalTotal, false).replace(/,/g, ''))}
+      />
 
       {/* ── Totals ── */}
-      <div className="card-3d p-4 space-y-1">
+      <div className="card-3d p-3 space-y-1">
         <h2 className="text-sm font-semibold text-foreground mb-2">Totals</h2>
         <div className="flex items-center justify-between text-sm">
           <span className="text-muted-foreground">Subtotal</span><span className="font-medium" data-num>{formatWholeRupees(subtotal, false)}</span>
@@ -269,8 +292,8 @@ export function OfcSaleView({ user }: { user: MeUser }) {
           <span className="text-muted-foreground">Advance Received</span><span className="font-medium" data-num>{formatWholeRupees(advanceReceived, false)}</span>
         </div>
         {changeAmount > 0n && (
-          <div className="flex items-center justify-between text-sm">
-            <span className="text-muted-foreground">Change</span><span className="font-medium text-amber-600" data-num>−{formatWholeRupees(changeAmount, false)}</span>
+          <div className="flex items-center justify-between rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-sm">
+            <span className="font-semibold text-amber-700">Change to Return</span><span className="font-medium text-amber-700" data-num>{formatWholeRupees(changeAmount, false)}</span>
           </div>
         )}
         <div className="flex items-center justify-between text-sm">
@@ -287,8 +310,10 @@ export function OfcSaleView({ user }: { user: MeUser }) {
       {result && !result.ok && <div className="card-3d p-3 border-destructive/40 flex items-center gap-2"><AlertCircle className="size-4 text-destructive" /><span className="text-xs text-destructive">{result.error}</span></div>}
 
       <Button className="w-full press-md shadow-sm" disabled={postMut.isPending || !canPost || !ofcValid} onClick={() => postMut.mutate()}>
-        {!ofcValid && finalTotal > 0n ? 'Full advance required' : postMut.isPending ? 'Posting…' : <><Truck className="size-4" /> Post OFC Sale — {formatWholeRupees(finalTotal)}</>}
+        {!ofcValid && finalTotal > 0n ? 'Full advance required' : postMut.isPending ? 'Posting…' : <><Truck className="size-4" /> Post Out-of-City Sale — {formatWholeRupees(finalTotal)}</>}
       </Button>
+        </div>
+      </div>
     </div>
   )
 }

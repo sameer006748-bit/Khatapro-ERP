@@ -29,6 +29,38 @@ export class GeminiClientError extends Error {
   }
 }
 
+export type GeminiRetryValidation<T> =
+  | { valid: true; value: T }
+  | { valid: false; retryable: boolean; reason: string }
+
+export async function runGeminiWithSingleRetry<T>(args: {
+  call: (strict: boolean) => Promise<string>
+  validate: (text: string, strict: boolean) => GeminiRetryValidation<T>
+  onRetry?: (reason: string) => void
+}): Promise<T> {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const strict = attempt === 1
+    try {
+      const text = await args.call(strict)
+      const validation = args.validate(text, strict)
+      if (validation.valid) return validation.value
+      if (!validation.retryable) {
+        throw new GeminiClientError('provider_unavailable', 200, 'UNSAFE_OUTPUT')
+      }
+      if (strict) {
+        throw new GeminiClientError('truncated', 200, 'INCOMPLETE_AFTER_RETRY')
+      }
+      args.onRetry?.(validation.reason)
+    } catch (error) {
+      if (!(error instanceof GeminiClientError) || error.category !== 'truncated') throw error
+      if (strict) throw error
+      args.onRetry?.('truncated')
+    }
+  }
+
+  throw new GeminiClientError('truncated', 200, 'INCOMPLETE_AFTER_RETRY')
+}
+
 type GeminiResponse = {
   candidates?: Array<{
     content?: { parts?: Array<{ text?: string }> }

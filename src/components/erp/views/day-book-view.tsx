@@ -10,6 +10,8 @@ import { bizDate } from '@/lib/dates'
 import { Search, ChevronDown, ChevronRight, BookOpen, ArrowLeft } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import type { MeUser } from '@/components/erp/erp-app'
+import { apiFetchJson } from '@/lib/api-client'
+import { PageHeader } from '@/components/erp/page-header'
 
 type DayBookRow = {
   voucherId: string; voucherNo: string | null; voucherType: string; voucherDate: string
@@ -46,11 +48,12 @@ export function DayBookView({ user, onSelectVoucher }: { user: MeUser; onSelectV
   if (toDate) params.set('toDate', toDate)
   if (voucherType !== 'all') params.set('voucherType', voucherType)
 
-  const q = useQuery<{ rows: DayBookRow[] }>({
+  const q = useQuery<{ rows: DayBookRow[]; availability?: { accounting: boolean; message?: string } }>({
     queryKey: ['day-book', fromDate, toDate, voucherType],
-    queryFn: () => fetch(`/api/day-book?${params.toString()}`).then(r => r.json()),
+    queryFn: ({ signal }) => apiFetchJson(`/api/day-book?${params.toString()}`, { signal }),
     staleTime: 30_000,
     gcTime: 5 * 60_000,
+    retry: false,
   })
 
   const rows = q.data?.rows ?? []
@@ -74,10 +77,12 @@ export function DayBookView({ user, onSelectVoucher }: { user: MeUser; onSelectV
 
   return (
     <div className="space-y-4">
-      <div>
-        <h1 className="text-xl font-semibold tracking-tight text-foreground">Day Book</h1>
-        <p className="text-xs text-muted-foreground mt-0.5">All posted vouchers — expand any row to see its lines</p>
-      </div>
+      {q.data?.availability?.accounting === false && (
+        <div className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          This accounting feature is currently unavailable.
+        </div>
+      )}
+      <PageHeader compact title="Day Book" description="Review posted vouchers and expand a row to see its accounting lines." />
 
       {/* Filters */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
@@ -121,7 +126,7 @@ export function DayBookView({ user, onSelectVoucher }: { user: MeUser; onSelectV
         </div>
       )
       : q.isError ? <div className="text-center py-8"><p className="text-sm text-destructive">Failed to load vouchers.</p><button className="mt-2 text-sm text-primary hover:underline" onClick={() => q.refetch()}>Retry</button></div>
-      : filtered.length === 0 ? <div className="text-center py-8"><BookOpen className="size-8 text-muted-foreground mx-auto mb-2 opacity-50" /><p className="text-sm text-muted-foreground">No vouchers for this filter.</p></div>
+      : filtered.length === 0 ? <div className="text-center py-8"><BookOpen className="size-8 text-muted-foreground mx-auto mb-2 opacity-50" /><p className="text-sm text-muted-foreground">{rows.length === 0 && !fromDate && !toDate && voucherType === 'all' ? 'No transactions yet.' : 'No vouchers for this filter.'}</p></div>
       : (
         <>
           {/* Desktop table */}

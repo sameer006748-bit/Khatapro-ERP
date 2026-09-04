@@ -1,7 +1,7 @@
 'use client'
 
 import { useQuery } from '@tanstack/react-query'
-import { Database, CheckCircle2, AlertCircle, AlertTriangle } from 'lucide-react'
+import { Activity, CircleCheck, CircleAlert, TriangleAlert } from 'lucide-react'
 
 type Status = {
   configured: boolean
@@ -27,34 +27,34 @@ export function SupabaseStatusBadge() {
   if (!s) {
     return (
       <span className="hidden sm:inline-flex items-center gap-1.5 text-[11px] text-muted-foreground">
-        <Database className="size-3" />
+        <Activity className="size-3" strokeWidth={1.9} />
         Checking…
       </span>
     )
   }
 
-  // Fully live: admin works AND both migrations applied.
+  // Fully ready.
   if (s.configured && s.adminCanQuery && s.phase1Applied && s.phase2Applied) {
     return (
       <span
         className="hidden sm:inline-flex items-center gap-1.5 text-[11px] px-2 py-1 bg-primary/10 text-primary rounded-md font-medium"
-        title={`Supabase live: ${s.url}`}
+        title="All services are available"
       >
-        <CheckCircle2 className="size-3" />
-        Supabase live
+        <CircleCheck className="size-3" strokeWidth={1.9} />
+        System Online
       </span>
     )
   }
 
-  // Connected but migrations pending.
+  // Needs attention.
   if (s.configured && s.adminCanQuery && (!s.phase1Applied || !s.phase2Applied)) {
     return (
       <span
         className="hidden sm:inline-flex items-center gap-1.5 text-[11px] px-2 py-1 bg-amber-100 text-amber-700 rounded-md font-medium"
-        title={s.message}
+        title="Some services need attention"
       >
-        <AlertTriangle className="size-3" />
-        Supabase (migrations pending)
+        <TriangleAlert className="size-3" strokeWidth={1.9} />
+        System needs attention
       </span>
     )
   }
@@ -64,10 +64,10 @@ export function SupabaseStatusBadge() {
     return (
       <span
         className="hidden sm:inline-flex items-center gap-1.5 text-[11px] px-2 py-1 bg-amber-100 text-amber-700 rounded-md font-medium"
-        title={s.message}
+        title="Some services need attention"
       >
-        <AlertCircle className="size-3" />
-        Supabase (pending)
+        <CircleAlert className="size-3" strokeWidth={1.9} />
+        System needs attention
       </span>
     )
   }
@@ -76,10 +76,10 @@ export function SupabaseStatusBadge() {
   return (
     <span
       className="hidden sm:inline-flex items-center gap-1.5 text-[11px] px-2 py-1 bg-muted text-muted-foreground rounded-md font-medium"
-      title={s.message}
+      title="System status is currently unavailable"
     >
-      <Database className="size-3" />
-      Local preview
+      <Activity className="size-3" strokeWidth={1.9} />
+      System status unavailable
     </span>
   )
 }

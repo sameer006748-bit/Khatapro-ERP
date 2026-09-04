@@ -19,19 +19,14 @@ import { getServerSession } from 'next-auth'
 import { z } from 'zod'
 import { authOptions } from '@/lib/auth/authOptions'
 import { loadSessionUser, requirePermission } from '@/lib/auth/permissions'
-import { postSale, resolveEffectiveSalesmanId } from '@/lib/sales/data-access'
+import { postSale, resolveSaleSeller } from '@/lib/sales/data-access'
+import { SaleItemSchema, SellerRoleSchema, saleRuleErrorResponse } from '@/lib/sales/sale-http'
 import { createDeliveryOrder } from '@/lib/delivery/data-access'
 import { parseMoney } from '@/lib/format'
 import { assertPhase9SaleFeatures } from '@/lib/supabase/rpc-compatibility'
 import { resolveRequestId, safeMutationError } from '@/lib/observability'
 
-const ItemSchema = z.object({
-  productId: z.string().nullable().optional(),
-  productName: z.string().min(1),
-  qty: z.number().int().positive(),
-  unitPrice: z.string().min(1),
-  isTemporary: z.boolean().optional(),
-})
+const ItemSchema = SaleItemSchema
 
 const PaymentSchema = z.object({
   accountId: z.string().min(1),
@@ -45,6 +40,7 @@ const OnlineSaleSchema = z.object({
   items: z.array(ItemSchema).min(1),
   payments: z.array(PaymentSchema),
   salesmanId: z.string().nullable().optional(),
+  sellerRole: SellerRoleSchema.optional(),
   customerName: z.string().min(1),
   customerPhone: z.string().min(1),
   customerAddress: z.string().min(1),
@@ -71,7 +67,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'INVALID_INPUT', details: parsed.error.flatten() }, { status: 400 })
   }
 
-  let items: Array<{ productId?: string | null; productName: string; qty: number; unitPrice: bigint; isTemporary?: boolean }>
+  let items: Array<{ productId?: string | null; productName: string; qty: number; returnedQty?: number; unitPrice: bigint; isTemporary?: boolean; originalInvoiceItemId?: string | null }>
   let payments: Array<{ accountId: string; amount: bigint; isChange?: boolean }>
   try {
     items = parsed.data.items.map((i) => {
@@ -107,13 +103,16 @@ export async function POST(req: Request) {
 
   const requestId = resolveRequestId(req)
   try {
-    const smResult = await resolveEffectiveSalesmanId(su, parsed.data.salesmanId ?? null)
+    const smResult = await resolveSaleSeller(su, {
+      sellerRole: parsed.data.sellerRole ?? null,
+      salesmanId: parsed.data.salesmanId ?? null,
+    })
     if (!smResult.ok) {
       return NextResponse.json({ error: smResult.error }, { status: smResult.status })
     }
 
     // ── Compute reconciled totals ──
-    const productSubtotal = items.reduce((s, i) => s + i.unitPrice * BigInt(i.qty), 0n)
+    const productSubtotal = items.reduce((s, i) => s + i.unitPrice * BigInt(i.qty - (i.returnedQty ?? 0)), 0n)
     const netProductTotal = productSubtotal - discountPaisas
 
     const deliveryCharge = parsed.data.deliveryCharge ? (parseMoney(parsed.data.deliveryCharge) ?? 0n) : 0n
@@ -146,6 +145,7 @@ export async function POST(req: Request) {
       items,
       payments,
       salesmanId: smResult.salesmanId,
+      sellerRole: smResult.sellerRole,
       customerName: parsed.data.customerName,
       customerPhone: parsed.data.customerPhone,
       customerAddress: parsed.data.customerAddress,
@@ -212,6 +212,10 @@ export async function POST(req: Request) {
       remainingCod: remainingCod.toString(),
     })
   } catch (e) {
+    // Business-rule and migration-dependent rejections carry an exact,
+    // operator-actionable reason; everything else stays generic.
+    const ruleError = saleRuleErrorResponse(e)
+    if (ruleError) return ruleError
     return safeMutationError({
       route: '/api/sales/online',
       requestId,

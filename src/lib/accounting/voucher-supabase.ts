@@ -14,6 +14,7 @@
  * from User.supabaseUserUuid (populated by scripts/align-supabase-auth.ts).
  */
 import 'server-only'
+import { randomUUID } from 'crypto'
 import { getAdminSupabase } from '@/lib/supabase/admin'
 import { db } from '@/lib/db'
 import { isSupabaseConfigured } from '@/lib/supabase/config'
@@ -21,6 +22,7 @@ import { writeAudit } from '@/lib/auth/permissions'
 import { bizDateString } from '@/lib/dates'
 import type { VoucherLineInput, PostVoucherInput } from '@/lib/accounting/voucher'
 import { VoucherError } from '@/lib/accounting/voucher'
+import { usesLegacyTransactionSchema } from '@/lib/identity/legacy-bridge'
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
@@ -54,7 +56,10 @@ export async function resolveSupabaseUuid(userId: string | null | undefined): Pr
 }
 
 export async function postVoucherViaSupabase(input: PostVoucherInput): Promise<string> {
-  const { businessId, voucherType, voucherDate, memo, lines, referenceId, referenceType, postedBy } = input
+  const {
+    businessId, voucherType, voucherDate, memo, lines,
+    referenceId, referenceType, postedBy, idempotencyKey,
+  } = input
   const admin = getAdminSupabase()
 
   // Pre-flight client validation (mirrors the RPC's checks) so we get
@@ -93,21 +98,25 @@ export async function postVoucherViaSupabase(input: PostVoucherInput): Promise<s
   // Lines are passed as JSONB with debit/credit as STRING (BigInt-safe over JSON).
   const linesJson = lines.map((l, i) => ({
     account_id: l.accountId,
-    debit: l.debit.toString(),
-    credit: l.credit.toString(),
-    memo: l.memo ?? null,
-    idx: i + 1,
+    debit_paisas: l.debit.toString(),
+    credit_paisas: l.credit.toString(),
+    line_narration: l.memo ?? null,
+    source_line_reference: String(i + 1),
   }))
 
-  const { data, error } = await admin.rpc('post_voucher', {
+  const { data, error } = await admin.rpc('post_ledger_voucher', {
     p_business_id: businessId,
     p_voucher_type: voucherType,
-    p_voucher_date: bizDateString(voucherDate),
-    p_memo: memo ?? null,
+    p_transaction_date: bizDateString(voucherDate),
+    p_narration: memo ?? null,
     p_lines: linesJson,
-    p_reference_id: referenceId ?? null,
-    p_reference_type: referenceType ?? null,
+    p_source_id: referenceId ?? null,
+    p_source_type: referenceType ?? null,
+    p_idempotency_key: idempotencyKey ?? randomUUID(),
     p_posted_by: supabasePostedBy,
+    p_reference: referenceId ?? null,
+    p_readable_number: null,
+    p_reverses_voucher_id: null,
   })
 
   if (error) {
@@ -125,7 +134,8 @@ export async function postVoucherViaSupabase(input: PostVoucherInput): Promise<s
     throw new VoucherError(msg, 'RPC_ERROR')
   }
 
-  const voucherId = data as string
+  const result = data as { voucher_id: string; readable_number: string; idempotent: boolean }
+  const voucherId = result.voucher_id
 
   // Write a local audit entry too (the RPC writes one in Supabase, but the
   // local audit_logs table is what the /api/audit-logs route reads when
@@ -175,7 +185,7 @@ export async function trialBalanceViaSupabase(
   balance: bigint
 }>> {
   const admin = getAdminSupabase()
-  const { data, error } = await admin.rpc('trial_balance', {
+  const { data, error } = await admin.rpc('ledger_trial_balance', {
     p_business_id: businessId,
     p_from_date: fromDate ? bizDateString(fromDate) : null,
     p_to_date: toDate ? bizDateString(toDate) : null,
@@ -209,6 +219,55 @@ export async function trialBalanceViaSupabase(
   }))
 }
 
+/** Trial Balance for the verified legacy production schema. */
+export async function trialBalanceViaLegacySupabase(
+  businessId: string,
+  fromDate?: Date,
+  toDate?: Date,
+): Promise<Array<{
+  account: {
+    id: string
+    code: string
+    name: string
+    category: { code: string; name: string; type: string }
+  }
+  totalDebit: bigint
+  totalCredit: bigint
+  balance: bigint
+}>> {
+  const admin = getAdminSupabase()
+  const { data, error } = await admin.rpc('trial_balance', {
+    p_business_id: businessId,
+    p_from_date: fromDate ? bizDateString(fromDate) : null,
+    p_to_date: toDate ? bizDateString(toDate) : null,
+  })
+
+  if (error) throw new VoucherError(error.message, 'RPC_ERROR')
+  if (!data) return []
+
+  return (data as Array<{
+    account_id: string
+    account_code: string
+    account_name: string
+    category_code: string
+    category_name: string
+    category_type: string
+    total_debit: string | number
+    total_credit: string | number
+    balance: string | number
+  }>).map((r) => ({
+    account: {
+      id: r.account_id,
+      code: r.account_code,
+      name: r.account_name,
+      category: { code: r.category_code, name: r.category_name, type: r.category_type },
+    },
+    totalDebit: BigInt(r.total_debit),
+    totalCredit: BigInt(r.total_credit),
+    balance: BigInt(r.balance),
+  }))
+}
+
 /**
  * Account ledger drill-down via Supabase `account_ledger()` RPC.
  */
@@ -228,7 +287,7 @@ export async function accountLedgerViaSupabase(
   runningBalance: bigint
 }>> {
   const admin = getAdminSupabase()
-  const { data, error } = await admin.rpc('account_ledger', {
+  const { data, error } = await admin.rpc('ledger_general_ledger', {
     p_business_id: businessId,
     p_account_id: accountId,
     p_from_date: fromDate ? bizDateString(fromDate) : null,
@@ -242,22 +301,58 @@ export async function accountLedgerViaSupabase(
     line_id: string
     voucher_id: string
     voucher_type: string
-    voucher_date: string
-    memo: string | null
-    debit: string
-    credit: string
-    running_balance: string
+    transaction_date: string
+    narration: string | null
+    debit_paisas: string
+    credit_paisas: string
+    running_balance_paisas: string
   }>
 
   return rows.map((r) => ({
     lineId: r.line_id,
     voucherId: r.voucher_id,
     voucherType: r.voucher_type,
-    voucherDate: new Date(r.voucher_date),
-    memo: r.memo,
-    debit: BigInt(r.debit),
-    credit: BigInt(r.credit),
-    runningBalance: BigInt(r.running_balance),
+    voucherDate: new Date(r.transaction_date),
+    memo: r.narration,
+    debit: BigInt(r.debit_paisas),
+    credit: BigInt(r.credit_paisas),
+    runningBalance: BigInt(r.running_balance_paisas),
+  }))
+}
+
+/** Account ledger drill-down for the verified legacy production schema. */
+export async function accountLedgerViaLegacySupabase(
+  businessId: string,
+  accountId: string,
+  fromDate?: Date,
+  toDate?: Date,
+): Promise<Array<{
+  lineId: string
+  voucherId: string
+  voucherType: string
+  voucherDate: Date
+  memo: string | null
+  debit: bigint
+  credit: bigint
+  runningBalance: bigint
+}>> {
+  const { data, error } = await getAdminSupabase().rpc('account_ledger', {
+    p_business_id: businessId,
+    p_account_id: accountId,
+    p_from_date: fromDate ? bizDateString(fromDate) : null,
+    p_to_date: toDate ? bizDateString(toDate) : null,
+  })
+  if (error) throw new VoucherError(error.message, 'RPC_ERROR')
+
+  return (data ?? []).map((row: any) => ({
+    lineId: row.line_id,
+    voucherId: row.voucher_id,
+    voucherType: row.voucher_type,
+    voucherDate: new Date(row.voucher_date),
+    memo: row.memo,
+    debit: BigInt(row.debit ?? 0),
+    credit: BigInt(row.credit ?? 0),
+    runningBalance: BigInt(row.running_balance ?? 0),
   }))
 }
 
@@ -270,15 +365,24 @@ export async function cancelVoucherViaSupabase(
   reason?: string | null,
 ): Promise<string> {
   const admin = getAdminSupabase()
-  // Phase 2.1: resolve the real Supabase auth.users UUID for cancelled_by.
   const supabaseCancelledBy = await resolveSupabaseUuid(cancelledBy)
-  const { data, error } = await admin.rpc('cancel_voucher', {
+  if (!supabaseCancelledBy) throw new VoucherError('Reversal actor is unavailable', 'INVALID_USER')
+  const { data: voucher, error: voucherError } = await admin
+    .from('ledger_vouchers')
+    .select('business_id')
+    .eq('id', voucherId)
+    .maybeSingle()
+  if (voucherError || !voucher) throw new VoucherError('Voucher not found', 'NOT_FOUND')
+  const { data, error } = await admin.rpc('reverse_ledger_voucher', {
+    p_business_id: voucher.business_id,
     p_voucher_id: voucherId,
-    p_cancelled_by: supabaseCancelledBy,
-    p_reason: reason ?? null,
+    p_reversal_date: bizDateString(new Date()),
+    p_reason: reason ?? 'Correction',
+    p_idempotency_key: `reversal:${voucherId}`,
+    p_posted_by: supabaseCancelledBy,
   })
   if (error) throw new VoucherError(error.message, 'RPC_ERROR')
-  return data as string
+  return (data as { voucher_id: string }).voucher_id
 }
 
 /**
@@ -312,6 +416,9 @@ export async function accountLedgerSmart(
   fromDate?: Date,
   toDate?: Date,
 ) {
+  if (isSupabaseConfigured() && await usesLegacyTransactionSchema()) {
+    return accountLedgerViaLegacySupabase(businessId, accountId, fromDate, toDate)
+  }
   if (await isSupabaseLive()) {
     return accountLedgerViaSupabase(businessId, accountId, fromDate, toDate)
   }
@@ -356,7 +463,7 @@ async function isSupabaseLive(): Promise<boolean> {
     // Use a real select (not head) so PostgREST returns an error when the
     // table doesn't exist in the schema cache.
     const { data, error } = await admin
-      .from('vouchers')
+      .from('ledger_vouchers')
       .select('id')
       .limit(1)
     // Table exists if no error AND we got an array (even if empty).

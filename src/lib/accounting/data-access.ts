@@ -2,7 +2,7 @@
  * Smart data-access helpers that switch between Supabase and Prisma based on
  * whether Supabase env vars are configured.
  *
- * Phase 1 setup data (accounts, categories, business accounts) lives in
+ * Canonical setup data (ledger_accounts and ledger_account_categories) lives in
  * whichever database is active. When Supabase is live, we read from Supabase
  * tables via the admin client; otherwise we fall back to Prisma/SQLite.
  *
@@ -11,12 +11,13 @@
  */
 import 'server-only'
 import { db } from '@/lib/db'
+import { usesLegacyTransactionSchema } from '@/lib/identity/legacy-bridge'
 import { getAdminSupabase } from '@/lib/supabase/admin'
+import { isSupabaseConfigured } from '@/lib/supabase/config'
 import { probeTable } from '@/lib/supabase/phase-probe'
 
 /**
- * True when Supabase env vars are set AND Phase 1 migration is applied
- * (so the accounts table exists). Cached after first check.
+ * True when Supabase env vars are set AND the production UUID ledger exists.
  */
 const _phase1Cache = { lastChecked: 0, lastResult: false }
 
@@ -26,7 +27,7 @@ async function isSupabaseLive(): Promise<boolean> {
   // than returning false — this prevents falling through to Prisma/SQLite,
   // which is unavailable on serverless and crashes accounting reads. It also
   // re-probes on a 30s TTL instead of permanently caching a transient failure.
-  return probeTable(_phase1Cache, 'permissions')
+  return probeTable(_phase1Cache, 'ledger_accounts')
 }
 
 export type AccountRow = {
@@ -39,7 +40,23 @@ export type AccountRow = {
   isPartyAccount: boolean
   partyType: string | null
   balanceCache: bigint
-  category: { id: string; code: string; name: string; type: string }
+  /**
+   * Set on the legacy production schema only: true for ledger accounts the
+   * posting engine maintains itself (e.g. Purchases / COGS, Salesman
+   * Commission Expense). Such accounts must stay visible in reports but must
+   * never be offered as a manual posting destination.
+   */
+  isSystem?: boolean
+  category: {
+    id: string
+    code: string
+    name: string
+    type: string
+    /** 0 = fixed accounting root, 1 = category, 2 = subcategory. */
+    depth?: number
+    parentId?: string | null
+    rootId?: string | null
+  }
 }
 
 export type CategoryWithAccounts = {
@@ -47,6 +64,9 @@ export type CategoryWithAccounts = {
   code: string
   name: string
   type: string
+  depth?: number
+  parentId?: string | null
+  rootId?: string | null
   accounts: AccountRow[]
 }
 
@@ -57,16 +77,86 @@ export function getDefaultBusinessId(): string {
 
 /** List all account categories with their accounts for a business. */
 export async function getChartOfAccounts(businessId: string): Promise<CategoryWithAccounts[]> {
+  if (isSupabaseConfigured() && await usesLegacyTransactionSchema()) {
+    return getChartOfAccountsFromLegacySupabase(businessId)
+  }
   if (await isSupabaseLive()) {
     return getChartOfAccountsFromSupabase(businessId)
   }
   return getChartOfAccountsFromPrisma(businessId)
 }
 
+async function getChartOfAccountsFromLegacySupabase(businessId: string): Promise<CategoryWithAccounts[]> {
+  const admin = getAdminSupabase()
+  const [{ data: cats, error: categoryError }, { data: accts, error: accountError }] = await Promise.all([
+    admin
+      .from('account_categories')
+      .select('id, code, name, type, depth, parent_id, root_id')
+      .eq('business_id', businessId)
+      .order('code'),
+    admin
+      .from('accounts')
+      .select('id, code, name, category_id, is_active, is_system, is_business_account, is_party_account, party_type, balance_cache')
+      .eq('business_id', businessId)
+      .order('code'),
+  ])
+  if (categoryError) throw new Error(`Chart of accounts categories failed: ${categoryError.message}`)
+  if (accountError) throw new Error(`Chart of accounts failed: ${accountError.message}`)
+
+  return (cats ?? []).map((category) => {
+    const identity = {
+      id: category.id,
+      code: category.code,
+      name: category.name,
+      type: category.type,
+      depth: category.depth ?? 0,
+      parentId: category.parent_id ?? null,
+      rootId: category.root_id ?? category.id,
+    }
+    return {
+      ...identity,
+      accounts: (accts ?? [])
+        .filter((account) => account.category_id === category.id)
+        .map((account) => ({
+          id: account.id,
+          code: account.code,
+          name: account.name,
+          categoryId: account.category_id,
+          isActive: account.is_active,
+          isBusinessAccount: account.is_business_account,
+          isPartyAccount: account.is_party_account,
+          partyType: account.party_type,
+          balanceCache: BigInt(account.balance_cache ?? 0),
+          isSystem: account.is_system === true,
+          category: identity,
+        })),
+    }
+  })
+}
+
 async function getChartOfAccountsFromPrisma(businessId: string): Promise<CategoryWithAccounts[]> {
   const cats = await db.accountCategory.findMany({
     where: { businessId },
-    include: { accounts: { orderBy: { code: 'asc' } } },
+    select: {
+      id: true,
+      code: true,
+      name: true,
+      type: true,
+      accounts: {
+        select: {
+          id: true,
+          code: true,
+          name: true,
+          categoryId: true,
+          isActive: true,
+          isBusinessAccount: true,
+          isPartyAccount: true,
+          partyType: true,
+          balanceCache: true,
+        },
+        orderBy: { code: 'asc' },
+      },
+    },
     orderBy: { code: 'asc' },
   })
   return cats.map((c) => ({
@@ -92,61 +182,69 @@ async function getChartOfAccountsFromPrisma(businessId: string): Promise<Categor
 async function getChartOfAccountsFromSupabase(businessId: string): Promise<CategoryWithAccounts[]> {
   const admin = getAdminSupabase()
   const { data: cats, error } = await admin
-    .from('account_categories')
-    .select('id, code, name, type')
+    .from('ledger_account_categories')
+    .select('id, stable_code, display_name, report_class')
     .eq('business_id', businessId)
-    .order('code')
+    .order('stable_code')
   if (error) throw new Error(`Supabase CoA query failed: ${error.message}`)
   if (!cats) return []
 
   const { data: accts, error: e2 } = await admin
-    .from('accounts')
-    .select('id, code, name, category_id, is_active, is_business_account, is_party_account, party_type, balance_cache')
+    .from('ledger_accounts')
+    .select('id, account_code, account_name, category_id, is_active, operational_money_key, party_type')
     .eq('business_id', businessId)
-    .order('code')
+    .order('account_code')
   if (e2) throw new Error(`Supabase accounts query failed: ${e2.message}`)
   if (!accts) return []
+  const { data: balances, error: balanceError } = await admin.rpc('ledger_account_balances', {
+    p_business_id: businessId,
+    p_as_of_date: null,
+  })
+  if (balanceError) throw new Error(`Supabase ledger balances failed: ${balanceError.message}`)
+  const balanceByAccount = new Map<string, bigint>(
+    (balances ?? []).map((row: any) => [row.account_id, BigInt(row.balance_paisas ?? 0)]),
+  )
 
   return cats.map((c) => ({
     id: c.id,
-    code: c.code,
-    name: c.name,
-    type: c.type,
+    code: c.stable_code,
+    name: c.display_name,
+    type: c.report_class,
     accounts: accts
       .filter((a) => a.category_id === c.id)
       .map((a) => ({
         id: a.id,
-        code: a.code,
-        name: a.name,
+        code: a.account_code,
+        name: a.account_name,
         categoryId: a.category_id,
         isActive: a.is_active,
-        isBusinessAccount: a.is_business_account,
-        isPartyAccount: a.is_party_account,
+        isBusinessAccount: a.operational_money_key !== null,
+        isPartyAccount: a.party_type !== null,
         partyType: a.party_type,
-        balanceCache: BigInt(a.balance_cache ?? 0),
-        category: { id: c.id, code: c.code, name: c.name, type: c.type },
+        balanceCache: balanceByAccount.get(a.id) ?? 0n,
+        category: { id: c.id, code: c.stable_code, name: c.display_name, type: c.report_class },
       })),
   }))
 }
 
 /** Find a single account by ID. */
 export async function getAccountById(businessId: string, accountId: string): Promise<AccountRow | null> {
-  if (await isSupabaseLive()) {
+  if (isSupabaseConfigured() && await usesLegacyTransactionSchema()) {
     const admin = getAdminSupabase()
     const { data, error } = await admin
       .from('accounts')
-      .select('id, code, name, category_id, is_active, is_business_account, is_party_account, party_type, balance_cache')
+      .select('id, code, name, category_id, is_active, is_system, is_business_account, is_party_account, party_type, balance_cache')
       .eq('id', accountId)
       .eq('business_id', businessId)
       .maybeSingle()
     if (error || !data) return null
-    // Fetch category separately
-    const { data: cat } = await admin
+    const { data: category, error: categoryError } = await admin
       .from('account_categories')
-      .select('id, code, name, type')
+      .select('id, code, name, type, depth, parent_id, root_id')
       .eq('id', data.category_id)
+      .eq('business_id', businessId)
       .maybeSingle()
-    if (!cat) return null
+    if (categoryError || !category) return null
     return {
       id: data.id,
       code: data.code,
@@ -157,7 +255,52 @@ export async function getAccountById(businessId: string, accountId: string): Pro
       isPartyAccount: data.is_party_account,
       partyType: data.party_type,
       balanceCache: BigInt(data.balance_cache ?? 0),
-      category: { id: cat.id, code: cat.code, name: cat.name, type: cat.type },
+      isSystem: data.is_system === true,
+      category: {
+        id: category.id,
+        code: category.code,
+        name: category.name,
+        type: category.type,
+        depth: category.depth ?? 0,
+        parentId: category.parent_id ?? null,
+        rootId: category.root_id ?? category.id,
+      },
+    }
+  }
+  if (await isSupabaseLive()) {
+    const admin = getAdminSupabase()
+    const { data, error } = await admin
+      .from('ledger_accounts')
+      .select('id, account_code, account_name, category_id, is_active, operational_money_key, party_type')
+      .eq('id', accountId)
+      .eq('business_id', businessId)
+      .maybeSingle()
+    if (error || !data) return null
+    // Fetch category separately
+    const { data: cat } = await admin
+      .from('ledger_account_categories')
+      .select('id, stable_code, display_name, report_class')
+      .eq('id', data.category_id)
+      .eq('business_id', businessId)
+      .maybeSingle()
+    if (!cat) return null
+    const { data: balancePaisas, error: balanceError } = await admin.rpc('ledger_account_balance_paisas', {
+      p_business_id: businessId,
+      p_account_id: accountId,
+      p_as_of_date: null,
+    })
+    if (balanceError) throw new Error(`Supabase account balance query failed: ${balanceError.message}`)
+    return {
+      id: data.id,
+      code: data.account_code,
+      name: data.account_name,
+      categoryId: data.category_id,
+      isActive: data.is_active,
+      isBusinessAccount: data.operational_money_key !== null,
+      isPartyAccount: data.party_type !== null,
+      partyType: data.party_type,
+      balanceCache: BigInt(balancePaisas ?? 0),
+      category: { id: cat.id, code: cat.stable_code, name: cat.display_name, type: cat.report_class },
     }
   }
   const a = await db.account.findFirst({
@@ -184,10 +327,10 @@ export async function getAccountByCode(businessId: string, code: string): Promis
   if (await isSupabaseLive()) {
     const admin = getAdminSupabase()
     const { data, error } = await admin
-      .from('accounts')
-      .select('id, code, name, category_id, is_active, is_business_account, is_party_account, party_type, balance_cache')
+      .from('ledger_accounts')
+      .select('id, account_code')
       .eq('business_id', businessId)
-      .eq('code', code)
+      .eq('account_code', code)
       .maybeSingle()
     if (error || !data) return null
     return getAccountById(businessId, data.id)
@@ -217,7 +360,7 @@ export async function validateAccounts(businessId: string, accountIds: string[])
   if (await isSupabaseLive()) {
     const admin = getAdminSupabase()
     const { count, error } = await admin
-      .from('accounts')
+      .from('ledger_accounts')
       .select('id', { count: 'exact', head: true })
       .in('id', unique)
       .eq('business_id', businessId)

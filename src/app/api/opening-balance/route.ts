@@ -28,6 +28,7 @@ const Schema = z.object({
   amount: z.string().min(1), // "Rs 5,000" or "5000" or "5000.00"
   side: z.enum(['debit', 'credit']),
   memo: z.string().optional(),
+  idempotencyKey: z.string().uuid().optional(),
 })
 
 export async function POST(req: Request) {
@@ -45,7 +46,7 @@ export async function POST(req: Request) {
       { status: 400 },
     )
   }
-  const { accountId, amount, side, memo } = parsed.data
+  const { accountId, amount, side, memo, idempotencyKey } = parsed.data
 
   const amt = parseMoney(amount)
   if (amt === null || amt <= 0n) {
@@ -86,6 +87,7 @@ export async function POST(req: Request) {
       referenceId: target.id,
       referenceType: 'opening_balance',
       postedBy: su.userId,
+      idempotencyKey: idempotencyKey ?? crypto.randomUUID(),
     })
     return NextResponse.json({ ok: true, voucherId, voucherType: 'OP' })
   } catch (e) {

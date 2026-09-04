@@ -14,10 +14,16 @@ import { motion } from 'framer-motion'
 import { PrintInvoiceButton } from '@/components/invoice/print-invoice-button'
 import { CURRENT_DATABASE_CAPABILITIES } from '@/lib/supabase/rpc-compatibility'
 import type { MeUser } from '@/components/erp/erp-app'
+import { apiFetchJson } from '@/lib/api-client'
+import { PaymentPanel } from '@/components/erp/sales/payment-panel'
+import { usePaymentDraft } from '@/components/erp/sales/use-payment-draft'
+import { usePaymentAccounts } from '@/components/erp/sales/use-payment-accounts'
+import { PageHeader } from '@/components/erp/page-header'
+import { userFacingError } from '@/lib/user-facing-error'
 
 type Product = { id: string; name: string; salePrice: number }
-type Account = { id: string; code: string; name: string }
 type Salesman = { id: string; name: string; commissionPct: number; isActive?: boolean }
+type Rider = { id: string; name: string; phone: string | null; isActive: boolean }
 type Item = { key: string; productId: string; productName: string; qty: string; unitPrice: string }
 
 export function OnlineSaleView({ user }: { user: MeUser }) {
@@ -29,36 +35,25 @@ export function OnlineSaleView({ user }: { user: MeUser }) {
   const [form, setForm] = useState({
     customerName: '', customerPhone: '', customerAddress: '', customerCity: '',
     source: 'WhatsApp', codAmount: '', deliveryFee: '', riderEarning: '',
-    companyDeliveryIncome: '', advanceReceived: '', discountRupees: '',
+    companyDeliveryIncome: '', discountRupees: '', riderId: '',
     invoiceDate: bizDateString(new Date()),
   })
   const [items, setItems] = useState<Item[]>([{ key: '1', productId: '', productName: '', qty: '1', unitPrice: '' }])
-  const [paymentAccountId, setPaymentAccountId] = useState('')
   const [result, setResult] = useState<{ ok: boolean; invoiceNo?: string; invoiceId?: string; error?: string; remainingCod?: string; customerGrandTotal?: string } | null>(null)
   const [idempotencyKey, setIdempotencyKey] = useState(() => crypto.randomUUID())
 
-  const coaQ = useQuery({ queryKey: ['coa'], queryFn: () => fetch('/api/setup/coa').then(r => r.json()), staleTime: 300_000 })
-  const productsQ = useQuery<{ rows: Product[] }>({ queryKey: ['products'], queryFn: () => fetch('/api/products').then(r => r.json()), staleTime: 30_000 })
-  const salesmenQ = useQuery<{ rows: Salesman[] }>({ queryKey: ['salesmen'], queryFn: () => fetch('/api/salesmen').then(r => r.json()), staleTime: 300_000, enabled: mustPickSalesman })
+  const paymentAccountsQ = usePaymentAccounts()
+  const productsQ = useQuery<{ rows: Product[] }>({ queryKey: ['products'], queryFn: ({ signal }) => apiFetchJson('/api/products', { signal }), staleTime: 30_000 })
+  const salesmenQ = useQuery<{ rows: Salesman[] }>({ queryKey: ['salesmen'], queryFn: ({ signal }) => apiFetchJson('/api/salesmen', { signal }), staleTime: 300_000, enabled: mustPickSalesman })
 
   const activeSalesmen = useMemo(() => (salesmenQ.data?.rows ?? []).filter(s => s.isActive !== false), [salesmenQ.data])
+  const ridersQ = useQuery<{ rows: Rider[] }>({ queryKey: ['riders'], queryFn: ({ signal }) => apiFetchJson('/api/riders', { signal }), staleTime: 60_000 })
+  const activeRiders = useMemo(() => (ridersQ.data?.rows ?? []).filter(r => r.isActive !== false), [ridersQ.data])
   // Same rule as Counter Sale: auto-select only when there is exactly ONE
   // active salesman (unambiguous) — never guess among several.
   const effectiveSalesmanId = useMemo(() => salesmanId || (activeSalesmen.length === 1 ? activeSalesmen[0].id : ''), [salesmanId, activeSalesmen])
 
-  const businessAccounts: Account[] = useMemo(() => {
-    if (!coaQ.data?.categories) return []
-    return coaQ.data.categories.flatMap((c: any) => c.accounts).filter((a: any) => a.isBusinessAccount && a.isActive).map((a: any) => ({ id: a.id, code: a.code, name: a.name }))
-  }, [coaQ.data])
-
-  const effectivePaymentAccountId = useMemo(() => {
-    if (paymentAccountId) return paymentAccountId
-    if (businessAccounts.length > 0) {
-      const cash = businessAccounts.find(a => a.name === 'Cash' || a.code === '1010')
-      return cash?.id ?? businessAccounts[0].id
-    }
-    return ''
-  }, [paymentAccountId, businessAccounts])
+  const businessAccounts = paymentAccountsQ.accounts
 
   const subtotal = items.reduce((acc, it) => acc + (parseMoney(it.unitPrice) ?? 0n) * BigInt(parseInt(it.qty) || 0), 0n)
   const discountPaisas = useMemo(() => {
@@ -73,21 +68,23 @@ export function OnlineSaleView({ user }: { user: MeUser }) {
   const companyDeliveryIncomePaisas = parseMoney(form.companyDeliveryIncome) ?? 0n
   const customerGrandTotal = netProductTotal + deliveryFeePaisas
 
-  const advanceReceived = parseMoney(form.advanceReceived) ?? 0n
-  const changeAmount = advanceReceived > customerGrandTotal ? advanceReceived - customerGrandTotal : 0n
+  // ── Advance payment uses the shared payment implementation: single account by
+  //    default, split on request. COD, rider earning and delivery income stay
+  //    channel-specific below. ──
+  const advance = usePaymentDraft({
+    accounts: businessAccounts,
+    netPayablePaisas: customerGrandTotal,
+  })
+
+  const advanceReceived = advance.paidPaisas
+  const changeAmount = advance.changePaisas
   const netAdvance = advanceReceived - changeAmount
   const outstanding = customerGrandTotal > netAdvance ? customerGrandTotal - netAdvance : 0n
   const codExpected = outstanding
 
   const postMut = useMutation({
     mutationFn: async () => {
-      const payments: Array<{ accountId: string; amount: string; isChange?: boolean }> = []
-      if (advanceReceived > 0n) {
-        payments.push({ accountId: effectivePaymentAccountId, amount: advanceReceived.toString() })
-      }
-      if (changeAmount > 0n) {
-        payments.push({ accountId: effectivePaymentAccountId, amount: changeAmount.toString(), isChange: true })
-      }
+      const payments = advance.serializedPayments
 
       const r = await fetch('/api/sales/online', {
         method: 'POST', headers: { 'content-type': 'application/json' },
@@ -139,14 +136,38 @@ export function OnlineSaleView({ user }: { user: MeUser }) {
       }
       return parsed
     },
-    onSuccess: (j) => {
+    onSuccess: async (j) => {
       toast.success(`Online sale posted: ${j.invoiceNo}`)
       setResult({ ok: true, invoiceNo: j.invoiceNo, invoiceId: j.invoiceId, remainingCod: j.remainingCod, customerGrandTotal: j.customerGrandTotal })
       void qc.invalidateQueries({ queryKey: ['invoices'] })
       void qc.invalidateQueries({ queryKey: ['trial-balance'] })
       void qc.invalidateQueries({ queryKey: ['products'] })
+      // Rider assignment happens after the sale succeeds; its failure must be
+      // visible without turning a posted sale into a failed one.
+      if (form.riderId && j.deliveryOrderId) {
+        try {
+          const assignment = await fetch(`/api/delivery-orders/${encodeURIComponent(j.deliveryOrderId)}/assign`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ riderId: form.riderId }),
+          })
+          if (!assignment.ok) {
+            const body = await assignment.json().catch(() => null)
+            throw new Error(body?.error ?? 'The rider could not be assigned.')
+          }
+          void qc.invalidateQueries({ queryKey: ['delivery-orders'] })
+        } catch (error) {
+          toast.warning(`Sale posted, but rider assignment failed: ${(error as Error).message}`)
+        }
+      } else if (form.riderId) {
+        toast.warning('Sale posted, but no delivery order was available for rider assignment.')
+      }
     },
-    onError: (e: Error) => { setResult({ ok: false, error: e.message }); toast.error(`Failed: ${e.message}`) },
+    onError: (e: Error) => {
+      const message = userFacingError(e, 'The sale could not be posted. Please review the details and try again.')
+      setResult({ ok: false, error: message })
+      toast.error(message)
+    },
   })
 
   function onProductSelect(key: string, productId: string) {
@@ -173,7 +194,8 @@ export function OnlineSaleView({ user }: { user: MeUser }) {
             <Button variant="ghost" className="press-sm" onClick={() => {
               setResult(null)
               setItems([{ key: String(Date.now()), productId: '', productName: '', qty: '1', unitPrice: '' }])
-              setForm({ customerName: '', customerPhone: '', customerAddress: '', customerCity: '', source: 'WhatsApp', codAmount: '', deliveryFee: '', riderEarning: '', companyDeliveryIncome: '', advanceReceived: '', discountRupees: '', invoiceDate: bizDateString(new Date()) })
+              setForm({ customerName: '', customerPhone: '', customerAddress: '', customerCity: '', source: 'WhatsApp', codAmount: '', deliveryFee: '', riderEarning: '', companyDeliveryIncome: '', discountRupees: '', riderId: '', invoiceDate: bizDateString(new Date()) })
+              advance.reset()
               setIdempotencyKey(crypto.randomUUID())
             }}><Globe className="size-4" /> New Order</Button>
           </div>
@@ -185,14 +207,23 @@ export function OnlineSaleView({ user }: { user: MeUser }) {
   const canPost = form.customerName && form.customerPhone && form.customerAddress &&
     items.some(it => it.productId || it.productName) &&
     (!mustPickSalesman || !!effectiveSalesmanId) &&
+    advance.isValid &&
     !discountError && (form.discountRupees === '' || discountPaisas >= 0n)
 
   return (
-    <div className="space-y-4">
-      <h1 className="text-xl font-semibold tracking-tight text-foreground">Online Sale</h1>
+    <div className="space-y-3">
+      <PageHeader compact title="Online Sale" description="Record a delivery sale with customer, delivery and payment details." />
 
+      {paymentAccountsQ.isError && (
+        <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-muted-foreground">
+          Payment accounts could not be loaded. Try again before recording an advance.
+        </div>
+      )}
+
+      <div className="grid gap-3 lg:grid-cols-[minmax(0,1.65fr)_minmax(360px,1fr)] lg:items-start">
+        <div className="min-w-0 space-y-3">
       {mustPickSalesman && (
-        <div className="card-3d p-4 space-y-2">
+        <div className="card-3d p-3 space-y-2">
           <h2 className="text-sm font-semibold text-foreground">Salesman *</h2>
           <Select value={salesmanId} onValueChange={setSalesmanId}>
             <SelectTrigger className="h-11 bg-background press-sm text-sm"><SelectValue placeholder="Select salesman…" /></SelectTrigger>
@@ -204,13 +235,13 @@ export function OnlineSaleView({ user }: { user: MeUser }) {
         </div>
       )}
 
-      <div className="card-3d p-4 space-y-3">
+      <div className="card-3d p-3 space-y-2">
         <h2 className="text-sm font-semibold text-foreground">Customer</h2>
         <div className="grid sm:grid-cols-2 gap-2">
-          <Input value={form.customerName} onChange={e => setForm(s => ({ ...s, customerName: e.target.value }))} placeholder="Name *" className="h-9 bg-background press-sm" />
-          <Input value={form.customerPhone} onChange={e => setForm(s => ({ ...s, customerPhone: e.target.value }))} placeholder="Phone *" className="h-9 bg-background press-sm" data-num />
-          <Input value={form.customerAddress} onChange={e => setForm(s => ({ ...s, customerAddress: e.target.value }))} placeholder="Address *" className="h-9 bg-background press-sm" />
-          <Input value={form.customerCity} onChange={e => setForm(s => ({ ...s, customerCity: e.target.value }))} placeholder="City" className="h-9 bg-background press-sm" />
+          <div><Label className="text-xs text-muted-foreground">Customer name *</Label><Input value={form.customerName} onChange={e => setForm(s => ({ ...s, customerName: e.target.value }))} placeholder="Customer name" className="h-9 bg-background press-sm mt-1" /></div>
+          <div><Label className="text-xs text-muted-foreground">Phone *</Label><Input value={form.customerPhone} onChange={e => setForm(s => ({ ...s, customerPhone: e.target.value }))} placeholder="Phone number" className="h-9 bg-background press-sm mt-1" data-num /></div>
+          <div><Label className="text-xs text-muted-foreground">Address *</Label><Input value={form.customerAddress} onChange={e => setForm(s => ({ ...s, customerAddress: e.target.value }))} placeholder="Delivery address" className="h-9 bg-background press-sm mt-1" /></div>
+          <div><Label className="text-xs text-muted-foreground">City</Label><Input value={form.customerCity} onChange={e => setForm(s => ({ ...s, customerCity: e.target.value }))} placeholder="City" className="h-9 bg-background press-sm mt-1" /></div>
         </div>
         <div>
           <div className="sm:max-w-sm">
@@ -230,15 +261,22 @@ export function OnlineSaleView({ user }: { user: MeUser }) {
         </div>
       </div>
 
-      <div className="card-3d p-4">
+      <div className="card-3d p-3">
         <div className="flex items-center justify-between mb-2">
           <h2 className="text-sm font-semibold text-foreground">Items</h2>
           <Button variant="outline" size="sm" onClick={() => setItems(ls => [...ls, { key: String(Date.now()), productId: '', productName: '', qty: '1', unitPrice: '' }])} className="press-sm"><Plus className="size-3" /> Add</Button>
         </div>
-        <div className="space-y-1.5">
+        {/* Compact column headers */}
+        <div className="grid grid-cols-[minmax(0,2fr)_0.7fr_minmax(0,1fr)_auto] gap-1.5 mb-1 px-1">
+          <span className="text-[10px] text-muted-foreground font-medium">Product</span>
+          <span className="text-[10px] text-muted-foreground font-medium">Qty</span>
+          <span className="text-[10px] text-muted-foreground font-medium">Price (Rs)</span>
+          <span className="text-[10px] text-muted-foreground font-medium">Remove</span>
+        </div>
+        <div className="space-y-1.5 lg:max-h-[calc(100dvh-25rem)] lg:overflow-y-auto lg:pr-1">
           {items.map((it) => (
-            <div key={it.key} className="grid grid-cols-4 gap-1.5 items-end">
-              <div className="col-span-2">
+            <div key={it.key} className="grid grid-cols-[minmax(0,2fr)_0.7fr_minmax(0,1fr)_auto] gap-1.5 items-end">
+              <div>
                 <Select value={it.productId} onValueChange={v => onProductSelect(it.key, v)}>
                   <SelectTrigger className="h-9 bg-background press-sm text-sm"><SelectValue placeholder="Product…" /></SelectTrigger>
                   <SelectContent>{productsQ.data?.rows.map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}</SelectContent>
@@ -254,7 +292,9 @@ export function OnlineSaleView({ user }: { user: MeUser }) {
         </div>
       </div>
 
-      <div className="card-3d p-4 space-y-3">
+        </div>
+        <div className="min-w-0 space-y-3 lg:sticky lg:top-3">
+      <div className="card-3d p-3 space-y-2">
         <h2 className="text-sm font-semibold text-foreground">Delivery</h2>
         <div className="grid sm:grid-cols-3 gap-2">
           <div>
@@ -275,24 +315,31 @@ export function OnlineSaleView({ user }: { user: MeUser }) {
         )}
       </div>
 
-      <div className="card-3d p-4 space-y-3">
-        <h2 className="text-sm font-semibold text-foreground">Advance Payment</h2>
-        <div className="grid sm:grid-cols-2 gap-2">
-          <div>
-            <Label className="text-[10px] text-muted-foreground">Advance Received (Rs)</Label>
-            <Input type="text" value={form.advanceReceived} onChange={e => setForm(s => ({ ...s, advanceReceived: e.target.value }))} placeholder="0" className="h-9 bg-background press-sm" data-num />
-          </div>
-          <div>
-            <Label className="text-[10px] text-muted-foreground">Payment Account</Label>
-            <Select value={paymentAccountId} onValueChange={setPaymentAccountId}>
-              <SelectTrigger className="h-9 bg-background press-sm text-sm"><SelectValue /></SelectTrigger>
-              <SelectContent>{businessAccounts.map(a => <SelectItem key={a.id} value={a.id}>{a.name} ({a.code})</SelectItem>)}</SelectContent>
-            </Select>
-          </div>
+        {/* Rider selector */}
+        <div>
+          <Label className="text-[10px] text-muted-foreground">Assign Rider (optional)</Label>
+          <Select value={form.riderId} onValueChange={v => setForm(s => ({ ...s, riderId: v }))}>
+            <SelectTrigger className="h-9 bg-background press-sm text-sm"><SelectValue placeholder="Select a rider..." /></SelectTrigger>
+            <SelectContent>
+              {activeRiders.map(r => <SelectItem key={r.id} value={r.id}>{r.name}{r.phone ? ` (${r.phone})` : ''}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          {ridersQ.isSuccess && activeRiders.length === 0 && (
+            <div className="text-[10px] text-destructive mt-0.5">No active rider found. Add one before assigning.</div>
+          )}
         </div>
-      </div>
 
-      <div className="card-3d p-4 space-y-1">
+      <PaymentPanel
+        accounts={businessAccounts}
+        {...advance.panelProps}
+        error={advance.error}
+        paidLabel="Advance Received (Rs)"
+        paidPlaceholder={formatWholeRupees(customerGrandTotal, false)}
+        onPayFull={() => advance.setPaidAmount(formatWholeRupees(customerGrandTotal, false).replace(/,/g, ''))}
+        idPrefix="online-advance"
+      />
+
+      <div className="card-3d p-3 space-y-1">
         <h2 className="text-sm font-semibold text-foreground mb-2">Reconciled Totals</h2>
         <div className="flex items-center justify-between text-sm">
           <span className="text-muted-foreground">Product Subtotal</span><span className="font-medium" data-num>{formatWholeRupees(subtotal, false)}</span>
@@ -325,8 +372,9 @@ export function OnlineSaleView({ user }: { user: MeUser }) {
           <span className="text-muted-foreground">Advance Received</span><span className="font-medium" data-num>{formatWholeRupees(advanceReceived, false)}</span>
         </div>
         {changeAmount > 0n && (
-          <div className="flex items-center justify-between text-sm">
-            <span className="text-muted-foreground">Change</span><span className="font-medium text-amber-600" data-num>−{formatWholeRupees(changeAmount, false)}</span>
+          <div className="flex items-center justify-between rounded-md bg-amber-50 border border-amber-200 px-3 py-2 mt-1">
+            <span className="text-xs font-semibold text-amber-700">Change to Return</span>
+            <span className="text-sm font-bold text-amber-700" data-num>{formatWholeRupees(changeAmount, false)}</span>
           </div>
         )}
         <div className="flex items-center justify-between text-sm">
@@ -345,6 +393,8 @@ export function OnlineSaleView({ user }: { user: MeUser }) {
       <Button className="w-full press-md shadow-sm" disabled={postMut.isPending || !canPost} onClick={() => postMut.mutate()}>
         {postMut.isPending ? 'Posting…' : <><Globe className="size-4" /> Post Online Sale</>}
       </Button>
+        </div>
+      </div>
     </div>
   )
 }

@@ -38,6 +38,9 @@ export async function POST(req: Request) {
   }
 
   if (!isSupabaseConfigured()) {
+    if (process.env.VERCEL) {
+      return NextResponse.json({ error: 'SERVER_CONFIGURATION_REQUIRED' }, { status: 503 })
+    }
     // Local dev fallback (SQLite/Prisma)
     const { db } = await import('@/lib/db')
     const bcrypt = await import('bcryptjs')

@@ -1,0 +1,92 @@
+- generic [ref=e1]:
+  - generic [ref=e5]:
+    - banner [ref=e6]:
+      - generic [ref=e7]: KhataPro ERP
+      - generic [ref=e14]:
+        - 'generic "Supabase live: https://ebcebxwpddltiwrqybqc.supabase.co" [ref=e15]': Supabase live
+        - generic [ref=e19]: 19/07/2026, 21:06:42
+        - button "Sign out" [ref=e20]
+    - generic [ref=e21]:
+      - complementary [ref=e22]:
+        - navigation [ref=e23]:
+          - generic [ref=e24]:
+            - button "Home" [ref=e25]
+            - generic [ref=e33]:
+              - button "Daily Work" [ref=e34]
+              - generic [ref=e129]:
+                - button "Counter Sale" [ref=e130]
+                - button "Online Sale" [ref=e136]
+                - button "OFC Sale" [active] [ref=e142]
+                - button "Sales List" [ref=e148]
+                - button "Delivery / Riders" [ref=e153]
+                - button "Purchase Bills" [ref=e160]
+                - button "Vendors" [ref=e165]
+                - button "Add Expense" [ref=e172]
+                - button "Salesman Reports" [ref=e177]
+            - button "Money" [ref=e42]
+            - button "Inventory" [ref=e49]
+            - button "Advanced Accounting" [ref=e56]
+            - button "Settings" [ref=e63]
+        - generic [ref=e73]:
+          - generic [ref=e74]: B
+          - generic [ref=e75]:
+            - generic [ref=e76]: Bilal Khan
+            - generic [ref=e77]: owner@test.local
+      - main [ref=e78]:
+        - generic [ref=e860]:
+          - heading "OFC Sale" [level=1] [ref=e861]
+          - generic [ref=e862]:
+            - heading "Customer" [level=2] [ref=e863]
+            - generic [ref=e864]:
+              - textbox "Name *" [ref=e865]
+              - textbox "Phone *" [ref=e866]
+              - textbox "Address *" [ref=e867]
+              - textbox "City *" [ref=e868]
+            - generic [ref=e869]:
+              - generic [ref=e870]: Courier Note (optional)
+              - 'textbox "Courier name, tracking # etc." [ref=e871]'
+            - generic [ref=e872]:
+              - generic [ref=e873]: Discount (Rs, optional)
+              - textbox "0" [ref=e874]
+          - generic [ref=e875]:
+            - heading "Items" [level=2] [ref=e876]
+            - generic [ref=e878]:
+              - combobox [ref=e880]:
+                - generic: Product…
+              - spinbutton "Qty" [ref=e881]: "1"
+              - generic [ref=e882]:
+                - textbox "Rs" [ref=e883]
+                - button [ref=e884]
+            - button "Add" [ref=e888]
+          - generic [ref=e889]:
+            - heading "Advance Payment" [level=2] [ref=e890]
+            - generic [ref=e891]:
+              - generic [ref=e892]:
+                - generic [ref=e893]: Advance Received (Rs)
+                - textbox "0" [ref=e894]
+              - generic [ref=e895]:
+                - generic [ref=e896]: Payment Account
+                - combobox [ref=e897]
+          - generic [ref=e898]:
+            - heading "Totals" [level=2] [ref=e899]
+            - generic [ref=e900]:
+              - generic [ref=e901]: Subtotal
+              - generic [ref=e902]: "0"
+            - generic [ref=e903]:
+              - generic [ref=e904]: Net Total (Full Advance Required)
+              - generic [ref=e905]: Rs 0
+            - generic [ref=e906]:
+              - generic [ref=e907]: Advance Received
+              - generic [ref=e908]: "0"
+            - generic [ref=e909]:
+              - generic [ref=e910]: Net Collected
+              - generic [ref=e911]: "0"
+          - button "Post OFC Sale — Rs 0" [disabled]
+  - region "Notifications alt+T"
+  - alert [ref=e4]
+  - generic [ref=e119]:
+    - generic [ref=e123]:
+      - paragraph [ref=e124]: Install KhataPro ERP
+      - paragraph [ref=e125]: Add to home screen for quick access.
+    - button "Dismiss" [ref=e126]: ✕
+    - button "Install" [ref=e127]

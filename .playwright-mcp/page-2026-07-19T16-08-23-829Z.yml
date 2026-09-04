@@ -1,0 +1,138 @@
+- generic:
+  - generic:
+    - banner:
+      - generic: KhataPro ERP
+      - generic:
+        - generic: Supabase live
+        - generic: 19/07/2026, 21:06:42
+        - button: Sign out
+    - generic:
+      - complementary:
+        - navigation:
+          - generic:
+            - button:
+              - generic: Home
+            - generic:
+              - button:
+                - generic: Daily Work
+              - generic:
+                - generic:
+                  - button:
+                    - generic: Counter Sale
+                  - button:
+                    - generic: Online Sale
+                  - button:
+                    - generic: OFC Sale
+                  - button:
+                    - generic: Sales List
+                  - button:
+                    - generic: Delivery / Riders
+                  - button:
+                    - generic: Purchase Bills
+                  - button:
+                    - generic: Vendors
+                  - button:
+                    - generic: Add Expense
+                  - button:
+                    - generic: Salesman Reports
+            - generic:
+              - button:
+                - generic: Money
+            - button:
+              - generic: Inventory
+            - generic:
+              - button:
+                - generic: Advanced Accounting
+            - generic:
+              - button:
+                - generic: Settings
+        - generic:
+          - generic:
+            - generic:
+              - generic: B
+              - generic:
+                - generic: Bilal Khan
+                - generic: owner@test.local
+      - main:
+        - generic:
+          - generic:
+            - generic:
+              - heading [level=1]: OFC Sale
+              - generic:
+                - heading [level=2]: Customer
+                - generic:
+                  - textbox:
+                    - /placeholder: Name *
+                    - text: QA RETEST OFC CUST
+                  - textbox:
+                    - /placeholder: Phone *
+                    - text: "03000000001"
+                  - textbox:
+                    - /placeholder: Address *
+                    - text: QA RETEST OFC ADDR
+                  - textbox:
+                    - /placeholder: City *
+                    - text: QA CITY
+                - generic:
+                  - generic: Courier Note (optional)
+                  - textbox:
+                    - /placeholder: "Courier name, tracking # etc."
+                - generic:
+                  - generic: Discount (Rs, optional)
+                  - textbox:
+                    - /placeholder: "0"
+              - generic:
+                - heading [level=2]: Items
+                - generic:
+                  - generic:
+                    - generic:
+                      - combobox [expanded]:
+                        - generic: QA TEST FABRIC 01
+                    - spinbutton: "100"
+                    - generic:
+                      - textbox:
+                        - /placeholder: Rs
+                        - text: "100"
+                      - button
+                - button: Add
+              - generic:
+                - heading [level=2]: Advance Payment
+                - generic:
+                  - generic:
+                    - generic: Advance Received (Rs)
+                    - textbox:
+                      - /placeholder: "0"
+                      - text: "10000"
+                  - generic:
+                    - generic: Payment Account
+                    - combobox:
+                      - generic: Bank (1030)
+              - generic:
+                - heading [level=2]: Totals
+                - generic:
+                  - generic: Subtotal
+                  - generic: 10,000
+                - generic:
+                  - generic: Net Total (Full Advance Required)
+                  - generic: Rs 10,000
+                - generic:
+                  - generic: Advance Received
+                  - generic: 10,000
+                - generic:
+                  - generic: Net Collected
+                  - generic: 10,000
+              - button: Post OFC Sale — Rs 10,000
+  - region "Notifications alt+T"
+  - alert
+  - generic:
+    - generic:
+      - generic:
+        - paragraph: Install KhataPro ERP
+        - paragraph: Add to home screen for quick access.
+      - button: ✕
+      - button: Install
+  - listbox [ref=e912]:
+    - option "QA TEST FABRIC 01" [active] [selected] [ref=e913]
+    - option "QA TEST FABRIC 01" [ref=e917]
+    - option "QA TEST NEGATIVE STOCK 01" [ref=e920]
+    - option "QA TEST TEMP ITEM 01" [ref=e923]

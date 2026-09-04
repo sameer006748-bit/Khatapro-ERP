@@ -1,38 +1,96 @@
-import { useQuery } from '@tanstack/react-query'
+import { keepPreviousData, useQuery } from '@tanstack/react-query'
+import { bizPresetDateRange, dashboardDateRangeQuery, type BusinessDateRange } from '@/lib/dates'
+import { apiFetchJson, shouldRetryApiRequest } from '@/lib/api-client'
+import type { CashPosition } from '@/lib/dashboard/cash-position'
+import type { OperationalPulseKey, OperationalPulseState } from '@/lib/dashboard/operational-pulse'
+import type { MetricComparison } from '@/lib/dashboard/trends'
+
+/** A hero KPI's optional history. Both members are null when unsupported. */
+export type DashboardMetricTrend = {
+  series: number[] | null
+  comparison: MetricComparison | null
+}
+
+export type DashboardTrendMetricKey =
+  | 'todaySales'
+  | 'todayNetCashFlow'
+  | 'totalReceivables'
+  | 'totalPayables'
 
 export interface OwnerDashboardData {
   today: string
+  range: BusinessDateRange
+  dataSource: 'uuid-ledger' | 'operational-fallback'
+  trends: {
+    previousRange: BusinessDateRange | null
+    metrics: Record<DashboardTrendMetricKey, DashboardMetricTrend>
+  }
+  cashPosition: CashPosition
+  operationalCounts: {
+    counts: Record<OperationalPulseKey, number | null>
+    states: Record<OperationalPulseKey, OperationalPulseState>
+  }
   kpis: {
-    todaySales: number
-    todaySalesPaisas: string
+    todaySales: number | null
+    todaySalesPaisas: string | null
     todayCollections: number | null
-    todayExpenses: number
-    todayExpensesPaisas: string
+    todayExpenses: number | null
+    todayExpensesPaisas: string | null
     todayNetCashFlow: number | null
-    totalReceivables: number
-    totalPayables: number
-    totalSales: number
-    lowStockCount: number
-    negativeStockCount: number
+    totalReceivables: number | null
+    totalPayables: number | null
+    totalSales: number | null
+    lowStockCount: number | null
+    negativeStockCount: number | null
     todayPurchases: number | null
     cashBalance: number | null
     bankBalance: number | null
+    cashInflow: number | null
+    cashOutflow: number | null
+    bankInflow: number | null
+    bankOutflow: number | null
+    totalInflow: number | null
+    totalOutflow: number | null
+    periodSalesReturns: number | null
+    periodPurchaseReturns: number | null
+    periodCogs: number | null
+    approxProfit: number | null
+    periodReceivablesMovement: number | null
+    periodPayablesMovement: number | null
+    pendingOutstanding: number | null
   }
   availability: {
     todaySales: boolean
     todayCollections: boolean
     todayExpenses: boolean
     todayNetCashFlow: boolean
+    todayPurchases: boolean
+    periodSalesReturns: boolean
+    periodPurchaseReturns: boolean
+    periodCogs: boolean
+    approxProfit: boolean
+    cashBalance: boolean
+    bankBalance: boolean
+    cashMovement: boolean
+    bankMovement: boolean
     totalReceivables: boolean
     totalPayables: boolean
     totalSales: boolean
+    receivablesMovement: boolean
+    payablesMovement: boolean
     lowStockCount: boolean
     negativeStockCount: boolean
+  }
+  metricStates: Record<string, 'available' | 'not-tracked' | 'error'>
+  paymentAccounts: {
+    activeCount: number | null
+    state: 'available' | 'not-tracked' | 'error'
   }
   salesByType: {
     counter: { count: number; amount: string }
     online: { count: number; amount: string }
     ofc: { count: number; amount: string }
+    other: { count: number; amount: string }
   }
   recentInvoices: Array<{
     id: string
@@ -64,36 +122,33 @@ export interface OwnerDashboardData {
     name: string
     currentStock: number
   }>
-  auditLogs: Array<{
-    id: string
-    timestamp: string
-    action: string
-    entity: string
-    entityId: string | null
-  }>
-}
-
-async function fetchOwnerDashboard(): Promise<OwnerDashboardData> {
-  const r = await fetch('/api/dashboard/owner', { cache: 'no-store' })
-  if (!r.ok) {
-    if (r.status === 401 || r.status === 403) {
-      throw new Error('Unauthorized')
-    }
-    throw new Error('DASHBOARD_LOAD_FAILED')
+  recentActivity: {
+    state: 'available' | 'not-tracked' | 'error'
+    items: Array<{
+      id: string
+      timestamp: string
+      kind: 'sale' | 'purchase' | 'payment' | 'expense' | 'transfer' | 'return' | 'rider' | 'entry'
+      title: string
+      reference: string | null
+      amount: string | null
+      destination: string
+    }>
   }
-  return r.json()
 }
 
-export function useOwnerDashboard() {
+async function fetchOwnerDashboard(range: BusinessDateRange, signal?: AbortSignal): Promise<OwnerDashboardData> {
+  const query = dashboardDateRangeQuery(range)
+  return apiFetchJson(`/api/dashboard/owner?${query}`, { cache: 'no-store', signal })
+}
+
+export function useOwnerDashboard(range: BusinessDateRange = bizPresetDateRange('today')) {
   return useQuery({
-    queryKey: ['owner-dashboard'],
-    queryFn: fetchOwnerDashboard,
+    queryKey: ['owner-dashboard', range.from, range.to],
+    queryFn: ({ signal }) => fetchOwnerDashboard(range, signal),
     staleTime: 30_000,
     refetchInterval: 60_000,
-    retry: (failureCount, error) => {
-      if (error instanceof Error && error.message === 'Unauthorized') return false
-      return failureCount < 2
-    },
+    placeholderData: keepPreviousData,
+    retry: shouldRetryApiRequest,
   })
 }
 
@@ -116,34 +171,29 @@ export interface OwnSalesDashboardData {
   }>
 }
 
-async function fetchOwnSalesDashboard(): Promise<OwnSalesDashboardData> {
+async function fetchOwnSalesDashboard(signal?: AbortSignal): Promise<OwnSalesDashboardData> {
   const { bizDateString } = await import('@/lib/dates')
   const today = bizDateString(new Date())
   const qs = `fromDate=${today}&toDate=${today}`
-  const [sumRes, detRes] = await Promise.all([
-    fetch(`/api/reports/salesman?type=my-sales-summary&${qs}`, { cache: 'no-store' }),
-    fetch(`/api/reports/salesman?type=my-sales-detail&${qs}`, { cache: 'no-store' }),
+  const [summaryPayload, detailPayload] = await Promise.all([
+    apiFetchJson<{ summary: OwnSalesDashboardData['summary'] }>(
+      `/api/reports/salesman?type=my-sales-summary&${qs}`,
+      { cache: 'no-store', signal },
+    ),
+    apiFetchJson<{ rows?: OwnSalesDashboardData['rows'] }>(
+      `/api/reports/salesman?type=my-sales-detail&${qs}`,
+      { cache: 'no-store', signal },
+    ),
   ])
-  if (!sumRes.ok || !detRes.ok) {
-    if ([sumRes.status, detRes.status].some((s) => s === 401 || s === 403)) {
-      throw new Error('Unauthorized')
-    }
-    throw new Error('DASHBOARD_LOAD_FAILED')
-  }
-  const summary = (await sumRes.json()).summary
-  const rows = (await detRes.json()).rows ?? []
-  return { summary, rows: rows.slice(0, 5) }
+  return { summary: summaryPayload.summary, rows: (detailPayload.rows ?? []).slice(0, 5) }
 }
 
 export function useOwnSalesDashboard() {
   return useQuery({
     queryKey: ['own-sales-dashboard'],
-    queryFn: fetchOwnSalesDashboard,
+    queryFn: ({ signal }) => fetchOwnSalesDashboard(signal),
     staleTime: 30_000,
     refetchInterval: 60_000,
-    retry: (failureCount, error) => {
-      if (error instanceof Error && error.message === 'Unauthorized') return false
-      return failureCount < 2
-    },
+    retry: shouldRetryApiRequest,
   })
 }

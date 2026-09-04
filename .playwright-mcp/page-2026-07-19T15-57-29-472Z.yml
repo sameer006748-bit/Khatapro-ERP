@@ -1,0 +1,160 @@
+- generic:
+  - generic:
+    - banner:
+      - generic: KhataPro ERP
+      - generic:
+        - generic: Supabase live
+        - generic: 19/07/2026, 20:57:08
+        - button: Sign out
+    - generic:
+      - complementary:
+        - navigation:
+          - generic:
+            - button:
+              - generic: Home
+            - generic:
+              - button:
+                - generic: Daily Work
+              - generic:
+                - generic:
+                  - button:
+                    - generic: Counter Sale
+                  - button:
+                    - generic: Online Sale
+                  - button:
+                    - generic: OFC Sale
+                  - button:
+                    - generic: Sales List
+                  - button:
+                    - generic: Delivery / Riders
+                  - button:
+                    - generic: Purchase Bills
+                  - button:
+                    - generic: Vendors
+                  - button:
+                    - generic: Add Expense
+                  - button:
+                    - generic: Salesman Reports
+            - generic:
+              - button:
+                - generic: Money
+            - button:
+              - generic: Inventory
+            - generic:
+              - button:
+                - generic: Advanced Accounting
+            - generic:
+              - button:
+                - generic: Settings
+        - generic:
+          - generic:
+            - generic:
+              - generic: B
+              - generic:
+                - generic: Bilal Khan
+                - generic: owner@test.local
+      - main:
+        - generic:
+          - generic:
+            - generic:
+              - generic:
+                - heading [level=1]: Expense Batch
+                - paragraph: Multiple expense lines paid from one account — single credit to payment account
+              - generic:
+                - generic:
+                  - generic:
+                    - generic: Date
+                    - textbox: 2026-07-19
+                  - generic:
+                    - generic: Paid From (business account)
+                    - combobox [expanded]:
+                      - generic: Select account…
+                - generic:
+                  - generic:
+                    - generic: Reference
+                    - textbox:
+                      - /placeholder: Optional
+                  - generic:
+                    - generic: Notes
+                    - textbox:
+                      - /placeholder: Optional
+              - generic:
+                - generic:
+                  - heading [level=2]:
+                    - text: Expense Lines
+                    - generic: (1)
+                  - button: Add line
+                - generic:
+                  - table:
+                    - rowgroup:
+                      - row:
+                        - columnheader: Expense Account
+                        - columnheader: Description
+                        - columnheader: Amount (Rs)
+                        - columnheader
+                    - rowgroup:
+                      - row:
+                        - cell:
+                          - combobox:
+                            - generic: Select…
+                        - cell:
+                          - textbox:
+                            - /placeholder: Optional
+                        - cell:
+                          - textbox:
+                            - /placeholder: "0.00"
+                        - cell:
+                          - button [disabled]
+                    - rowgroup:
+                      - row:
+                        - cell: Total (1 lines)
+                        - cell: "0.00"
+                        - cell
+              - generic:
+                - button [disabled]: Post Expense Batch
+  - region "Notifications alt+T"
+  - alert
+  - generic:
+    - generic:
+      - generic:
+        - paragraph: Install KhataPro ERP
+        - paragraph: Add to home screen for quick access.
+      - button: ✕
+      - button: Install
+  - listbox [ref=e620]:
+    - option "1010 · Cash" [active] [ref=e621]:
+      - generic [ref=e623]:
+        - generic [ref=e624]: "1010"
+        - text: · Cash
+    - option "1020 · Petty Cash" [ref=e625]:
+      - generic [ref=e627]:
+        - generic [ref=e628]: "1020"
+        - text: · Petty Cash
+    - option "1030 · Bank" [ref=e629]:
+      - generic [ref=e631]:
+        - generic [ref=e632]: "1030"
+        - text: · Bank
+    - option "1040 · Easypaisa" [ref=e633]:
+      - generic [ref=e635]:
+        - generic [ref=e636]: "1040"
+        - text: · Easypaisa
+    - option "1050 · JazzCash" [ref=e637]:
+      - generic [ref=e639]:
+        - generic [ref=e640]: "1050"
+        - text: · JazzCash
+    - option "1100 · Inventory" [ref=e641]:
+      - generic [ref=e643]:
+        - generic [ref=e644]: "1100"
+        - text: · Inventory
+    - option "1200 · Customers Receivable" [ref=e645]:
+      - generic [ref=e647]:
+        - generic [ref=e648]: "1200"
+        - text: · Customers Receivable
+    - option "1300 · Salesman - Ali" [ref=e649]:
+      - generic [ref=e651]:
+        - generic [ref=e652]: "1300"
+        - text: · Salesman - Ali
+    - option "1310 · Rider COD Receivable" [ref=e653]:
+      - generic [ref=e655]:
+        - generic [ref=e656]: "1310"
+        - text: · Rider COD Receivable

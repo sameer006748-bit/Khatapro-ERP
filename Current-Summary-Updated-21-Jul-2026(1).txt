@@ -1,0 +1,456 @@
+KHATAPRO ERP — CURRENT PROJECT HANDOFF SUMMARY
+Updated: 21 July 2026
+
+PURPOSE
+Is file ko project mein authoritative current summary ke taur par rakhna hai.
+New ChatGPT/Codex/Claude chat mein is file ko read karke isi point se kaam continue karna hai.
+Old summaries aur old completion percentages ko source of truth na samjha jaye.
+
+======================================================================
+1. USER WORKING STYLE
+======================================================================
+
+- User: Sameer
+- Language: Roman Urdu
+- Jawab short, direct aur practical hon.
+- Pehle proposed direction discuss karo; risky accounting/business ambiguity clear kiye baghair coding prompt na do.
+- Ek waqt mein ek focused step, lekin related work ko largest safe batch mein combine kiya ja sakta hai.
+- Har coding prompt code block mein ho.
+- Har prompt se pehle:
+  - recommended agent/tool
+  - model
+  - effort/reasoning level
+  - short reason with token cost in mind
+- Token saving mandatory:
+  - repo ko repeatedly rescan na karo
+  - explicitly relevant files se start karo
+  - long plans/progress diaries/temp frameworks avoid karo
+  - unrelated refactors na karo
+  - sirf required checks run karo
+  - final report concise aur evidence-based ho
+- Performance work hamesha:
+  Measure → Identify → Verify → Fix → Measure Again
+- Build pass ya HTTP 200 ko akela production success na samjho.
+- Important claims ko tests, git diff, production logs aur real browser/UAT se verify karo.
+
+Preferred coding model rule:
+- Straightforward/focused work: cheapest suitable model.
+- Complex accounting, permissions, concurrency, migrations or multi-file architecture: strongest reliable reasoning model.
+- Push/SHA/deploy-only work: light/low effort model sufficient.
+
+======================================================================
+2. PROJECT IDENTITY
+======================================================================
+
+Project:
+KhataPro ERP
+
+Local path:
+C:\Users\Dell\Downloads\KhataPro ERP
+
+GitHub:
+https://github.com/sameer006748-bit/Khatapro-ERP
+
+Working branch:
+fix/backend-stock-recovery
+
+Production branch:
+main
+
+Production URL:
+https://khatapro-erp.vercel.app
+
+Latest confirmed deployed commit:
+15804490a06d901ea6e771537051f788652284ea
+
+Latest deployment state:
+- feature branch and main were verified on commit 1580449
+- Vercel Production READY
+- production URL HTTP 200
+- authenticated client/UAT iteration is active
+- automated in-app browser audit was unavailable; manual user testing is the source of truth
+
+Correct Supabase project ref:
+ebcebxwpddltiwrqybqc
+
+Forbidden old/wrong Supabase project ref:
+wkjavxiviyzfirjnfltg
+
+Never:
+- expose or paste secrets
+- modify .env unless explicitly approved
+- commit API keys or local agent settings
+- touch the wrong Supabase project
+- directly mutate production data without explicit authorization
+- commit .mcp.json, .playwright-mcp or unrelated generated files
+
+======================================================================
+3. DATABASE / MIGRATION SAFETY
+======================================================================
+
+Migration 00011:
+- historically applied
+- do not invent, recreate, modify or reapply
+
+Migration 00012:
+- previously applied manually
+- do not reapply or modify
+
+Migration 00013:
+- additive opening-stock runtime recovery migration
+- has been applied to the correct Supabase production project:
+  ebcebxwpddltiwrqybqc
+- never modify or reapply migration 00013
+- the only remaining opening-stock work is controlled production verification
+- do not claim opening-stock production success until the live verification passes
+
+Migration 00009:
+- never deploy or modify
+
+Supabase fail-closed rule:
+- when Supabase is configured, production must never silently fall back to Prisma/SQLite
+- Prisma/SQLite fallback is allowed only when Supabase is genuinely not configured
+
+======================================================================
+4. LOCKED BUSINESS FOUNDATION
+======================================================================
+
+Business:
+- kapra retail/wholesale ERP
+- sales types: Counter, Online Karachi, OFC/out-of-city, and Other Sale
+- all sale types share one invoice sequence
+- Counter customer name optional
+- Online/OFC require customer details
+- Online can be COD/advance
+- OFC normally full advance
+- Other Sale is a customer-account/credit sale: customer is mandatory, goods can be issued now, and payment may be received later against the same customer and bill reference
+
+Stock:
+- negative stock allowed
+- temporary products allowed
+- purchase increases stock
+- sale decreases stock
+- return/cancellation reverses correctly
+- manual stock in/out supported
+- no double stock mutation
+- opening stock must post exactly once
+
+Accounts:
+- multiple cash/bank/wallet/other accounts
+- separate balance and ledger per account
+- petty cash separate
+- split/partial payments
+- vendor/customer ledgers
+- Trial Balance, Ledger, P&L and Balance Sheet
+- opening balances use Opening Balance Equity
+- amounts display in whole rupees with commas
+
+Roles:
+- Owner/Admin
+- Accountant
+- Salesman
+- Rider
+
+Permissions:
+- Owner/Admin configurable full control
+- Accountant manages accounting and financial reports
+- Salesman sees permitted own work only
+- Rider sees assigned orders only
+- restricted roles must never receive Owner fallback data
+
+Printing:
+- half-A4 invoices
+- two invoices per A4 supported
+
+======================================================================
+5. MAJOR COMPLETED WORK
+======================================================================
+
+Core stabilization:
+- Counter Sale transaction recovery
+- Purchases and Purchase Returns
+- sales posting and returns
+- manual stock adjustment
+- Expense Batch
+- Receipt, Payment, Journal, Contra and Petty Cash foundations
+- duplicate-submit protections in major mutation flows
+- negative-stock support
+- Supabase production fail-closed fixes
+- roles/navigation/performance stabilization batches
+- production deployment pipeline verified
+
+Opening-stock implementation:
+- product created at zero stock
+- atomic post_opening_stock RPC design
+- stock movement + WAC + balanced accounting voucher
+- safe failure keeps stock at zero
+- code/tests prepared
+- production migration 00013 has been applied to project ebcebxwpddltiwrqybqc
+- live verification remains pending
+
+AI integration:
+- Gemini-only, server-side and read-only
+- configured model: gemini-2.5-flash
+- encrypted API-key storage using existing Phase-10 settings
+- API key is not returned to client
+- Owner/Admin manages AI settings
+- role-filtered context for Owner, Accountant, Salesman and Rider
+- global KhataPro AI assistant
+- contextual field help
+- accounting explanations for non-accounting users
+- English UI/loading/error states
+- professional English or professional mixed Roman Urdu answers
+- structured Summary / Accounting Impact / Recommended Check response
+- 800 output-token limit
+- MAX_TOKENS/incomplete-output detection and one automatic concise retry
+- mocked AI tests reached 44/44 in latest report
+- AI integration deployed on commit 1580449
+- final live manual re-test of latest AI UX remains required
+
+======================================================================
+6. OFFICIAL ENGINEERING DISCIPLINE
+======================================================================
+
+Performance/diagnostic cycle:
+Measure → Identify → Verify → Fix → Measure Again
+
+Observability is infrastructure:
+- request IDs
+- safe route durations
+- production-aware low-overhead logs
+- no passwords, tokens, cookies, customer PII, full payloads or sensitive accounting values
+- no heavy permanent profiling
+
+No optimization without evidence.
+
+======================================================================
+7. CLIENT UAT — CHANGE REQUEST BATCH 1
+======================================================================
+
+This batch was received after the client tested the deployed ERP.
+The following business/accounting decisions are now locked.
+
+A. HOME / BUSINESS SUMMARY DATE RANGE
+- Home must support direct period selection.
+- User should be able to view Today, Last 3 Days, Last 7 Days, This Month or a Custom Range.
+- The selected period must consistently control period-based business-summary figures.
+- Point-in-time balances must remain clearly separate from period activity.
+
+B. SALE, RETURN AND NET DAILY ACTIVITY
+- Counter, Online, OFC and Other Sale use the same sale/return principles.
+- A return from an older bill can be entered on today's bill as a negative line.
+- Every negative line must reference the original invoice and original sale line.
+- The original posted bill must remain immutable.
+- The system should create the required linked return/audit record and accounting reversal underneath, while the current bill/screen shows positive sale lines and negative return lines together.
+- Example:
+  - Yesterday: 5 pieces sold.
+  - Today: 5 new pieces sold and 2 pieces from yesterday returned.
+  - Today's activity shows Sale +5, Return -2, Net +3.
+- Stock, customer balance, revenue, COGS and commission must reverse exactly once for the returned quantity.
+
+C. OTHER SALE
+- Add a fourth sale category named "Other Sale".
+- It is a customer-account/credit sale for cases where the customer takes goods now and pays later.
+- Customer selection is mandatory.
+- Paid amount may be zero or partial.
+- The unpaid amount creates/updates customer receivable.
+- Later receipts must be linked to the customer and preferably to the specific Other Sale bill.
+- Other Sale follows the same return, commission, identity-number and reporting rules as other sale types.
+
+D. PRODUCT-WISE COMMISSION — LOCKED FLOW
+- Commission rate is configured per product in whole rupees per piece, e.g. Rs 20.
+- Commission is calculated and accrued when a sale/return bill is posted.
+- Actual payment to Owner/Salesman happens later through a separate settlement/payment entry.
+- A sale adds commission; a return creates a commission reversal.
+- Net commissionable quantity for the relevant seller/product = sold quantity - returned quantity.
+- Example:
+  - Today sold 5 at Rs 20 = +Rs 100 commission.
+  - Today returned 2 from an older bill = -Rs 40 commission.
+  - Net commission movement today = Rs 60.
+- Return commission must reverse against the seller recorded on the original sale line, even if another user records the return today.
+- Applies to Counter, Online, OFC and Other Sale.
+- Every commission movement must show:
+  - separate identity/reference
+  - current bill reference
+  - original bill reference for returns
+  - seller/Owner
+  - product
+  - sold quantity
+  - returned quantity
+  - net quantity
+  - per-piece rate
+  - positive or negative commission movement
+  - running payable balance
+- No duplicate commission posting is allowed.
+
+E. OWNER COMMISSION — REAL EXPENSE
+- If Owner personally makes a sale, commission belongs to Owner.
+- It is a real business commission expense as requested by the client.
+- Recommended posting:
+  - Commission Expense Dr
+  - Owner Commission Payable Cr
+- When paid:
+  - Owner Commission Payable Dr
+  - Cash/Bank/Petty Cash Cr
+- Keep Owner commission separately identifiable from drawings.
+- Accountant should confirm local tax treatment outside the software design.
+
+F. ONLINE SALE RIDER ASSIGNMENT
+- Online Sale must include rider assignment.
+- One complete order is assigned to one rider.
+- COD amount is tied to that rider/order.
+- Owner/Admin/Accountant can manage delivery status where permitted.
+- Rider can update status from the rider dashboard.
+- All status changes synchronize immediately and record actor, time and source.
+
+G. RIDER DELIVERY, PARTIAL RETURN AND SETTLEMENT — LOCKED ACCOUNTING FLOW
+- Rider UI must be extremely simple: assigned order plus large clear action buttons.
+- Required actions:
+  - Deliver
+  - Partial Delivery
+  - Return
+  - Partial Return
+- Example:
+  - ordered 2
+  - delivered 1
+  - returned 1
+- On delivery/COD collection:
+  - Rider COD Receivable / Cash with Rider Dr
+  - Customer Receivable Cr
+- On rider settlement:
+  - Cash/Bank/Petty Cash Dr
+  - Rider COD Receivable / Cash with Rider Cr
+- Return/partial return reverses sale, stock, customer receivable and rider expected COD for only the returned quantity.
+- Owner/Accountant settlement screen and Rider dashboard must show the same live status.
+- Settlement view must show:
+  - total assigned parcels
+  - delivered parcels
+  - returned/partial-return parcels
+  - unsettled parcels
+  - COD expected
+  - COD received from rider
+  - rider-held/outstanding amount
+- Settlement must be auditable and linked to orders, status actions and receipt/accounting entries.
+
+H. IDENTITY NUMBER FOR EVERY ENTRY
+- Every transaction/business entry must have a readable identity number.
+- Example: Purchase PUR-0001.
+- Audit all existing entry types and add missing sequences without breaking the shared sale invoice sequence.
+- Prefixes and reset rules must be documented and consistent.
+
+I. ACCOUNT CATEGORY SUBCATEGORIES
+- Account Categories need parent/subcategory support.
+- Reports and Chart of Accounts must continue grouping correctly.
+- Use a simple expandable hierarchy and avoid unnecessary deep nesting.
+
+J. EXPANDED EASY CONTRA / MONEY MOVEMENT — LOCKED FLOW
+- Use one simple "Contra & Transfers" screen for daily money movement.
+- The UI may contain multiple expandable rows and one save action.
+- Each row must select a transaction type:
+  1. Internal Transfer
+     - Destination Cash/Bank/Petty Cash Dr
+     - Source Cash/Bank/Petty Cash Cr
+     - no income/expense effect
+  2. Owner Drawing
+     - Drawings Dr
+     - selected Cash/Bank/Petty Cash Cr
+  3. Capital Introduced
+     - selected Cash/Bank/Petty Cash Dr
+     - Capital Cr
+- The UI remains simple, but backend accounting must choose the correct voucher/posting type.
+- Do not post Owner Drawing as a fake cash-to-cash Contra.
+- Require source, destination/type, amount, narration/reference, running totals and atomic batch posting.
+- No self-transfer, zero amount, negative amount or duplicate row.
+
+K. PROFESSIONAL INVOICES / BILLS
+- Current invoices/bills are considered incomplete.
+- Counter, Online, OFC, Other Sale, Purchase and Return documents need complete information and professional alignment.
+- Preserve half-A4 and two-up A4 requirements.
+- Show current positive sale lines and negative return lines clearly.
+- Customer-facing print must not expose internal commission/accounting details unless explicitly requested.
+- Online documents may include appropriate delivery/COD/rider information.
+
+L. MORE CLIENT CHANGES EXPECTED
+- This is Client UAT Batch 1, not the final requirement list.
+- Complete and verify this batch before starting the next batch.
+- Do not claim the project is 99–100% final while client UAT changes remain open.
+
+======================================================================
+8. CURRENT HONEST STATUS
+======================================================================
+
+- Stable deployed core baseline exists.
+- Automated tests/build/deployment are strong.
+- AI integration is deployed but latest UX still needs manual live confirmation.
+- Migration 00013 has been applied to production project ebcebxwpddltiwrqybqc. Opening-stock production verification remains pending.
+- Client UAT has reopened product/accounting scope with significant new requirements.
+- Official status:
+  READY FOR CONTROLLED CLIENT UAT ITERATION
+  NOT FINAL PRODUCTION SIGN-OFF
+  NOT 99–100% COMPLETE AFTER ADDING CLIENT UAT BATCH 1
+
+======================================================================
+9. IMMEDIATE NEXT STEP
+======================================================================
+
+1. Replace Current Summary and Remaining Tasks with these decision-locked versions.
+2. Migration 00013 is already applied — do not reapply. Proceed to controlled production verification of opening stock.
+3. Run a bounded architecture audit for Client UAT Batch 1.
+4. Produce exact schema/RPC/accounting invariants, migration sequence and test matrix.
+5. Implement in safe phases:
+   - Home date range + Other Sale foundation
+   - sale/return + commission engine
+   - rider assignment/delivery/settlement
+   - identity numbers + account subcategories
+   - Contra & Transfers
+   - professional invoices
+   - full regression and controlled client UAT
+
+======================================================================
+APPROVED BUSINESS DECISIONS
+======================================================================
+
+1. COMMISSION TRIGGER
+- Commission is calculated from net eligible quantity:
+  sold quantity minus returned quantity.
+- Commission is calculated when the bill is posted.
+- It becomes earned/payable proportionally when customer payment is collected.
+- Returns reduce or reverse the related commission exactly once.
+- For Online COD, collection is recognized for commission when rider settlement is completed and the business receives/settles the COD amount.
+- Example:
+  10 sold, 2 returned, rate Rs 20 = Rs 160 eligible commission.
+  If 50% eligible payment is collected, Rs 80 becomes payable initially.
+
+2. RIDER-HELD COD
+- COD collected from customers remains associated with the assigned rider until settlement.
+- It does not need to appear as a normal user-managed Cash or Bank account.
+- Backend accounting must still remain balanced through a protected system-controlled account such as:
+  Rider Held COD / Cash with Rider.
+- The system account must not be editable or deletable by normal users.
+- It may remain hidden from ordinary account-entry screens.
+- It must be included correctly in Balance Sheet reporting as a Current Asset.
+- Rider Settlement UI should show:
+  COD collected,
+  amount received from rider,
+  and remaining amount held by rider.
+- On settlement, the amount moves from Rider Held COD to the selected Cash/Bank account.
+- Partial delivery and returns must recognize only the actual collectible/collected COD.
+- Settlement and reversal must be idempotent and auditable.
+
+======================================================================
+UNRESOLVED DECISION GATES
+======================================================================
+
+These remain unresolved and require approval before implementation:
+
+1. OWNER COMMISSION
+Whether Owner commission creates a real Commission Expense/payable or remains reporting-only.
+
+2. SALE AND RETURN WORKFLOW
+Whether to use:
+- negative/return lines before final posting, or
+- a linked return/adjustment document after posting.
+Do not assume destructive editing of posted accounting history is allowed.
+
+3. DRAWINGS THROUGH CONTRA UI
+The UI may remain simple, but backend Drawings must post against Drawings/Capital correctly and must not be treated as a pure account-to-account Contra.
