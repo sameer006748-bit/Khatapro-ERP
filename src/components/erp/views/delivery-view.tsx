@@ -22,7 +22,7 @@ type DeliveryOrder = {
   source: string | null; deliveryVoucherId: string | null
   customerName: string | null; customerPhone: string | null; customerAddress: string | null; customerCity: string | null
 }
-type Rider = { id: string; name: string; phone: string | null; zone: string | null; isActive: boolean }
+type Rider = { id: string; name: string; phone: string | null; zone: string | null; isActive: boolean; userId: string | null }
 type DeliveryItem = {
   invoiceItemId: string; productName: string; unitPrice: string; orderedQty: number
   deliveredQty: number; returnedQty: number; remainingQty: number
@@ -332,6 +332,7 @@ function RidersTab({ user }: { user: MeUser }) {
   const qc = useQueryClient()
   const [showAdd, setShowAdd] = useState(false)
   const [ledgerRider, setLedgerRider] = useState<Rider | null>(null)
+  const [linkRider, setLinkRider] = useState<Rider | null>(null)
   const [f, setF] = useState({ name: '', phone: '', zone: '', vehicleType: '', userId: '' })
   const ridersQ = useQuery<{ rows: Rider[] }>({ queryKey: ['riders'], queryFn: () => fetch('/api/riders').then(r => r.json()) })
   const riders = ridersQ.data?.rows ?? []
@@ -349,7 +350,10 @@ function RidersTab({ user }: { user: MeUser }) {
         <div className="grid md:grid-cols-2 gap-2">{riders.map(r => (
           <div key={r.id} className="border border-border rounded-lg bg-card p-3">
             <div className="flex items-start justify-between mb-2"><div><div className="font-medium text-foreground">{r.name}</div><div className="text-[10px] text-muted-foreground" data-num>{r.phone ?? '—'} · {r.zone ?? 'No zone'}</div></div><span className={`text-[9px] uppercase px-1.5 py-0.5 rounded ${r.isActive ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'}`}>{r.isActive ? 'Active' : 'Inactive'}</span></div>
-            <div className="flex gap-1">{user.permissions.includes('can_view_rider_ledger') && <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => setLedgerRider(r)}>View Ledger</Button>}</div>
+            <div className="flex flex-wrap gap-1">
+              {user.permissions.includes('can_manage_riders') && <Button variant="outline" size="sm" className="h-9 text-xs" onClick={() => setLinkRider(r)}>{r.userId ? 'Change Account' : 'Connect Account'}</Button>}
+              {user.permissions.includes('can_view_rider_ledger') && <Button variant="ghost" size="sm" className="h-9 text-xs" onClick={() => setLedgerRider(r)}>View Ledger</Button>}
+            </div>
           </div>
         ))}</div>
       )}
@@ -372,10 +376,41 @@ function RidersTab({ user }: { user: MeUser }) {
           </div>
           <Button type="submit" size="sm" disabled={mut.isPending || !f.name}>{mut.isPending ? 'Creating…' : 'Create Rider'}</Button>
         </form></Shell>}
+        {linkRider && <ConnectRiderAccount rider={linkRider} users={availableUsers} onClose={() => setLinkRider(null)} />}
         {ledgerRider && <RiderLedgerModal rider={ledgerRider} onClose={() => setLedgerRider(null)} />}
       </AnimatePresence>
     </div>
   )
+}
+
+function ConnectRiderAccount({ rider, users, onClose }: { rider: Rider; users: Array<{ id: string; email: string; displayName: string }>; onClose: () => void }) {
+  const qc = useQueryClient()
+  const [userId, setUserId] = useState('')
+  const mutation = useMutation({
+    mutationFn: async () => {
+      const response = await fetch(`/api/riders/${rider.id}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ userId }),
+      })
+      const body = await response.json().catch(() => null)
+      if (!response.ok) throw new Error(body?.error ?? 'Could not connect account')
+      return body
+    },
+    onSuccess: () => {
+      toast.success('Rider account connected.')
+      void qc.invalidateQueries({ queryKey: ['riders'] })
+      void qc.invalidateQueries({ queryKey: ['rider-available-users'] })
+      onClose()
+    },
+    onError: () => toast.error('Could not connect account. Please try again.'),
+  })
+  return <Shell title={`Connect ${rider.name}`} onClose={onClose}><div className="space-y-4">
+    <p className="text-sm text-muted-foreground">Choose the login this rider uses.</p>
+    <div><Label className="text-xs text-muted-foreground">Rider Login</Label><Select value={userId} onValueChange={setUserId}><SelectTrigger className="h-12 bg-background"><SelectValue placeholder="Choose rider login" /></SelectTrigger><SelectContent>{users.map(option => <SelectItem key={option.id} value={option.id}>{option.displayName} ({option.email})</SelectItem>)}</SelectContent></Select></div>
+    {users.length === 0 && <p className="rounded-lg bg-muted p-3 text-sm">No unconnected Rider login is available.</p>}
+    <Button className="h-12 w-full" disabled={!userId || mutation.isPending} onClick={() => mutation.mutate()}>{mutation.isPending ? 'Connecting...' : 'Connect Account'}</Button>
+  </div></Shell>
 }
 
 function RiderLedgerModal({ rider, onClose }: { rider: Rider; onClose: () => void }) {

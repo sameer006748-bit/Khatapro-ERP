@@ -34,7 +34,7 @@ export async function createRider(businessId: string, name: string, phone?: stri
   return { id: r.id, name: r.name, phone: r.phone, zone: r.zone, vehicleType: r.vehicle_type, isActive: r.is_active, userId: r.user_id }
 }
 
-export async function updateRider(businessId: string, riderId: string, updates: { name?: string; phone?: string | null; zone?: string | null; vehicleType?: string | null; isActive?: boolean }): Promise<void> {
+export async function updateRider(businessId: string, riderId: string, updates: { name?: string; phone?: string | null; zone?: string | null; vehicleType?: string | null; isActive?: boolean; userId?: string | null }): Promise<void> {
   const admin = getAdminSupabase()
   const patch: Record<string, unknown> = { updated_at: new Date().toISOString() }
   if (updates.name !== undefined) patch.name = updates.name
@@ -42,6 +42,7 @@ export async function updateRider(businessId: string, riderId: string, updates: 
   if (updates.zone !== undefined) patch.zone = updates.zone
   if (updates.vehicleType !== undefined) patch.vehicle_type = updates.vehicleType
   if (updates.isActive !== undefined) patch.is_active = updates.isActive
+  if (updates.userId !== undefined) patch.user_id = updates.userId
   const { error } = await admin.from('riders').update(patch).eq('id', riderId).eq('business_id', businessId)
   if (error) throw new Error(`Update rider: ${error.message}`)
 }

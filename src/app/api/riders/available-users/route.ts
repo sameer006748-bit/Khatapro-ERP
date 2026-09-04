@@ -45,11 +45,13 @@ async function getAvailableRiderUsers() {
       .eq('business_id', su.businessId)
       .not('user_id', 'is', null)
     const linkedUserIds = new Set((linkedRiders ?? []).map((r: any) => r.user_id))
+    const { data: authUsers } = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 })
+    const emailByUserId = new Map((authUsers?.users ?? []).map(user => [user.id, user.email ?? ''] as const))
 
     return NextResponse.json({
       rows: (profiles ?? []).map((p: any) => ({
         id: p.user_id,
-        email: p.display_name,
+        email: emailByUserId.get(p.user_id) || p.display_name,
         displayName: p.display_name,
         alreadyLinked: linkedUserIds.has(p.user_id),
       })),

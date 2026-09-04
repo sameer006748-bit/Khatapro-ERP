@@ -11,6 +11,9 @@ const deliveredRoute = await readFile('src/app/api/delivery-orders/[id]/delivere
 const returnedRoute = await readFile('src/app/api/delivery-orders/[id]/returned/route.ts', 'utf8')
 const statusRoute = await readFile('src/app/api/delivery-orders/[id]/status/route.ts', 'utf8')
 const codRoute = await readFile('src/app/api/rider-cod/balances/route.ts', 'utf8')
+const riderUpdateRoute = await readFile('src/app/api/riders/[id]/route.ts', 'utf8')
+const availableRiderUsersRoute = await readFile('src/app/api/riders/available-users/route.ts', 'utf8')
+const deliveryAdminUi = await readFile('src/components/erp/views/delivery-view.tsx', 'utf8')
 const shell = await readFile('src/components/erp/dashboard-shell.tsx', 'utf8')
 const riderUi = await readFile('src/components/erp/views/rider-dashboard.tsx', 'utf8')
 
@@ -104,4 +107,14 @@ test('Rider errors terminate with retry actions instead of blank screens', () =>
   assert.match(riderUi, /Could not load delivery\./)
   assert.match(riderUi, /Try Again/)
   assert.match(riderUi, /12_000/)
+})
+
+test('Owner can safely repair an existing Rider account mapping', () => {
+  assert.match(riderUpdateRoute, /requirePermission\(loaded, 'can_manage_riders'\)/)
+  assert.match(riderUpdateRoute, /\.eq\('business_id', su\.businessId\)/)
+  assert.match(riderUpdateRoute, /role\?\.name !== 'Rider'/)
+  assert.match(riderUpdateRoute, /\.neq\('id', id\)/)
+  assert.match(deliveryAdminUi, /Connect Account/)
+  assert.match(deliveryAdminUi, /method: 'PATCH'/)
+  assert.match(availableRiderUsersRoute, /auth\.admin\.listUsers/)
 })
