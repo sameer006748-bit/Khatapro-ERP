@@ -1,5 +1,22 @@
 # KhataPro ERP — Product Vision
 
+## Version boundary
+KhataPro is being delivered in two clearly separated stages.
+
+### Version 1 — current client handover
+The immediate product is the reliable ERP already built: sales, purchases, expenses, accounting, money accounts, reports, audit, rider workflows, permissions, printing and related operational flows.
+
+**Version 1 is now in final stabilization and client handover.**
+
+Until the client has received, tested and approved Version 1:
+- do not start speculative AI-product expansion,
+- do not redesign stable ERP workflows merely to fit the future AI vision,
+- prioritize bug fixing, production correctness, role/mobile/print verification, safe data cleanup and handover readiness,
+- treat new AI/intelligence work as deferred unless it is required to fix an existing Version 1 feature.
+
+### Version 2 — intelligent ERP evolution
+After Version 1 is approved, KhataPro should evolve toward the intelligent/proactive direction described below. The long-term vision is authoritative for Version 2 product direction, not a command to implement those features during Version 1 closeout.
+
 ## What KhataPro is
 KhataPro is a business-management / ERP product for real operating businesses. Its foundation is a reliable accounting and operational system; its long-term direction is to become an intelligent ERP that understands business activity and tells the owner what deserves attention.
 
