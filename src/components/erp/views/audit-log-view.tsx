@@ -49,6 +49,13 @@ const ACTION_LABELS: Record<string, string> = {
   MANUAL_LEDGER_ACCOUNT_ACTIVATE: 'Account reactivated',
   MANUAL_LEDGER_ACCOUNT_DEACTIVATE: 'Account deactivated',
   MANUAL_LEDGER_ACCOUNT_REMOVED: 'Linked ledger removed automatically',
+  MONEY_ACCOUNT_CREATE: 'Money account created',
+  MONEY_ACCOUNT_RENAME: 'Money account renamed',
+  MONEY_ACCOUNT_TYPE_CHANGE: 'Money account moved between Cash and Bank',
+  MONEY_ACCOUNT_DEACTIVATE: 'Money account deactivated',
+  MONEY_ACCOUNT_REACTIVATE: 'Money account reactivated',
+  MONEY_ACCOUNT_UPDATE: 'Money account details updated',
+  MONEY_ACCOUNT_DELETE: 'Money account deleted',
   EXPENSE_POSTED_WITH_CATEGORY: 'Expense posted using category',
 }
 
@@ -56,8 +63,25 @@ const ENTITY_LABELS: Record<string, string> = {
   account_category: 'Category',
   account_subcategory: 'Subcategory',
   manual_ledger_account: 'Ledger account',
+  business_account: 'Money account',
   expense: 'Expense',
 }
+
+/**
+ * Internal plumbing the log never shows: database row ids, the raw request
+ * payload and idempotency keys mean nothing to an accountant reading history.
+ */
+const HIDDEN_DETAIL_KEYS = new Set([
+  'ledgerAccountId',
+  'accountId',
+  'businessId',
+  'userId',
+  'profileId',
+  'categoryId',
+  'subcategoryId',
+  'patch',
+  'idempotencyKey',
+])
 
 function actionLabel(row: Row) {
   return ACTION_LABELS[row.action]
@@ -98,7 +122,9 @@ function snapshotChanges(row: Row) {
   if (!before && !after) return []
   const fields = row.entity === 'manual_ledger_account'
     ? [{ key: 'code', label: 'Account code' }, { key: 'name', label: 'Name' }, { key: 'isActive', label: 'Status' }]
-    : [{ key: 'name', label: 'Name' }, { key: 'isActive', label: 'Status' }]
+    : row.entity === 'business_account'
+      ? [{ key: 'code', label: 'Account code' }, { key: 'name', label: 'Name' }, { key: 'type', label: 'Money type' }, { key: 'isActive', label: 'Status' }]
+      : [{ key: 'name', label: 'Name' }, { key: 'isActive', label: 'Status' }]
   const changes: Array<{ label: string; value: string }> = []
   for (const field of fields) {
     const from = readableValue(before?.[field.key], field.key)
@@ -127,7 +153,7 @@ function referenceLabel(row: Row) {
 function DetailSummary({ row }: { row: Row }) {
   const changes = snapshotChanges(row)
   const items = changes.length ? changes : Object.entries(row.details ?? {})
-    .filter(([, value]) => ['string', 'number', 'boolean'].includes(typeof value))
+    .filter(([key, value]) => !HIDDEN_DETAIL_KEYS.has(key) && ['string', 'number', 'boolean'].includes(typeof value))
     .slice(0, 4)
     .map(([key, value]) => ({ label: key.replaceAll('_', ' '), value: String(value) }))
   if (!items.length) return null

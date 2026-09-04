@@ -1,22 +1,20 @@
 'use client'
 
-import { useState, Fragment } from 'react'
+import { useMemo, useState, Fragment } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
 import { formatMoney, formatTableDate } from '@/lib/format'
 import type { MeUser } from '@/components/erp/erp-app'
 import { toast } from 'sonner'
 import { Wallet, WalletCards, Banknote, Landmark, Smartphone, Plus, X, ArrowRight, Pencil, Power, Trash2 } from 'lucide-react'
-import { BUSINESS_ACCOUNT_TYPES } from '@/lib/accounting/business-account-types'
+import {
+  BUSINESS_ACCOUNT_TYPES,
+  needsMoneyTypeReview,
+  normalizeBusinessAccountType,
+  type BusinessAccountType,
+} from '@/lib/accounting/business-account-types'
 import { PageHeader } from '@/components/erp/page-header'
 
 type BusinessAccountRow = {
@@ -39,10 +37,10 @@ type BusinessAccountRow = {
 }
 
 /**
- * Only the four generic classes are offered for new accounts. A row saved by an
- * earlier release may hold a legacy label ('Petty Cash', 'JazzCash', …); the
- * edit form keeps that value selectable so saving other fields never silently
- * reclassifies the account.
+ * A new account is Cash or Bank — nothing else. A row saved by an earlier
+ * release may hold a legacy label ('Wallet', 'JazzCash', …); the edit form keeps
+ * that value selectable so saving other fields never silently reclassifies the
+ * account, and the row carries a review action to move it deliberately.
  */
 function typeOptions(current?: string): string[] {
   const options: string[] = [...BUSINESS_ACCOUNT_TYPES]
@@ -61,6 +59,67 @@ function AccountTypeIcon({ type, className = 'size-3 text-muted-foreground' }: {
 
 function AccountTypeLabel({ type }: { type: string }) {
   return <span className="inline-flex items-center gap-1.5 rounded border border-border bg-muted/30 px-2 py-1 text-[11px] text-foreground"><AccountTypeIcon type={type} />{type}</span>
+}
+
+/**
+ * Type picker. Two choices, so they are shown side by side rather than hidden
+ * behind a dropdown; a legacy label appears as a third choice on the account
+ * that already holds it, so an edit never rewrites it by accident.
+ */
+function TypeChoice({ value, options, onChange }: { value: string; options: string[]; onChange: (next: string) => void }) {
+  return (
+    <div role="radiogroup" aria-label="Account type" className="inline-flex flex-wrap gap-0.5 rounded-md border border-border bg-muted/30 p-0.5">
+      {options.map((option) => (
+        <button
+          key={option}
+          type="button"
+          role="radio"
+          aria-checked={value === option}
+          onClick={() => onChange(option)}
+          className={`inline-flex items-center gap-1.5 rounded px-3 py-1.5 text-xs font-medium transition-colors ${value === option ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+        >
+          <AccountTypeIcon type={option} className={`size-3.5 ${value === option ? 'text-foreground' : 'text-muted-foreground'}`} />
+          {option}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+/**
+ * An account still carrying a label from an earlier release. Nothing about it is
+ * rewritten: it keeps its name, balance and history, appears under the money
+ * type shown here, and moves only when the owner picks a side.
+ */
+function TypeReview({ row, canManage, busy, onMove }: {
+  row: BusinessAccountRow
+  canManage: boolean
+  busy: boolean
+  onMove: (type: BusinessAccountType) => void
+}) {
+  if (!needsMoneyTypeReview(row.type)) return null
+  return (
+    <div className="mt-1.5 space-y-1">
+      <span className="inline-flex rounded border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide text-amber-800">
+        Shown under {normalizeBusinessAccountType(row.type)} — needs review
+      </span>
+      {canManage && (
+        <div className="flex flex-wrap gap-1">
+          {BUSINESS_ACCOUNT_TYPES.map((type) => (
+            <button
+              key={type}
+              type="button"
+              disabled={busy}
+              onClick={() => onMove(type)}
+              className="rounded border border-border bg-background px-1.5 py-0.5 text-[10px] font-medium text-foreground hover:bg-accent disabled:opacity-50"
+            >
+              Move to {type}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
 }
 
 export function BusinessAccountsView({ user }: { user: MeUser }) {
@@ -156,6 +215,29 @@ export function BusinessAccountsView({ user }: { user: MeUser }) {
     if (ok) deleteMut.mutate(row.id)
   }
 
+  /** Reclassifying only changes where the account is listed. */
+  function askMoveType(row: BusinessAccountRow, type: BusinessAccountType) {
+    const ok = window.confirm(
+      `Move "${row.name}" to ${type}? Its balance, ledger account ${row.ledger.code} and posted history stay exactly as they are — only where it is listed changes.`,
+    )
+    if (ok) updateMut.mutate({ id: row.id, patch: { type } })
+  }
+
+  // Cash held and money at the bank, the two totals an owner reads first.
+  // Inactive accounts are counted separately but still carry their balance.
+  const summary = useMemo(() => {
+    const rows = q.data?.rows ?? []
+    return BUSINESS_ACCOUNT_TYPES.map((type) => {
+      const group = rows.filter((row) => normalizeBusinessAccountType(row.type) === type)
+      return {
+        type,
+        accounts: group.length,
+        active: group.filter((row) => row.isActive).length,
+        balancePaisas: group.reduce((total, row) => total + BigInt(row.ledger.balancePaisas), 0n),
+      }
+    })
+  }, [q.data?.rows])
+
   return (
     <div className="space-y-5">
       {q.data?.availability?.accounting === false && (
@@ -165,7 +247,7 @@ export function BusinessAccountsView({ user }: { user: MeUser }) {
       )}
       <PageHeader
         title="Business Accounts"
-        description="Manage cash, bank and wallet accounts used for daily payments. Balances update as entries are recorded."
+        description="Your money lives in two places: Cash and Bank. Add as many accounts as you need under either one — balances update as entries are recorded."
         actions={canManage && (
           <Button onClick={() => setOpen((v) => !v)} className="shadow-sm">
             {open ? <X className="size-4" /> : <Plus className="size-4" />}
@@ -174,6 +256,30 @@ export function BusinessAccountsView({ user }: { user: MeUser }) {
         )}
       />
 
+      {q.data?.rows?.length ? (
+        <div className="grid gap-3 sm:grid-cols-2">
+          {summary.map((group) => (
+            <div key={group.type} className="rounded-lg border border-border bg-card p-4">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <div className="grid size-8 place-items-center rounded-md border border-border bg-muted/35">
+                    <AccountTypeIcon type={group.type} className="size-4 text-foreground" />
+                  </div>
+                  <div>
+                    <div className="text-sm font-semibold text-foreground">{group.type}</div>
+                    <div className="text-[11px] text-muted-foreground" data-num>
+                      {group.accounts} account{group.accounts === 1 ? '' : 's'} · {group.active} active
+                    </div>
+                  </div>
+                </div>
+                <div className={`text-base font-semibold ${group.balancePaisas < 0n ? 'text-destructive' : 'text-foreground'}`} data-num>
+                  {formatMoney(group.balancePaisas)}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : null}
       {open && canManage && (
         <div className="rounded-lg border border-border bg-card p-5 sm:p-6">
           <h2 className="text-base font-semibold text-foreground mb-4">Create business account</h2>
@@ -222,6 +328,12 @@ export function BusinessAccountsView({ user }: { user: MeUser }) {
                       </td>
                       <td className="p-3.5">
                         <AccountTypeLabel type={r.type} />
+                        <TypeReview
+                          row={r}
+                          canManage={canManage}
+                          busy={updateMut.isPending}
+                          onMove={(type) => askMoveType(r, type)}
+                        />
                       </td>
                       <td className="p-3.5 text-xs text-muted-foreground">
                         <div>{r.accountHolder ?? '—'}</div>
@@ -290,6 +402,12 @@ export function BusinessAccountsView({ user }: { user: MeUser }) {
                     <div className="min-w-0">
                       <div className="font-medium text-foreground truncate">{r.name}</div>
                       <div className="mt-1"><AccountTypeLabel type={r.type} /></div>
+                      <TypeReview
+                        row={r}
+                        canManage={canManage}
+                        busy={updateMut.isPending}
+                        onMove={(type) => askMoveType(r, type)}
+                      />
                     </div>
                   </div>
                   <div className="text-right shrink-0">
@@ -372,7 +490,7 @@ export function BusinessAccountsView({ user }: { user: MeUser }) {
           </div>
           <p className="text-sm text-muted-foreground">No business accounts yet.</p>
           <p className="text-xs text-muted-foreground mt-1">
-            Create one to see the linked ledger account appear.
+            Add your first Cash or Bank account to see the linked ledger account appear.
           </p>
           {canManage && (
             <Button
@@ -461,6 +579,11 @@ function AccountForm({
   const [bankName, setBankName] = useState(initial?.bankName ?? '')
   const [accountNumber, setAccountNumber] = useState(initial?.accountNumber ?? '')
   const isEdit = initial !== undefined
+  // Holder, bank and account number belong to a bank account. A cash account
+  // needs a name and nothing else — unless it already holds those details, in
+  // which case they stay visible and editable rather than becoming unreachable.
+  const showBankDetails = normalizeBusinessAccountType(type) === 'Bank'
+    || Boolean(initial?.accountHolder || initial?.bankName || initial?.accountNumber)
 
   return (
     <form
@@ -493,31 +616,26 @@ function AccountForm({
       </div>
       <div className="space-y-1.5">
         <Label className="text-xs font-medium text-muted-foreground">Type</Label>
-        <Select value={type} onValueChange={setType}>
-          <SelectTrigger className="h-10 bg-background press-sm">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {typeOptions(initial?.type).map((t) => (
-              <SelectItem key={t} value={t}>
-                {t}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <div className="flex h-10 items-center">
+          <TypeChoice value={type} options={typeOptions(initial?.type)} onChange={setType} />
+        </div>
       </div>
-      <div className="space-y-1.5">
-        <Label className="text-xs font-medium text-muted-foreground">Account holder</Label>
-        <Input value={accountHolder} onChange={(e) => setAccountHolder(e.target.value)} className="h-10 bg-background press-sm" />
-      </div>
-      <div className="space-y-1.5">
-        <Label className="text-xs font-medium text-muted-foreground">Bank name</Label>
-        <Input value={bankName} onChange={(e) => setBankName(e.target.value)} className="h-10 bg-background press-sm" />
-      </div>
-      <div className="space-y-1.5">
-        <Label className="text-xs font-medium text-muted-foreground">Account number</Label>
-        <Input value={accountNumber} onChange={(e) => setAccountNumber(e.target.value)} className="h-10 bg-background press-sm" data-num />
-      </div>
+      {showBankDetails && (
+        <>
+          <div className="space-y-1.5">
+            <Label className="text-xs font-medium text-muted-foreground">Account holder</Label>
+            <Input value={accountHolder} onChange={(e) => setAccountHolder(e.target.value)} className="h-10 bg-background press-sm" />
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs font-medium text-muted-foreground">Bank name</Label>
+            <Input value={bankName} onChange={(e) => setBankName(e.target.value)} className="h-10 bg-background press-sm" />
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs font-medium text-muted-foreground">Account number</Label>
+            <Input value={accountNumber} onChange={(e) => setAccountNumber(e.target.value)} className="h-10 bg-background press-sm" data-num />
+          </div>
+        </>
+      )}
       <div className="sm:col-span-2 lg:col-span-3 flex justify-end gap-2 pt-1">
         {onCancel && (
           <Button type="button" variant="ghost" className="press-sm" onClick={onCancel}>

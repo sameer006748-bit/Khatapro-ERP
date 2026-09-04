@@ -13,7 +13,8 @@
  *     invoices, vouchers and purchase payments must stay readable. Deletion is
  *     refused with the referencing counts so the Owner can deactivate instead.
  *  3. Legacy type labels ('Petty Cash', 'JazzCash', …) stay editable so rows
- *     written by earlier releases can be saved without a data migration.
+ *     written by earlier releases can be saved — and moved to Cash or Bank —
+ *     without a data migration.
  */
 import { NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
@@ -28,6 +29,7 @@ import {
   BUSINESS_ACCOUNTS_UNAVAILABLE_MESSAGE,
   LegacyBusinessAccountsUnavailableError,
   deleteLegacyBusinessAccount,
+  listLegacyBusinessAccounts,
   updateLegacyBusinessAccount,
   type BusinessAccountRecord,
 } from '@/lib/accounting/legacy-business-accounts'
@@ -110,6 +112,71 @@ function serializeLegacy(row: BusinessAccountRecord) {
   }
 }
 
+/**
+ * The four things an owner reads back off an audit entry. Bank name, account
+ * holder and account number are deliberately absent, and so are internal ids.
+ */
+type MoneyAccountSnapshot = { code: string; name: string; type: string; isActive: boolean }
+
+/**
+ * Name the event after what actually changed, so the audit log reads as
+ * "Money account renamed" rather than a generic update.
+ */
+function moneyAccountAction(before: MoneyAccountSnapshot | null, after: MoneyAccountSnapshot) {
+  if (before && before.isActive !== after.isActive) {
+    return after.isActive ? 'MONEY_ACCOUNT_REACTIVATE' : 'MONEY_ACCOUNT_DEACTIVATE'
+  }
+  if (before && before.type !== after.type) return 'MONEY_ACCOUNT_TYPE_CHANGE'
+  if (before && before.name !== after.name) return 'MONEY_ACCOUNT_RENAME'
+  return 'MONEY_ACCOUNT_UPDATE'
+}
+
+/**
+ * One readable audit row per edit. The legacy database function records its own
+ * bare row as well; this one is what the Audit Log renders, because it carries
+ * the before/after the owner needs to see.
+ */
+async function auditMoneyAccountUpdate(input: {
+  su: SessionUser
+  businessAccountId: string
+  before: MoneyAccountSnapshot | null
+  after: MoneyAccountSnapshot
+}) {
+  await writeAudit({
+    businessId: input.su.businessId,
+    userId: input.su.userId,
+    action: moneyAccountAction(input.before, input.after),
+    entity: 'business_account',
+    entityId: input.businessAccountId,
+    details: {
+      name: input.after.name,
+      ledgerCode: input.after.code,
+      ...(input.before ? { before: input.before } : {}),
+      after: input.after,
+    },
+  })
+}
+
+/**
+ * The row as it stood before a legacy edit, read through the same listing the
+ * screen uses. Best effort: a failure here must not fail the edit, it only
+ * costs the audit entry its "before" half.
+ */
+async function legacySnapshotBefore(
+  su: SessionUser,
+  businessAccountId: string,
+): Promise<MoneyAccountSnapshot | null> {
+  try {
+    const rows = await listLegacyBusinessAccounts(su.businessId, su.profileId)
+    const row = rows.find((candidate) => candidate.id === businessAccountId)
+    return row
+      ? { code: row.accountCode, name: row.name, type: row.type, isActive: row.isActive }
+      : null
+  } catch {
+    return null
+  }
+}
+
 export async function PATCH(req: Request, ctx: Ctx) {
   const auth = await authorize()
   if (auth.error) return auth.error
@@ -129,11 +196,18 @@ export async function PATCH(req: Request, ctx: Ctx) {
   if (isSupabaseConfigured()) {
     if (!await usesLegacyTransactionSchema()) return unavailableResponse()
     try {
+      const before = await legacySnapshotBefore(su, id)
       const row = await updateLegacyBusinessAccount({
         businessId: su.businessId,
         businessAccountId: id,
         actorProfileId: su.profileId,
         patch,
+      })
+      await auditMoneyAccountUpdate({
+        su,
+        businessAccountId: id,
+        before,
+        after: { code: row.accountCode, name: row.name, type: row.type, isActive: row.isActive },
       })
       return NextResponse.json({ row: serializeLegacy(row) })
     } catch (error) {
@@ -144,6 +218,7 @@ export async function PATCH(req: Request, ctx: Ctx) {
 
   const existing = await db.businessAccount.findFirst({
     where: { id, businessId: su.businessId },
+    include: { account: { select: { code: true } } },
   })
   if (!existing) return NextResponse.json({ error: 'NOT_FOUND' }, { status: 404 })
 
@@ -176,13 +251,21 @@ export async function PATCH(req: Request, ctx: Ctx) {
     return row
   })
 
-  await writeAudit({
-    businessId: su.businessId,
-    userId: su.userId,
-    action: 'UPDATE',
-    entity: 'business_account',
-    entityId: existing.id,
-    details: { patch, ledgerAccountId: existing.accountId },
+  await auditMoneyAccountUpdate({
+    su,
+    businessAccountId: existing.id,
+    before: {
+      code: existing.account.code,
+      name: existing.name,
+      type: existing.type,
+      isActive: existing.isActive,
+    },
+    after: {
+      code: updated.account.code,
+      name: updated.name,
+      type: updated.type,
+      isActive: updated.isActive,
+    },
   })
 
   // Re-read so the returned ledger name/active state reflect the synced writes.
@@ -258,10 +341,19 @@ export async function DELETE(_req: Request, ctx: Ctx) {
   await writeAudit({
     businessId: su.businessId,
     userId: su.userId,
-    action: 'DELETE',
+    action: 'MONEY_ACCOUNT_DELETE',
     entity: 'business_account',
     entityId: existing.id,
-    details: { name: existing.name, type: existing.type, ledgerAccountId: existing.accountId },
+    details: {
+      name: existing.name,
+      ledgerCode: existing.account.code,
+      before: {
+        code: existing.account.code,
+        name: existing.name,
+        type: existing.type,
+        isActive: existing.isActive,
+      },
+    },
   })
 
   return NextResponse.json({ ok: true, deletedId: existing.id })

@@ -193,13 +193,15 @@ export async function POST(req: Request) {
     return ba
   })
 
+  // Readable audit detail only: what the account is called, which of the two
+  // money types it is, and the ledger code the owner sees on screen.
   await writeAudit({
     businessId: su.businessId,
     userId: su.userId,
-    action: 'CREATE',
+    action: 'MONEY_ACCOUNT_CREATE',
     entity: 'business_account',
     entityId: created.id,
-    details: { name, type, ledgerCode: newCode, ledgerAccountId: created.accountId },
+    details: { name, ledgerCode: newCode, after: { name, type, code: newCode, isActive: true } },
   })
 
   return NextResponse.json({

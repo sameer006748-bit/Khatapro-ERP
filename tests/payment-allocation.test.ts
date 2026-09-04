@@ -257,14 +257,17 @@ test('Counter, Online, OFC and Other share one payment implementation', () => {
   assert.match(onlineView, /cod/i)
 })
 
-test('account types are four generic classes with legacy labels still accepted', () => {
-  assert.deepEqual([...BUSINESS_ACCOUNT_TYPES], ['Cash', 'Bank', 'Wallet', 'Other'])
-  for (const legacy of ['Petty Cash', 'JazzCash', 'Easypaisa']) {
+test('money accounts are Cash or Bank, with legacy labels still accepted', () => {
+  assert.deepEqual([...BUSINESS_ACCOUNT_TYPES], ['Cash', 'Bank'])
+  for (const legacy of ['Wallet', 'Other', 'Petty Cash', 'JazzCash', 'Easypaisa', 'Custom / Other']) {
     assert.ok((ACCEPTED_BUSINESS_ACCOUNT_TYPES as readonly string[]).includes(legacy), legacy)
   }
-  assert.equal(normalizeBusinessAccountType('JazzCash'), 'Wallet')
+  // Wallet money is cash the business holds; only a bank label reads as Bank.
+  assert.equal(normalizeBusinessAccountType('JazzCash'), 'Cash')
   assert.equal(normalizeBusinessAccountType('Petty Cash'), 'Cash')
-  // New accounts may only be created with the generic classes.
+  assert.equal(normalizeBusinessAccountType('Wallet'), 'Cash')
+  assert.equal(normalizeBusinessAccountType('Bank'), 'Bank')
+  // New accounts may only be created as Cash or Bank.
   assert.match(accountRoute, /z\.enum\(BUSINESS_ACCOUNT_TYPES\)/)
   assert.match(accountItemRoute, /z\.enum\(ACCEPTED_BUSINESS_ACCOUNT_TYPES\)/)
 })

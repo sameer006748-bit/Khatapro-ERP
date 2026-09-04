@@ -21,7 +21,8 @@ test('accounts workspace uses a consistent professional icon and balance system'
 test('accounts stay distinguishable and actions remain available without changing data', () => {
   assert.match(accounts, /Account \{account\.code\}/)
   assert.match(accounts, /ACCOUNT_GROUPS/)
-  assert.match(accounts, /Cash', 'Bank', 'Mobile Wallets', 'Other/)
+  assert.match(accounts, /ACCOUNT_GROUPS: AccountGroup\[\] = \['Cash', 'Bank'\]/)
+  assert.doesNotMatch(accounts, /Mobile Wallets/)
   assert.match(accounts, /> New Entry</)
   assert.match(accounts, /Receive Payment/)
   assert.match(accounts, /Pay Vendor/)
