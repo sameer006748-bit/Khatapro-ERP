@@ -30,8 +30,8 @@ export function SetupView({
       ownerOnly: false,
     },
     {
-      title: 'Account Classification',
-      desc: 'Create the categories and subcategories that group your ledger accounts.',
+      title: 'Account Categories',
+      desc: 'Name the categories your business uses under each accounting type.',
       route: 'account-classification',
       icon: FolderTree,
       ownerOnly: false,

@@ -1,11 +1,12 @@
 /**
  * Client-side view of the account classification served by
- * /api/account-classification (fixed accounting roots → categories →
- * subcategories → ledger accounts).
+ * /api/account-classification: five fixed accounting roots, each holding the
+ * categories the business created.
  *
- * The server RPCs stay authoritative for every rule; these helpers only shape
- * that payload into the cascades the screens render, so no screen re-derives
- * the hierarchy on its own.
+ * The server stays authoritative for every rule — including which ledger account
+ * a category posts to. These helpers only shape the payload into the lists the
+ * screens render, so no screen re-derives the hierarchy or picks an account of
+ * its own accord.
  */
 import { ApiRequestError, apiFetchJson } from '@/lib/api-client'
 
@@ -40,7 +41,7 @@ export type ClassificationAccountDto = {
   subcategoryId: string | null
   isActive: boolean
   isSystem: boolean
-  /** True when the account may be renamed / reclassified from the setup screen. */
+  /** True when the account is one a user may name and classify. */
   isManual: boolean
 }
 
@@ -52,30 +53,20 @@ export type ClassificationTree = {
   /** Server's verdict on whether this user may change the classification. */
   canManage: boolean
 }
-
 export const CLASSIFICATION_LOAD_ERROR = 'Unable to load account classifications'
-export const NO_CATEGORIES_MESSAGE = 'No categories created yet.'
-export const NO_SUBCATEGORIES_MESSAGE = 'No subcategories — you can select a direct expense account.'
-export const NO_MANUAL_ACCOUNTS_MESSAGE = 'No manual expense accounts are available in this category.'
+export const NO_CATEGORIES_MESSAGE = 'No categories yet.'
+export const NO_EXPENSE_CATEGORIES_MESSAGE = 'No expense categories yet — add one under Account Categories.'
+export const EXPENSE_CATEGORY_GROUP_LABEL = 'Expense categories'
+export const OTHER_EXPENSE_ACCOUNTS_LABEL = 'Other expense accounts'
 
 /**
  * Shared React Query key and cache lifetime for the tree. Every screen reads it
  * under the same key, so the classification is fetched once and reused instead
  * of once per screen; the setup screen invalidates that key after each change,
- * which overrides the lifetime, so a consumer never shows a stale cascade.
- * Matches the lifetime the chart of accounts already uses — both are setup data
- * that only changes through an explicit action in this app.
+ * which overrides the lifetime, so a consumer never shows a stale list.
  */
 export const CLASSIFICATION_QUERY_KEY = ['account-classification'] as const
 export const CLASSIFICATION_STALE_TIME_MS = 300_000
-
-/**
- * Accounts that hang off a fixed root instead of a user category (every account
- * that existed before categories were introduced). They stay selectable through
- * this pseudo-category so no existing posting flow loses its destination.
- */
-export const DIRECT_ACCOUNT_GROUP = '__direct__'
-export const DIRECT_ACCOUNT_GROUP_LABEL = 'Direct expense accounts'
 
 /**
  * A deployment without the classification schema answers 503; the caller then
@@ -111,126 +102,99 @@ export function rootByType(tree: ClassificationTree | null, type: string): Class
   return tree?.roots.find((root) => root.type === type) ?? null
 }
 
-/** Every category under a root, inactive included — the management screen shows both. */
+/** Every category under a root, inactive included — the setup screen shows both. */
 export function categoriesForRoot(tree: ClassificationTree | null, rootId: string | null): ClassificationNodeDto[] {
   if (!tree || !rootId) return []
   return tree.categories.filter((node) => node.rootId === rootId).sort(byName)
 }
 
-export function subcategoriesForCategory(
-  tree: ClassificationTree | null,
-  categoryId: string | null,
-): ClassificationNodeDto[] {
-  if (!tree || !categoryId) return []
-  return tree.subcategories.filter((node) => node.parentId === categoryId).sort(byName)
-}
-
-/** Only these may be picked for something new; inactive nodes stay visible in history. */
+/** Only these may be picked for something new; inactive ones stay visible in history. */
 export function activeCategories(tree: ClassificationTree | null, rootId: string | null): ClassificationNodeDto[] {
   return categoriesForRoot(tree, rootId).filter((node) => node.isActive)
 }
-
-export function activeSubcategories(
-  tree: ClassificationTree | null,
-  categoryId: string | null,
-): ClassificationNodeDto[] {
-  return subcategoriesForCategory(tree, categoryId).filter((node) => node.isActive)
+/** What an expense line is posted against: a category, or one plain account. */
+export type ExpenseChoice = {
+  value: string
+  label: string
+  /** Shown only for a plain account, so the chart of accounts stays recognisable. */
+  code?: string
+  categoryId?: string
+  expenseAccountId?: string
 }
 
-export type ManualAccountOption = {
-  id: string
-  code: string
-  name: string
-  subcategoryId: string | null
-  subcategoryName: string | null
-}
+export type ExpenseChoiceGroup = { key: string; label: string; choices: ExpenseChoice[] }
 
-function toOption(
-  account: ClassificationAccountDto,
-  subcategoryNames: Map<string, string>,
-): ManualAccountOption {
-  return {
-    id: account.id,
-    code: account.code,
-    name: account.name,
-    subcategoryId: account.subcategoryId,
-    subcategoryName: account.subcategoryId ? subcategoryNames.get(account.subcategoryId) ?? null : null,
-  }
-}
+const CATEGORY_VALUE_PREFIX = 'category:'
+const ACCOUNT_VALUE_PREFIX = 'account:'
 
-function manualAccounts(tree: ClassificationTree, rootId: string): ClassificationAccountDto[] {
-  return tree.accounts.filter((account) => account.rootId === rootId && account.isActive && account.isManual)
+/** Categories that already have a ledger account behind them, so they can post. */
+function postableCategories(tree: ClassificationTree, rootId: string): ClassificationNodeDto[] {
+  const linked = new Set(
+    tree.accounts
+      .filter((account) => account.isActive && account.isManual && account.categoryId)
+      .map((account) => account.categoryId),
+  )
+  return activeCategories(tree, rootId).filter((node) => linked.has(node.id))
 }
 
 /**
- * Manual, active accounts inside one category — linked to the category itself or
- * to one of its subcategories. Pass DIRECT_ACCOUNT_GROUP for the accounts that
- * hang off the fixed root.
+ * The single choice an expense line needs. A category is the normal answer; the
+ * second group only appears for manual accounts that never had a category, so no
+ * destination that used to work quietly disappears. System-managed accounts
+ * (Purchases / COGS, Salesman Commission Expense) are never offered.
  */
-export function manualAccountsInCategory(
+export function expenseChoiceGroups(
   tree: ClassificationTree | null,
   rootId: string | null,
-  categoryId: string | null,
-): ManualAccountOption[] {
-  if (!tree || !rootId || !categoryId) return []
-  const names = new Map(tree.subcategories.map((node) => [node.id, node.name]))
-  return manualAccounts(tree, rootId)
-    .filter((account) => categoryId === DIRECT_ACCOUNT_GROUP
-      ? !account.categoryId && !account.subcategoryId
-      : account.categoryId === categoryId)
-    .sort(byCode)
-    .map((account) => toOption(account, names))
-}
-
-/** Every manual, active account under a root — used when a business has no categories yet. */
-export function manualAccountsInRoot(
-  tree: ClassificationTree | null,
-  rootId: string | null,
-): ManualAccountOption[] {
+): ExpenseChoiceGroup[] {
   if (!tree || !rootId) return []
-  const names = new Map(tree.subcategories.map((node) => [node.id, node.name]))
-  return manualAccounts(tree, rootId).sort(byCode).map((account) => toOption(account, names))
-}
-
-/** True when manual accounts still hang off the fixed root itself. */
-export function hasDirectAccounts(tree: ClassificationTree | null, rootId: string | null): boolean {
-  return manualAccountsInCategory(tree, rootId, DIRECT_ACCOUNT_GROUP).length > 0
-}
-
-/**
- * Group account options under their subcategory, so a single dropdown can show
- * the subcategories of a category and the accounts inside them at once.
- */
-export function groupBySubcategory(
-  options: ManualAccountOption[],
-  directLabel: string,
-): Array<{ key: string; label: string; accounts: ManualAccountOption[] }> {
-  const groups: Array<{ key: string; label: string; accounts: ManualAccountOption[] }> = []
-  const positions = new Map<string, number>()
-  for (const option of options) {
-    const key = option.subcategoryId ?? 'direct'
-    let at = positions.get(key)
-    if (at === undefined) {
-      at = groups.length
-      positions.set(key, at)
-      groups.push({ key, label: option.subcategoryName ?? directLabel, accounts: [] })
-    }
-    groups[at].accounts.push(option)
+  const groups: ExpenseChoiceGroup[] = []
+  const categories = postableCategories(tree, rootId)
+  if (categories.length > 0) {
+    groups.push({
+      key: 'categories',
+      label: EXPENSE_CATEGORY_GROUP_LABEL,
+      choices: categories.map((node) => ({
+        value: `${CATEGORY_VALUE_PREFIX}${node.id}`,
+        label: node.name,
+        categoryId: node.id,
+      })),
+    })
+  }
+  const direct = tree.accounts
+    .filter((account) => account.rootId === rootId && account.isActive && account.isManual
+      && !account.categoryId && !account.subcategoryId)
+    .sort(byCode)
+  if (direct.length > 0) {
+    groups.push({
+      key: 'accounts',
+      label: OTHER_EXPENSE_ACCOUNTS_LABEL,
+      choices: expenseAccountChoices(direct),
+    })
   }
   return groups
 }
 
-/** "Category › Subcategory" for a row label; empty when the account sits on a root. */
-export function classificationPath(
-  tree: ClassificationTree | null,
-  account: { categoryId: string | null; subcategoryId: string | null },
-): string {
-  if (!tree) return ''
-  const category = account.categoryId
-    ? tree.categories.find((node) => node.id === account.categoryId)
-    : null
-  const subcategory = account.subcategoryId
-    ? tree.subcategories.find((node) => node.id === account.subcategoryId)
-    : null
-  return [category?.name, subcategory?.name].filter(Boolean).join(' › ')
+/**
+ * The same picker shape for a plain account list — used on a deployment that has
+ * no classification layer at all, so this screen keeps working there unchanged.
+ */
+export function expenseAccountChoices(
+  accounts: Array<{ id: string; code: string; name: string }>,
+): ExpenseChoice[] {
+  return [...accounts].sort(byCode).map((account) => ({
+    value: `${ACCOUNT_VALUE_PREFIX}${account.id}`,
+    label: account.name,
+    code: account.code,
+    expenseAccountId: account.id,
+  }))
+}
+
+/** The choice behind a stored value, so a line always posts what the user saw. */
+export function findExpenseChoice(groups: ExpenseChoiceGroup[], value: string): ExpenseChoice | null {
+  for (const group of groups) {
+    const choice = group.choices.find((entry) => entry.value === value)
+    if (choice) return choice
+  }
+  return null
 }

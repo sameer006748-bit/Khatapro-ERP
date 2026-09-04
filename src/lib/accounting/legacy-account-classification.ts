@@ -18,6 +18,11 @@ import { classifyPostgrestCompatibilityError, type PostgrestLikeError } from '@/
 export const ACCOUNT_CLASSIFICATION_UNAVAILABLE_MESSAGE = 'Account classification is currently unavailable.'
 export const ACCOUNT_CLASSIFICATION_DENIED_MESSAGE = 'You do not have permission to manage account classifications.'
 export const ACCOUNT_CLASSIFICATION_GENERIC_MESSAGE = 'This classification change could not be saved.'
+/**
+ * Raised by the unique (business, code) constraint. Exported because the
+ * automatic ledger workflow treats it as "try the next code", not as a failure.
+ */
+export const DUPLICATE_ACCOUNT_CODE_MESSAGE = 'This account code is already used.'
 
 export class AccountClassificationUnavailableError extends Error {
   readonly code = 'FEATURE_UNAVAILABLE'
@@ -133,7 +138,7 @@ function friendlyMessage(code: string, text: string): string {
   if (code === '23505') {
     return /sibling_name|categor/i.test(text)
       ? 'A category with this name already exists here.'
-      : 'This account code is already used.'
+      : DUPLICATE_ACCOUNT_CODE_MESSAGE
   }
   for (const [pattern, message] of FRIENDLY_MESSAGES) {
     if (pattern.test(text)) return message

@@ -22,7 +22,6 @@ import { PageHeader } from '@/components/erp/page-header'
 type ReportClassification = {
   hasCustomClassification: boolean
   categories: Array<{ id: string; name: string; rootId: string; isActive: boolean }>
-  subcategories: Array<{ id: string; name: string; rootId: string; categoryId: string; isActive: boolean }>
   accounts: Record<string, {
     categoryId: string
     categoryName: string | null
@@ -40,15 +39,15 @@ type ReportGroup<T> = {
   key: string
   label: string
   total: bigint
-  subs: Array<{ key: string; label: string; total: bigint; rows: T[] }>
+  rows: T[]
 }
 
 const lastIf = (isLast: boolean) => (isLast ? 1 : 0)
 
 /**
- * Partition one statement section into Category → Subcategory buckets. Every
- * row lands in exactly one bucket, so the subtotals add up to the section total
- * the statement already prints — grouping never recomputes a figure.
+ * Partition one statement section into its categories. Every row lands in
+ * exactly one bucket, so the subtotals add up to the section total the
+ * statement already prints — grouping never recomputes a figure.
  */
 function groupByClassification<T extends StatementRow>(
   rows: T[],
@@ -58,7 +57,6 @@ function groupByClassification<T extends StatementRow>(
   const groups: Array<ReportGroup<T>> = []
   for (const row of rows) {
     const label = classification?.accounts[row.account_code] ?? null
-    const amount = amountOf(row)
     const categoryKey = label?.categoryId ?? 'ungrouped'
     let group = groups.find((entry) => entry.key === categoryKey)
     if (!group) {
@@ -66,26 +64,15 @@ function groupByClassification<T extends StatementRow>(
         key: categoryKey,
         label: label?.categoryName ?? 'Not grouped in a category',
         total: 0n,
-        subs: [],
+        rows: [],
       }
       groups.push(group)
     }
-    group.total += amount
-    const subKey = label?.subcategoryId ?? 'direct'
-    let sub = group.subs.find((entry) => entry.key === subKey)
-    if (!sub) {
-      sub = { key: subKey, label: label?.subcategoryName ?? 'Direct accounts', total: 0n, rows: [] }
-      group.subs.push(sub)
-    }
-    sub.total += amount
-    sub.rows.push(row)
+    group.total += amountOf(row)
+    group.rows.push(row)
   }
   groups.sort((a, b) =>
     lastIf(a.key === 'ungrouped') - lastIf(b.key === 'ungrouped') || a.label.localeCompare(b.label))
-  for (const group of groups) {
-    group.subs.sort((a, b) =>
-      lastIf(a.key === 'direct') - lastIf(b.key === 'direct') || a.label.localeCompare(b.label))
-  }
   return groups
 }
 
@@ -157,19 +144,9 @@ function StatementLines<T extends StatementRow>({ rows, grouped, classification,
             <span>{group.label}</span>
             <span data-num>{formatMoney(group.total, false)}</span>
           </div>
-          {group.subs.map((sub) => (
-            <Fragment key={sub.key}>
-              {(group.subs.length > 1 || sub.key !== 'direct') && (
-                <div className="flex justify-between text-[11px] text-muted-foreground pt-1.5 pl-2">
-                  <span>{sub.label}</span>
-                  <span data-num>{formatMoney(sub.total, false)}</span>
-                </div>
-              )}
-              <div className="pl-2">
-                {sub.rows.map((row) => <Fragment key={row.account_code}>{renderRow(row)}</Fragment>)}
-              </div>
-            </Fragment>
-          ))}
+          <div className="pl-2">
+            {group.rows.map((row) => <Fragment key={row.account_code}>{renderRow(row)}</Fragment>)}
+          </div>
         </div>
       ))}
     </>
@@ -602,7 +579,6 @@ function CashFlowReport({ rows }: { rows: any[] }) {
  */
 function ExpenseReport({ rows, classification }: { rows: any[]; classification: ReportClassification | null }) {
   const [categoryFilter, setCategoryFilter] = useState(ALL)
-  const [subcategoryFilter, setSubcategoryFilter] = useState(ALL)
   const canFilter = classification?.hasCustomClassification === true
   const total = rows.reduce((sum, r) => sum + BigInt(r.total_amount ?? 0), 0n)
 
@@ -610,26 +586,16 @@ function ExpenseReport({ rows, classification }: { rows: any[]; classification: 
     .map((r) => classification?.accounts[r.account_code]?.categoryId)
     .filter((id): id is string => Boolean(id)))
   const categoryOptions = (classification?.categories ?? []).filter((c) => present.has(c.id))
-  const subcategoryOptions = (classification?.subcategories ?? []).filter((s) => categoryFilter === ALL
-    ? present.has(s.categoryId)
-    : s.categoryId === categoryFilter)
 
-  const filtersActive = canFilter && (categoryFilter !== ALL || subcategoryFilter !== ALL)
+  const filtersActive = canFilter && categoryFilter !== ALL
   const visible = !filtersActive ? rows : rows.filter((r) => {
     const label = classification?.accounts[r.account_code] ?? null
-    if (categoryFilter !== ALL && label?.categoryId !== categoryFilter) return false
-    if (subcategoryFilter !== ALL && label?.subcategoryId !== subcategoryFilter) return false
-    return true
+    return label?.categoryId === categoryFilter
   })
   const visibleTotal = visible.reduce((sum, r) => sum + BigInt(r.total_amount ?? 0), 0n)
 
-  function selectCategory(value: string) {
-    setCategoryFilter(value)
-    setSubcategoryFilter(ALL)
-  }
   function resetFilters() {
     setCategoryFilter(ALL)
-    setSubcategoryFilter(ALL)
   }
 
   return (
@@ -641,11 +607,7 @@ function ExpenseReport({ rows, classification }: { rows: any[]; classification: 
           </span>
           <ReportFilterSelect
             label="Category" allLabel="All categories" value={categoryFilter}
-            options={categoryOptions} onChange={selectCategory}
-          />
-          <ReportFilterSelect
-            label="Subcategory" allLabel="All subcategories" value={subcategoryFilter}
-            options={subcategoryOptions} onChange={setSubcategoryFilter}
+            options={categoryOptions} onChange={setCategoryFilter}
           />
           {filtersActive && (
             <Button variant="ghost" size="sm" className="h-8 px-2 text-xs" onClick={resetFilters}>

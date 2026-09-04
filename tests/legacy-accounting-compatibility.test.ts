@@ -30,7 +30,10 @@ test('configured legacy production loads its business-scoped Chart of Accounts',
 })
 
 test('Expense Batch accepts legacy text identities but enforces account roles server-side', () => {
-  assert.match(expenseRoute, /usesUuidLedger = isSupabaseConfigured\(\) && !await usesLegacyTransactionSchema\(\)/)
+  // Legacy detection is read once and reused: categories only exist in the
+  // legacy accounting schema, and the UUID id checks hang off the same answer.
+  assert.match(expenseRoute, /usesLegacyAccounting = isSupabaseConfigured\(\) && await usesLegacyTransactionSchema\(\)/)
+  assert.match(expenseRoute, /usesUuidLedger = isSupabaseConfigured\(\) && !usesLegacyAccounting/)
   assert.match(expenseRoute, /paymentAccount\.isBusinessAccount/)
   assert.match(expenseRoute, /paymentAccount\.category\.type !== 'Asset'/)
   assert.match(expenseRoute, /account\.category\.type !== 'Expense'/)

@@ -32,7 +32,6 @@ type Classification = {
   hasCustomClassification: boolean
   roots: Array<{ id: string; name: string; type: string; displayType: string }>
   categories: Array<{ id: string; name: string; rootId: string; isActive: boolean }>
-  subcategories: Array<{ id: string; name: string; rootId: string; categoryId: string; isActive: boolean }>
 }
 
 const CATEGORY_COLORS: Record<string, string> = {
@@ -53,8 +52,7 @@ function displayType(type: string): string {
   return type === 'Income' ? 'Revenue' : type
 }
 
-type Bucket = { key: string; label: string; rows: Row[]; debit: bigint; credit: bigint }
-type CategoryGroup = { key: string; label: string; debit: bigint; credit: bigint; subs: Bucket[] }
+type CategoryGroup = { key: string; label: string; debit: bigint; credit: bigint; rows: Row[] }
 type RootGroup = {
   key: string
   label: string
@@ -68,8 +66,8 @@ const rank = (position: number) => (position < 0 ? ROOT_ORDER.length : position)
 const lastIf = (isLast: boolean) => (isLast ? 1 : 0)
 
 /**
- * Root → Category → Subcategory → Account. Every row lands in exactly one
- * subcategory bucket, so each subtotal is a sum over a disjoint set of the same
+ * Accounting type → category → ledger account. Every row lands in exactly one
+ * category bucket, so each subtotal is a sum over a disjoint set of the same
  * account rows the flat table shows — nothing is counted twice, and accounts
  * that predate the classification still appear under their accounting type.
  */
@@ -102,36 +100,18 @@ function buildGroups(rows: Row[], roots: Classification['roots']): RootGroup[] {
         label: row.classCategoryName ?? 'Not grouped in a category',
         debit: 0n,
         credit: 0n,
-        subs: [],
+        rows: [],
       }
       root.categories.push(category)
     }
     category.debit += debit
     category.credit += credit
-    const subKey = row.classSubcategoryId ?? 'direct'
-    let sub = category.subs.find((entry) => entry.key === subKey)
-    if (!sub) {
-      sub = {
-        key: subKey,
-        label: row.classSubcategoryName ?? 'Direct accounts',
-        rows: [],
-        debit: 0n,
-        credit: 0n,
-      }
-      category.subs.push(sub)
-    }
-    sub.debit += debit
-    sub.credit += credit
-    sub.rows.push(row)
+    category.rows.push(row)
   }
   groups.sort((a, b) => rank(a.order) - rank(b.order) || a.label.localeCompare(b.label))
   for (const root of groups) {
     root.categories.sort((a, b) =>
       lastIf(a.key === 'ungrouped') - lastIf(b.key === 'ungrouped') || a.label.localeCompare(b.label))
-    for (const category of root.categories) {
-      category.subs.sort((a, b) =>
-        lastIf(a.key === 'direct') - lastIf(b.key === 'direct') || a.label.localeCompare(b.label))
-    }
   }
   return groups
 }
@@ -140,7 +120,6 @@ export function TrialBalanceView() {
   const router = useRouter()
   const [typeFilter, setTypeFilter] = useState(ALL)
   const [categoryFilter, setCategoryFilter] = useState(ALL)
-  const [subcategoryFilter, setSubcategoryFilter] = useState(ALL)
   const [grouped, setGrouped] = useState(false)
 
   const q = useQuery<{
@@ -167,12 +146,8 @@ export function TrialBalanceView() {
   const roots = classification?.roots ?? []
   const categoryOptions = (classification?.categories ?? [])
     .filter((category) => typeFilter === ALL || category.rootId === typeFilter)
-  const subcategoryOptions = (classification?.subcategories ?? []).filter((sub) => categoryFilter !== ALL
-    ? sub.categoryId === categoryFilter
-    : typeFilter === ALL || sub.rootId === typeFilter)
 
-  const filtersActive = canFilter
-    && (typeFilter !== ALL || categoryFilter !== ALL || subcategoryFilter !== ALL)
+  const filtersActive = canFilter && (typeFilter !== ALL || categoryFilter !== ALL)
 
   /** Filtering only ever hides whole account rows; the figures stay untouched. */
   const selectedRoot = roots.find((root) => root.id === typeFilter) ?? null
@@ -181,7 +156,6 @@ export function TrialBalanceView() {
       || (r.rootId ? r.rootId === typeFilter : selectedRoot?.type === r.categoryType)
     if (!rootOk) return false
     if (categoryFilter !== ALL && r.classCategoryId !== categoryFilter) return false
-    if (subcategoryFilter !== ALL && r.classSubcategoryId !== subcategoryFilter) return false
     return true
   })
   const filteredDebit = visibleRows.reduce((sum, r) => sum + BigInt(r.totalDebit), 0n)
@@ -192,16 +166,10 @@ export function TrialBalanceView() {
   function selectType(value: string) {
     setTypeFilter(value)
     setCategoryFilter(ALL)
-    setSubcategoryFilter(ALL)
-  }
-  function selectCategory(value: string) {
-    setCategoryFilter(value)
-    setSubcategoryFilter(ALL)
   }
   function resetFilters() {
     setTypeFilter(ALL)
     setCategoryFilter(ALL)
-    setSubcategoryFilter(ALL)
   }
 
   return (
@@ -287,12 +255,8 @@ export function TrialBalanceView() {
                 options={roots.map((root) => ({ value: root.id, label: root.displayType }))}
               />
               <FilterSelect
-                label="Category" allLabel="All categories" value={categoryFilter} onChange={selectCategory}
+                label="Category" allLabel="All categories" value={categoryFilter} onChange={setCategoryFilter}
                 options={categoryOptions.map((category) => ({ value: category.id, label: optionLabel(category) }))}
-              />
-              <FilterSelect
-                label="Subcategory" allLabel="All subcategories" value={subcategoryFilter} onChange={setSubcategoryFilter}
-                options={subcategoryOptions.map((sub) => ({ value: sub.id, label: optionLabel(sub) }))}
               />
               {filtersActive && (
                 <Button variant="ghost" size="sm" className="h-9 px-2 text-xs" onClick={resetFilters}>
@@ -365,19 +329,8 @@ export function TrialBalanceView() {
                               </td>
                               <td colSpan={2}></td>
                             </tr>
-                            {category.subs.map((sub) => (
-                              <Fragment key={sub.key}>
-                                {(category.subs.length > 1 || sub.key !== 'direct') && (
-                                  <tr className="border-b border-border/40">
-                                    <td colSpan={7} className="px-3.5 py-1 pl-10 text-[11px] uppercase tracking-wider text-muted-foreground">
-                                      {sub.label}
-                                    </td>
-                                  </tr>
-                                )}
-                                {sub.rows.map((r) => (
-                                  <AccountRow key={r.accountId} row={r} indent onOpen={() => openLedger(r.accountId)} />
-                                ))}
-                              </Fragment>
+                            {category.rows.map((r) => (
+                              <AccountRow key={r.accountId} row={r} indent onOpen={() => openLedger(r.accountId)} />
                             ))}
                           </Fragment>
                         ))}
@@ -433,7 +386,7 @@ export function TrialBalanceView() {
                   {root.categories.map((category) => (
                     <div key={category.key} className="space-y-3">
                       <div className="text-xs font-medium text-muted-foreground px-1">{category.label}</div>
-                      {category.subs.flatMap((sub) => sub.rows).map((r) => (
+                      {category.rows.map((r) => (
                         <AccountCard key={r.accountId} row={r} onOpen={() => openLedger(r.accountId)} />
                       ))}
                     </div>

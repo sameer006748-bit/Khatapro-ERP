@@ -88,8 +88,8 @@ export function CoaView() {
           Chart of Accounts
         </h1>
         <p className="text-sm text-muted-foreground mt-1.5 max-w-2xl">
-          Every ledger account under its accounting type. Categories and subcategories are managed
-          in Account Classification.
+          Every ledger account under its accounting type. The categories themselves are managed
+          in Account Categories.
         </p>
       </div>
 

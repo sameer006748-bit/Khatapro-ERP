@@ -10,6 +10,10 @@
  * authoritative. There is no local/Prisma equivalent of this classification, so
  * a non-legacy deployment reports the feature as unavailable instead of
  * silently answering with different data.
+ *
+ * Category actions also maintain the ledger account behind the category, so a
+ * client who only ever names a category ("Expense → Lunch Expense") still ends
+ * up with a complete, postable chart of accounts.
  */
 import { NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
@@ -27,7 +31,18 @@ import {
   manageAccountCategory,
   manageAccountSubcategory,
   manageManualLedgerAccount,
+  type AccountClassificationTree,
 } from '@/lib/accounting/legacy-account-classification'
+import {
+  deactivateCategoryWithLedger,
+  deleteCategoryIfSafe,
+  ensureCategoryLedgerAccount,
+  ensureCategoryLedgerAccounts,
+  reactivateCategoryWithLedger,
+  renameCategoryWithLedger,
+  safeAudit,
+  type ClassificationActor,
+} from '@/lib/accounting/category-ledger'
 import { resolveRequestId, safeApiError, safeMutationError, withObservability } from '@/lib/observability'
 
 const MANAGE_PERMISSIONS = ['can_manage_setup', 'can_manage_account_categories', 'can_manage_chart_of_accounts'] as const
@@ -119,17 +134,104 @@ function hasRequiredFields(input: Mutation): boolean {
   return Boolean(input.accountId)
 }
 
-async function applyMutation(user: SessionUser, input: Mutation) {
-  const actor = { businessId: user.businessId, actorProfileId: user.profileId }
-  if (input.scope === 'category') {
-    return manageAccountCategory({
-      ...actor,
-      action: input.action,
-      categoryId: input.categoryId,
-      rootId: input.rootId,
-      name: input.name,
+type CategoryMutation = Extract<Mutation, { scope: 'category' }>
+type CategoryResult = { action: string; category: unknown; ledgerCode?: string }
+
+/** "Linked ledger created automatically", in the audit log's own vocabulary. */
+async function auditLinkedLedger(user: SessionUser, link: {
+  categoryId: string; categoryName: string; displayType: string; code: string; name: string
+}) {
+  await safeAudit({
+    businessId: user.businessId,
+    userId: user.userId,
+    action: 'ACCOUNT_CATEGORY_LEDGER_LINKED',
+    entity: 'account_category',
+    entityId: link.categoryId,
+    details: {
+      name: link.categoryName,
+      accounting_type: link.displayType,
+      ledger_code: link.code,
+      ledger_name: link.name,
+    },
+  })
+}
+
+/**
+ * Every category action carries its ledger account with it: creating a category
+ * creates the account behind it, renaming keeps the two in step, (de)activating
+ * moves both, and deleting only succeeds when that account is provably unused.
+ * The account itself is never offered here — ledger detail belongs to the Chart
+ * of Accounts.
+ */
+async function applyCategoryMutation(
+  user: SessionUser,
+  actor: ClassificationActor,
+  input: CategoryMutation,
+): Promise<CategoryResult> {
+  if (input.action === 'create') {
+    const { category } = await manageAccountCategory({
+      ...actor, action: 'create', rootId: input.rootId, name: input.name,
+    })
+    if (!category) return { action: 'create', category: null }
+    // A failure here leaves a category without its account rather than hiding
+    // the reason; the next load of this screen retries the link.
+    const tree = await listAccountClassification(actor.businessId, actor.actorProfileId)
+    const ledger = await ensureCategoryLedgerAccount(actor, tree, category)
+    if (ledger.created) {
+      await auditLinkedLedger(user, {
+        categoryId: category.id,
+        categoryName: category.name,
+        displayType: category.displayType,
+        code: ledger.code,
+        name: ledger.name,
+      })
+    }
+    return { action: 'create', category, ledgerCode: ledger.code }
+  }
+  return applyCategoryLifecycle(user, actor, input)
+}
+async function applyCategoryLifecycle(
+  user: SessionUser,
+  actor: ClassificationActor,
+  input: CategoryMutation,
+): Promise<CategoryResult> {
+  const categoryId = input.categoryId
+  // hasRequiredFields already answered 400 for a missing id; fail closed anyway.
+  if (!categoryId) throw new AccountClassificationRejectedError()
+  const tree: AccountClassificationTree = await listAccountClassification(
+    actor.businessId, actor.actorProfileId,
+  )
+  if (input.action === 'rename') {
+    if (!input.name) throw new AccountClassificationRejectedError()
+    const { category } = await renameCategoryWithLedger(actor, tree, categoryId, input.name)
+    return { action: 'rename', category }
+  }
+  if (input.action === 'deactivate') {
+    const { category } = await deactivateCategoryWithLedger(actor, tree, categoryId)
+    return { action: 'deactivate', category }
+  }
+  if (input.action === 'reactivate') {
+    const { category } = await reactivateCategoryWithLedger(actor, tree, categoryId)
+    return { action: 'reactivate', category }
+  }
+  const before = tree.categories.find((node) => node.id === categoryId) ?? null
+  const { removedAccounts } = await deleteCategoryIfSafe(actor, tree, categoryId)
+  for (const account of removedAccounts) {
+    await safeAudit({
+      businessId: user.businessId,
+      userId: user.userId,
+      action: 'MANUAL_LEDGER_ACCOUNT_REMOVED',
+      entity: 'manual_ledger_account',
+      entityId: account.id,
+      details: { name: before?.name ?? '', ledger_code: account.code, ledger_name: account.name },
     })
   }
+  return { action: 'delete', category: null }
+}
+
+async function applyMutation(user: SessionUser, input: Mutation) {
+  const actor: ClassificationActor = { businessId: user.businessId, actorProfileId: user.profileId }
+  if (input.scope === 'category') return applyCategoryMutation(user, actor, input)
   if (input.scope === 'subcategory') {
     return manageAccountSubcategory({
       ...actor,
@@ -149,6 +251,22 @@ async function applyMutation(user: SessionUser, input: Mutation) {
   })
 }
 
+/**
+ * Categories that predate the automatic ledger workflow have no account behind
+ * them, so nothing can be posted to them. A manager loading the tree finishes
+ * that setup off — idempotent, and it writes nothing once every category is
+ * linked. A repair that fails is never allowed to stop the tree from loading.
+ */
+async function healCategoryLedgers(user: SessionUser, tree: AccountClassificationTree): Promise<void> {
+  const actor: ClassificationActor = { businessId: user.businessId, actorProfileId: user.profileId }
+  try {
+    const { created } = await ensureCategoryLedgerAccounts(actor, tree)
+    for (const link of created) await auditLinkedLedger(user, link)
+  } catch {
+    return
+  }
+}
+
 export const GET = withObservability('/api/account-classification', async (req: Request) => {
   const requestId = resolveRequestId(req)
   const user = await sessionUser()
@@ -157,7 +275,9 @@ export const GET = withObservability('/api/account-classification', async (req: 
   if (!await classificationAvailable()) return unavailableResponse()
   try {
     const tree = await listAccountClassification(user.businessId, user.profileId)
-    return NextResponse.json({ ...tree, canManage: canManageClassification(user) })
+    const canManage = canManageClassification(user)
+    if (canManage) await healCategoryLedgers(user, tree)
+    return NextResponse.json({ ...tree, canManage })
   } catch (error) {
     if (error instanceof AccountClassificationUnavailableError) return unavailableResponse()
     if (error instanceof AccountClassificationDeniedError) {

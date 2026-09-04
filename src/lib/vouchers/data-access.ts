@@ -235,7 +235,7 @@ export async function postExpenseBatch(input: {
   lines: Array<{ expenseAccountId: string; description?: string | null; amountPaisas: bigint }>
   reference?: string | null; notes?: string | null; createdBy?: string | null
   idempotencyKey?: string | null
-}): Promise<{ expenseId: string; expenseNo: string; voucherId: string }> {
+}): Promise<{ expenseId: string; expenseNo: string; voucherId: string; idempotent: boolean }> {
   if (await usesLegacyTransactionSchema()) {
     const { data } = await callLegacyIdentityRpc('post_expense_batch', {
       p_business_id: input.businessId,
@@ -251,7 +251,14 @@ export async function postExpenseBatch(input: {
       p_created_by: await resolveSupabaseUuid(input.createdBy),
     }, input.idempotencyKey)
     const result = data as any
-    return { expenseId: result.expense_id, expenseNo: result.expense_no, voucherId: result.voucher_id }
+    // Only the identity-bridge overload reports a replay; without it every call
+    // is a fresh post, which is exactly what `false` means here.
+    return {
+      expenseId: result.expense_id,
+      expenseNo: result.expense_no,
+      voucherId: result.voucher_id,
+      idempotent: result.idempotent === true,
+    }
   }
   const total = input.lines.reduce((sum, line) => sum + line.amountPaisas, 0n)
   const result = await postCanonicalVoucher({
@@ -281,6 +288,7 @@ export async function postExpenseBatch(input: {
     expenseId: result.voucher_id,
     expenseNo: result.readable_number,
     voucherId: result.voucher_id,
+    idempotent: result.idempotent === true,
   }
 }
 

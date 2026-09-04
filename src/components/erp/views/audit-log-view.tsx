@@ -37,6 +37,7 @@ const ACTION_LABELS: Record<string, string> = {
   ACCOUNT_CATEGORY_DEACTIVATE: 'Category deactivated',
   ACCOUNT_CATEGORY_REACTIVATE: 'Category reactivated',
   ACCOUNT_CATEGORY_DELETE: 'Category deleted',
+  ACCOUNT_CATEGORY_LEDGER_LINKED: 'Linked ledger created automatically',
   ACCOUNT_SUBCATEGORY_CREATE: 'Subcategory created',
   ACCOUNT_SUBCATEGORY_RENAME: 'Subcategory renamed',
   ACCOUNT_SUBCATEGORY_DEACTIVATE: 'Subcategory deactivated',
@@ -47,12 +48,15 @@ const ACTION_LABELS: Record<string, string> = {
   MANUAL_LEDGER_ACCOUNT_CLASSIFY: 'Account classification changed',
   MANUAL_LEDGER_ACCOUNT_ACTIVATE: 'Account reactivated',
   MANUAL_LEDGER_ACCOUNT_DEACTIVATE: 'Account deactivated',
+  MANUAL_LEDGER_ACCOUNT_REMOVED: 'Linked ledger removed automatically',
+  EXPENSE_POSTED_WITH_CATEGORY: 'Expense posted using category',
 }
 
 const ENTITY_LABELS: Record<string, string> = {
   account_category: 'Category',
   account_subcategory: 'Subcategory',
   manual_ledger_account: 'Ledger account',
+  expense: 'Expense',
 }
 
 function actionLabel(row: Row) {
@@ -109,7 +113,9 @@ function snapshotChanges(row: Row) {
 
 function referenceLabel(row: Row) {
   const details = row.details ?? {}
-  for (const key of ['name', 'voucher_no', 'payment_no', 'receipt_no', 'replacement_no', 'ledgerCode']) {
+  // `categories` reads as the subject of an expense posting ("… using category
+  // Lunch Expense"); the document number stays in the details below it.
+  for (const key of ['name', 'categories', 'voucher_no', 'payment_no', 'receipt_no', 'replacement_no', 'expense_no', 'ledgerCode']) {
     if (typeof details[key] === 'string' || typeof details[key] === 'number') return String(details[key])
   }
   const { before, after } = snapshots(row.details)

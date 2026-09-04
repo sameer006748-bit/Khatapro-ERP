@@ -208,7 +208,7 @@ const INTERNAL_PAGES: SubItem[] = [
 // Setup detail pages: opened from the Setup overview cards (and by deep link)
 // instead of taking a slot of their own in the main navigation.
 const SETUP_DETAIL_PAGES: SubItem[] = [
-  { key: 'account-classification', label: 'Account Classification', short: 'Classification', icon: FolderTree, perm: 'can_view_setup' },
+  { key: 'account-classification', label: 'Account Categories', short: 'Categories', icon: FolderTree, perm: 'can_view_setup' },
 ]
 
 // Legacy deep links stay available for tours, bookmarks and contextual actions;
