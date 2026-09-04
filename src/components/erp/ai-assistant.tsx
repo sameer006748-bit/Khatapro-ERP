@@ -141,7 +141,10 @@ export function AiAssistant({ user, activeScreen }: { user: MeUser; activeScreen
         type="button"
         variant="outline"
         onClick={() => { setScreen(normalizeScreen(activeScreen)); setMode('ask'); setField(undefined); setOpen(true) }}
-        className="fixed z-40 right-4 md:right-6 bottom-24 md:bottom-6 h-12 rounded-full border-primary/25 bg-card/95 px-4 text-foreground shadow-[0_10px_30px_rgba(15,23,42,0.12)] backdrop-blur-md hover:border-primary/40 hover:bg-primary/10 hover:text-foreground focus-visible:ring-primary/30"
+        className="fixed z-40 right-4 md:right-6 h-12 rounded-full border-primary/25 bg-card/95 px-4 text-foreground shadow-[0_10px_30px_rgba(15,23,42,0.12)] backdrop-blur-md hover:border-primary/40 hover:bg-primary/10 hover:text-foreground focus-visible:ring-primary/30"
+        // Its slot in the shared bottom stack: above the mobile nav, and clear of
+        // the room every screen reserves for its own primary action.
+        style={{ bottom: 'var(--kp-fab-bottom)' }}
         aria-label="Ask KhataPro AI"
         aria-haspopup="dialog"
       >

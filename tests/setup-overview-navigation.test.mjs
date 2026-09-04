@@ -8,6 +8,7 @@ const shell = await readFile('src/components/erp/dashboard-shell.tsx', 'utf8')
 const mappings = {
   'Business Accounts': 'business-accounts',
   'Chart of Accounts': 'coa',
+  'Account Classification': 'account-classification',
   'Users & Roles': 'users',
   'Roles & Permissions': 'permissions',
   'Audit Log': 'audit',
@@ -24,12 +25,42 @@ test('every Setup target resolves to its existing view component', () => {
   for (const [key, component] of Object.entries({
     'business-accounts': 'BusinessAccountsView',
     coa: 'CoaView',
+    'account-classification': 'AccountClassificationView',
     users: 'UsersView',
     permissions: 'PermissionMatrixView',
     audit: 'AuditLogView',
   })) {
     assert.match(shell, new RegExp(`active === '${key}'\\) return <${component}`))
   }
+})
+
+// Regression: the rendered page used to be re-checked against the sidebar
+// categories, so a registered, permitted page with no navigation slot — every
+// Setup detail page and every legacy voucher deep link — silently fell back to
+// Home even though ?page= kept its value in the URL.
+test('a registered page without a navigation slot renders itself, not Home', () => {
+  const resolved = shell.slice(shell.indexOf('const effectiveActive'), shell.indexOf('function selectItem'))
+  assert.doesNotMatch(resolved, /visibleItems\.some/)
+  assert.doesNotMatch(resolved, /: 'home'/)
+  assert.match(resolved, /: active\s*$/m)
+})
+
+test('Setup detail pages are registered outside the sidebar but stay permission-gated', () => {
+  assert.match(shell, /const SETUP_DETAIL_PAGES[\s\S]*?key: 'account-classification'[\s\S]*?perm: 'can_view_setup'/)
+  const navSource = shell.slice(shell.indexOf('const NAV_CATEGORIES'), shell.indexOf('const INTERNAL_PAGES'))
+  assert.doesNotMatch(navSource, /account-classification/)
+  assert.match(shell, /for \(const item of SETUP_DETAIL_PAGES\) PAGE_REGISTRY\.set\(item\.key, item\)/)
+})
+
+test('a deep link to a page this role cannot see still fails closed to Home', () => {
+  const resolver = shell.slice(shell.indexOf('function resolveInitialPage'), shell.indexOf('export function DashboardShell'))
+  assert.match(resolver, /if \(page && PAGE_REGISTRY\.has\(page\)\)/)
+  assert.match(resolver, /if \(isItemVisible\(user, item\)\) return page/)
+  assert.match(resolver, /return 'home'/)
+  // …and the corrected key is written back to the URL so the address bar cannot
+  // keep advertising a page the role never got.
+  assert.match(shell, /if \(requestedPage && requestedPage !== nextPage\)/)
+  assert.match(shell, /window\.history\.replaceState\(\{\}, '', nextUrl\)/)
 })
 
 test('business-day diagnostics remain owner-only and outside client navigation', () => {

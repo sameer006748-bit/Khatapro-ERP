@@ -132,7 +132,11 @@ test('reports never filter an account out for being system-managed', () => {
 
 test('Expense Batch cascades Category then Subcategory / Expense Account', () => {
   assert.match(expenseView, /Subcategory \/ Expense Account/)
-  assert.match(expenseView, /manualAccountsInCategory\(tree, expenseRootId, line\.categoryId\)/)
+  // The eligible accounts of a category come from the shared helper — the screen
+  // caches its answer per picked category but never derives the list itself.
+  assert.match(expenseView, /manualAccountsInCategory\(tree, expenseRootId, categoryId\)/)
+  assert.match(expenseView, /cascadeByCategory\.get\(line\.categoryId\)/)
+  assert.doesNotMatch(expenseView, /tree\??\.accounts\s*\.?\s*\.filter/)
   assert.match(expenseView, /Select category first…/)
 })
 
@@ -297,6 +301,36 @@ test('the audit log reads the recorded change without showing raw payloads', () 
   // Identifiers are dropped rather than printed.
   assert.doesNotMatch(auditView, /label: '(rootId|parentId|categoryId|depth)'/)
   assert.doesNotMatch(auditView, /JSON\.stringify/)
+})
+
+// ---------------------------------------------------------------------------
+// Loading the tree
+// ---------------------------------------------------------------------------
+
+test('every screen reads the tree under one shared key, so it is fetched once', () => {
+  assert.match(client, /export const CLASSIFICATION_QUERY_KEY = \['account-classification'\] as const/)
+  assert.match(client, /export const CLASSIFICATION_STALE_TIME_MS = 300_000/)
+  for (const [name, view] of [['setup', setupView], ['expense batch', expenseView]] as const) {
+    assert.match(view, /queryKey: CLASSIFICATION_QUERY_KEY/, `${name} must share the classification key`)
+    assert.match(view, /staleTime: CLASSIFICATION_STALE_TIME_MS/, `${name} must share the cache lifetime`)
+    assert.doesNotMatch(view, /queryKey: \['account-classification'\]/, `${name} must not re-declare the key`)
+  }
+  // The chart of accounts is the screen's second load; it is shared on the same
+  // terms so opening Expense Batch does not refetch setup data it already has.
+  assert.match(expenseView, /queryKey: \['coa'\][\s\S]{0,160}staleTime: 300_000/)
+})
+
+test('a classification change invalidates both caches so consumers cannot go stale', () => {
+  assert.match(setupView, /invalidateQueries\(\{ queryKey: CLASSIFICATION_QUERY_KEY \}\)/)
+  assert.match(setupView, /invalidateQueries\(\{ queryKey: \['coa'\] \}\)/)
+})
+
+test('the tree is loaded once per screen — no polling and no refetch loop', () => {
+  for (const [name, view] of [['setup', setupView], ['expense batch', expenseView]] as const) {
+    assert.doesNotMatch(view, /refetchInterval|refetchOnMount: 'always'|setInterval/, `${name} must not poll`)
+    // A refetch only happens on the user's own Retry, never from an effect.
+    assert.doesNotMatch(view, /useEffect\([\s\S]{0,200}refetch\(\)/, `${name} must not refetch from an effect`)
+  }
 })
 
 // ---------------------------------------------------------------------------

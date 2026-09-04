@@ -103,9 +103,14 @@ export function ServiceWorkerRegister() {
 
   return (
     <>
-      {/* Update notification */}
+      {/* Update notification. Both banners take their slot from the shared
+          bottom stack so neither covers the mobile nav, the Ask KhataPro AI
+          button, or a screen's primary action. */}
       {updateAvailable && (
-        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 max-w-sm w-[calc(100%-2rem)]">
+        <div
+          className="fixed left-1/2 -translate-x-1/2 z-50 max-w-sm w-[calc(100%-2rem)]"
+          style={{ bottom: 'var(--kp-banner-bottom)' }}
+        >
           <div className="card-3d p-3 flex items-center gap-3 border-emerald-200 bg-card shadow-lg">
             <div className="size-9 rounded-lg bg-emerald-50 grid place-items-center shrink-0">
               <svg viewBox="0 0 24 24" fill="none" className="size-5 text-emerald-600">
@@ -126,9 +131,12 @@ export function ServiceWorkerRegister() {
         </div>
       )}
 
-      {/* Install prompt */}
+      {/* Install prompt — one slot higher whenever the update banner is up. */}
       {showInstall && (
-        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 max-w-sm w-[calc(100%-2rem)]" style={{ bottom: updateAvailable ? '5rem' : '1rem' }}>
+        <div
+          className="fixed left-1/2 -translate-x-1/2 z-50 max-w-sm w-[calc(100%-2rem)]"
+          style={{ bottom: updateAvailable ? 'var(--kp-banner-stacked-bottom)' : 'var(--kp-banner-bottom)' }}
+        >
           <div className="card-3d p-3 flex items-center gap-3 border-primary/30 bg-card shadow-lg">
             <div className="size-9 rounded-lg bg-primary/10 grid place-items-center shrink-0">
               <svg viewBox="0 0 24 24" fill="none" className="size-5 text-primary">

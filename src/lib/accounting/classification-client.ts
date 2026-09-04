@@ -59,6 +59,17 @@ export const NO_SUBCATEGORIES_MESSAGE = 'No subcategories — you can select a d
 export const NO_MANUAL_ACCOUNTS_MESSAGE = 'No manual expense accounts are available in this category.'
 
 /**
+ * Shared React Query key and cache lifetime for the tree. Every screen reads it
+ * under the same key, so the classification is fetched once and reused instead
+ * of once per screen; the setup screen invalidates that key after each change,
+ * which overrides the lifetime, so a consumer never shows a stale cascade.
+ * Matches the lifetime the chart of accounts already uses — both are setup data
+ * that only changes through an explicit action in this app.
+ */
+export const CLASSIFICATION_QUERY_KEY = ['account-classification'] as const
+export const CLASSIFICATION_STALE_TIME_MS = 300_000
+
+/**
  * Accounts that hang off a fixed root instead of a user category (every account
  * that existed before categories were introduced). They stay selectable through
  * this pseudo-category so no existing posting flow loses its destination.

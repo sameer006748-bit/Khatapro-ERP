@@ -361,15 +361,19 @@ export function DashboardShell({ user, onSignOut }: { user: MeUser; onSignOut: (
   }, [queryString, user, canOpenLedger, canOpenInvoice, canOpenVoucher])
 
   // If ?ledger= or ?invoice= or ?voucher= is in the URL, show that view instead.
+  // `active` needs no further validation: resolveInitialPage already checked it
+  // against PAGE_REGISTRY and this role's permissions, and returned 'home' when
+  // either failed. Re-checking it against the sidebar categories here would drop
+  // every page that deliberately has no navigation slot — the Setup detail pages
+  // and the legacy voucher deep links — back to Home despite being registered
+  // and permitted.
   const effectiveActive = ledgerAccountId && canOpenLedger
     ? 'ledger-drilldown'
     : invoiceId && canOpenInvoice
     ? 'invoice-detail'
     : voucherId && canOpenVoucher
     ? 'voucher-detail'
-    : cats.some((c) => c.visibleItems.some((i) => i.key === active))
-    ? active
-    : 'home'
+    : active
 
   // When active changes, auto-expand its category and sync ?page= to URL.
   function selectItem(key: string) {
@@ -502,8 +506,9 @@ export function DashboardShell({ user, onSignOut }: { user: MeUser; onSignOut: (
           </div>
         </aside>
 
-        {/* Main content */}
-        <main className="flex-1 overflow-y-auto pb-28 md:pb-8">
+        {/* Main content. The reserved bottom room keeps a screen's last primary
+            action clear of the floating bottom stack (nav, AI button, banners). */}
+        <main className="flex-1 overflow-y-auto" style={{ paddingBottom: 'var(--kp-content-bottom)' }}>
           <div className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto">
             {(AI_SCREEN_SET.has(effectiveActive) || getPageHelp(effectiveActive)) && (
               <div className="flex flex-wrap justify-end gap-2 mb-3">
@@ -744,7 +749,7 @@ function MobilePillNav({
     <nav
       className="md:hidden fixed left-1/2 -translate-x-1/2 z-40 glass-pill rounded-full px-3 py-3 flex items-center gap-2"
       style={{
-        bottom: 'calc(1rem + env(safe-area-inset-bottom, 0px))',
+        bottom: 'var(--kp-mobile-nav-bottom)',
         maxWidth: 'calc(100vw - 2rem)',
         minHeight: '64px',
       }}

@@ -23,6 +23,8 @@ import { ApiRequestError } from '@/lib/api-client'
 import { PageHeader } from '@/components/erp/page-header'
 import {
   CLASSIFICATION_LOAD_ERROR,
+  CLASSIFICATION_QUERY_KEY,
+  CLASSIFICATION_STALE_TIME_MS,
   NO_CATEGORIES_MESSAGE,
   type ClassificationNodeDto,
   type ClassificationTree,
@@ -114,8 +116,9 @@ export function AccountClassificationView({ user }: { user: MeUser }) {
   const [classify, setClassify] = useState<{ accountId: string; categoryId: string } | null>(null)
 
   const q = useQuery({
-    queryKey: ['account-classification'],
+    queryKey: CLASSIFICATION_QUERY_KEY,
     queryFn: ({ signal }) => fetchClassificationTree(signal),
+    staleTime: CLASSIFICATION_STALE_TIME_MS,
   })
   const tree = q.data ?? null
   const canManage = tree?.canManage === true
@@ -139,7 +142,7 @@ export function AccountClassificationView({ user }: { user: MeUser }) {
       setDraft(null)
       setClassify(null)
       if (input.scope === 'account' && input.action === 'create') setAccountForm(null)
-      void qc.invalidateQueries({ queryKey: ['account-classification'] })
+      void qc.invalidateQueries({ queryKey: CLASSIFICATION_QUERY_KEY })
       void qc.invalidateQueries({ queryKey: ['coa'] })
     },
     onError: (e: Error) => toast.error(e.message),

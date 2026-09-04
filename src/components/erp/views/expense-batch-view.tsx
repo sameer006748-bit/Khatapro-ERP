@@ -15,6 +15,8 @@ import { apiFetchJson } from '@/lib/api-client'
 import { PageHeader } from '@/components/erp/page-header'
 import {
   CLASSIFICATION_LOAD_ERROR,
+  CLASSIFICATION_QUERY_KEY,
+  CLASSIFICATION_STALE_TIME_MS,
   DIRECT_ACCOUNT_GROUP,
   DIRECT_ACCOUNT_GROUP_LABEL,
   NO_MANUAL_ACCOUNTS_MESSAGE,
@@ -58,17 +60,23 @@ export function ExpenseBatchView({ user }: { user: MeUser }) {
   const [result, setResult] = useState<{ ok: boolean; expenseNo?: string; error?: string } | null>(null)
   const [idempotencyKey, setIdempotencyKey] = useState(() => crypto.randomUUID())
 
-  const coaQ = useQuery<any>({ queryKey: ['coa'], queryFn: ({ signal }) => apiFetchJson<any>('/api/setup/coa', { signal }) })
+  // Both loads are setup data that only changes through an explicit action in
+  // this app, and both are shared with other screens under these keys — so they
+  // are fetched once, in parallel, and reused instead of refetched on every
+  // revisit. The setup screen invalidates both keys after a classification
+  // change, which overrides the cache lifetime.
+  const coaQ = useQuery<any>({ queryKey: ['coa'], queryFn: ({ signal }) => apiFetchJson<any>('/api/setup/coa', { signal }), staleTime: 300_000 })
   // Resolves to null on a deployment without the classification layer; the flat
   // account list below then behaves exactly as it did before this screen learned
   // about categories.
   const classQ = useQuery({
-    queryKey: ['account-classification'],
+    queryKey: CLASSIFICATION_QUERY_KEY,
     queryFn: ({ signal }) => fetchClassificationTree(signal),
+    staleTime: CLASSIFICATION_STALE_TIME_MS,
   })
 
   const accounts: Account[] = useMemo(() => (coaQ.data?.categories ?? []).flatMap((c: any) => c.accounts.filter((a: any) => a.isActive).map((a: any) => ({ id: a.id, code: a.code, name: a.name, categoryType: c.type }))), [coaQ.data])
-  const businessAccounts = accounts.filter(a => a.categoryType === 'Asset')
+  const businessAccounts = useMemo(() => accounts.filter(a => a.categoryType === 'Asset'), [accounts])
   // Fallback list: system-managed accounts are posted by their own workflows, and
   // cash/bank or party accounts are never manual expense destinations.
   const flatExpenseAccounts = useMemo(() => (coaQ.data?.categories ?? [])
@@ -78,14 +86,31 @@ export function ExpenseBatchView({ user }: { user: MeUser }) {
     .sort((a: ManualAccountOption, b: ManualAccountOption) => a.code.localeCompare(b.code)), [coaQ.data])
 
   const tree = classQ.data ?? null
-  const expenseRoot = rootByType(tree, 'Expense')
-  const expenseRootId = expenseRoot?.id ?? null
-  const categories = activeCategories(tree, expenseRootId)
-  const rootAccounts = manualAccountsInRoot(tree, expenseRootId)
-  const directAvailable = hasDirectAccounts(tree, expenseRootId)
+  const expenseRootId = useMemo(() => rootByType(tree, 'Expense')?.id ?? null, [tree])
+  // Each of these walks the whole account list, so they are derived once per
+  // loaded tree instead of on every keystroke in a line.
+  const categories = useMemo(() => activeCategories(tree, expenseRootId), [tree, expenseRootId])
+  const rootAccounts = useMemo(() => manualAccountsInRoot(tree, expenseRootId), [tree, expenseRootId])
+  const directAvailable = useMemo(() => hasDirectAccounts(tree, expenseRootId), [tree, expenseRootId])
   /** Cascade only once the business actually has categories and accounts to cascade to. */
   const cascade = categories.length > 0 && rootAccounts.length > 0
   const expenseAccounts = cascade ? rootAccounts : flatExpenseAccounts
+
+  // The cascade for each category a line has picked. Keyed on the picked
+  // categories alone, so editing a description or an amount no longer re-walks
+  // the account list once per line. The helpers stay the only place the eligible
+  // accounts are decided — this just stops asking them the same question twice.
+  const selectedCategoryKey = lines.map(l => l.categoryId).join('|')
+  const cascadeByCategory = useMemo(() => {
+    const byCategory = new Map<string, { options: ManualAccountOption[]; subcategoryCount: number }>()
+    for (const categoryId of new Set(selectedCategoryKey.split('|').filter(Boolean))) {
+      byCategory.set(categoryId, {
+        options: manualAccountsInCategory(tree, expenseRootId, categoryId),
+        subcategoryCount: activeSubcategories(tree, categoryId).length,
+      })
+    }
+    return byCategory
+  }, [selectedCategoryKey, tree, expenseRootId])
 
   const total = lines.reduce((s, l) => s + (parseMoney(l.amount) ?? 0n), 0n)
 
@@ -182,10 +207,11 @@ export function ExpenseBatchView({ user }: { user: MeUser }) {
   function lineOptions(line: ExpenseLine): { options: ManualAccountOption[]; hint: string | null } {
     if (!cascade) return { options: flatExpenseAccounts, hint: null }
     if (!line.categoryId) return { options: [], hint: null }
-    const options = manualAccountsInCategory(tree, expenseRootId, line.categoryId)
+    const resolved = cascadeByCategory.get(line.categoryId)
+    const options = resolved?.options ?? []
     if (options.length === 0) return { options, hint: NO_MANUAL_ACCOUNTS_MESSAGE }
     const isDirect = line.categoryId === DIRECT_ACCOUNT_GROUP
-    const hint = !isDirect && activeSubcategories(tree, line.categoryId).length === 0
+    const hint = !isDirect && resolved?.subcategoryCount === 0
       ? NO_SUBCATEGORIES_MESSAGE
       : null
     return { options, hint }

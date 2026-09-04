@@ -103,6 +103,35 @@
   --warning-foreground: oklch(0.99 0 0);
 }
 
+/*
+ * Bottom floating layer stack — the single source of truth for every fixed
+ * bottom offset. The mobile nav, the Ask KhataPro AI button and the PWA
+ * banners each own one slot, so none of them lands on another or on a
+ * screen's primary action (e.g. Post Expense Batch). Mobile order from the
+ * screen edge: nav (1rem, 64px tall) → AI button → banner → second banner.
+ * Desktop has no bottom nav, so the stack starts at the viewport edge.
+ * Every slot carries the safe-area inset so a home indicator shifts the whole
+ * stack together instead of closing the gaps between layers.
+ */
+:root {
+  --kp-safe-bottom: env(safe-area-inset-bottom, 0px);
+  --kp-mobile-nav-bottom: calc(1rem + var(--kp-safe-bottom));
+  --kp-fab-bottom: calc(5.75rem + var(--kp-safe-bottom));
+  --kp-banner-bottom: calc(9.5rem + var(--kp-safe-bottom));
+  --kp-banner-stacked-bottom: calc(13.5rem + var(--kp-safe-bottom));
+  /* Room reserved below page content for the tallest persistent layer. */
+  --kp-content-bottom: calc(9.25rem + var(--kp-safe-bottom));
+}
+
+@media (min-width: 768px) {
+  :root {
+    --kp-fab-bottom: calc(1.5rem + var(--kp-safe-bottom));
+    --kp-banner-bottom: calc(1rem + var(--kp-safe-bottom));
+    --kp-banner-stacked-bottom: calc(5rem + var(--kp-safe-bottom));
+    --kp-content-bottom: calc(5.5rem + var(--kp-safe-bottom));
+  }
+}
+
 .dark {
   --radius: 12px;
   --background: oklch(0.16 0 0);
