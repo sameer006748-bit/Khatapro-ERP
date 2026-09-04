@@ -122,7 +122,12 @@ test('delete is guarded by all established history references and otherwise dele
     body.indexOf('delete from public.business_accounts') < body.indexOf('delete from public.accounts'),
     'the linked child must be deleted before its account',
   )
-  assert.match(itemRoute, /Deactivate it instead/)
+  // Both delete branches answer with the one shared, readable refusal.
+  assert.match(itemRoute, /message: ACCOUNT_IN_USE_MESSAGE/)
+  assert.match(
+    fs.readFileSync(path.join(root, 'src/lib/accounting/business-account-types.ts'), 'utf8'),
+    /'This account has transaction history and cannot be deleted\. Deactivate it instead\.'/,
+  )
 })
 
 test('missing 00040 fails with clean UX and no backend terminology in client response', () => {

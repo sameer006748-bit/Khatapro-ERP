@@ -22,7 +22,8 @@ import { z } from 'zod'
 import { db } from '@/lib/db'
 import { authOptions } from '@/lib/auth/authOptions'
 import { loadSessionUser, requirePermission, writeAudit } from '@/lib/auth/permissions'
-import { ACCEPTED_BUSINESS_ACCOUNT_TYPES } from '@/lib/accounting/business-account-types'
+import { ACCEPTED_BUSINESS_ACCOUNT_TYPES, ACCOUNT_IN_USE_MESSAGE } from '@/lib/accounting/business-account-types'
+import { deriveMoneyIdentity } from '@/lib/accounting/money-account-identity'
 import { isSupabaseConfigured } from '@/lib/supabase/config'
 import { usesLegacyTransactionSchema } from '@/lib/identity/legacy-bridge'
 import {
@@ -150,6 +151,13 @@ async function auditMoneyAccountUpdate(input: {
     entityId: input.businessAccountId,
     details: {
       name: input.after.name,
+      // The identity the account reads by, alongside the ledger code it posts
+      // to — the two references an owner recognises the account from.
+      identity: deriveMoneyIdentity({
+        name: input.after.name,
+        type: input.after.type,
+        ledgerCode: input.after.code,
+      }),
       ledgerCode: input.after.code,
       ...(input.before ? { before: input.before } : {}),
       after: input.after,
@@ -294,7 +302,7 @@ export async function DELETE(_req: Request, ctx: Ctx) {
         return NextResponse.json(
           {
             error: 'ACCOUNT_IN_USE',
-            message: 'This account is used by posted transactions and cannot be deleted. Deactivate it instead — it will stop appearing on new sales while old invoices stay readable.',
+            message: ACCOUNT_IN_USE_MESSAGE,
             references: result.references,
           },
           { status: 409 },
@@ -325,8 +333,7 @@ export async function DELETE(_req: Request, ctx: Ctx) {
     return NextResponse.json(
       {
         error: 'ACCOUNT_IN_USE',
-        message:
-          'This account is used by posted transactions and cannot be deleted. Deactivate it instead — it will stop appearing on new sales while old invoices stay readable.',
+        message: ACCOUNT_IN_USE_MESSAGE,
         references: { paymentAllocations, voucherLines, purchasePayments },
       },
       { status: 409 },
@@ -346,6 +353,11 @@ export async function DELETE(_req: Request, ctx: Ctx) {
     entityId: existing.id,
     details: {
       name: existing.name,
+      identity: deriveMoneyIdentity({
+        name: existing.name,
+        type: existing.type,
+        ledgerCode: existing.account.code,
+      }),
       ledgerCode: existing.account.code,
       before: {
         code: existing.account.code,

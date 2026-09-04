@@ -33,7 +33,10 @@ test('business accounts preserve existing management paths with finance styling'
   assert.match(businessAccounts, /method: 'POST'/)
   assert.match(businessAccounts, /method: 'PATCH'/)
   assert.match(businessAccounts, /method: 'DELETE'/)
-  assert.match(businessAccounts, /AccountTypeLabel/)
+  // The money type is now the section heading each account sits under, so the
+  // per-row type label is gone; the row leads with its readable identity.
+  assert.match(businessAccounts, /<AccountTypeIcon type=\{group\.type\}/)
+  assert.match(businessAccounts, /<IdentityChip identity=\{row\.identity\} \/>/)
   assert.match(businessAccounts, /Active/)
   assert.match(businessAccounts, /Inactive/)
   assert.match(businessAccounts, /New business account/)

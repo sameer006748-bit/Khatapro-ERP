@@ -18,6 +18,14 @@
 /** The only types offered when creating a money account. */
 export const BUSINESS_ACCOUNT_TYPES = ['Cash', 'Bank'] as const
 
+/**
+ * Why a delete was refused. Accounting history is never removed, so an account
+ * money has moved through can only be deactivated. One wording, used by both
+ * data paths, so the owner reads the same sentence everywhere.
+ */
+export const ACCOUNT_IN_USE_MESSAGE =
+  'This account has transaction history and cannot be deleted. Deactivate it instead.'
+
 export type BusinessAccountType = (typeof BUSINESS_ACCOUNT_TYPES)[number]
 
 /**

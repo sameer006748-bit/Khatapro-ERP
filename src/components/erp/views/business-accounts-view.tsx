@@ -8,7 +8,7 @@ import { Label } from '@/components/ui/label'
 import { formatMoney, formatTableDate } from '@/lib/format'
 import type { MeUser } from '@/components/erp/erp-app'
 import { toast } from 'sonner'
-import { Wallet, WalletCards, Banknote, Landmark, Smartphone, Plus, X, ArrowRight, Pencil, Power, Trash2 } from 'lucide-react'
+import { Wallet, WalletCards, Banknote, Landmark, Smartphone, Plus, X, ArrowRight, Pencil, Power, Trash2, Link2 } from 'lucide-react'
 import {
   BUSINESS_ACCOUNT_TYPES,
   needsMoneyTypeReview,
@@ -19,13 +19,22 @@ import { PageHeader } from '@/components/erp/page-header'
 
 type BusinessAccountRow = {
   id: string
+  /**
+   * False for a money account that exists only in the chart of accounts — the
+   * accounts seeded with the business (Cash, Petty Cash, Bank, …). Such a row is
+   * read-only until it is brought under management, which reuses its ledger
+   * account and leaves its code, balance and history untouched.
+   */
+  linked: boolean
+  /** Readable business identity: CASH, PETTY-CASH, BANK-UBL. Never a number. */
+  identity: string
   name: string
   type: string
   accountHolder: string | null
   bankName: string | null
   accountNumber: string | null
   isActive: boolean
-  createdAt: string
+  createdAt: string | null
   ledger: {
     id: string
     code: string
@@ -57,8 +66,55 @@ function AccountTypeIcon({ type, className = 'size-3 text-muted-foreground' }: {
   return <Wallet className={className} aria-hidden />
 }
 
-function AccountTypeLabel({ type }: { type: string }) {
-  return <span className="inline-flex items-center gap-1.5 rounded border border-border bg-muted/30 px-2 py-1 text-[11px] text-foreground"><AccountTypeIcon type={type} />{type}</span>
+/**
+ * How the business refers to this account. Readable words, never a number and
+ * never an internal id, so it can be said out loud and typed by hand.
+ */
+function IdentityChip({ identity }: { identity: string }) {
+  if (!identity) return null
+  return (
+    <span
+      className="inline-flex rounded border border-primary/30 bg-primary/5 px-1.5 py-0.5 text-[10px] font-semibold tracking-wide text-primary"
+      title={`Identity: ${identity}`}
+    >
+      {identity}
+    </span>
+  )
+}
+
+function StatusBadge({ isActive }: { isActive: boolean }) {
+  return (
+    <span className={`inline-flex rounded border px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide ${isActive ? 'border-emerald-700/20 bg-emerald-700/5 text-emerald-700' : 'border-destructive/30 bg-destructive/5 text-destructive'}`}>
+      {isActive ? 'Active' : 'Inactive'}
+    </span>
+  )
+}
+
+/** An account that is still only a chart entry, with the one action it offers. */
+function UnmanagedNote({ canManage, busy, onEnable }: {
+  canManage: boolean
+  busy: boolean
+  onEnable: () => void
+}) {
+  return (
+    <div className="mt-1.5 space-y-1">
+      <span className="inline-flex rounded border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide text-amber-800">
+        From your chart of accounts
+      </span>
+      {canManage && (
+        <div>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={onEnable}
+            className="inline-flex items-center gap-1 rounded border border-border bg-background px-1.5 py-0.5 text-[10px] font-medium text-foreground hover:bg-accent disabled:opacity-50"
+          >
+            <Link2 className="size-3" /> Enable management
+          </button>
+        </div>
+      )}
+    </div>
+  )
 }
 
 /**
@@ -120,6 +176,27 @@ function TypeReview({ row, canManage, busy, onMove }: {
       )}
     </div>
   )
+}
+
+/**
+ * Everything a row can do, in one bag. The table and the card list are two
+ * renderings of the same list, so they share one set of handlers rather than
+ * each wiring its own — a row then behaves identically on desktop and mobile.
+ */
+type RowControls = {
+  canManage: boolean
+  editingId: string | null
+  /** An update or delete is in flight; row actions are disabled meanwhile. */
+  rowBusy: boolean
+  linkBusy: boolean
+  saving: boolean
+  onEdit: (row: BusinessAccountRow) => void
+  onToggleActive: (row: BusinessAccountRow) => void
+  onDelete: (row: BusinessAccountRow) => void
+  onMoveType: (row: BusinessAccountRow, type: BusinessAccountType) => void
+  onEnable: (row: BusinessAccountRow) => void
+  onCancelEdit: () => void
+  onSubmitEdit: (row: BusinessAccountRow, patch: Record<string, unknown>) => void
 }
 
 export function BusinessAccountsView({ user }: { user: MeUser }) {
@@ -208,9 +285,38 @@ export function BusinessAccountsView({ user }: { user: MeUser }) {
     onError: (e: Error) => toast.error(e.message),
   })
 
+  /**
+   * Bring a chart-only money account under management. The ledger account it
+   * already posts to is reused, so its code, its balance and every posted entry
+   * stay as they are — only the ability to rename, move and deactivate is added.
+   */
+  const linkMut = useMutation({
+    mutationFn: async (row: BusinessAccountRow) => {
+      const r = await fetch('/api/setup/business-accounts/link', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          ledgerAccountId: row.ledger.id,
+          type: normalizeBusinessAccountType(row.type),
+        }),
+      })
+      const j = await r.json().catch(() => ({}))
+      if (!r.ok) throw new Error(j?.message ?? j?.error ?? 'LINK_FAILED')
+      return j
+    },
+    onSuccess: (j) => {
+      toast.success(j?.alreadyLinked
+        ? 'This account was already editable.'
+        : 'Account is now editable. Its ledger code, balance and history are unchanged.')
+      void qc.invalidateQueries({ queryKey: ['business-accounts'] })
+      void qc.invalidateQueries({ queryKey: ['coa'] })
+    },
+    onError: (e: Error) => toast.error(e.message),
+  })
+
   function askDelete(row: BusinessAccountRow) {
     const ok = window.confirm(
-      `Delete "${row.name}"? This also removes its ledger account ${row.ledger.code}. Accounts used by posted transactions cannot be deleted — deactivate those instead.`,
+      `Delete "${row.name}" (${row.identity})? This also removes its ledger account ${row.ledger.code}. An account with transaction history cannot be deleted — deactivate that one instead.`,
     )
     if (ok) deleteMut.mutate(row.id)
   }
@@ -223,20 +329,41 @@ export function BusinessAccountsView({ user }: { user: MeUser }) {
     if (ok) updateMut.mutate({ id: row.id, patch: { type } })
   }
 
+  const rows = q.data?.rows ?? []
   // Cash held and money at the bank, the two totals an owner reads first.
   // Inactive accounts are counted separately but still carry their balance.
-  const summary = useMemo(() => {
-    const rows = q.data?.rows ?? []
-    return BUSINESS_ACCOUNT_TYPES.map((type) => {
-      const group = rows.filter((row) => normalizeBusinessAccountType(row.type) === type)
-      return {
-        type,
-        accounts: group.length,
-        active: group.filter((row) => row.isActive).length,
-        balancePaisas: group.reduce((total, row) => total + BigInt(row.ledger.balancePaisas), 0n),
-      }
-    })
-  }, [q.data?.rows])
+  const summary = useMemo(() => BUSINESS_ACCOUNT_TYPES.map((type) => {
+    const group = rows.filter((row) => normalizeBusinessAccountType(row.type) === type)
+    return {
+      type,
+      accounts: group.length,
+      active: group.filter((row) => row.isActive).length,
+      balancePaisas: group.reduce((total, row) => total + BigInt(row.ledger.balancePaisas), 0n),
+    }
+  }), [rows])
+
+  // The list is grouped by the only two money types there are. Everything a
+  // business keeps money in sits under one of them, old accounts included.
+  const groups = useMemo(() => BUSINESS_ACCOUNT_TYPES.map((type) => ({
+    type,
+    rows: rows.filter((row) => normalizeBusinessAccountType(row.type) === type),
+  })).filter((group) => group.rows.length > 0), [rows])
+  const unmanagedCount = rows.filter((row) => !row.linked).length
+
+  const controls: RowControls = {
+    canManage,
+    editingId,
+    rowBusy: updateMut.isPending || deleteMut.isPending,
+    linkBusy: linkMut.isPending,
+    saving: updateMut.isPending,
+    onEdit: (row) => setEditingId(editingId === row.id ? null : row.id),
+    onToggleActive: (row) => updateMut.mutate({ id: row.id, patch: { isActive: !row.isActive } }),
+    onDelete: askDelete,
+    onMoveType: askMoveType,
+    onEnable: (row) => linkMut.mutate(row),
+    onCancelEdit: () => setEditingId(null),
+    onSubmitEdit: (row, patch) => updateMut.mutate({ id: row.id, patch }),
+  }
 
   return (
     <div className="space-y-5">
@@ -290,199 +417,37 @@ export function BusinessAccountsView({ user }: { user: MeUser }) {
         </div>
       )}
 
-      {/* Desktop: table. Mobile: cards. */}
+      {/* One section per money type — Cash first, then Bank. */}
       {q.isLoading ? (
         <div className="rounded-lg border border-border bg-card p-8 text-sm text-muted-foreground">Loading…</div>
-      ) : q.data?.rows.length ? (
-        <>
-          {/* Desktop table */}
-          <div className="hidden overflow-hidden rounded-lg border border-border bg-card md:block">
-            <div className="px-5 py-3.5 border-b border-border flex items-center justify-between">
-              <h2 className="text-sm font-semibold text-foreground">Accounts</h2>
-              <span className="text-xs text-muted-foreground" data-num>
-                {q.data.rows.length} total
-              </span>
+      ) : groups.length ? (
+        <div className="space-y-5">
+          {unmanagedCount > 0 && (
+            <div className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-xs text-amber-900">
+              <span className="font-medium">
+                {unmanagedCount} account{unmanagedCount === 1 ? '' : 's'} below came with your chart of
+                accounts and {unmanagedCount === 1 ? 'is' : 'are'} not editable yet.
+              </span>{' '}
+              Choose “Enable management” to rename one, move it between Cash and Bank, or deactivate it.
+              Its ledger code, its balance and its posted history stay exactly as they are.
             </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-border text-[11px] uppercase tracking-wider text-muted-foreground bg-muted/40">
-                    <th className="text-left p-3.5 font-medium">Name</th>
-                    <th className="text-left p-3.5 font-medium">Type</th>
-                    <th className="text-left p-3.5 font-medium">Holder / Bank / A/c#</th>
-                    <th className="text-left p-3.5 font-medium">Ledger</th>
-                    <th className="text-right p-3.5 font-medium">Balance</th>
-                    <th className="text-left p-3.5 font-medium">Created</th>
-                    {canManage && <th className="text-right p-3.5 font-medium">Actions</th>}
-                  </tr>
-                </thead>
-                <tbody>
-                  {q.data.rows.map((r) => (
-                    <Fragment key={r.id}>
-                    <tr
-                      className="border-b border-border/60 last:border-0 hover:bg-accent/30 transition-colors"
-                    >
-                      <td className="p-3.5">
-                        <div className="font-medium text-foreground">{r.name}</div>
-                        <span className={`mt-1 inline-flex rounded border px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide ${r.isActive ? 'border-emerald-700/20 bg-emerald-700/5 text-emerald-700' : 'border-destructive/30 bg-destructive/5 text-destructive'}`}>{r.isActive ? 'Active' : 'Inactive'}</span>
-                      </td>
-                      <td className="p-3.5">
-                        <AccountTypeLabel type={r.type} />
-                        <TypeReview
-                          row={r}
-                          canManage={canManage}
-                          busy={updateMut.isPending}
-                          onMove={(type) => askMoveType(r, type)}
-                        />
-                      </td>
-                      <td className="p-3.5 text-xs text-muted-foreground">
-                        <div>{r.accountHolder ?? '—'}</div>
-                        <div>{r.bankName ?? ''}</div>
-                        <div data-num>{r.accountNumber ?? ''}</div>
-                      </td>
-                      <td className="p-3.5 text-xs">
-                        <div className="font-medium text-foreground" data-num>
-                          {r.ledger.code}
-                        </div>
-                        <div className="text-muted-foreground">{r.ledger.name}</div>
-                        <div className="text-muted-foreground">{r.ledger.category}</div>
-                      </td>
-                      <td className={`p-3.5 text-right font-semibold ${BigInt(r.ledger.balancePaisas) < 0n ? 'text-destructive' : 'text-foreground'}`} data-num>
-                        {formatMoney(BigInt(r.ledger.balancePaisas))}
-                      </td>
-                      <td className="p-3.5 text-xs text-muted-foreground" data-num>
-                        {formatTableDate(r.createdAt)}
-                      </td>
-                      {canManage && (
-                        <td className="p-3.5">
-                          <div className="flex items-center justify-end gap-1">
-                            <RowActions
-                              row={r}
-                              editing={editingId === r.id}
-                              busy={updateMut.isPending || deleteMut.isPending}
-                              onEdit={() => setEditingId(editingId === r.id ? null : r.id)}
-                              onToggleActive={() =>
-                                updateMut.mutate({ id: r.id, patch: { isActive: !r.isActive } })
-                              }
-                              onDelete={() => askDelete(r)}
-                            />
-                          </div>
-                        </td>
-                      )}
-                    </tr>
-                    {canManage && editingId === r.id && (
-                      <tr className="border-b border-border/60 bg-muted/30">
-                        <td colSpan={7} className="p-3.5">
-                          <AccountForm
-                            initial={r}
-                            submitting={updateMut.isPending}
-                            submitLabel="Save changes"
-                            onCancel={() => setEditingId(null)}
-                            onSubmit={(v) => updateMut.mutate({ id: r.id, patch: v })}
-                          />
-                        </td>
-                      </tr>
-                    )}
-                    </Fragment>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          {/* Mobile cards */}
-          <div className="md:hidden space-y-3">
-            {q.data.rows.map((r) => (
-              <div key={r.id} className={`rounded-lg border bg-card p-4 ${r.isActive ? 'border-border' : 'border-destructive/30'}`}>
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className="grid size-10 shrink-0 place-items-center rounded-md border border-border bg-muted/35">
-                      <AccountTypeIcon type={r.type} className="size-5 text-foreground" />
-                    </div>
-                    <div className="min-w-0">
-                      <div className="font-medium text-foreground truncate">{r.name}</div>
-                      <div className="mt-1"><AccountTypeLabel type={r.type} /></div>
-                      <TypeReview
-                        row={r}
-                        canManage={canManage}
-                        busy={updateMut.isPending}
-                        onMove={(type) => askMoveType(r, type)}
-                      />
-                    </div>
-                  </div>
-                  <div className="text-right shrink-0">
-                    <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                      Balance
-                    </div>
-                    <div className={`font-semibold ${BigInt(r.ledger.balancePaisas) < 0n ? 'text-destructive' : 'text-foreground'}`} data-num>
-                      {formatMoney(BigInt(r.ledger.balancePaisas))}
-                    </div>
-                  </div>
-                </div>
-                <div className="mt-3 pt-3 border-t border-border grid grid-cols-2 gap-3 text-xs">
-                  <div>
-                    <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                      Ledger
-                    </div>
-                    <div className="text-foreground font-medium" data-num>
-                      {r.ledger.code} · {r.ledger.name}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                      Created
-                    </div>
-                    <div className="text-foreground" data-num>
-                      {formatTableDate(r.createdAt)}
-                    </div>
-                  </div>
-                  {r.accountNumber && (
-                    <div className="col-span-2">
-                      <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                        A/c #
-                      </div>
-                      <div className="text-foreground" data-num>
-                        {r.accountNumber}
-                      </div>
-                    </div>
-                  )}
-                </div>
-                {canManage && (
-                  <div className="mt-3 pt-3 border-t border-border flex items-center justify-between gap-2">
-                    {!r.isActive ? (
-                      <span className="rounded border border-destructive/30 bg-destructive/5 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide text-destructive">Inactive</span>
-                    ) : (
-                      <span className="rounded border border-emerald-700/20 bg-emerald-700/5 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide text-emerald-700">Active</span>
-                    )}
-                    <div className="flex items-center gap-1">
-                      <RowActions
-                        row={r}
-                        editing={editingId === r.id}
-                        busy={updateMut.isPending || deleteMut.isPending}
-                        onEdit={() => setEditingId(editingId === r.id ? null : r.id)}
-                        onToggleActive={() =>
-                          updateMut.mutate({ id: r.id, patch: { isActive: !r.isActive } })
-                        }
-                        onDelete={() => askDelete(r)}
-                      />
-                    </div>
-                  </div>
-                )}
-                {canManage && editingId === r.id && (
-                  <div className="mt-3 pt-3 border-t border-border">
-                    <AccountForm
-                      initial={r}
-                      submitting={updateMut.isPending}
-                      submitLabel="Save changes"
-                      onCancel={() => setEditingId(null)}
-                      onSubmit={(v) => updateMut.mutate({ id: r.id, patch: v })}
-                    />
-                  </div>
-                )}
+          )}
+          {groups.map((group) => (
+            <section key={group.type} className="overflow-hidden rounded-lg border border-border bg-card">
+              <div className="flex items-center justify-between gap-3 border-b border-border px-5 py-3.5">
+                <h2 className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                  <AccountTypeIcon type={group.type} className="size-4 text-foreground" />
+                  {group.type}
+                </h2>
+                <span className="text-xs text-muted-foreground" data-num>
+                  {group.rows.length} account{group.rows.length === 1 ? '' : 's'}
+                </span>
               </div>
-            ))}
-          </div>
-        </>
+              <GroupTable rows={group.rows} controls={controls} />
+              <GroupCards rows={group.rows} controls={controls} />
+            </section>
+          ))}
+        </div>
       ) : (
         <div className="rounded-lg border border-border bg-card p-8 text-center">
           <div className="mx-auto mb-3 grid size-12 place-items-center rounded-md border border-border bg-muted/35">
@@ -503,6 +468,191 @@ export function BusinessAccountsView({ user }: { user: MeUser }) {
           )}
         </div>
       )}
+    </div>
+  )
+}
+
+/**
+ * One money type's accounts as a table (desktop). The section header already
+ * says which type these are, so there is no type column — what each row must
+ * show is the name, the identity the business refers to it by, its ledger code
+ * as the secondary accounting reference, its balance and its status.
+ */
+function GroupTable({ rows, controls }: { rows: BusinessAccountRow[]; controls: RowControls }) {
+  return (
+    <div className="hidden overflow-x-auto md:block">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="border-b border-border bg-muted/40 text-[11px] uppercase tracking-wider text-muted-foreground">
+            <th className="p-3.5 text-left font-medium">Account</th>
+            <th className="p-3.5 text-left font-medium">Holder / Bank / A/c#</th>
+            <th className="p-3.5 text-left font-medium">Ledger</th>
+            <th className="p-3.5 text-right font-medium">Balance</th>
+            <th className="p-3.5 text-left font-medium">Status</th>
+            {controls.canManage && <th className="p-3.5 text-right font-medium">Actions</th>}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <Fragment key={row.id}>
+              <tr className="border-b border-border/60 transition-colors last:border-0 hover:bg-accent/30">
+                <td className="p-3.5">
+                  <div className="font-medium text-foreground">{row.name}</div>
+                  <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                    <IdentityChip identity={row.identity} />
+                  </div>
+                  {row.linked ? (
+                    <TypeReview
+                      row={row}
+                      canManage={controls.canManage}
+                      busy={controls.rowBusy}
+                      onMove={(type) => controls.onMoveType(row, type)}
+                    />
+                  ) : (
+                    <UnmanagedNote
+                      canManage={controls.canManage}
+                      busy={controls.linkBusy}
+                      onEnable={() => controls.onEnable(row)}
+                    />
+                  )}
+                </td>
+                <td className="p-3.5 text-xs text-muted-foreground">
+                  <div>{row.accountHolder ?? '—'}</div>
+                  <div>{row.bankName ?? ''}</div>
+                  <div data-num>{row.accountNumber ?? ''}</div>
+                </td>
+                <td className="p-3.5 text-xs">
+                  <div className="font-medium text-foreground" data-num>{row.ledger.code}</div>
+                  <div className="text-muted-foreground">{row.ledger.name}</div>
+                  <div className="text-muted-foreground">{row.ledger.category}</div>
+                </td>
+                <td className={`p-3.5 text-right font-semibold ${BigInt(row.ledger.balancePaisas) < 0n ? 'text-destructive' : 'text-foreground'}`} data-num>
+                  {formatMoney(BigInt(row.ledger.balancePaisas))}
+                </td>
+                <td className="p-3.5">
+                  <StatusBadge isActive={row.isActive} />
+                </td>
+                {controls.canManage && (
+                  <td className="p-3.5">
+                    <div className="flex items-center justify-end gap-1">
+                      {row.linked && <ManagedRowActions row={row} controls={controls} />}
+                    </div>
+                  </td>
+                )}
+              </tr>
+              {controls.canManage && row.linked && controls.editingId === row.id && (
+                <tr className="border-b border-border/60 bg-muted/30">
+                  <td colSpan={controls.canManage ? 6 : 5} className="p-3.5">
+                    <AccountForm
+                      initial={row}
+                      submitting={controls.saving}
+                      submitLabel="Save changes"
+                      onCancel={controls.onCancelEdit}
+                      onSubmit={(v) => controls.onSubmitEdit(row, v)}
+                    />
+                  </td>
+                </tr>
+              )}
+            </Fragment>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+/** The actions a managed row offers, bound to the shared handlers. */
+function ManagedRowActions({ row, controls }: { row: BusinessAccountRow; controls: RowControls }) {
+  return (
+    <RowActions
+      row={row}
+      editing={controls.editingId === row.id}
+      busy={controls.rowBusy}
+      onEdit={() => controls.onEdit(row)}
+      onToggleActive={() => controls.onToggleActive(row)}
+      onDelete={() => controls.onDelete(row)}
+    />
+  )
+}
+
+/** The same accounts as stacked cards (mobile). */
+function GroupCards({ rows, controls }: { rows: BusinessAccountRow[]; controls: RowControls }) {
+  return (
+    <div className="divide-y divide-border md:hidden">
+      {rows.map((row) => (
+        <div key={row.id} className="p-4">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex min-w-0 items-center gap-3">
+              <div className="grid size-10 shrink-0 place-items-center rounded-md border border-border bg-muted/35">
+                <AccountTypeIcon type={row.type} className="size-5 text-foreground" />
+              </div>
+              <div className="min-w-0">
+                <div className="truncate font-medium text-foreground">{row.name}</div>
+                <div className="mt-1"><IdentityChip identity={row.identity} /></div>
+                {row.linked ? (
+                  <TypeReview
+                    row={row}
+                    canManage={controls.canManage}
+                    busy={controls.rowBusy}
+                    onMove={(type) => controls.onMoveType(row, type)}
+                  />
+                ) : (
+                  <UnmanagedNote
+                    canManage={controls.canManage}
+                    busy={controls.linkBusy}
+                    onEnable={() => controls.onEnable(row)}
+                  />
+                )}
+              </div>
+            </div>
+            <div className="shrink-0 text-right">
+              <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Balance</div>
+              <div className={`font-semibold ${BigInt(row.ledger.balancePaisas) < 0n ? 'text-destructive' : 'text-foreground'}`} data-num>
+                {formatMoney(BigInt(row.ledger.balancePaisas))}
+              </div>
+            </div>
+          </div>
+          <div className="mt-3 grid grid-cols-2 gap-3 border-t border-border pt-3 text-xs">
+            <div>
+              <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Ledger</div>
+              <div className="font-medium text-foreground" data-num>
+                {row.ledger.code} · {row.ledger.name}
+              </div>
+            </div>
+            {row.createdAt && (
+              <div>
+                <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Added</div>
+                <div className="text-foreground" data-num>{formatTableDate(row.createdAt)}</div>
+              </div>
+            )}
+            {row.accountNumber && (
+              <div className="col-span-2">
+                <div className="text-[10px] uppercase tracking-wider text-muted-foreground">A/c #</div>
+                <div className="text-foreground" data-num>{row.accountNumber}</div>
+              </div>
+            )}
+          </div>
+          <div className="mt-3 flex items-center justify-between gap-2 border-t border-border pt-3">
+            <StatusBadge isActive={row.isActive} />
+            {controls.canManage && row.linked && (
+              <div className="flex items-center gap-1">
+                <ManagedRowActions row={row} controls={controls} />
+              </div>
+            )}
+          </div>
+          {controls.canManage && row.linked && controls.editingId === row.id && (
+            <div className="mt-3 border-t border-border pt-3">
+              <AccountForm
+                initial={row}
+                submitting={controls.saving}
+                submitLabel="Save changes"
+                onCancel={controls.onCancelEdit}
+                onSubmit={(v) => controls.onSubmitEdit(row, v)}
+              />
+            </div>
+          )}
+        </div>
+      ))}
     </div>
   )
 }

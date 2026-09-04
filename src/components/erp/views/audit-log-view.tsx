@@ -56,6 +56,7 @@ const ACTION_LABELS: Record<string, string> = {
   MONEY_ACCOUNT_REACTIVATE: 'Money account reactivated',
   MONEY_ACCOUNT_UPDATE: 'Money account details updated',
   MONEY_ACCOUNT_DELETE: 'Money account deleted',
+  MONEY_ACCOUNT_LINK: 'Money account from the chart made manageable',
   EXPENSE_POSTED_WITH_CATEGORY: 'Expense posted using category',
 }
 
@@ -126,6 +127,12 @@ function snapshotChanges(row: Row) {
       ? [{ key: 'code', label: 'Account code' }, { key: 'name', label: 'Name' }, { key: 'type', label: 'Money type' }, { key: 'isActive', label: 'Status' }]
       : [{ key: 'name', label: 'Name' }, { key: 'isActive', label: 'Status' }]
   const changes: Array<{ label: string; value: string }> = []
+  // A money account is referred to by its readable identity, so that leads —
+  // the numeric account code follows as the accounting reference.
+  if (row.entity === 'business_account') {
+    const identity = readableValue(row.details?.identity, 'identity')
+    if (identity) changes.push({ label: 'Identity', value: identity })
+  }
   for (const field of fields) {
     const from = readableValue(before?.[field.key], field.key)
     const to = readableValue(after?.[field.key], field.key)

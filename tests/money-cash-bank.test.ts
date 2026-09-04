@@ -11,6 +11,7 @@ import test from 'node:test'
 import { readFile } from 'node:fs/promises'
 import {
   ACCEPTED_BUSINESS_ACCOUNT_TYPES,
+  ACCOUNT_IN_USE_MESSAGE,
   BUSINESS_ACCOUNT_TYPES,
   LEGACY_BUSINESS_ACCOUNT_TYPES,
   isAcceptedBusinessAccountType,
@@ -138,7 +139,7 @@ test('managing an account stays behind the permission the server enforces', () =
 
 test('rename, deactivate and reactivate keep working and follow through to the ledger', () => {
   assert.match(businessAccountsView, /method: 'PATCH'/)
-  assert.match(businessAccountsView, /isActive: !r\.isActive/)
+  assert.match(businessAccountsView, /patch: \{ isActive: !row\.isActive \}/)
   assert.match(itemRoute, /tx\.account\.update/)
   assert.match(itemRoute, /patch\.name !== undefined \? \{ name: patch\.name \} : \{\}/)
 })
@@ -150,7 +151,9 @@ test('an account money has moved through cannot be deleted, only deactivated', (
   assert.match(itemRoute, /purchasePayment\.count/)
   assert.match(itemRoute, /references > 0 \|\| existing\.account\.balanceCache !== 0n/)
   assert.match(itemRoute, /ACCOUNT_IN_USE/)
-  assert.match(itemRoute, /Deactivate it instead/)
+  // One wording, shared by both data paths, in the words the owner reads.
+  assert.equal(ACCOUNT_IN_USE_MESSAGE, 'This account has transaction history and cannot be deleted. Deactivate it instead.')
+  assert.match(itemRoute, /message: ACCOUNT_IN_USE_MESSAGE/)
   assert.match(itemRoute, /status: 409/)
   // Unreferenced accounts still delete, together with their linked ledger row.
   assert.match(itemRoute, /tx\.businessAccount\.delete/)

@@ -38,7 +38,8 @@ test('Expense Batch accepts legacy text identities but enforces account roles se
   assert.match(expenseRoute, /paymentAccount\.category\.type !== 'Asset'/)
   assert.match(expenseRoute, /account\.category\.type !== 'Expense'/)
   assert.match(expenseRoute, /requirePermission\(loaded, 'can_create_expense_batch'\)/)
-  assert.match(expenseView, /No eligible payment accounts configured/)
+  // The picker is now money accounts only, so the empty state says which kind.
+  assert.match(expenseView, /'No active Cash or Bank account to pay from\.'/)
   assert.match(expenseView, /No eligible expense accounts configured/)
 })
 

@@ -277,7 +277,7 @@ test('owner can create, edit, activate/deactivate and is blocked from deleting u
   assert.doesNotMatch(accountsView, /const TYPES =/)
   assert.match(accountsView, /method: 'PATCH'/)
   assert.match(accountsView, /method: 'DELETE'/)
-  assert.match(accountsView, /isActive: !r\.isActive/)
+  assert.match(accountsView, /patch: \{ isActive: !row\.isActive \}/)
   // Deactivation must follow through to the ledger account the sale screens read.
   assert.match(accountItemRoute, /tx\.account\.update/)
   assert.match(accountItemRoute, /ACCOUNT_IN_USE/)

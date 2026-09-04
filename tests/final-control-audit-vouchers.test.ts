@@ -29,9 +29,11 @@ test('product edits and business-account deletion retain safe audit evidence', (
   assert.match(productRoute, /action = parsed\.data\.isActive === false \? 'DEACTIVATE'/)
   assert.match(productRoute, /writeAudit/)
   assert.match(businessAccountRoute, /ACCOUNT_IN_USE/)
-  // The deleted account's name, code, type and status survive as a snapshot.
+  // The deleted account's name, readable identity, code, type and status survive
+  // as a snapshot; the ledger code stays the secondary accounting reference.
   assert.match(businessAccountRoute, /action: 'MONEY_ACCOUNT_DELETE'/)
-  assert.match(businessAccountRoute, /name: existing\.name,\s*ledgerCode: existing\.account\.code,/)
+  assert.match(businessAccountRoute, /name: existing\.name,\s*identity: deriveMoneyIdentity\(\{/)
+  assert.match(businessAccountRoute, /\}\),\s*ledgerCode: existing\.account\.code,/)
   assert.match(businessAccountRoute, /before: \{\s*code: existing\.account\.code,\s*name: existing\.name,\s*type: existing\.type,/)
-  assert.match(businessAccountRoute, /Deactivate it instead/)
+  assert.match(businessAccountRoute, /message: ACCOUNT_IN_USE_MESSAGE/)
 })

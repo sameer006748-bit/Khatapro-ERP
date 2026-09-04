@@ -63,7 +63,7 @@ export function AccountsView({ user }: { user: MeUser }) {
   // sale screen already caches this exact list under the same key, so reading it
   // here shares that cache instead of adding a request, and nothing new is put
   // on screen — only the Cash/Bank heading each account sits under.
-  const moneyAccountsQ = useQuery<{ rows?: Array<{ type: string; ledger?: { code?: string | null } | null }> }>({
+  const moneyAccountsQ = useQuery<{ rows?: Array<{ type: string; identity?: string | null; ledger?: { code?: string | null } | null }> }>({
     queryKey: ['business-accounts'],
     queryFn: ({ signal }) => apiFetchJson('/api/setup/business-accounts', { signal }),
     staleTime: 300_000,
@@ -74,6 +74,18 @@ export function AccountsView({ user }: { user: MeUser }) {
     for (const row of moneyAccountsQ.data?.rows ?? []) {
       const code = row?.ledger?.code
       if (code && typeof row.type === 'string' && row.type.trim()) byLedgerCode.set(code, row.type)
+    }
+    return byLedgerCode
+  }, [moneyAccountsQ.data?.rows])
+
+  // The readable identity an account is referred to by (CASH, PETTY-CASH,
+  // BANK-UBL). Assigned once, by the money accounts endpoint, so one account
+  // reads the same here as it does on the management screen.
+  const moneyIdentities = useMemo(() => {
+    const byLedgerCode = new Map<string, string>()
+    for (const row of moneyAccountsQ.data?.rows ?? []) {
+      const code = row?.ledger?.code
+      if (code && typeof row.identity === 'string' && row.identity.trim()) byLedgerCode.set(code, row.identity)
     }
     return byLedgerCode
   }, [moneyAccountsQ.data?.rows])
@@ -197,7 +209,7 @@ export function AccountsView({ user }: { user: MeUser }) {
             return <section key={group} aria-label={`${group} accounts`}>
               <h3 className="mb-2 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">{group}</h3>
               <div className="grid grid-cols-1 min-[420px]:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2">
-                {groupedAccounts.map(a => <FinanceAccountCard key={a.id} account={a} group={group} balance={getBalance(a.code)} isLoading={tbQ.isLoading} unavailable={tbQ.isError || tbQ.data?.availability?.accounting === false} onOpen={() => openLedger(a.id)} onManage={canManageAccounts ? openBusinessAccounts : undefined} />)}
+                {groupedAccounts.map(a => <FinanceAccountCard key={a.id} account={a} group={group} identity={moneyIdentities.get(a.code) ?? null} balance={getBalance(a.code)} isLoading={tbQ.isLoading} unavailable={tbQ.isError || tbQ.data?.availability?.accounting === false} onOpen={() => openLedger(a.id)} onManage={canManageAccounts ? openBusinessAccounts : undefined} />)}
               </div>
             </section>
           })}
@@ -453,7 +465,7 @@ function AccountSubcategoryPanel({ activities, accounts, user }: { activities: M
   </div>
 }
 
-function FinanceAccountCard({ account, group, balance: bal, isLoading, unavailable, onOpen, onManage }: { account: Account; group: AccountGroup; balance: bigint | null; isLoading: boolean; unavailable: boolean; onOpen: () => void; onManage?: () => void }) {
+function FinanceAccountCard({ account, group, identity, balance: bal, isLoading, unavailable, onOpen, onManage }: { account: Account; group: AccountGroup; identity: string | null; balance: bigint | null; isLoading: boolean; unavailable: boolean; onOpen: () => void; onManage?: () => void }) {
   const isNegative = bal !== null && bal < 0n
   const isZero = bal === 0n
   const status = isLoading ? 'Loading' : unavailable ? 'Unavailable' : bal === null ? 'Not tracked' : isNegative ? 'Overdrawn' : isZero ? 'Zero' : 'Normal'
@@ -467,6 +479,7 @@ function FinanceAccountCard({ account, group, balance: bal, isLoading, unavailab
         <span className={`rounded border px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide ${statusClass}`}>{status}</span>
       </div>
       <div className="mt-3 truncate text-sm font-medium text-foreground">{account.name}</div>
+      {identity && <div className="mt-1"><span className="inline-flex rounded border border-primary/30 bg-primary/5 px-1.5 py-0.5 text-[9px] font-semibold tracking-wide text-primary" title={`Identity: ${identity}`}>{identity}</span></div>}
       <div className="mt-1 flex items-end justify-between gap-2"><span className={`text-lg font-semibold ${isNegative ? 'text-destructive' : 'text-foreground'}`} data-num>{balanceLabel}</span><span className="text-[10px] text-muted-foreground" data-num>Account {account.code}</span></div>
     </button>
     {onManage && (

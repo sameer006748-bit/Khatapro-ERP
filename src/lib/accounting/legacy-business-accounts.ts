@@ -2,6 +2,7 @@ import 'server-only'
 
 import { getAdminSupabase } from '@/lib/supabase/admin'
 import { classifyPostgrestCompatibilityError, type PostgrestLikeError } from '@/lib/dashboard/compatibility'
+import { moneyTypeFromLedgerAccount } from '@/lib/accounting/business-account-types'
 
 export const BUSINESS_ACCOUNTS_UNAVAILABLE_MESSAGE = 'This feature is currently unavailable.'
 
@@ -78,6 +79,83 @@ export async function listLegacyBusinessAccounts(businessId: string, actorProfil
   })
   if (error) unavailable(error)
   return ((data ?? []) as LegacyRow[]).map(mapRow)
+}
+
+/**
+ * Why a ledger money account could not be brought under management.
+ * `already-linked` is not a failure — it is what running the same link twice
+ * returns, so the caller can answer with the row that already exists.
+ */
+export type LinkLedgerMoneyAccountResult =
+  | { ok: true; alreadyLinked: boolean; row: BusinessAccountRecord }
+  | { ok: false; reason: 'NOT_FOUND' | 'NOT_MONEY_ACCOUNT' }
+
+/**
+ * Bring an existing ledger money account under management: insert the missing
+ * `business_accounts` row against the ledger account that is already there.
+ *
+ * The ledger row is reused, never recreated — its id, its numeric code, its
+ * balance and every posted entry referencing it stay exactly as they are. This
+ * is a plain insert of the columns the table has had since the first migration,
+ * so no schema change is involved.
+ *
+ * Idempotent twice over: an existing row is detected first, and `account_id`
+ * carries a unique constraint, so a concurrent second attempt cannot produce a
+ * duplicate money account for one ledger account.
+ */
+export async function linkLegacyLedgerMoneyAccount(input: {
+  businessId: string
+  actorProfileId: string
+  ledgerAccountId: string
+  /** Falls back to what the account's own code and name imply. */
+  type?: string
+}): Promise<LinkLedgerMoneyAccountResult> {
+  const admin = getAdminSupabase()
+  const { data: account, error: accountError } = await admin
+    .from('accounts')
+    .select('id, code, name, is_active, is_business_account, category_id')
+    .eq('business_id', input.businessId)
+    .eq('id', input.ledgerAccountId)
+    .maybeSingle()
+  if (accountError) unavailable(accountError)
+  if (!account) return { ok: false, reason: 'NOT_FOUND' }
+  if (account.is_business_account !== true) return { ok: false, reason: 'NOT_MONEY_ACCOUNT' }
+
+  const { data: category, error: categoryError } = await admin
+    .from('account_categories')
+    .select('id, type')
+    .eq('id', account.category_id)
+    .maybeSingle()
+  if (categoryError) unavailable(categoryError)
+  if (category?.type !== 'Asset') return { ok: false, reason: 'NOT_MONEY_ACCOUNT' }
+
+  const { data: existing, error: existingError } = await admin
+    .from('business_accounts')
+    .select('id')
+    .eq('business_id', input.businessId)
+    .eq('account_id', account.id)
+    .maybeSingle()
+  if (existingError) unavailable(existingError)
+
+  if (!existing) {
+    const { error: insertError } = await admin.from('business_accounts').insert({
+      business_id: input.businessId,
+      account_id: account.id,
+      name: account.name,
+      type: input.type ?? moneyTypeFromLedgerAccount({ code: account.code, name: account.name }),
+      is_active: account.is_active !== false,
+    })
+    // A unique violation means another request linked the same ledger account
+    // first; that is the idempotent outcome, not an error.
+    if (insertError && insertError.code !== '23505') unavailable(insertError)
+  }
+
+  // Read the row back through the same listing every screen uses, so a linked
+  // account is indistinguishable from one created here in the first place.
+  const rows = await listLegacyBusinessAccounts(input.businessId, input.actorProfileId)
+  const row = rows.find((candidate) => candidate.accountId === account.id)
+  if (!row) throw new LegacyBusinessAccountsUnavailableError()
+  return { ok: true, alreadyLinked: Boolean(existing), row }
 }
 
 export async function createLegacyBusinessAccount(input: {

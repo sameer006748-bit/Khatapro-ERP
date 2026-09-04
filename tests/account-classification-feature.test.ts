@@ -207,8 +207,9 @@ test('an expense line asks for a category, a description and an amount', () => {
   assert.doesNotMatch(expenseView, /Subcategory|Expense Account</)
   assert.doesNotMatch(expenseView, /Select category first…/)
   assert.doesNotMatch(expenseView, /cascade|manualAccountsInCategory/)
-  // The header of the batch is unchanged.
-  for (const field of [/>Date</, /Paid From \(business account\)/, />Reference</, />Notes</, /Post Expense Batch/]) {
+  // The header of the batch still reads Date, Paid From, Reference, Notes. The
+  // "(business account)" aside is gone: each row now names its own money type.
+  for (const field of [/>Date</, />Paid From</, />Reference</, />Notes</, /Post Expense Batch/]) {
     assert.match(expenseView, field)
   }
 })
