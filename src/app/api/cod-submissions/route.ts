@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth/authOptions'
 import { loadSessionUser, hasPermission } from '@/lib/auth/permissions'
-import { listCodSubmissions, getRiderByUserId } from '@/lib/delivery/data-access'
+import { listCodSubmissions, getRiderForSession } from '@/lib/delivery/data-access'
 import { resolveRequestId, safeMutationError, withObservability } from '@/lib/observability'
 
 const getCodSubmissions = async (req: Request) => {
@@ -16,8 +16,8 @@ const getCodSubmissions = async (req: Request) => {
   const url = new URL(req.url)
   let riderId: string | null = url.searchParams.get('riderId')
   if (loaded.roleName === 'Rider') {
-    const rider = await getRiderByUserId(loaded.businessId, loaded.userId)
-    if (!rider) return NextResponse.json({ rows: [] })
+    const rider = await getRiderForSession(loaded)
+    if (!rider) return NextResponse.json({ error: 'RIDER_LINK_REQUIRED' }, { status: 403 })
     riderId = rider.id
   }
   const rows = await listCodSubmissions(loaded.businessId, riderId)
@@ -59,7 +59,7 @@ export async function POST(req: Request) {
   // Riders can only submit for themselves
   let riderId = parsed.data.riderId
   if (su.roleName === 'Rider') {
-    const rider = await getRiderByUserId(su.businessId, su.userId)
+    const rider = await getRiderForSession(su)
     if (!rider || rider.id !== riderId) {
       return NextResponse.json({ error: 'FORBIDDEN — can only submit for yourself' }, { status: 403 })
     }

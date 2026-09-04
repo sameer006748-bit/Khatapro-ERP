@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth/authOptions'
 import { loadSessionUser, requirePermission } from '@/lib/auth/permissions'
-import { riderLedger, getRiderByUserId } from '@/lib/delivery/data-access'
+import { riderLedger, getRiderForSession } from '@/lib/delivery/data-access'
 
 export async function GET(req: Request, { params }: { params: Promise<{ riderId: string }> }) {
   const session = await getServerSession(authOptions)
@@ -12,7 +12,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ riderId:
   // Riders can view only their own ledger
   let riderId = (await params).riderId
   if (loaded.roleName === 'Rider') {
-    const rider = await getRiderByUserId(loaded.businessId, loaded.userId)
+    const rider = await getRiderForSession(loaded)
     if (!rider || rider.id !== riderId) {
       return NextResponse.json({ error: 'FORBIDDEN — can only view your own ledger' }, { status: 403 })
     }

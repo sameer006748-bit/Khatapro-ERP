@@ -3,7 +3,7 @@ import { getServerSession } from 'next-auth'
 import { z } from 'zod'
 import { authOptions } from '@/lib/auth/authOptions'
 import { loadSessionUser, requirePermission, hasPermission } from '@/lib/auth/permissions'
-import { createCodSubmission, listCodSubmissions, getRiderByUserId } from '@/lib/delivery/data-access'
+import { createCodSubmission, listCodSubmissions, getRiderForSession } from '@/lib/delivery/data-access'
 import { parseMoney } from '@/lib/format'
 import { resolveRequestId, safeMutationError, withObservability } from '@/lib/observability'
 
@@ -20,8 +20,8 @@ async function getCodSubmissionRows() {
   }
   let riderFilter: string | null = null
   if (loaded.roleName === 'Rider') {
-    const rider = await getRiderByUserId(loaded.businessId, loaded.userId)
-    if (!rider) return NextResponse.json({ rows: [] })
+    const rider = await getRiderForSession(loaded)
+    if (!rider) return NextResponse.json({ error: 'RIDER_LINK_REQUIRED' }, { status: 403 })
     riderFilter = rider.id
   }
   const rows = await listCodSubmissions(loaded.businessId, riderFilter)
@@ -43,7 +43,7 @@ export async function POST(req: Request) {
   // If rider, resolve their own riderId
   let riderId = parsed.data.riderId
   if (su.roleName === 'Rider') {
-    const ownRider = await getRiderByUserId(su.businessId, su.userId)
+    const ownRider = await getRiderForSession(su)
     if (!ownRider || ownRider.id !== riderId) return NextResponse.json({ error: 'FORBIDDEN: rider can only submit own COD' }, { status: 403 })
   }
   const requestedAmount = parseMoney(parsed.data.requestedAmount)

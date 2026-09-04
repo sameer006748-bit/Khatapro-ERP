@@ -3,7 +3,7 @@ import { getServerSession } from 'next-auth'
 import { z } from 'zod'
 import { authOptions } from '@/lib/auth/authOptions'
 import { loadSessionUser, hasPermission } from '@/lib/auth/permissions'
-import { getDeliveryOrder, getDeliveryOrderItems, getRiderByUserId, recordDeliveryOutcome } from '@/lib/delivery/data-access'
+import { getDeliveryOrder, getDeliveryOrderItems, getRiderForSession, recordDeliveryOutcome } from '@/lib/delivery/data-access'
 import { parseMoney } from '@/lib/format'
 import { resolveRequestId, safeMutationError } from '@/lib/observability'
 
@@ -37,7 +37,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   if (!order) return NextResponse.json({ error: 'NOT_FOUND' }, { status: 404 })
   // For riders: verify they own this order
   if (loaded.roleName === 'Rider') {
-    const rider = await getRiderByUserId(loaded.businessId, loaded.userId)
+    const rider = await getRiderForSession(loaded)
     if (!rider) return NextResponse.json({ error: 'FORBIDDEN' }, { status: 403 })
     if (order.riderId !== rider.id) {
       return NextResponse.json({ error: 'FORBIDDEN' }, { status: 403 })

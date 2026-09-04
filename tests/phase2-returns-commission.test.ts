@@ -19,7 +19,7 @@ test('linked returns use durable invoice-item identity, idempotency, and exact-o
   assert.match(migration, /\(v_item->>'invoice_item_id'\)::uuid/)
   assert.match(migration, /sale_return_documents[\s\S]{0,240}idempotency_key/i)
   assert.match(migration, /update public\.products set stock = stock \+ v_requested/i)
-  assert.match(migration, /post_sale_return\(\n  p_business_id uuid, p_original_invoice_id text, p_items jsonb/i)
+  assert.match(migration, /post_sale_return\(\r?\n  p_business_id uuid, p_original_invoice_id text, p_items jsonb/i)
   assert.match(returnRoute, /invoiceItemId: z\.string\(\)\.min\(1\)\.max\(80\)/)
 })
 

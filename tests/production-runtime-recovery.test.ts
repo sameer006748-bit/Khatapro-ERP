@@ -128,12 +128,14 @@ test('secondary customers panel has an authenticated, scoped route', () => {
   assert.match(customersRoute, /FORBIDDEN/)
 })
 
-test('rider dashboard reports unavailable delivery capability without fabricated metrics', () => {
+test('rider dashboard reports missing mappings and unavailable delivery capability without fabricated metrics', () => {
   assert.match(riderRoute, /DELIVERY_MIGRATION_REQUIRED/)
   assert.match(riderRoute, /summary: null/)
   assert.match(riderRoute, /recentOrders: \[\]/)
-  assert.match(riderDashboard, /data\?\.available === false/)
-  assert.match(riderDashboard, /\{data\.message\}/)
+  assert.match(riderRoute, /RIDER_LINK_REQUIRED/)
+  assert.match(riderDashboard, /Your rider account is not connected yet/)
+  assert.match(riderDashboard, /Try Again/)
+  assert.doesNotMatch(riderDashboard, /RPC failed|REQUEST_FAILED|schema|constraint/)
 })
 
 test('safe unknown 500 logs include request correlation and technical location only', () => {

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { signOut } from 'next-auth/react'
+import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { motion, AnimatePresence } from 'framer-motion'
@@ -46,7 +47,7 @@ import {
   CircleUserRound,
   type LucideIcon,
 } from 'lucide-react'
-import { useSearchParams } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import dynamic from 'next/dynamic'
 import type { MeUser } from '@/components/erp/erp-app'
 import { KhataProLogo } from '@/components/erp/logo'
@@ -115,6 +116,7 @@ type SubItem = {
   icon: LucideIcon
   perm?: string
   ownerOnly?: boolean
+  riderOnly?: boolean
 }
 
 type NavCategory = {
@@ -199,10 +201,35 @@ const NAV_CATEGORIES: NavCategory[] = [
   },
 ]
 
+const RIDER_NAV_CATEGORIES: NavCategory[] = [
+  {
+    id: 'rider-home',
+    label: 'Home',
+    icon: HomeIcon,
+    items: [{ key: 'home', label: 'Home', short: 'Home', icon: HomeIcon, riderOnly: true }],
+  },
+  {
+    id: 'rider-work',
+    label: 'My Work',
+    icon: PackageCheck,
+    items: [
+      { key: 'delivery', label: 'My Deliveries', short: 'Deliveries', icon: PackageCheck, riderOnly: true },
+      { key: 'rider-cash', label: 'Cash With You', short: 'Cash', icon: WalletCards, riderOnly: true },
+    ],
+  },
+  {
+    id: 'rider-profile',
+    label: 'Profile',
+    icon: CircleUserRound,
+    items: [{ key: 'my-profile', label: 'My Profile', short: 'Profile', icon: CircleUserRound, riderOnly: true }],
+  },
+]
+
 // Kept for direct owner-only diagnostics, but intentionally excluded from all
 // normal client navigation and Setup surfaces.
 const INTERNAL_PAGES: SubItem[] = [
   { key: 'biz-day-test', label: 'Business Day Diagnostic', short: 'Business Day', icon: Clock, ownerOnly: true },
+  { key: 'rider-cash', label: 'Cash With You', short: 'Cash', icon: WalletCards, riderOnly: true },
 ]
 
 // Setup detail pages: opened from the Setup overview cards (and by deep link)
@@ -233,12 +260,17 @@ for (const item of LEGACY_VOUCHER_PAGES) PAGE_REGISTRY.set(item.key, item)
 
 function isItemVisible(user: MeUser, item: SubItem): boolean {
   if (item.ownerOnly) return user.roleName === 'Owner/Admin'
+  if (item.riderOnly) return user.roleName === 'Rider'
+  if (item.key === 'delivery' && user.roleName === 'Rider') {
+    return user.permissions.includes('can_view_own_orders') || user.permissions.includes('can_view_delivery_orders')
+  }
   if (item.perm) return user.permissions.includes(item.perm)
   return true
 }
 
 function visibleCategories(user: MeUser): Array<NavCategory & { visibleItems: SubItem[] }> {
-  return NAV_CATEGORIES.map((cat) => ({
+  const categories = user.roleName === 'Rider' ? RIDER_NAV_CATEGORIES : NAV_CATEGORIES
+  return categories.map((cat) => ({
     ...cat,
     visibleItems: cat.items.filter((item) => isItemVisible(user, item)),
   })).filter((cat) => cat.visibleItems.length > 0)
@@ -246,7 +278,7 @@ function visibleCategories(user: MeUser): Array<NavCategory & { visibleItems: Su
 
 /** Find which category contains a given item key. */
 function categoryForKey(key: string): string | null {
-  for (const cat of NAV_CATEGORIES) {
+  for (const cat of [...NAV_CATEGORIES, ...RIDER_NAV_CATEGORIES]) {
     if (cat.items.some((i) => i.key === key)) return cat.id
   }
   return null
@@ -287,6 +319,13 @@ const MOBILE_SLOTS: MobileSlot[] = [
   }},
 ]
 
+const RIDER_MOBILE_SLOTS: MobileSlot[] = [
+  { id: 'home', label: 'Home', icon: HomeIcon, resolve: () => 'home' },
+  { id: 'deliveries', label: 'Deliveries', icon: PackageCheck, resolve: () => 'delivery' },
+  { id: 'cash', label: 'Cash', icon: WalletCards, resolve: () => 'rider-cash' },
+  { id: 'profile', label: 'Profile', icon: CircleUserRound, resolve: () => 'my-profile' },
+]
+
 // ──────────────────────────────────────────────────────────────────────────
 // Main shell
 // ──────────────────────────────────────────────────────────────────────────
@@ -303,6 +342,7 @@ function resolveInitialPage(searchParams: URLSearchParams, user: MeUser): string
 export function DashboardShell({ user, onSignOut }: { user: MeUser; onSignOut: () => void }) {
   const [moreOpen, setMoreOpen] = useState(false)
   const tourNavigationState = useRef<{ expanded: Set<string>; moreOpen: boolean } | null>(null)
+  const router = useRouter()
   const searchParams = useSearchParams()
   const queryString = searchParams.toString()
   const ledgerAccountId = searchParams.get('ledger')
@@ -382,7 +422,7 @@ export function DashboardShell({ user, onSignOut }: { user: MeUser; onSignOut: (
     url.searchParams.delete('invoice')
     url.searchParams.delete('voucher')
     url.searchParams.set('page', key)
-    window.history.pushState({}, '', url.toString())
+    router.push(`${url.pathname}?${url.searchParams.toString()}`)
     const cat = categoryForKey(key)
     if (cat) {
       setExpanded((prev) => {
@@ -403,7 +443,8 @@ export function DashboardShell({ user, onSignOut }: { user: MeUser; onSignOut: (
   }
 
   // Mobile: resolve the 4 primary slots + "More" for everything else.
-  const mobilePrimary: MobilePrimarySlot[] = MOBILE_SLOTS.map((slot) => ({
+  const mobileSlots = user.roleName === 'Rider' ? RIDER_MOBILE_SLOTS : MOBILE_SLOTS
+  const mobilePrimary: MobilePrimarySlot[] = mobileSlots.map((slot) => ({
     ...slot,
     key: slot.resolve(user),
   })).filter((s): s is MobilePrimarySlot => s.key !== null)
@@ -411,7 +452,7 @@ export function DashboardShell({ user, onSignOut }: { user: MeUser; onSignOut: (
   // Mobile "More": all visible items grouped by category, EXCLUDING the ones
   // already shown as primary slots.
   const mobilePrimaryKeys = new Set(mobilePrimary.map((s) => s.key))
-  const mobileMoreCategories = cats
+  const mobileMoreCategories = user.roleName === 'Rider' ? [] : cats
     .map((cat) => ({
       ...cat,
       visibleItems: cat.visibleItems.filter((item) => !mobilePrimaryKeys.has(item.key)),
@@ -463,7 +504,7 @@ export function DashboardShell({ user, onSignOut }: { user: MeUser; onSignOut: (
           </span>
         </div>
         <div className="ml-auto flex items-center gap-3">
-          <SupabaseStatusBadge />
+          {user.roleName !== 'Rider' && <SupabaseStatusBadge />}
           <span className="hidden lg:inline text-[11px] text-muted-foreground" data-num>
             {new Date().toLocaleString('en-GB', { timeZone: 'Asia/Karachi' })}
           </span>
@@ -510,7 +551,7 @@ export function DashboardShell({ user, onSignOut }: { user: MeUser; onSignOut: (
             action clear of the floating bottom stack (nav, AI button, banners). */}
         <main className="flex-1 overflow-y-auto" style={{ paddingBottom: 'var(--kp-content-bottom)' }}>
           <div className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto">
-            {(AI_SCREEN_SET.has(effectiveActive) || getPageHelp(effectiveActive)) && (
+            {user.roleName !== 'Rider' && (AI_SCREEN_SET.has(effectiveActive) || getPageHelp(effectiveActive)) && (
               <div className="flex flex-wrap justify-end gap-2 mb-3">
                 <ContextualPageHelp pageKey={effectiveActive} />
                 {AI_SCREEN_SET.has(effectiveActive) && <AiExplainButton screen={effectiveActive as AiScreen} />}
@@ -536,7 +577,6 @@ export function DashboardShell({ user, onSignOut }: { user: MeUser; onSignOut: (
       <MobilePillNav
         primary={mobilePrimary}
         active={effectiveActive}
-        onSelect={selectItem}
         hasMore={mobileMoreCategories.some((c) => c.visibleItems.length > 0)}
         onMore={() => setMoreOpen(true)}
       />
@@ -554,13 +594,15 @@ export function DashboardShell({ user, onSignOut }: { user: MeUser; onSignOut: (
           }}
         />
       )}
-      <LazyAiAssistant user={user} activeScreen={effectiveActive} />
-      <ProductTourGuide
-        user={user}
-        visiblePageKeys={visiblePageKeys}
-        onNavigate={selectItem}
-        onStepChange={handleTourStepChange}
-      />
+      {user.roleName !== 'Rider' && <LazyAiAssistant user={user} activeScreen={effectiveActive} />}
+      {user.roleName !== 'Rider' && (
+        <ProductTourGuide
+          user={user}
+          visiblePageKeys={visiblePageKeys}
+          onNavigate={selectItem}
+          onStepChange={handleTourStepChange}
+        />
+      )}
     </div>
   )
 }
@@ -735,68 +777,71 @@ type MobilePrimarySlot = MobileSlot & { key: string }
 function MobilePillNav({
   primary,
   active,
-  onSelect,
   hasMore,
   onMore,
 }: {
   primary: MobilePrimarySlot[]
   active: string
-  onSelect: (k: string) => void
   hasMore: boolean
   onMore: () => void
 }) {
   return (
     <nav
-      className="md:hidden fixed left-1/2 -translate-x-1/2 z-40 glass-pill rounded-full px-3 py-3 flex items-center gap-2"
+      className="md:hidden fixed left-3 right-3 z-40 glass-pill rounded-2xl px-2 py-2 flex items-center justify-around gap-1"
       style={{
         bottom: 'var(--kp-mobile-nav-bottom)',
-        maxWidth: 'calc(100vw - 2rem)',
-        minHeight: '64px',
+        minHeight: '68px',
       }}
       aria-label="Primary"
     >
       {primary.map((slot) => {
         const isActive = active === slot.key
         return (
-          <button
+          <Link
             key={slot.id}
-            type="button"
+            href={`/?page=${slot.key}`}
             data-tour={`nav-page-${slot.key}`}
-            onClick={() => onSelect(slot.key!)}
-            className="relative flex items-center justify-center press-sm"
+            className="relative flex min-w-16 flex-col items-center justify-center gap-1 rounded-xl px-1 py-1.5 press-sm"
             aria-label={slot.label}
             aria-current={isActive ? 'page' : undefined}
-            style={{ minWidth: '48px', minHeight: '48px' }}
+            style={{ minHeight: '52px' }}
           >
             {isActive && (
               <motion.span
                 layoutId="pill-active"
-                className="absolute inset-0 rounded-full bg-primary shadow-md"
+                className="absolute inset-0 rounded-xl bg-primary shadow-md"
                 transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
               />
             )}
             <span
               className={cn(
-                'relative z-10 grid place-items-center size-11 rounded-full',
+                'relative z-10 grid place-items-center',
                 isActive ? 'text-primary-foreground' : 'text-muted-foreground',
               )}
             >
               <slot.icon className="size-5" strokeWidth={1.9} />
             </span>
-          </button>
+            <span className={cn(
+              'relative z-10 text-[10px] font-bold leading-none',
+              isActive ? 'text-primary-foreground' : 'text-muted-foreground',
+            )}>
+              {slot.label}
+            </span>
+          </Link>
         )
       })}
       {hasMore && (
         <button
           type="button"
           onClick={onMore}
-          className="relative flex items-center justify-center press-sm"
+          className="relative flex min-w-16 flex-col items-center justify-center gap-1 rounded-xl px-1 py-1.5 press-sm"
           aria-label="More navigation"
-          style={{ minWidth: '48px', minHeight: '48px' }}
+          style={{ minHeight: '52px' }}
         >
-          <span className="grid place-items-center size-11 rounded-full text-muted-foreground">
+          <span className="grid place-items-center text-muted-foreground">
             <MoreHorizontal className="size-5" strokeWidth={1.9} />
           </span>
+          <span className="text-[10px] font-bold leading-none text-muted-foreground">More</span>
         </button>
       )}
     </nav>
@@ -979,6 +1024,8 @@ function ViewRouter({
   if (active === 'vendors') return <VendorsView user={user} />
 
   // Phase 7 — Delivery & Riders
+  if (active === 'delivery' && user.roleName === 'Rider') return <RiderDashboard user={user} section="deliveries" />
+  if (active === 'rider-cash' && user.roleName === 'Rider') return <RiderDashboard user={user} section="cash" />
   if (active === 'delivery') return <DeliveryView user={user} />
   if (active === 'riders') return <DeliveryView user={user} />
 

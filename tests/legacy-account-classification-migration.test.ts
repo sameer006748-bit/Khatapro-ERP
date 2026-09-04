@@ -16,8 +16,8 @@ const businessAccountDataAccess = await readFile(
 )
 
 test('migration is transactional, legacy-only, and never applies itself', () => {
-  assert.match(migration, /^--[\s\S]*\nbegin;/)
-  assert.match(migration, /notify pgrst, 'reload schema';\ncommit;\s*$/)
+  assert.match(migration, /^--[\s\S]*\r?\nbegin;/)
+  assert.match(migration, /notify pgrst, 'reload schema';\r?\ncommit;\s*$/)
   assert.doesNotMatch(migration, /public\.businesses|public\.ledger_accounts|public\.account_subcategories/)
   assert.doesNotMatch(migration, /apply_migration|supabase db push|post_sale/)
   assert.match(migration, /c\.udt_name = 'text'/)

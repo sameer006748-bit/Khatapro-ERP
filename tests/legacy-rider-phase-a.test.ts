@@ -123,7 +123,7 @@ test('business and rider scope are enforced in SQL and server routes', () => {
   assert.match(settlement, /id = p_rider_id and business_id = p_business_id/)
   assert.match(settleRoute, /loaded\.roleName === 'Rider'/)
   assert.match(settleRoute, /hasPermission\(loaded, 'can_confirm_cod_submission'\)/)
-  assert.match(balancesRoute, /getRiderByUserId\(loaded\.businessId, loaded\.userId\)/)
+  assert.match(balancesRoute, /getRiderForSession\(loaded\)/)
   assert.match(balancesRoute, /riderCodBalances\(loaded\.businessId, riderId\)/)
 })
 

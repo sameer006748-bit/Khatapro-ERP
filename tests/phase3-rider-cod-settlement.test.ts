@@ -16,7 +16,7 @@ test('COD delivery records rider-held cash without receipt, paid update, or comm
 })
 
 test('delivery validates active rider, assignment, text invoice, collection cap, and idempotency conflict', () => {
-  assert.match(migration, /complete_cod_delivery\(\n  p_business_id uuid,\n  p_invoice_id text,\n  p_cash_collected numeric,\n  p_idempotency_key text/i)
+  assert.match(migration, /complete_cod_delivery\(\r?\n  p_business_id uuid,\r?\n  p_invoice_id text,\r?\n  p_cash_collected numeric,\r?\n  p_idempotency_key text/i)
   assert.match(migration, /r\.profile_id = v_profile\.id/)
   assert.match(migration, /v_invoice\.rider_id is distinct from v_rider\.id/)
   assert.match(migration, /p_cash_collected > v_outstanding/)

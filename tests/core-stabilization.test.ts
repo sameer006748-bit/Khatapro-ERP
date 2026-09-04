@@ -32,7 +32,7 @@ test('Rider reads and mutations are scoped to the linked rider record', async ()
   const list = await source('src/app/api/delivery-orders/route.ts')
   const detail = await source('src/app/api/delivery-orders/[id]/route.ts')
   const status = await source('src/app/api/delivery-orders/[id]/status/route.ts')
-  assert.match(list, /loaded\.roleName === 'Rider'[\s\S]*getRiderByUserId[\s\S]*riderId = rider\.id/)
+  assert.match(list, /loaded\.roleName === 'Rider'[\s\S]*getRiderForSession\(loaded\)[\s\S]*riderId = rider\.id/)
   assert.match(detail, /order\.riderId !== rider\.id/)
   assert.match(status, /order\.riderId !== rider\.id/)
 })
@@ -51,7 +51,7 @@ test('safe errors expose request IDs without serializing raw exceptions', async 
 
 test('mobile navigation and sheets retain reachable, scrollable controls', async () => {
   const shell = await source('src/components/erp/dashboard-shell.tsx')
-  assert.match(shell, /minWidth: '48px', minHeight: '48px'/)
+  assert.match(shell, /minHeight: '52px'/)
   assert.match(shell, /max-h-\[70vh\] overflow-y-auto/)
   assert.match(shell, /env\(safe-area-inset-bottom/)
 })

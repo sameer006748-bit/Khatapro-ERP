@@ -3,7 +3,7 @@ import { getServerSession } from 'next-auth'
 import { z } from 'zod'
 import { authOptions } from '@/lib/auth/authOptions'
 import { loadSessionUser, hasPermission } from '@/lib/auth/permissions'
-import { startCodDelivery, getDeliveryOrder, getRiderByUserId } from '@/lib/delivery/data-access'
+import { startCodDelivery, getDeliveryOrder, getRiderForSession } from '@/lib/delivery/data-access'
 import { resolveRequestId, safeMutationError } from '@/lib/observability'
 
 const Schema = z.object({ newStatus: z.literal('out_for_delivery'), note: z.string().optional(), idempotencyKey: z.string().uuid().optional() })
@@ -26,7 +26,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   if (!order) return NextResponse.json({ error: 'NOT_FOUND' }, { status: 404 })
   // For riders: verify they own this order
   if (loaded.roleName === 'Rider') {
-    const rider = await getRiderByUserId(loaded.businessId, loaded.userId)
+    const rider = await getRiderForSession(loaded)
     if (!rider) return NextResponse.json({ error: 'FORBIDDEN' }, { status: 403 })
     if (order.riderId !== rider.id) {
       return NextResponse.json({ error: 'FORBIDDEN' }, { status: 403 })

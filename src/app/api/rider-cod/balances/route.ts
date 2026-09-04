@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth/authOptions'
 import { loadSessionUser, hasPermission } from '@/lib/auth/permissions'
-import { getRiderByUserId, riderCodBalances } from '@/lib/delivery/data-access'
+import { getRiderForSession, riderCodBalances } from '@/lib/delivery/data-access'
 import { resolveRequestId, safeApiError, withObservability } from '@/lib/observability'
 
 export const GET = withObservability('/api/rider-cod/balances', async (request: Request) => {
@@ -17,8 +17,8 @@ export const GET = withObservability('/api/rider-cod/balances', async (request: 
     }
     let riderId: string | null = null
     if (loaded.roleName === 'Rider') {
-      const rider = await getRiderByUserId(loaded.businessId, loaded.userId)
-      if (!rider) return NextResponse.json({ rows: [] })
+      const rider = await getRiderForSession(loaded)
+      if (!rider) return NextResponse.json({ error: 'RIDER_LINK_REQUIRED' }, { status: 403 })
       riderId = rider.id
     }
     return NextResponse.json({ rows: await riderCodBalances(loaded.businessId, riderId) })

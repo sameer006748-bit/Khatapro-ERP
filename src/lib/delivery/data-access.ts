@@ -5,6 +5,8 @@
 import 'server-only'
 import { getAdminSupabase } from '@/lib/supabase/admin'
 import { resolveSupabaseUuid } from '@/lib/accounting/voucher-supabase'
+import type { SessionUser } from '@/lib/auth/permissions'
+import { riderIdentityCandidates } from '@/lib/delivery/rider-identity'
 
 // ─── Riders ───
 export type RiderRow = {
@@ -45,15 +47,31 @@ export async function updateRider(businessId: string, riderId: string, updates: 
 }
 
 // ─── Resolve rider from auth user (for Rider role) ───
-export async function getRiderByUserId(businessId: string, userId: string): Promise<RiderRow | null> {
-  // userId is Prisma cuid — riders.user_id stores the Prisma cuid
+export async function getRiderByUserId(businessId: string, userId: string | string[]): Promise<RiderRow | null> {
+  const userIds = Array.from(new Set((Array.isArray(userId) ? userId : [userId]).filter(Boolean)))
+  if (userIds.length === 0) return null
   const admin = getAdminSupabase()
   const { data, error } = await admin.from('riders')
     .select('id, name, phone, zone, vehicle_type, is_active, user_id')
-    .eq('business_id', businessId).eq('user_id', userId).maybeSingle()
-  if (error || !data) return null
-  const r = data as any
+    .eq('business_id', businessId)
+    .eq('is_active', true)
+    .in('user_id', userIds)
+    .limit(2)
+  if (error || !data || data.length !== 1) return null
+  const r = data[0] as any
   return { id: r.id, name: r.name, phone: r.phone, zone: r.zone, vehicleType: r.vehicle_type, isActive: r.is_active, userId: r.user_id }
+}
+
+/**
+ * Resolve the Rider record across both supported identity lineages.
+ *
+ * Legacy production stores the Prisma/text user id in riders.user_id. Newer
+ * records store the Supabase Auth UUID, while some staged schemas used the
+ * profile id. Every candidate remains business-scoped, active-only and
+ * fail-closed when more than one Rider matches.
+ */
+export async function getRiderForSession(user: Pick<SessionUser, 'businessId' | 'userId' | 'supabaseUserUuid' | 'profileId'>): Promise<RiderRow | null> {
+  return getRiderByUserId(user.businessId, riderIdentityCandidates(user))
 }
 
 // ─── Delivery Orders ───

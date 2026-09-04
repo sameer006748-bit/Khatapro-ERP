@@ -15,6 +15,7 @@ const reportsView = await readFile('src/components/erp/views/reports-view.tsx', 
 const reportsRoute = await readFile('src/app/api/reports/route.ts', 'utf8')
 const ownerDashboardRoute = await readFile('src/app/api/dashboard/owner/route.ts', 'utf8')
 const ownerDashboardSummary = await readFile('src/lib/dashboard/owner-summary.ts', 'utf8')
+const normalizedReports = reports.replace(/\r\n/g, '\n')
 
 test('production chart and balances use canonical ledger tables and RPC', () => {
   assert.match(accounting, /probeTable\(_phase1Cache, 'ledger_accounts'\)/)
@@ -37,13 +38,13 @@ test('General Ledger and Trial Balance consumers use canonical RPCs', () => {
 })
 
 test('P&L and Balance Sheet have no active app-side accounting patches', () => {
-  const profitLoss = reports.slice(
-    reports.indexOf('export async function reportProfitLoss'),
-    reports.indexOf('export async function reportBalanceSheet'),
+  const profitLoss = normalizedReports.slice(
+    normalizedReports.indexOf('export async function reportProfitLoss'),
+    normalizedReports.indexOf('export async function reportBalanceSheet'),
   )
-  const balanceSheet = reports.slice(
-    reports.indexOf('export async function reportBalanceSheet'),
-    reports.indexOf('/*\n * Historical app-side legacy-table fallbacks'),
+  const balanceSheet = normalizedReports.slice(
+    normalizedReports.indexOf('export async function reportBalanceSheet'),
+    normalizedReports.indexOf('/*\n * Historical app-side legacy-table fallbacks'),
   )
   assert.match(profitLoss, /ledger_profit_loss/)
   assert.doesNotMatch(profitLoss, /\.filter\(/)
