@@ -49,7 +49,7 @@ type Product = {
   lowStockThreshold: number
   commissionRatePaisas: string | null
 }
-type Salesman = { id: string; name: string; commissionPct: number; isActive?: boolean }
+type Salesman = { id: string; name: string; isActive?: boolean }
 type Customer = { id: string; name: string; phone: string | null }
 
 /** One editable bill row: sold, returned and everything derived from them. */

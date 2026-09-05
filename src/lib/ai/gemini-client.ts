@@ -11,6 +11,7 @@ import {
 import {
   callGeminiCore,
   GeminiClientError,
+  probeThinkingBudget,
   runGeminiWithSingleRetry,
   type GeminiFailureCategory,
 } from '@/lib/ai/gemini-client-core'
@@ -82,6 +83,11 @@ export type GeminiProbeResult = {
   errorCategory: GeminiFailureCategory | null
 }
 
+// Generous ceiling for the probe: when thinking is left at the model's default
+// its tokens count against this budget, and exhausting it would surface as an
+// empty response — a false "connection failed" for a perfectly good key.
+const PROBE_OUTPUT_TOKENS = 512
+
 export async function probeGeminiKey(
   apiKey: string,
   requestId: string = 'unavailable',
@@ -90,7 +96,7 @@ export async function probeGeminiKey(
     await callGemini(apiKey, {
       systemInstruction: { parts: [{ text: 'Reply with only OK.' }] },
       contents: [{ role: 'user', parts: [{ text: 'Connection check.' }] }],
-    }, 16, 0)
+    }, PROBE_OUTPUT_TOKENS, probeThinkingBudget(GEMINI_MODEL))
     return { status: 'connected', errorCategory: null }
   } catch (error) {
     if (error instanceof GeminiClientError) {

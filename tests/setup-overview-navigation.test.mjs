@@ -5,10 +5,15 @@ import { readFile } from 'node:fs/promises'
 const setup = await readFile('src/components/erp/views/setup-view.tsx', 'utf8')
 const shell = await readFile('src/components/erp/dashboard-shell.tsx', 'utf8')
 
+// Card title -> registered page key. The title is the label the client reads;
+// the key is an internal identifier and deliberately outlives label changes.
+// 60c3d97 renamed this card's label to "Account Categories" everywhere it is
+// shown (sidebar, page heading, Chart of Accounts cross-reference) while
+// keeping the 'account-classification' key and AccountClassificationView.
 const mappings = {
   'Business Accounts': 'business-accounts',
   'Chart of Accounts': 'coa',
-  'Account Classification': 'account-classification',
+  'Account Categories': 'account-classification',
   'Users & Roles': 'users',
   'Roles & Permissions': 'permissions',
   'Audit Log': 'audit',

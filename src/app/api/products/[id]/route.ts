@@ -9,6 +9,7 @@ import { z } from 'zod'
 import { authOptions } from '@/lib/auth/authOptions'
 import { loadSessionUser, requirePermission, writeAudit } from '@/lib/auth/permissions'
 import { listProducts, updateProduct } from '@/lib/products/data-access'
+import { SafeProductError } from '@/lib/products/opening-stock'
 import { resolveRequestId, safeMutationError } from '@/lib/observability'
 
 const UpdateSchema = z.object({
@@ -56,6 +57,18 @@ export async function PATCH(
     })
     return NextResponse.json({ ok: true })
   } catch (error) {
+    // A refusal this route can explain: the message is written for the operator
+    // and says whether anything was saved. The raw diagnostic stays in the log.
+    if (error instanceof SafeProductError) {
+      return safeMutationError({
+        route: '/api/products/[id]',
+        requestId,
+        errorCode: 'PRODUCT_UPDATE_UNSUPPORTED',
+        userMessage: error.message,
+        error: error.diagnostic ?? error.message,
+        status: 400,
+      })
+    }
     return safeMutationError({ route: '/api/products/[id]', requestId, errorCode: 'PRODUCT_UPDATE_FAILED', userMessage: 'The product could not be updated.', error })
   }
 }

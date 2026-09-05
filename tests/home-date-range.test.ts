@@ -163,7 +163,9 @@ test('Needs Attention is conditional and every live stock condition links to inv
   assert.match(attention, /negativeStockProducts/)
   assert.match(attention, /lowStockProducts/)
   assert.match(attention, /destination: '\/\?page=inventory'/)
-  assert.match(page, /router\.push\(destination\)/)
+  // The attention item opens through the shared shell primitive, and only after
+  // its own permission re-check. See tests/shell-navigation-primitive.test.ts.
+  assert.match(page, /if \(canOpen\(destination\)\) navigateShell\(destination\)/)
 })
 
 test('Home recognizes a missing active payment account only from the shared status payload', () => {

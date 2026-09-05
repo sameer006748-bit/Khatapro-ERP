@@ -121,6 +121,21 @@ export function classifyGeminiFailure(
   return 'provider_unavailable'
 }
 
+/**
+ * Thinking budget for the connection probe, which is the only call that pins
+ * one. Gemini 1.x/2.x accept a numeric `thinkingBudget`; Gemini 3.x replaced it
+ * with `thinking_level` and rejects the old field with HTTP 400 ("thinking_budget
+ * and thinking_level are not supported together"), while `thinking_level` is in
+ * turn rejected by 2.x and its lowest accepted tier differs between 3.x models.
+ * So the probe pins a zero budget only where that is known-good and otherwise
+ * sends no thinking field at all, leaving the model's own default in place: a
+ * connection test must fail on the API key, never on a parameter the model
+ * dislikes.
+ */
+export function probeThinkingBudget(model: string): number | undefined {
+  return /^gemini-[12]\./.test(model) ? 0 : undefined
+}
+
 export async function callGeminiCore(args: {
   apiKey: string
   url: string

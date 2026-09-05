@@ -2,7 +2,7 @@
 
 import { Fragment, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { useRouter } from 'next/navigation'
+import { navigateShell } from '@/lib/navigation/shell-navigation'
 import { formatMoney } from '@/lib/format'
 import { apiFetchJson } from '@/lib/api-client'
 import { Button } from '@/components/ui/button'
@@ -117,7 +117,6 @@ function buildGroups(rows: Row[], roots: Classification['roots']): RootGroup[] {
 }
 
 export function TrialBalanceView() {
-  const router = useRouter()
   const [typeFilter, setTypeFilter] = useState(ALL)
   const [categoryFilter, setCategoryFilter] = useState(ALL)
   const [grouped, setGrouped] = useState(false)
@@ -161,7 +160,7 @@ export function TrialBalanceView() {
   const filteredDebit = visibleRows.reduce((sum, r) => sum + BigInt(r.totalDebit), 0n)
   const filteredCredit = visibleRows.reduce((sum, r) => sum + BigInt(r.totalCredit), 0n)
   const groups = grouped ? buildGroups(visibleRows, roots) : []
-  const openLedger = (accountId: string) => router.push(`/?ledger=${accountId}`)
+  const openLedger = (accountId: string) => navigateShell(`/?ledger=${accountId}`)
 
   function selectType(value: string) {
     setTypeFilter(value)

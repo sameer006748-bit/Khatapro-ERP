@@ -22,7 +22,7 @@ import { PageHeader } from '@/components/erp/page-header'
 import { userFacingError } from '@/lib/user-facing-error'
 
 type Product = { id: string; name: string; salePrice: number }
-type Salesman = { id: string; name: string; commissionPct: number; isActive?: boolean }
+type Salesman = { id: string; name: string; isActive?: boolean }
 type Rider = { id: string; name: string; phone: string | null; isActive: boolean }
 type Item = { key: string; productId: string; productName: string; qty: string; unitPrice: string }
 

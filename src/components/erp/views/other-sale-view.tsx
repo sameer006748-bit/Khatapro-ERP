@@ -28,7 +28,7 @@ import { usePaymentAccounts } from '@/components/erp/sales/use-payment-accounts'
 import { userFacingError } from '@/lib/user-facing-error'
 
 type Product = { id: string; name: string; currentStock: number; salePrice: number; unit: string }
-type Salesman = { id: string; name: string; commissionPct: number }
+type Salesman = { id: string; name: string }
 type Customer = { id: string; name: string; phone?: string; city?: string }
 
 type CartItem = {

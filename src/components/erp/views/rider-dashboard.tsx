@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useRouter } from 'next/navigation'
+import { navigateShell } from '@/lib/navigation/shell-navigation'
 import {
   ArrowLeft,
   Check,
@@ -87,7 +87,6 @@ export function RiderDashboard({
   user: MeUser
   section?: RiderSection
 }) {
-  const router = useRouter()
   const query = useRiderDashboard()
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null)
   const orders = query.data?.recentOrders ?? []
@@ -160,7 +159,7 @@ export function RiderDashboard({
       <div className="grid gap-4">
         <Button
           className="h-20 justify-between rounded-2xl px-5 text-lg font-bold shadow-md"
-          onClick={() => router.push(riderPage('delivery'))}
+          onClick={() => navigateShell(riderPage('delivery'))}
         >
           <span className="flex items-center gap-3"><Package className="size-6" /> Start Deliveries</span>
           <ChevronRight className="size-6" />
@@ -168,7 +167,7 @@ export function RiderDashboard({
         <Button
           variant="outline"
           className="h-20 justify-between rounded-2xl border-2 px-5 text-lg font-bold"
-          onClick={() => router.push(riderPage('rider-cash'))}
+          onClick={() => navigateShell(riderPage('rider-cash'))}
         >
           <span className="flex items-center gap-3"><Wallet className="size-6 text-amber-600" /> Cash to Submit</span>
           <ChevronRight className="size-6" />
@@ -178,7 +177,7 @@ export function RiderDashboard({
       <button
         type="button"
         className="flex min-h-14 w-full items-center justify-between rounded-2xl bg-muted/70 px-4 text-left"
-        onClick={() => router.push(riderPage('delivery'))}
+        onClick={() => navigateShell(riderPage('delivery'))}
       >
         <span className="flex items-center gap-3 font-medium">
           <CheckCircle2 className="size-5 text-emerald-600" />

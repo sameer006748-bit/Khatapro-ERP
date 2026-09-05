@@ -7,6 +7,7 @@
     "build": "next build && node -e \"const fs=require('fs'); fs.rmSync('.next/standalone/.next',{recursive:true,force:true}); fs.cpSync('.next/static','.next/standalone/.next',{recursive:true}); fs.rmSync('.next/standalone/public',{recursive:true,force:true}); fs.cpSync('public','.next/standalone/public',{recursive:true})\"",
     "start": "NODE_ENV=production bun .next/standalone/server.js 2>&1 | tee server.log",
     "lint": "eslint .",
+    "test": "node --test \"tests/*.test.ts\" \"tests/*.test.mjs\"",
     "db:push": "prisma db push",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",

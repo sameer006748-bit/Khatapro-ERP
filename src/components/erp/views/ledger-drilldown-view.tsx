@@ -1,7 +1,7 @@
 'use client'
 
 import { useQuery } from '@tanstack/react-query'
-import { useRouter } from 'next/navigation'
+import { openShellHome } from '@/lib/navigation/shell-navigation'
 import { formatMoney } from '@/lib/format'
 import { bizDate } from '@/lib/dates'
 import { ArrowLeft, BookOpen, FileText } from 'lucide-react'
@@ -30,8 +30,6 @@ const VOUCHER_BADGE: Record<string, string> = {
 }
 
 export function LedgerDrilldownView({ accountId }: { accountId: string }) {
-  const router = useRouter()
-
   const q = useQuery<{
     account: {
       id: string
@@ -52,7 +50,7 @@ export function LedgerDrilldownView({ accountId }: { accountId: string }) {
 
   // When the user navigates back, strip ?ledger= from the URL.
   function back() {
-    router.push('/')
+    openShellHome()
   }
 
   if (!accountId) {
@@ -65,7 +63,7 @@ export function LedgerDrilldownView({ accountId }: { accountId: string }) {
         <p className="text-xs text-muted-foreground mt-1">
           Open the Trial Balance and click an account to drill into its ledger.
         </p>
-        <Button variant="outline" className="mt-4 press-sm" onClick={() => router.push('/')}>
+        <Button variant="outline" className="mt-4 press-sm" onClick={() => openShellHome()}>
           Go to Trial Balance
         </Button>
       </div>

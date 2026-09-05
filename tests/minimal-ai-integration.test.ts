@@ -1,7 +1,7 @@
 import { strict as assert } from 'node:assert'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
-import { callGeminiCore, GeminiClientError, runGeminiWithSingleRetry } from '../src/lib/ai/gemini-client-core.ts'
+import { callGeminiCore, GeminiClientError, probeThinkingBudget, runGeminiWithSingleRetry } from '../src/lib/ai/gemini-client-core.ts'
 import {
   buildSystemInstruction,
   canUseAiForScreen,
@@ -45,12 +45,51 @@ test('Supabase AI settings writes use the authenticated UUID without Prisma look
   assert.match(store, /classification: 'database_upsert_failed'/)
 })
 
-test('release model is centralized on stable Gemini 2.5 Flash', async () => {
+test('release model is centralized on stable Gemini 3.5 Flash, overridable per environment', async () => {
   const config = await source('src/lib/ai/config.ts')
   const client = await source('src/lib/ai/gemini-client.ts')
-  assert.match(config, /'gemini-2\.5-flash'/)
+  assert.match(config, /'gemini-3\.5-flash'/)
+  assert.match(config, /process\.env\.GEMINI_MODEL\?\.trim\(\)/)
   assert.match(config, /https:\/\/generativelanguage\.googleapis\.com\/v1beta/)
   assert.match(client, /GEMINI_API_BASE.*models.*encodeURIComponent\(GEMINI_MODEL\).*generateContent/s)
+})
+
+// The connection test in AI Settings is the first thing an Owner presses after
+// pasting a key, so it must fail only on the key. Gemini 3.x rejects the numeric
+// thinkingBudget that 2.x needs, so the probe chooses per model generation, and
+// leaves thinking unconstrained whenever it cannot be sure.
+test('connection probe never sends a thinking parameter the release model rejects', async () => {
+  assert.equal(probeThinkingBudget('gemini-3.5-flash'), undefined)
+  assert.equal(probeThinkingBudget('gemini-3.8-flash'), undefined)
+  assert.equal(probeThinkingBudget('gemini-2.5-flash'), 0)
+  assert.equal(probeThinkingBudget('gemini-1.5-flash'), 0)
+
+  let capturedBody = ''
+  const mockFetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+    capturedBody = String(init?.body)
+    return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: 'OK' }] } }] }), { status: 200 })
+  }) as typeof fetch
+  await callGeminiCore({
+    apiKey: 'key',
+    url: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent',
+    body: { contents: [{ role: 'user', parts: [{ text: 'Connection check.' }] }] },
+    outputTokens: 512,
+    timeoutMs: 100,
+    thinkingBudget: probeThinkingBudget('gemini-3.5-flash'),
+    fetchImpl: mockFetch,
+  })
+  assert.deepEqual(JSON.parse(capturedBody).generationConfig, { temperature: 0.2, maxOutputTokens: 512 })
+})
+
+// Thinking tokens count against maxOutputTokens, and an exhausted budget arrives
+// as an empty candidate - indistinguishable from a provider fault. The probe's
+// ceiling therefore has to leave room for a thinking model to still say "OK".
+test('connection probe leaves room for a thinking model to answer', async () => {
+  const client = await source('src/lib/ai/gemini-client.ts')
+  const ceiling = client.match(/const PROBE_OUTPUT_TOKENS = (\d+)/)
+  assert.ok(ceiling, 'the probe declares its output ceiling')
+  assert.ok(Number(ceiling[1]) >= 256, `probe ceiling ${ceiling?.[1]} is too small for a thinking model`)
+  assert.match(client, /\}, PROBE_OUTPUT_TOKENS, probeThinkingBudget\(GEMINI_MODEL\)\)/)
 })
 
 test('permission filtering allows only role-scoped screens', () => {

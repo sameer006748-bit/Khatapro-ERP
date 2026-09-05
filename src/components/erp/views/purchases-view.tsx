@@ -11,7 +11,7 @@ import { Plus, Search, Package, Wallet, TrendingDown, X, CheckCircle2, AlertCirc
 import { formatWholeRupees, parseMoney } from '@/lib/format'
 import { bizDate, bizDateString } from '@/lib/dates'
 import { motion, AnimatePresence } from 'framer-motion'
-import { useRouter } from 'next/navigation'
+import { openShellPage } from '@/lib/navigation/shell-navigation'
 import type { MeUser } from '@/components/erp/erp-app'
 import { AiFieldHelp } from '@/components/erp/ai-actions'
 import { apiFetchJson } from '@/lib/api-client'
@@ -29,7 +29,6 @@ type Payment = { accountId: string; amountPaisas: string; paymentType: string }
 const STATUS_BADGE: Record<string, string> = { posted: 'bg-sky-50 text-sky-700 border-sky-200', partially_paid: 'bg-amber-50 text-amber-700 border-amber-200', paid: 'bg-emerald-50 text-emerald-700 border-emerald-200', returned: 'bg-red-50 text-red-700 border-red-200', partially_returned: 'bg-amber-50 text-amber-700 border-amber-200' }
 
 export function PurchasesView({ user }: { user: MeUser }) {
-  const router = useRouter()
   const qc = useQueryClient()
   const canCreate = user.permissions.includes('can_create_purchases')
   const canPay = user.permissions.includes('can_pay_vendors')
@@ -82,7 +81,7 @@ export function PurchasesView({ user }: { user: MeUser }) {
 
       {/* Quick actions — vendor payments and ledgers both live on the Vendors page */}
       <div className="flex flex-wrap gap-2">
-        <Button variant="outline" size="sm" className="h-9 press-sm" onClick={() => router.push('/?page=vendors')}>
+        <Button variant="outline" size="sm" className="h-9 press-sm" onClick={() => openShellPage('vendors')}>
           <BookOpen className="size-3.5 mr-1.5" /> Vendors
         </Button>
       </div>

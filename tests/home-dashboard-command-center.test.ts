@@ -50,7 +50,12 @@ test('only supported hero KPIs expose existing drill-down destinations', () => {
   ]) {
     assert.match(page, new RegExp(`label: '${label}'[\\s\\S]*destination: '${destination.replace(/[/?]/g, '\\$&')}'`))
   }
-  assert.match(page, /onOpen=\{canOpen\(destination\) \? \(\) => router\.push\(destination\) : undefined\}/)
+  // Shell state is written with the history primitive, not router.push: every
+  // screen here is the same route, and router.push discards a same-route
+  // navigation silently when it cannot resolve it. The gate in front is what
+  // matters on this line - an unreachable destination gets no handler at all.
+  // See tests/shell-navigation-primitive.test.ts for the full audit.
+  assert.match(page, /onOpen=\{canOpen\(destination\) \? \(\) => navigateShell\(destination\) : undefined\}/)
 })
 
 test('dashboard refresh retains existing content and exposes keyboard-accessible actions', () => {

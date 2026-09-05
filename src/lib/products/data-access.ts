@@ -352,21 +352,41 @@ export async function createProduct(
     // Step 1: create the product with ZERO stock. Opening quantity is only
     // ever applied by the atomic post_opening_stock RPC below — never here —
     // so a failure cannot leave quantity without valuation/accounting.
+    //
+    // commission_rate is one of the optional columns this module already probes
+    // for on read: it exists only where the commission feature migration was
+    // applied. PostgREST rejects the WHOLE insert when the payload names a
+    // column the table does not have, and it rejects it for the key alone —
+    // sending `commission_rate: null` fails just as hard as sending a value. So
+    // the key is omitted entirely unless a rate was actually entered.
+    const productInsert: Record<string, unknown> = {
+      business_id: businessId,
+      name: input.name,
+      category_id: input.categoryId ?? null,
+      unit: 'piece',
+      sale_price: input.salePrice ?? 0,
+      purchase_price: input.purchasePrice ?? 0,
+      current_stock: 0,
+      is_temporary: input.isTemporary ?? false,
+    }
+    if (input.commissionRatePaisas !== undefined && input.commissionRatePaisas !== null) {
+      productInsert.commission_rate = input.commissionRatePaisas.toString()
+    }
     const { data: created, error: createErr } = await admin
       .from('products')
-      .insert({
-        business_id: businessId,
-        name: input.name,
-        category_id: input.categoryId ?? null,
-        unit: 'piece',
-        sale_price: input.salePrice ?? 0,
-        purchase_price: input.purchasePrice ?? 0,
-        current_stock: 0,
-        is_temporary: input.isTemporary ?? false,
-        commission_rate: input.commissionRatePaisas?.toString() ?? null,
-      })
+      .insert(productInsert)
       .select('id')
       .single()
+    if (createErr && missingProductOptionalColumn(createErr) === 'commissionRate') {
+      // The insert was rejected as a whole, so no product row exists to clean
+      // up. Refusing is the honest outcome: storing the product while dropping
+      // the rate would pay zero commission on every future sale of it.
+      throw new SafeProductError(
+        `Per-piece commission is not available on this database, so "${input.name}" was not created. ` +
+        'Save the product without a commission rate, or ask your administrator to enable the commission feature first.',
+        `products.commission_rate absent [${(createErr as { code?: string | null }).code ?? 'unknown'}]`,
+      )
+    }
     if (createErr || !created) throw new Error('Failed to create product. Please try again.')
     const productId = (created as any).id as string
 
@@ -564,6 +584,16 @@ export async function updateProduct(
       .update(patch)
       .eq('id', productId)
       .eq('business_id', businessId)
+    if (error && missingProductOptionalColumn(error) === 'commissionRate') {
+      // PostgREST rejected the whole patch, so none of the other edits in this
+      // form were saved either. Say that, rather than letting the operator
+      // believe a partial save happened.
+      throw new SafeProductError(
+        'Per-piece commission is not available on this database, so no changes were saved. ' +
+        'Save the product without changing its commission rate.',
+        `products.commission_rate absent [${(error as { code?: string | null }).code ?? 'unknown'}]`,
+      )
+    }
     if (error) throw new Error(`Supabase: ${error.message}`)
     return
   }

@@ -1,7 +1,7 @@
 'use client'
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { useRouter } from 'next/navigation'
+import { openShellHome } from '@/lib/navigation/shell-navigation'
 import { formatMoney } from '@/lib/format'
 import { bizDate, bizFormat } from '@/lib/dates'
 import { ArrowLeft, Printer, RotateCcw, CheckCircle2 } from 'lucide-react'
@@ -91,7 +91,6 @@ const TYPE_BADGE: Record<string, string> = {
 }
 
 export function InvoiceDetailView({ invoiceId, openReturn = false }: { invoiceId: string; openReturn?: boolean }) {
-  const router = useRouter()
   const qc = useQueryClient()
   const [returnOpen, setReturnOpen] = useState(openReturn)
   const [returnReason, setReturnReason] = useState('')
@@ -245,7 +244,9 @@ export function InvoiceDetailView({ invoiceId, openReturn = false }: { invoiceId
     }
   }
 
-  function back() { router.push('/') }
+  // Back clears ?invoice= from the shell URL, returning to the page underneath.
+  function back() { openShellHome() }
+
 
   return (
     <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">

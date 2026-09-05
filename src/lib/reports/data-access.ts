@@ -492,11 +492,19 @@ function bigAbsSum(rows: any[], field: string): bigint {
 }
 void bigAbsSum  // reserved for future severity-sorted aggregation
 
+/**
+ * Returns null when the General Ledger balance cannot be read at all - the
+ * legacy production schema has no ledger_accounts table and no
+ * ledger_account_balance_paisas function, so every lookup here is unanswerable
+ * there. An unreadable balance is not a zero balance: reporting it as zero
+ * makes each reconciliation below flag the whole operational total as a
+ * discrepancy, so callers must skip the check instead.
+ */
 async function getAccountBalanceByCode(
   businessId: string,
   code: string,
   asOfDate?: string,
-): Promise<bigint> {
+): Promise<bigint | null> {
   const admin = getAdminSupabase()
   const { data: acct, error: acctErr } = await admin
     .from('ledger_accounts')
@@ -504,14 +512,14 @@ async function getAccountBalanceByCode(
     .eq('business_id', businessId)
     .eq('account_code', code)
     .maybeSingle()
-  if (acctErr || !acct) return 0n
+  if (acctErr || !acct) return null
 
   const { data, error } = await admin.rpc('ledger_account_balance_paisas', {
     p_business_id: businessId,
     p_account_id: acct.id,
     p_as_of_date: asOfDate ?? null,
   })
-  if (error || data === null) return 0n
+  if (error || data === null) return null
   return BigInt(data as string | number)
 }
 
@@ -599,7 +607,8 @@ export async function reportExceptions(businessId: string): Promise<ExceptionRow
       }
     }
     const gl1100 = await getAccountBalanceByCode(businessId, '1100')
-    const diff = stockValue - gl1100
+    // A null GL balance means the ledger cannot be read, not that it is zero.
+    const diff = gl1100 === null ? 0n : stockValue - gl1100
     if (diff !== 0n) {
       out.push({
         severity: 'HIGH',
@@ -630,7 +639,7 @@ export async function reportExceptions(businessId: string): Promise<ExceptionRow
       }
     }
     const gl1200 = await getAccountBalanceByCode(businessId, '1200')
-    const diff = outstanding - gl1200
+    const diff = gl1200 === null ? 0n : outstanding - gl1200
     if (diff !== 0n) {
       out.push({
         severity: 'HIGH',
@@ -662,7 +671,7 @@ export async function reportExceptions(businessId: string): Promise<ExceptionRow
     const gl2010 = await getAccountBalanceByCode(businessId, '2010')
     // Vendors Payable is credit-normal, so GL balance stored as credit-debit;
     // getAccountBalanceByCode returns debit-credit, so payable = -balance.
-    const diff = outstanding + gl2010
+    const diff = gl2010 === null ? 0n : outstanding + gl2010
     if (diff !== 0n) {
       out.push({
         severity: 'HIGH',
@@ -692,7 +701,7 @@ export async function reportExceptions(businessId: string): Promise<ExceptionRow
       }
     }
     const gl1310 = await getAccountBalanceByCode(businessId, '1310')
-    const diff = codPending - gl1310
+    const diff = gl1310 === null ? 0n : codPending - gl1310
     if (diff !== 0n) {
       out.push({
         severity: 'HIGH',
@@ -732,7 +741,7 @@ export async function reportExceptions(businessId: string): Promise<ExceptionRow
     }
     const payable = earned - deducted
     const gl2020 = await getAccountBalanceByCode(businessId, '2020')
-    const diff = payable + gl2020
+    const diff = gl2020 === null ? 0n : payable + gl2020
     if (diff !== 0n) {
       out.push({
         severity: 'HIGH',
@@ -759,7 +768,7 @@ export async function reportExceptions(businessId: string): Promise<ExceptionRow
     if (accts) {
       for (const a of accts as any[]) {
         const bal = await getAccountBalanceByCode(businessId, a.account_code)
-        if (bal < 0n) {
+        if (bal !== null && bal < 0n) {
           out.push({
             severity: 'MEDIUM',
             issue: `Negative balance in asset account`,
@@ -895,7 +904,7 @@ export async function reportExceptions(businessId: string): Promise<ExceptionRow
     if (accts) {
       for (const a of accts as any[]) {
         const bal = await getAccountBalanceByCode(businessId, a.account_code)
-        if (bal < 0n) {
+        if (bal !== null && bal < 0n) {
           out.push({
             severity: 'MEDIUM',
             issue: `Unusual credit balance on asset account`,
@@ -923,7 +932,7 @@ export async function reportExceptions(businessId: string): Promise<ExceptionRow
     if (accts) {
       for (const a of accts as any[]) {
         const bal = await getAccountBalanceByCode(businessId, a.account_code)
-        if (bal > 0n) {
+        if (bal !== null && bal > 0n) {
           out.push({
             severity: 'MEDIUM',
             issue: `Unusual debit balance on liability account`,

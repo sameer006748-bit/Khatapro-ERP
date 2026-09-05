@@ -14,7 +14,7 @@ import {
 import { useOwnSalesDashboard } from '@/hooks/use-owner-dashboard'
 import { GlassPanel, KpiCard, QuickActionButton, SectionHeader, EmptyState } from '@/components/erp/dashboard-components'
 import { formatWholeRupees } from '@/lib/format'
-import { useRouter } from 'next/navigation'
+import { openShellPage } from '@/lib/navigation/shell-navigation'
 
 
 function formatDateTime(iso: string): string {
@@ -22,7 +22,6 @@ function formatDateTime(iso: string): string {
 }
 
 export function SalesmanDashboard({ user }: { user: any }) {
-  const router = useRouter()
   const { data, isLoading, error, refetch } = useOwnSalesDashboard()
 
   const container = {
@@ -66,11 +65,11 @@ export function SalesmanDashboard({ user }: { user: any }) {
   }
 
   const quickActions = [
-    { label: 'New Bill', icon: ShoppingCart, action: () => router.push('/?page=counter-sale') },
-    { label: 'My Sales', icon: FileText, action: () => router.push('/?page=sales-list') },
-    { label: 'Reports', icon: TrendingUp, action: () => router.push('/?page=my-reports') },
-    { label: 'Receive Payment', icon: Wallet, action: () => router.push('/?page=accounts') },
-    { label: 'Commission', icon: TrendingUp, action: () => router.push('/?page=my-reports') },
+    { label: 'New Bill', icon: ShoppingCart, action: () => openShellPage('counter-sale') },
+    { label: 'My Sales', icon: FileText, action: () => openShellPage('sales-list') },
+    { label: 'Reports', icon: TrendingUp, action: () => openShellPage('my-reports') },
+    { label: 'Receive Payment', icon: Wallet, action: () => openShellPage('accounts') },
+    { label: 'Commission', icon: TrendingUp, action: () => openShellPage('my-reports') },
   ]
 
   const kpis = [
@@ -147,7 +146,7 @@ export function SalesmanDashboard({ user }: { user: any }) {
       <motion.div variants={item}>
         <GlassPanel padding="p-5 sm:p-6">
           <SectionHeader title="Recent Invoices" subtitle="Latest sales transactions"
-            action={<button onClick={() => router.push('/?page=sales-list')} className="text-xs text-primary hover:underline flex items-center gap-1">View all <ArrowRight className="size-3" /></button>} />
+            action={<button onClick={() => openShellPage('sales-list')} className="text-xs text-primary hover:underline flex items-center gap-1">View all <ArrowRight className="size-3" /></button>} />
           {(data.rows ?? []).length === 0 ? <EmptyState message="No invoices yet" /> : (
             <div className="space-y-2">
               {(data.rows ?? []).map(inv => (

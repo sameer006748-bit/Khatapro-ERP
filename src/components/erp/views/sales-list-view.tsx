@@ -6,7 +6,7 @@ import { formatMoney, formatWholeRupees, formatTableDate } from '@/lib/format'
 import { FileText, Search, Printer, X, ShoppingCart, Truck, ArrowDownToLine, RotateCcw } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
-import { useRouter } from 'next/navigation'
+import { navigateShell, openShellPage } from '@/lib/navigation/shell-navigation'
 import { PrintInvoiceButton } from '@/components/invoice/print-invoice-button'
 import { apiFetchJson } from '@/lib/api-client'
 import { PageHeader } from '@/components/erp/page-header'
@@ -33,7 +33,6 @@ const TYPE_BADGE: Record<string, string> = {
 }
 
 export function SalesListView() {
-  const router = useRouter()
   const [filter, setFilter] = useState('')
   const [typeFilter, setTypeFilter] = useState<string>('')
   const [selected, setSelected] = useState<string[]>([])
@@ -107,22 +106,22 @@ export function SalesListView() {
 
       {/* Primary action + Quick actions */}
       <div className="flex flex-wrap gap-2">
-        <Button size="sm" className="h-10 press-sm shadow-sm" onClick={() => router.push('/?page=counter-sale')}>
+        <Button size="sm" className="h-10 press-sm shadow-sm" onClick={() => openShellPage('counter-sale')}>
           <ShoppingCart className="size-4 mr-1.5" /> Counter Sale
         </Button>
-        <Button variant="outline" size="sm" className="h-10 press-sm" onClick={() => router.push('/?page=online-sale')}>
+        <Button variant="outline" size="sm" className="h-10 press-sm" onClick={() => openShellPage('online-sale')}>
           <ShoppingCart className="size-4 mr-1.5" /> Online Sale
         </Button>
-        <Button variant="outline" size="sm" className="h-10 press-sm" onClick={() => router.push('/?page=ofc-sale')}>
+        <Button variant="outline" size="sm" className="h-10 press-sm" onClick={() => openShellPage('ofc-sale')}>
           <Truck className="size-4 mr-1.5" /> Out-of-City Sale
         </Button>
-        <Button variant="outline" size="sm" className="h-10 press-sm" onClick={() => router.push('/?page=other-sale')}>
+        <Button variant="outline" size="sm" className="h-10 press-sm" onClick={() => openShellPage('other-sale')}>
           <ShoppingCart className="size-4 mr-1.5" /> Other Sale
         </Button>
         <Button variant={returnMode ? 'default' : 'outline'} size="sm" className="h-10 press-sm" onClick={() => { setReturnMode(value => !value); setSelectMode(false); setSelected([]) }}>
           <RotateCcw className="size-4 mr-1.5" /> Historical Return
         </Button>
-        <Button variant="outline" size="sm" className="h-10 press-sm" onClick={() => router.push('/?page=receipt-voucher')}>
+        <Button variant="outline" size="sm" className="h-10 press-sm" onClick={() => openShellPage('receipt-voucher')}>
           <ArrowDownToLine className="size-4 mr-1.5" /> Receive Payment
         </Button>
       </div>
@@ -216,7 +215,7 @@ export function SalesListView() {
                           e.stopPropagation()
                           toggleSelect(r.id)
                         } else {
-                          router.push(`/?invoice=${r.id}${returnMode ? '&return=1' : ''}`)
+                          navigateShell(`/?invoice=${r.id}${returnMode ? '&return=1' : ''}`)
                         }
                       }}
                       className={`border-b border-border/60 last:border-0 hover:bg-accent/30 transition-colors cursor-pointer ${isSelected ? 'bg-primary/5' : ''}`}
@@ -264,7 +263,7 @@ export function SalesListView() {
                   key={r.id}
                   onClick={() => {
                     if (selectMode) toggleSelect(r.id)
-                    else router.push(`/?invoice=${r.id}${returnMode ? '&return=1' : ''}`)
+                    else navigateShell(`/?invoice=${r.id}${returnMode ? '&return=1' : ''}`)
                   }}
                   className={`card-3d card-3d-hover p-4 w-full text-left ${isSelected ? 'border-primary ring-2 ring-primary/20' : ''}`}
                 >

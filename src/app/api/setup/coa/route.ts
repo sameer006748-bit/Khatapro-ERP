@@ -5,7 +5,7 @@
 import { NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth/authOptions'
-import { loadSessionUser } from '@/lib/auth/permissions'
+import { hasPermission, loadSessionUser } from '@/lib/auth/permissions'
 import { getChartOfAccounts } from '@/lib/accounting/data-access'
 import { getAccountingAvailability, unavailableAccountingPayload } from '@/lib/accounting/availability'
 import { isSupabaseConfigured } from '@/lib/supabase/config'
@@ -26,6 +26,18 @@ export async function GET() {
     ))
   }
   const cats = await getChartOfAccounts(su.businessId)
+
+  // Every operational screen uses this route as an account picker - payment
+  // accounts, expense heads, vendor and party ledgers - so the structure stays
+  // available to any signed-in user of the business. Balances are a separate
+  // question: they amount to the whole ledger in one response, so they travel
+  // only to the roles the Accounts, Chart of Accounts and Trial Balance screens
+  // are already gated on ('can_view_account_balances' is seeded as sensitive).
+  // A Salesman or Rider gets the account list their screens need, and no
+  // business-wide figures.
+  const canSeeBalances = hasPermission(su, 'can_view_account_balances')
+    || hasPermission(su, 'can_view_setup')
+    || hasPermission(su, 'can_view_trial_balance')
 
   // Additive fields only. `depth`/`rootId`/`parentId` let a screen tell a fixed
   // accounting root apart from a user-created category or subcategory, and
@@ -50,7 +62,7 @@ export async function GET() {
         isPartyAccount: a.isPartyAccount,
         isSystem: a.isSystem === true,
         partyType: a.partyType,
-        balancePaisas: a.balanceCache.toString(),
+        ...(canSeeBalances ? { balancePaisas: a.balanceCache.toString() } : {}),
       })),
     })),
   })

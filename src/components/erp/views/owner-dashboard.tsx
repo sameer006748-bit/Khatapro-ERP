@@ -19,7 +19,7 @@ import {
   Wallet,
   type LucideIcon,
 } from 'lucide-react'
-import { useRouter } from 'next/navigation'
+import { navigateShell } from '@/lib/navigation/shell-navigation'
 import { useOwnerDashboard, type DashboardMetricTrend } from '@/hooks/use-owner-dashboard'
 import { formatWholeRupees } from '@/lib/format'
 import { bizFormat, bizPresetDateRange, businessDaySpan, isBusinessDateRange, type BusinessDateRange } from '@/lib/dates'
@@ -216,7 +216,6 @@ function RecentActivity({ state, items, onOpen, onRetry }: RecentActivityProps) 
 }
 
 export function OwnerDashboard({ user }: { user: { displayName: string; roleName: string; permissions?: string[] } }) {
-  const router = useRouter()
   const permissions = user.permissions ?? []
   const [range, setRange] = useState<BusinessDateRange>(() => bizPresetDateRange('today'))
   const [preset, setPreset] = useState<'today' | 'last3' | 'last7' | 'month' | 'custom'>('today')
@@ -252,7 +251,7 @@ export function OwnerDashboard({ user }: { user: { displayName: string; roleName
   const stateFor = (name: string): MetricState => data.metricStates[name] ?? (data.availability[name as keyof typeof data.availability] ? 'available' : 'not-tracked')
   const hasPeriodActivity = (data.kpis.todaySales ?? 0) !== 0 || (data.kpis.todayCollections ?? 0) !== 0 || (data.kpis.todayExpenses ?? 0) !== 0 || (data.kpis.todayPurchases ?? 0) !== 0
   const canOpen = (destination: string) => canOpenDashboardDestination(permissions, destination)
-  const openDestination = (destination: string) => { if (canOpen(destination)) router.push(destination) }
+  const openDestination = (destination: string) => { if (canOpen(destination)) navigateShell(destination) }
   // Wording comes from the measured previous range, so a 5-day custom range
   // never claims to be compared against "last week".
   const previousPeriodLabel = data.trends.previousRange === null
@@ -294,7 +293,7 @@ export function OwnerDashboard({ user }: { user: { displayName: string; roleName
 
   const sectionNodes: Partial<Record<DashboardSectionId, ReactNode>> = {
     hero: <div key="hero">
-      <section aria-label="Business overview"><div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">{heroMetrics.map(({ destination, ...metric }) => <HeroMetric key={metric.label} {...metric} periodLabel={previousPeriodLabel} onRetry={() => refetch()} onOpen={canOpen(destination) ? () => router.push(destination) : undefined} />)}</div></section>
+      <section aria-label="Business overview"><div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">{heroMetrics.map(({ destination, ...metric }) => <HeroMetric key={metric.label} {...metric} periodLabel={previousPeriodLabel} onRetry={() => refetch()} onOpen={canOpen(destination) ? () => navigateShell(destination) : undefined} />)}</div></section>
       {!hasPeriodActivity && <p className="mt-5 rounded-lg border border-dashed border-border px-4 py-3 text-sm text-muted-foreground">No activity in this period.</p>}
     </div>,
     attention: attentionItems.length === 0 ? null : <section key="attention" className="rounded-xl border border-border bg-muted/20 p-4" aria-label="Needs Attention"><div className="flex items-start justify-between gap-3"><div><h2 className="text-sm font-semibold text-foreground">Needs Attention</h2><p className="text-xs text-muted-foreground">Actionable items, ordered by urgency.</p></div><span className="shrink-0 text-xs text-muted-foreground">{attentionItems.length} item{attentionItems.length === 1 ? '' : 's'}</span></div><div className="mt-3 grid gap-2">{visibleAttentionItems.map((item) => <AttentionItem key={item.id} item={item} onOpen={openDestination} canOpen={canOpen(item.destination)} />)}</div>{attentionItems.length > 4 && <button type="button" onClick={() => setShowAllAttention((shown) => !shown)} className="mt-3 min-h-9 text-xs font-medium text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">{showAllAttention ? 'Show Less' : `Show ${attentionItems.length - 4} More`}</button>}{attentionOverflow && <p className="mt-3 text-xs text-muted-foreground">{attentionOverflow}</p>}</section>,
