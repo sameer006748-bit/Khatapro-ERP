@@ -99,9 +99,14 @@ test('one metric failure does not break an independent successful card', async (
   assert.deepEqual({ value: successful.value, available: successful.available }, { value: 12500, available: true })
 })
 
-test('operational Received uses actual payments and excludes rider delivery events', () => {
-  assert.match(summary, /\.from\('payments'\)/)
-  assert.match(summary, /String\(row\.direction\)\.toLowerCase\(\) === 'received'/)
+test('operational Received uses real collections and excludes rider delivery events', () => {
+  // `payments` is the vendor-payment table on production and has no
+  // invoice_id/direction/payment_mode; a collection is an allocation against an
+  // invoice or a posted receipt voucher.
+  assert.match(summary, /\.from\('payment_allocations'\)/)
+  assert.match(summary, /\.from\('receipts'\)/)
+  assert.doesNotMatch(summary, /\.from\('payments'\)/)
+  assert.doesNotMatch(summary, /row\.direction/)
   assert.doesNotMatch(summary, /\.from\('delivery_orders'\)/)
   assert.match(summary, /Rider delivery tables are intentionally absent/)
 })
@@ -133,8 +138,15 @@ test('retry is bounded and stale date-range requests are aborted', () => {
 })
 
 test('Today, a custom single date, and a custom range share the selected Karachi range', () => {
-  assert.match(summary, /boundary\(range\.from\)/)
-  assert.match(summary, /boundary\(range\.to, true\)/)
+  // Every period read filters its own business-date column against the one
+  // selected range. Those columns default to the Asia/Karachi day, so no read
+  // builds timestamp boundaries of its own.
+  assert.match(summary, /\.gte\('invoice_date', range\.from\)\.lte\('invoice_date', range\.to\)/)
+  assert.match(summary, /readCollections\(admin, bid, range\.from, range\.to\)/)
+  assert.match(summary, /\.gte\('expense_date', range\.from\)\.lte\('expense_date', range\.to\)/)
+  assert.match(summary, /\.gte\('purchase_date', range\.from\)\.lte\('purchase_date', range\.to\)/)
+  assert.match(summary, /\.gte\('return_date', range\.from\)\.lte\('return_date', range\.to\)/)
+  assert.doesNotMatch(summary, /boundary\(/)
   assert.match(hook, /dashboardDateRangeQuery\(range\)/)
   assert.match(hook, /queryKey: \['owner-dashboard', range\.from, range\.to\]/)
 })

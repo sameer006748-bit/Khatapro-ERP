@@ -31,6 +31,7 @@ const ownerSummary = await read('src/lib/dashboard/owner-summary.ts')
 const invoiceView = await read('src/components/erp/views/invoice-detail-view.tsx')
 const foundation = await read('supabase/migrations/00014_phase1_foundation.sql')
 const phase4Sales = await read('supabase/migrations/00004_phase4_sales.sql')
+const phase6Vouchers = await read('supabase/migrations/00006_phase6_vouchers_expenses.sql')
 
 const assignableRiders = /export async function listAssignableRiders[\s\S]*?\n\}/.exec(deliveryAccess)![0]
 
@@ -263,6 +264,104 @@ test('every sale type opens its invoice through the one shared read', async () =
   const list = await read('src/components/erp/views/sales-list-view.tsx')
   assert.match(list, /\/\?invoice=\$\{r\.id\}/)
   assert.match(invoiceView, /fetch\(`\/api\/sales\/\$\{invoiceId\}`\)/)
+})
+
+// ---------------------------------------------------------------------------
+// BLOCKER 2c — the Payments section of an invoice, and the Collections KPI.
+//
+// `payments` is the vendor-payment table: `payment_no`, `payment_date`,
+// `paid_from_account_id`, `vendor_id`. It has never had `invoice_id`,
+// `direction` or `payment_mode`, so a posted invoice opened with
+// `unavailableSections: ["payments"]` and the owner dashboard reported
+// Collections as "not tracked" on a business that collects money every day.
+//
+// A customer's money arrives in one of two places: an allocation against an
+// invoice (`payment_allocations`) or a standalone receipt voucher (`receipts`).
+// ---------------------------------------------------------------------------
+
+test('the vendor payments table is not read as if it held invoice receipts', () => {
+  for (const [name, source] of [['sales', salesAccess], ['dashboard', ownerSummary]] as const) {
+    assert.doesNotMatch(source.replace(/^[ \t]*\/\/.*$/gm, ''), /from\('payments'\)/, `${name} must not read the vendor payments table`)
+  }
+})
+
+test('the invoices payments section reads allocations and the receiving account', () => {
+  assert.match(salesAccess, /admin\.from\('payment_allocations'\)\s*\n\s*\.select\('id, account_id, amount, is_change, accounts\(code, name\)'\)\s*\n\s*\.eq\('business_id', businessId\)\.eq\('invoice_id', invoiceId\)/)
+  // Same shape the Prisma branch already returns, so the viewer needs no branch:
+  // a named account, its code, and whether the row is change handed back.
+  assert.match(salesAccess, /accountId: p\.account_id, accountCode: p\.accounts\?\.code \?\? null, accountName: p\.accounts\?\.name \?\? 'Payment', amount: String\(p\.amount\), isChange: Boolean\(p\.is_change\)/)
+  assert.match(invoiceView, /p\.isChange && p\.accountCode === '1200'/)
+})
+
+test('collections are invoice allocations plus posted receipts, on business dates', () => {
+  const reader = /async function readCollections[\s\S]*?\n\}/.exec(ownerSummary)![0]
+  assert.match(reader, /from\('payment_allocations'\)\s*\n?\s*\.select\('amount, allocation_date'\)\.eq\('business_id', bid\)\.eq\('is_change', false\)/)
+  assert.match(reader, /\.gte\('allocation_date', from\)\.lte\('allocation_date', to\)/)
+  assert.match(reader, /from\('receipts'\)\s*\n?\s*\.select\('amount, receipt_date'\)\.eq\('business_id', bid\)\.eq\('status', 'posted'\)/)
+  assert.match(reader, /\.gte\('receipt_date', from\)\.lte\('receipt_date', to\)/)
+  // Change handed back is not a collection, and a reversed receipt is not one.
+  assert.doesNotMatch(reader, /is_change', true/)
+  // Every consumer reads the normalized rows, so none of them names a column.
+  assert.match(ownerSummary, /const received = paymentQ\.available \? sum\(paymentQ\.value \?\? \[\], 'amount'\) : null/)
+  assert.match(ownerSummary, /const receivedPayments = paymentQ\.value \?\? \[\]/)
+  assert.doesNotMatch(ownerSummary, /row\.direction/)
+})
+
+test('both collection periods read the one source, so a comparison cannot mix definitions', () => {
+  const calls = ownerSummary.match(/readCollections\(admin, bid, (?:range|previousRange)\.from, (?:range|previousRange)\.to\)/g) ?? []
+  assert.deepEqual(calls, [
+    'readCollections(admin, bid, range.from, range.to)',
+    'readCollections(admin, bid, previousRange.from, previousRange.to)',
+  ])
+})
+
+test('the migrations agree: payments is a vendor table, allocations carry the invoice', () => {
+  const payments = /create table if not exists public\.payments \([\s\S]*?\n\);/i.exec(phase6Vouchers)![0]
+  assert.match(payments, /\bvendor_id\s+text/i)
+  assert.match(payments, /\bpaid_from_account_id\s+text/i)
+  for (const column of [/^\s*invoice_id\s/im, /^\s*direction\s/im, /^\s*payment_mode\s/im]) {
+    assert.doesNotMatch(payments, column, 'the vendor payments table has no invoice-receipt column')
+  }
+  const allocations = /create table if not exists public\.payment_allocations \([\s\S]*?\n\);/i.exec(phase4Sales)![0]
+  assert.match(allocations, /\binvoice_id\s+text not null references public\.invoices\(id\)/i)
+  assert.match(allocations, /\bamount\s+numeric\(20,0\) not null/i)
+  assert.match(allocations, /\bis_change\s+boolean not null default false/i)
+  // Business-local dates, which is why the range needs no timestamp boundaries.
+  assert.match(allocations, /allocation_date date not null default \(now\(\) at time zone 'Asia\/Karachi'\)::date/i)
+  const receipts = /create table if not exists public\.receipts \([\s\S]*?\n\);/i.exec(phase6Vouchers)![0]
+  assert.match(receipts, /receipt_date\s+date not null default \(now\(\) at time zone 'Asia\/Karachi'\)::date/i)
+  assert.match(receipts, /\bstatus\s+text not null default 'posted'/i)
+  assert.match(phase6Vouchers, /update public\.receipts set status = 'reversed'/i)
+})
+
+// ---------------------------------------------------------------------------
+// BLOCKER 2d — the Returns metric read a table that does not exist.
+//
+// `sale_return_documents` returned PGRST205 ("Could not find the table") on
+// every dashboard request, so Sales Returns read "not tracked" and Approx.
+// Profit could never be computed. Production records a return in
+// `sales_returns`, dated by `return_date`, with no posted/unposted status.
+// ---------------------------------------------------------------------------
+
+test('the returns metric reads the table production has, on its own date column', () => {
+  const returns = /isolated\('periodSalesReturns'[\s\S]*?\)\),/.exec(ownerSummary)![0]
+  assert.match(returns, /from\('sales_returns'\)/)
+  assert.match(returns, /\.select\('total, return_date'\)/)
+  assert.match(returns, /\.gte\('return_date', range\.from\)\.lte\('return_date', range\.to\)/)
+  assert.doesNotMatch(returns, /sale_return_documents/)
+  // `status` is not a column on a return: `settlement_status` records how the
+  // refund was settled (CREDIT_DUE / REFUNDED), never whether it counts.
+  assert.doesNotMatch(returns, /'status'/)
+  assert.match(ownerSummary, /const salesReturns = salesReturnQ\.available \? sum\(salesReturnQ\.value \?\? \[\], 'total'\) : null/)
+})
+
+test('a returns row is defined by return_date and total, and settlement_status is added later', async () => {
+  const table = /create table (?:if not exists )?public\.sales_returns \([\s\S]*?\n\);/i.exec(phase4Sales)![0]
+  assert.match(table, /\breturn_date\s+/i)
+  assert.match(table, /\btotal\s+numeric/i)
+  assert.doesNotMatch(table, /^\s*status\s+/im)
+  const legacy = await read('supabase/migrations/00037_legacy_historical_sales_returns.sql')
+  assert.match(legacy, /alter table public\.sales_returns add column if not exists settlement_status text/i)
 })
 
 // ---------------------------------------------------------------------------

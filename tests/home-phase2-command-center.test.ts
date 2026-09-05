@@ -220,6 +220,9 @@ test('Phase 2 adds no unbounded work and preserves Phase 1B refresh behaviour', 
   assert.doesNotMatch(page, /scrollTo\(|scrollIntoView\(/)
   // Prior-period reads live inside the one existing batch, never in a loop.
   assert.match(summary, /prevSalesQ, prevCashQ, prevPaymentQ, prevExpenseQ\] = await Promise\.all\(\[/)
-  assert.equal(summary.match(/await Promise\.all\(\[/g)?.length, 2)
+  // Three fixed batches and no more: the metric batch, the ledger accounts, and
+  // the two tables a collection can come from. None of them sits in a loop.
+  assert.equal(summary.match(/await Promise\.all\(\[/g)?.length, 3)
+  assert.match(summary, /const \[allocated, received\] = await Promise\.all\(\[/)
   assert.doesNotMatch(page, /refetchInterval|setInterval\(/)
 })

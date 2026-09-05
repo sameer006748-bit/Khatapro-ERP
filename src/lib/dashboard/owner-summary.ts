@@ -30,6 +30,8 @@ type Range = { from: string; to: string }
 type Metric<T> = { value: T | null; available: boolean }
 type Movement = { inflow: number; outflow: number }
 type MetricState = 'available' | 'not-tracked' | 'error'
+/** One collection event, normalized to a business date so callers need no schema. */
+type CollectionRow = { amount: number | string; date: string | null }
 
 function errorShape(error: unknown): PostgrestLikeError {
   return error && typeof error === 'object' ? error as PostgrestLikeError : { message: String(error) }
@@ -68,16 +70,42 @@ function sum(rows: any[], column: string): number {
   return Number(rows.reduce((value, row) => value + BigInt(row[column] ?? 0), 0n))
 }
 
-function boundary(date: string, end = false): string {
-  return `${date}T${end ? '23:59:59.999' : '00:00:00'}+05:00`
-}
-
 /**
  * `invoices` has no status column: cancelled and returned are separate boolean
  * flags (migration 00004), so a posted invoice is one with neither flag set.
  */
 function isPostedInvoice(row: any): boolean {
   return !row.is_cancelled && !row.is_returned
+}
+
+/**
+ * Money received in a business date range.
+ *
+ * There is no one table of money in and out. `payments` is the vendor-payment
+ * table — `vendor_id`, `paid_from_account_id`, `payment_date` — and has never
+ * had the `direction`, `payment_mode` or `invoice_id` columns this metric used
+ * to select, so every request returned 42703 and the Collections KPI read
+ * "not tracked" on a business that collects money every day.
+ *
+ * The two real sources are a payment allocated to an invoice at the counter
+ * (`payment_allocations`, where `is_change` marks change handed back rather than
+ * a collection) and a standalone receipt voucher (`receipts`, `reversed` once its
+ * voucher is reversed). Both date columns default to the Asia/Karachi day, so
+ * they take the same plain business dates as every other read here.
+ */
+async function readCollections(admin: any, bid: string, from: string, to: string): Promise<CollectionRow[]> {
+  const [allocated, received] = await Promise.all([
+    admin.from('payment_allocations')
+      .select('amount, allocation_date').eq('business_id', bid).eq('is_change', false)
+      .gte('allocation_date', from).lte('allocation_date', to),
+    admin.from('receipts')
+      .select('amount, receipt_date').eq('business_id', bid).eq('status', 'posted')
+      .gte('receipt_date', from).lte('receipt_date', to),
+  ])
+  return [
+    ...rowsOrThrow(allocated).map(row => ({ amount: row.amount ?? 0, date: row.allocation_date ?? null })),
+    ...rowsOrThrow(received).map(row => ({ amount: row.amount ?? 0, date: row.receipt_date ?? null })),
+  ]
 }
 
 /**
@@ -425,10 +453,7 @@ export async function buildOwnerDashboardPayload(input: {
     legacyReports
       ? isolated('recentInvoices', unavailable, () => reportSalesDetail(bid, range.from, range.to))
       : Promise.resolve<Metric<any[]> | null>(null),
-    isolated('todayCollections', unavailable, async () => rowsOrThrow(await admin.from('payments')
-      .select('amount, direction, payment_mode, created_at, invoice_id')
-      .eq('business_id', bid).gte('created_at', boundary(range.from))
-      .lte('created_at', boundary(range.to, true)))),
+    isolated('todayCollections', unavailable, () => readCollections(admin, bid, range.from, range.to)),
     legacyReports
       ? isolated('todayNetCashFlow', unavailable, () => reportCashFlow(bid, range.from, range.to))
       : Promise.resolve<Metric<any[]> | null>(null),
@@ -439,10 +464,12 @@ export async function buildOwnerDashboardPayload(input: {
       .select('id, purchase_no, purchase_date, total, paid_amount, outstanding_amount, status')
       .eq('business_id', bid).gte('purchase_date', range.from).lte('purchase_date', range.to)
       .order('purchase_date', { ascending: false }))),
-    isolated('periodSalesReturns', unavailable, async () => rowsOrThrow(await admin.from('sale_return_documents')
-      .select('total, return_date, status').eq('business_id', bid)
-      .gte('return_date', boundary(range.from)).lte('return_date', boundary(range.to, true))
-      .eq('status', 'posted'))),
+    // Production records a return in `sales_returns` (`return_date`, `total`);
+    // there is no `sale_return_documents` table and no posted/unposted status on
+    // a return — reading either left this metric permanently "not tracked".
+    isolated('periodSalesReturns', unavailable, async () => rowsOrThrow(await admin.from('sales_returns')
+      .select('total, return_date').eq('business_id', bid)
+      .gte('return_date', range.from).lte('return_date', range.to))),
     isolated('periodPurchaseReturns', unavailable, async () => rowsOrThrow(await admin.from('purchase_returns')
       .select('total_amount, return_date').eq('business_id', bid)
       .gte('return_date', range.from).lte('return_date', range.to))),
@@ -479,9 +506,7 @@ export async function buildOwnerDashboardPayload(input: {
       ? isolated('previousNetCash', unavailable, () => reportCashFlow(bid, previousRange.from, previousRange.to))
       : Promise.resolve<Metric<any[]> | null>(null),
     previousRange !== null && !legacyReports
-      ? isolated('previousCollections', unavailable, async () => rowsOrThrow(await admin.from('payments')
-        .select('amount, direction').eq('business_id', bid)
-        .gte('created_at', boundary(previousRange.from)).lte('created_at', boundary(previousRange.to, true))))
+      ? isolated('previousCollections', unavailable, () => readCollections(admin, bid, previousRange.from, previousRange.to))
       : Promise.resolve<Metric<any[]> | null>(null),
     previousRange !== null && !legacyReports
       ? isolated('previousExpenses', unavailable, async () => rowsOrThrow(await admin.from('expenses')
@@ -513,11 +538,10 @@ export async function buildOwnerDashboardPayload(input: {
     sales = Number(total)
   }
 
-  // Rider delivery tables are intentionally absent here. COD is Received only
-  // when settlement creates a real payments row with direction=Received.
-  const received = paymentQ.available
-    ? sum((paymentQ.value ?? []).filter(row => String(row.direction).toLowerCase() === 'received'), 'amount')
-    : null
+  // Rider delivery tables are intentionally absent here. COD becomes a
+  // collection only once settlement allocates it to the invoice, which is what
+  // readCollections counts.
+  const received = paymentQ.available ? sum(paymentQ.value ?? [], 'amount') : null
   const expenses = expenseQ.available
     ? sum((expenseQ.value ?? []).filter(row => String(row.status ?? '').toLowerCase() !== 'cancelled'), 'total_amount')
     : null
@@ -545,7 +569,7 @@ export async function buildOwnerDashboardPayload(input: {
     ? sum(prevSalesQ.value ?? [], legacyReports ? 'total_subtotal' : 'total')
     : null
   const previousReceived = prevPaymentQ?.available
-    ? sum((prevPaymentQ.value ?? []).filter(row => String(row.direction).toLowerCase() === 'received'), 'amount')
+    ? sum(prevPaymentQ.value ?? [], 'amount')
     : null
   const previousExpenses = prevExpenseQ?.available
     ? sum((prevExpenseQ.value ?? []).filter(row => String(row.status ?? '').toLowerCase() !== 'cancelled'), 'total_amount')
@@ -573,9 +597,8 @@ export async function buildOwnerDashboardPayload(input: {
     ? null
     : [
       ...(paymentQ.value ?? [])
-        .filter(row => String(row.direction).toLowerCase() === 'received')
         .map(row => ({
-          date: row.created_at ? bizDateString(row.created_at) : null,
+          date: row.date ?? null,
           value: Number(BigInt(row.amount ?? 0)),
         })),
       ...(expenseQ.value ?? [])
@@ -681,7 +704,7 @@ export async function buildOwnerDashboardPayload(input: {
   })
   const pulseState = (available: boolean, metric: string): MetricState =>
     available ? 'available' : unavailable.get(metric) ?? 'not-tracked'
-  const receivedPayments = (paymentQ.value ?? []).filter(row => String(row.direction).toLowerCase() === 'received')
+  const receivedPayments = paymentQ.value ?? []
   const postedExpenses = (expenseQ.value ?? []).filter(row => String(row.status ?? '').toLowerCase() !== 'cancelled')
 
   return {

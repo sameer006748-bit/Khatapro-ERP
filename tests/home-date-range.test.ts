@@ -98,7 +98,8 @@ test('all operational period metrics use the same validated range', () => {
     "gte('invoice_date', range.from).lte('invoice_date', range.to)",
     "gte('expense_date', range.from).lte('expense_date', range.to)",
     "gte('purchase_date', range.from).lte('purchase_date', range.to)",
-    "gte('created_at', boundary(range.from))",
+    "gte('return_date', range.from).lte('return_date', range.to)",
+    'readCollections(admin, bid, range.from, range.to)',
   ]) assert.ok(summary.includes(expression), expression)
 })
 
@@ -115,14 +116,15 @@ test('all sale types include Other Sale', () => {
   assert.match(page, /data\.salesByType\.other/)
 })
 
-test('collections use actual payments and never delivery state', () => {
-  assert.match(summary, /\.from\('payments'\)/)
-  assert.match(summary, /direction\)\.toLowerCase\(\) === 'received'/)
+test('collections use real received money and never delivery state', () => {
+  assert.match(summary, /\.from\('payment_allocations'\)/)
+  assert.match(summary, /\.from\('receipts'\)/)
+  assert.doesNotMatch(summary, /\.from\('payments'\)/)
   assert.doesNotMatch(summary, /\.from\('delivery_orders'\)/)
 })
 
 test('returns are period scoped and optional', () => {
-  assert.match(summary, /\.from\('sale_return_documents'\)/)
+  assert.match(summary, /\.from\('sales_returns'\)/)
   assert.match(summary, /\.from\('purchase_returns'\)/)
   assert.match(summary, /salesReturns = salesReturnQ\.available/)
   assert.match(summary, /purchaseReturns = purchaseReturnQ\.available/)

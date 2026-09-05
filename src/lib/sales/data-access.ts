@@ -807,8 +807,14 @@ export async function getInvoice(businessId: string, invoiceId: string): Promise
         ? admin.from('salesmen').select('name')
           .eq('business_id', businessId).eq('id', r.salesman_id).maybeSingle()
         : Promise.resolve({ data: null, error: null }),
-      admin.from('payments')
-        .select('id, amount, direction, payment_mode')
+      // An invoice's payments are its `payment_allocations`, embedded with the
+      // account that received the money. Production `payments` is the
+      // vendor-payment table — no `invoice_id`, `direction` or `payment_mode` —
+      // so reading it here returned 42703 and every invoice reported its
+      // Payments section unavailable. The embed resolves because an allocation
+      // carries a single-column foreign key to `accounts`.
+      admin.from('payment_allocations')
+        .select('id, account_id, amount, is_change, accounts(code, name)')
         .eq('business_id', businessId).eq('invoice_id', invoiceId).order('created_at'),
       admin.from('sales_returns')
         .select('id, return_no, return_date, total, reason')
@@ -870,7 +876,7 @@ export async function getInvoice(businessId: string, invoiceId: string): Promise
     }
 
     const sourceItems = new Map(itemRows.map((it: any) => [it.id, it]))
-    return { id: r.id, invoiceNo: r.invoice_no, invoiceType: r.invoice_type, invoiceDate: r.invoice_date, customerName: r.customer_name, customerPhone: r.customer_phone ?? null, customerAddress: r.customer_address ?? null, customerCity: r.customer_city ?? null, salesmanName, subtotal: String(r.subtotal), discount: String(r.discount ?? 0), total: String(r.total), paidAmount: String(r.paid_amount ?? 0), status: invoiceStatusLabel(Boolean(r.is_cancelled), Boolean(r.is_returned)), isCancelled: Boolean(r.is_cancelled), isReturned: Boolean(r.is_returned), memo: r.memo ?? null, items: itemRows.map((it: any) => ({ id: it.id, productId: it.product_id, productName: it.product_name, qty: it.qty, returnedQty: it.returned_qty ?? 0, unitPrice: String(it.unit_price), lineTotal: String(it.line_total), isTemporary: it.is_temporary })), payments: (payments ?? []).map((p: any) => ({ id: p.id, accountName: p.payment_mode ?? 'Payment', amount: String(p.amount), direction: p.direction, paymentMode: p.payment_mode })), unavailableSections: unavailable, returns: (returns ?? []).map((sr: any) => ({
+    return { id: r.id, invoiceNo: r.invoice_no, invoiceType: r.invoice_type, invoiceDate: r.invoice_date, customerName: r.customer_name, customerPhone: r.customer_phone ?? null, customerAddress: r.customer_address ?? null, customerCity: r.customer_city ?? null, salesmanName, subtotal: String(r.subtotal), discount: String(r.discount ?? 0), total: String(r.total), paidAmount: String(r.paid_amount ?? 0), status: invoiceStatusLabel(Boolean(r.is_cancelled), Boolean(r.is_returned)), isCancelled: Boolean(r.is_cancelled), isReturned: Boolean(r.is_returned), memo: r.memo ?? null, items: itemRows.map((it: any) => ({ id: it.id, productId: it.product_id, productName: it.product_name, qty: it.qty, returnedQty: it.returned_qty ?? 0, unitPrice: String(it.unit_price), lineTotal: String(it.line_total), isTemporary: it.is_temporary })), payments: (payments ?? []).map((p: any) => ({ id: p.id, accountId: p.account_id, accountCode: p.accounts?.code ?? null, accountName: p.accounts?.name ?? 'Payment', amount: String(p.amount), isChange: Boolean(p.is_change) })), unavailableSections: unavailable, returns: (returns ?? []).map((sr: any) => ({
       returnNo: sr.return_no,
       returnDate: sr.return_date,
       total: String(sr.total),
