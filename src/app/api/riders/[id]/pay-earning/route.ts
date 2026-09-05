@@ -12,6 +12,7 @@ import { getAdminSupabase } from '@/lib/supabase/admin'
 import { resolveSupabaseUuid } from '@/lib/accounting/voucher-supabase'
 import { bizDateString } from '@/lib/dates'
 import { parseMoney } from '@/lib/format'
+import { withObservability } from '@/lib/observability'
 
 const isUuid = (s: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s)
 const Schema = z.object({
@@ -20,7 +21,7 @@ const Schema = z.object({
   notes: z.string().optional(),
 })
 
-export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
+async function postRidersPayEarning(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const session = await getServerSession(authOptions)
   if (!session?.user) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
   const loaded = await loadSessionUser((session.user as any).id)
@@ -68,3 +69,5 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
   return NextResponse.json({ ok: true, voucherId })
 }
+
+export const POST = withObservability('/api/riders/[id]/pay-earning', postRidersPayEarning)

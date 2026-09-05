@@ -37,7 +37,7 @@ const CreateSchema = z.object({
   idempotencyKey: z.string().max(128).optional(),
 })
 
-export async function POST(req: Request) {
+async function postProducts(req: Request) {
   const requestId = resolveRequestId(req)
   const session = await getServerSession(authOptions)
   if (!session?.user) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
@@ -87,3 +87,5 @@ export async function POST(req: Request) {
     })
   }
 }
+
+export const POST = withObservability('/api/products', postProducts)

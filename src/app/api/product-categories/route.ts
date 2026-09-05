@@ -27,7 +27,7 @@ const CreateSchema = z.object({
   description: z.string().max(200).optional(),
 })
 
-export async function POST(req: Request) {
+async function postProductCategories(req: Request) {
   const requestId = resolveRequestId(req)
   const session = await getServerSession(authOptions)
   if (!session?.user) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
@@ -48,3 +48,5 @@ export async function POST(req: Request) {
     return safeMutationError({ route: '/api/product-categories', requestId, errorCode: 'PRODUCT_CATEGORY_CREATE_FAILED', userMessage: 'The product category could not be created.', error })
   }
 }
+
+export const POST = withObservability('/api/product-categories', postProductCategories)

@@ -20,7 +20,7 @@ export const GET = withObservability('/api/vendors', getVendors)
 
 const Schema = z.object({ name: z.string().min(1), phone: z.string().optional(), email: z.string().optional(), address: z.string().optional(), city: z.string().optional() })
 
-export async function POST(req: Request) {
+async function postVendors(req: Request) {
   const requestId = resolveRequestId(req)
   const session = await getServerSession(authOptions)
   if (!session?.user) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
@@ -33,3 +33,5 @@ export async function POST(req: Request) {
   try { const row = await createVendor(su.businessId, parsed.data.name, parsed.data.phone, parsed.data.email, parsed.data.address, parsed.data.city); return NextResponse.json({ row }) }
   catch (error) { return safeMutationError({ route: '/api/vendors', requestId, errorCode: 'VENDOR_CREATE_FAILED', userMessage: 'The vendor could not be created.', error }) }
 }
+
+export const POST = withObservability('/api/vendors', postVendors)

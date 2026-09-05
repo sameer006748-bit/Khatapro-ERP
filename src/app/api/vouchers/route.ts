@@ -30,7 +30,7 @@ const PostSchema = z.object({
   idempotencyKey: z.string().uuid().optional(),
 })
 
-export async function POST(req: Request) {
+async function postVouchers(req: Request) {
   const requestId = resolveRequestId(req)
   const session = await getServerSession(authOptions)
   if (!session?.user) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
@@ -179,3 +179,5 @@ const getVouchers = async () => {
 }
 
 export const GET = withObservability('/api/vouchers', getVouchers)
+
+export const POST = withObservability('/api/vouchers', postVouchers)

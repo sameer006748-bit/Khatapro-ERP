@@ -5,6 +5,7 @@ import { z } from 'zod'
 import { authOptions } from '@/lib/auth/authOptions'
 import { loadSessionUser, requirePermission } from '@/lib/auth/permissions'
 import { receiveInvoicePayment } from '@/lib/sales/data-access'
+import { withObservability } from '@/lib/observability'
 
 const Schema = z.object({
   amount: z.string().regex(/^\d+$/),
@@ -12,7 +13,7 @@ const Schema = z.object({
   idempotencyKey: z.string().uuid(),
 })
 
-export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
+async function postSalesPayment(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const session = await getServerSession(authOptions)
   if (!session?.user) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
   const loaded = await loadSessionUser((session.user as any).id)
@@ -29,3 +30,5 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     return NextResponse.json({ error: message }, { status: message.includes('exceeds') ? 400 : 500 })
   }
 }
+
+export const POST = withObservability('/api/sales/[id]/payment', postSalesPayment)

@@ -10,7 +10,7 @@ import { authOptions } from '@/lib/auth/authOptions'
 import { loadSessionUser, requirePermission, writeAudit } from '@/lib/auth/permissions'
 import { listProducts, updateProduct } from '@/lib/products/data-access'
 import { SafeProductError } from '@/lib/products/opening-stock'
-import { resolveRequestId, safeMutationError } from '@/lib/observability'
+import { resolveRequestId, safeMutationError, withObservability } from '@/lib/observability'
 
 const UpdateSchema = z.object({
   name: z.string().min(1).max(120).optional(),
@@ -24,7 +24,7 @@ const UpdateSchema = z.object({
   commissionRatePaisas: z.string().regex(/^\d+$/).nullable().optional(),
 })
 
-export async function PATCH(
+async function patchProducts(
   req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
@@ -72,3 +72,5 @@ export async function PATCH(
     return safeMutationError({ route: '/api/products/[id]', requestId, errorCode: 'PRODUCT_UPDATE_FAILED', userMessage: 'The product could not be updated.', error })
   }
 }
+
+export const PATCH = withObservability('/api/products/[id]', patchProducts)

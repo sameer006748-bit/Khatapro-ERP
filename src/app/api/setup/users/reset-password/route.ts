@@ -9,13 +9,14 @@ import { isSupabaseConfigured } from '@/lib/supabase/config'
 import { getAdminClient } from '@/lib/supabase/server-admin'
 import { authOptions } from '@/lib/auth/authOptions'
 import { loadSessionUser, requireOwner } from '@/lib/auth/permissions'
+import { withObservability } from '@/lib/observability'
 
 const ResetSchema = z.object({
   userId: z.string().min(1, 'User ID is required'),
   newPassword: z.string().min(8, 'Password must be at least 8 characters'),
 })
 
-export async function POST(req: Request) {
+async function postSetupUsersResetPassword(req: Request) {
   const session = await getServerSession(authOptions)
   if (!session?.user) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
 
@@ -117,3 +118,5 @@ export async function POST(req: Request) {
 
   return NextResponse.json({ ok: true })
 }
+
+export const POST = withObservability('/api/setup/users/reset-password', postSetupUsersResetPassword)

@@ -61,7 +61,7 @@ async function tryPostSale(input: Parameters<typeof postSale>[0]) {
   })
 }
 
-export async function POST(req: Request) {
+async function postSalesCounter(req: Request) {
   const session = await getServerSession(authOptions)
   if (!session?.user) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
   const loaded = await loadSessionUser((session.user as any).id)
@@ -236,3 +236,5 @@ const getSales = async (req: Request) => {
 }
 
 export const GET = withObservability('/api/sales/counter', getSales)
+
+export const POST = withObservability('/api/sales/counter', postSalesCounter)

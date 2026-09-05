@@ -34,6 +34,7 @@ import {
   updateLegacyBusinessAccount,
   type BusinessAccountRecord,
 } from '@/lib/accounting/legacy-business-accounts'
+import { withObservability } from '@/lib/observability'
 
 const UpdateSchema = z.object({
   name: z.string().min(1).max(80).optional(),
@@ -202,7 +203,7 @@ async function legacySnapshotBefore(
   }
 }
 
-export async function PATCH(req: Request, ctx: Ctx) {
+async function patchSetupBusinessAccounts(req: Request, ctx: Ctx) {
   const auth = await authorize()
   if (auth.error) return auth.error
   const su = auth.su
@@ -323,7 +324,7 @@ export async function PATCH(req: Request, ctx: Ctx) {
   return NextResponse.json({ row: serialize(fresh ?? updated) })
 }
 
-export async function DELETE(_req: Request, ctx: Ctx) {
+async function deleteSetupBusinessAccounts(_req: Request, ctx: Ctx) {
   const auth = await authorize()
   if (auth.error) return auth.error
   const su = auth.su
@@ -409,3 +410,6 @@ export async function DELETE(_req: Request, ctx: Ctx) {
 
   return NextResponse.json({ ok: true, deletedId: existing.id })
 }
+
+export const PATCH = withObservability('/api/setup/business-accounts/[id]', patchSetupBusinessAccounts)
+export const DELETE = withObservability('/api/setup/business-accounts/[id]', deleteSetupBusinessAccounts)

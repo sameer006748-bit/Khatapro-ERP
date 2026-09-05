@@ -5,7 +5,7 @@ import { authOptions } from '@/lib/auth/authOptions'
 import { loadSessionUser, requirePermission } from '@/lib/auth/permissions'
 import { postContraBatch, postOperationalContra, type ContraBatchLine } from '@/lib/money/operational-money'
 import { parseMoney } from '@/lib/format'
-import { resolveRequestId, safeMutationError } from '@/lib/observability'
+import { resolveRequestId, safeMutationError, withObservability } from '@/lib/observability'
 import { isSupabaseConfigured } from '@/lib/supabase/config'
 
 const isUuid = (s: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s)
@@ -26,7 +26,7 @@ const Schema = z.object({
   idempotencyKey: z.string().uuid(),
 })
 
-export async function POST(req: Request) {
+async function postContraEntry(req: Request) {
   const requestId = resolveRequestId(req)
   const session = await getServerSession(authOptions)
   if (!session?.user) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
@@ -78,3 +78,5 @@ export async function POST(req: Request) {
     return safeMutationError({ route: '/api/contra-entry', requestId, errorCode: 'CONTRA_ENTRY_FAILED', userMessage: 'The contra entry could not be posted.', error })
   }
 }
+
+export const POST = withObservability('/api/contra-entry', postContraEntry)

@@ -22,7 +22,7 @@ const PaySchema = z.object({
 }, { message: 'Non-credit payments require accountId and amountPaisas' })
 const Schema = z.object({ vendorId: z.string().min(1), purchaseDate: z.string(), supplierBillNo: z.string().optional(), items: z.array(ItemSchema).min(1), payments: z.array(PaySchema).min(1), discountPaisas: z.string().optional(), additionalChargesPaisas: z.string().optional(), notes: z.string().optional() })
 
-export async function POST(req: Request) {
+async function postPurchases(req: Request) {
   const session = await getServerSession(authOptions)
   if (!session?.user) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
   const loaded = await loadSessionUser((session.user as any).id)
@@ -67,3 +67,5 @@ export const GET = withObservability('/api/purchases', async () => {
   const rows = await listPurchases(su.businessId)
   return NextResponse.json({ rows })
 })
+
+export const POST = withObservability('/api/purchases', postPurchases)

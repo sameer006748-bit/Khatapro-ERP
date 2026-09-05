@@ -44,7 +44,7 @@ const Schema = z.object({
   notes: z.string().optional(),
 })
 
-export async function POST(req: Request) {
+async function postCodSubmissions(req: Request) {
   const requestId = resolveRequestId(req)
   const session = await getServerSession(authOptions)
   if (!session?.user) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
@@ -82,3 +82,5 @@ export async function POST(req: Request) {
     return safeMutationError({ route: '/api/cod-submissions', requestId, errorCode: 'COD_SUBMISSION_FAILED', userMessage: 'The COD submission could not be created.', error })
   }
 }
+
+export const POST = withObservability('/api/cod-submissions', postCodSubmissions)

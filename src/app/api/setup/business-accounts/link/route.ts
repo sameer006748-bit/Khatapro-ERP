@@ -31,6 +31,7 @@ import {
   LegacyBusinessAccountsUnavailableError,
   linkLegacyLedgerMoneyAccount,
 } from '@/lib/accounting/legacy-business-accounts'
+import { withObservability } from '@/lib/observability'
 
 const LinkSchema = z.object({
   ledgerAccountId: z.string().trim().min(1).max(64),
@@ -47,7 +48,7 @@ function unavailableResponse() {
   )
 }
 
-export async function POST(req: Request) {
+async function postSetupBusinessAccountsLink(req: Request) {
   const session = await getServerSession(authOptions)
   if (!session?.user) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
   const loaded = await loadSessionUser((session.user as any).id)
@@ -140,3 +141,5 @@ export async function POST(req: Request) {
 
   return NextResponse.json({ ok: true, alreadyLinked: false, id: created.id })
 }
+
+export const POST = withObservability('/api/setup/business-accounts/link', postSetupBusinessAccountsLink)

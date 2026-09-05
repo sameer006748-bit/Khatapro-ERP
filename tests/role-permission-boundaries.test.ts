@@ -163,3 +163,50 @@ test('the seeded roles keep Salesman and Rider away from business-wide money', a
     }
   }
 })
+
+// ---------------------------------------------------------------------------
+// A refusal has to arrive as a refusal.
+//
+// `requirePermission`/`requireOwner` deny by THROWING, and almost every guard
+// call sits above the route's try/catch, so the throw left the handler and Next
+// answered a bare 500 with an empty body and no request id. Live proof on
+// production (deployment dpl_9qzSnz2qyc5rZ4PABthPHTbLpnwC): a Rider posting to
+// /api/delivery-orders/[id]/assign and to /api/sales/counter both got HTTP 500
+// content-length 0, while the runtime log for those exact requests read
+// `Error: FORBIDDEN … { status: 403 }`. A Salesman got the same empty 500 from
+// 13 of 18 guarded writes probed, including /api/journal-voucher, /api/vouchers,
+// /api/products, /api/purchases and /api/setup/users.
+//
+// withObservability is the one place that maps a thrown denial to 401/403 with
+// a stable code and a request id, so a guarded handler may only be exported
+// through it. This test is the reason the class cannot come back one route at a
+// time.
+// ---------------------------------------------------------------------------
+test('a guarded route exports every handler through withObservability', async () => {
+  const METHODS = ['GET', 'POST', 'PATCH', 'PUT', 'DELETE']
+  const raw: string[] = []
+  let guarded = 0
+  for (const file of await routeFiles()) {
+    const source = await read(`src/app/api/${file}`)
+    if (!/require(?:Permission|Owner)\(/.test(source)) continue
+    guarded += 1
+    for (const method of METHODS) {
+      if (!new RegExp(`export (?:async function|function|const) ${method}\\b`).test(source)) continue
+      assert.match(
+        source,
+        new RegExp(`export const ${method}\\s*=\\s*withObservability\\(`),
+        `api/${file} ${method} must be exported through withObservability, or a permission denial reaches the caller as an empty 500`,
+      )
+      if (!new RegExp(`export const ${method}\\s*=\\s*withObservability\\(`).test(source)) raw.push(`${file} ${method}`)
+    }
+  }
+  assert.ok(guarded > 40, `expected the guarded surface to stay large, saw ${guarded}`)
+  assert.deepEqual(raw, [])
+})
+
+test('the wrapper is what turns a thrown denial into 401/403', async () => {
+  const obs = await read('src/lib/observability.ts')
+  assert.match(obs, /const denied = deniedStatusFromError\(error\)/)
+  assert.match(obs, /\{ error: deniedErrorCode\(denied\), requestId \}/)
+  assert.match(obs, /\{ status: denied, headers: \{ 'X-Request-Id': requestId \} \}/)
+})

@@ -149,7 +149,7 @@ function embeddedCount(value: unknown): number {
   return 0
 }
 
-export async function POST(req: Request) {
+async function postSetupUsers(req: Request) {
   const requestId = resolveRequestId(req)
   const session = await getServerSession(authOptions)
   if (!session?.user) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
@@ -250,3 +250,5 @@ export async function POST(req: Request) {
 
   return NextResponse.json({ ok: true, userId: newUserId })
 }
+
+export const POST = withObservability('/api/setup/users', postSetupUsers)

@@ -17,7 +17,7 @@ import { postSale, resolveSaleSeller } from '@/lib/sales/data-access'
 import { SaleItemSchema, SellerRoleSchema, saleRuleErrorResponse } from '@/lib/sales/sale-http'
 import { parseMoney } from '@/lib/format'
 import { assertPhase9SaleFeatures } from '@/lib/supabase/rpc-compatibility'
-import { resolveRequestId, safeMutationError } from '@/lib/observability'
+import { resolveRequestId, safeMutationError, withObservability } from '@/lib/observability'
 
 const ItemSchema = SaleItemSchema
 
@@ -43,7 +43,7 @@ const OfcSaleSchema = z.object({
   idempotencyKey: z.string().min(1).max(200).optional(),
 })
 
-export async function POST(req: Request) {
+async function postSalesOfc(req: Request) {
   const session = await getServerSession(authOptions)
   if (!session?.user) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
   const loaded = await loadSessionUser((session.user as any).id)
@@ -147,3 +147,5 @@ export async function POST(req: Request) {
     })
   }
 }
+
+export const POST = withObservability('/api/sales/ofc', postSalesOfc)

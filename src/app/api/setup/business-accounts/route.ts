@@ -43,6 +43,7 @@ import {
   listLegacyBusinessAccounts,
   type BusinessAccountRecord,
 } from '@/lib/accounting/legacy-business-accounts'
+import { withObservability } from '@/lib/observability'
 
 const CreateSchema = z.object({
   name: z.string().trim().min(1).max(80).refine(hasReadableMoneyIdentitySource, {
@@ -177,7 +178,7 @@ function withIdentities(rows: MoneyAccountIdentitySource[]): MoneyAccountRow[] {
   return ordered.map((row, index) => ({ ...row, identity: identities[index] }))
 }
 
-export async function GET() {
+async function getSetupBusinessAccounts() {
   const session = await getServerSession(authOptions)
   if (!session?.user) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
   const su = await loadSessionUser((session.user as any).id)
@@ -235,7 +236,7 @@ export async function GET() {
   return NextResponse.json({ rows: withIdentities([...managed, ...unlinked]) })
 }
 
-export async function POST(req: Request) {
+async function postSetupBusinessAccounts(req: Request) {
   const session = await getServerSession(authOptions)
   if (!session?.user) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
   const loaded = await loadSessionUser((session.user as any).id)
@@ -357,3 +358,6 @@ export async function POST(req: Request) {
     },
   })
 }
+
+export const GET = withObservability('/api/setup/business-accounts', getSetupBusinessAccounts)
+export const POST = withObservability('/api/setup/business-accounts', postSetupBusinessAccounts)

@@ -11,7 +11,7 @@ import { z } from 'zod'
 import { authOptions } from '@/lib/auth/authOptions'
 import { loadSessionUser, requirePermission } from '@/lib/auth/permissions'
 import { createStockMovement, listStockMovements } from '@/lib/products/data-access'
-import { resolveRequestId, safeMutationError } from '@/lib/observability'
+import { resolveRequestId, safeMutationError, withObservability } from '@/lib/observability'
 
 const MovementTypes = ['opening', 'adjustment_in', 'adjustment_out', 'temporary_item', 'correction'] as const
 
@@ -22,7 +22,7 @@ const CreateSchema = z.object({
   reason: z.string().max(200).optional(),
 })
 
-export async function POST(req: Request) {
+async function postStockMovements(req: Request) {
   const session = await getServerSession(authOptions)
   if (!session?.user) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
   const loaded = await loadSessionUser((session.user as any).id)
@@ -56,7 +56,7 @@ export async function POST(req: Request) {
   }
 }
 
-export async function GET(req: Request) {
+async function getStockMovements(req: Request) {
   const session = await getServerSession(authOptions)
   if (!session?.user) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
   const loaded = await loadSessionUser((session.user as any).id)
@@ -69,3 +69,6 @@ export async function GET(req: Request) {
   const rows = await listStockMovements(su.businessId, productId)
   return NextResponse.json({ rows })
 }
+
+export const GET = withObservability('/api/stock-movements', getStockMovements)
+export const POST = withObservability('/api/stock-movements', postStockMovements)

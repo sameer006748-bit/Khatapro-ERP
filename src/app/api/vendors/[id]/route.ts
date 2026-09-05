@@ -4,7 +4,7 @@ import { z } from 'zod'
 import { authOptions } from '@/lib/auth/authOptions'
 import { loadSessionUser, requirePermission } from '@/lib/auth/permissions'
 import { updateVendor } from '@/lib/purchases/data-access'
-import { resolveRequestId, safeMutationError } from '@/lib/observability'
+import { resolveRequestId, safeMutationError, withObservability } from '@/lib/observability'
 
 const Schema = z.object({
   name: z.string().min(1).optional(),
@@ -15,7 +15,7 @@ const Schema = z.object({
   isActive: z.boolean().optional(),
 })
 
-export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
+async function patchVendors(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const requestId = resolveRequestId(req)
   const session = await getServerSession(authOptions)
   if (!session?.user) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
@@ -32,3 +32,5 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     return NextResponse.json({ row })
   } catch (error) { return safeMutationError({ route: '/api/vendors/[id]', requestId, errorCode: 'VENDOR_UPDATE_FAILED', userMessage: 'The vendor could not be updated.', error }) }
 }
+
+export const PATCH = withObservability('/api/vendors/[id]', patchVendors)

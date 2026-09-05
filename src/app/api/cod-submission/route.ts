@@ -30,7 +30,7 @@ async function getCodSubmissionRows() {
 
 export const GET = withObservability('/api/cod-submission', getCodSubmissionRows)
 
-export async function POST(req: Request) {
+async function postCodSubmission(req: Request) {
   const requestId = resolveRequestId(req)
   const session = await getServerSession(authOptions)
   if (!session?.user) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
@@ -59,3 +59,5 @@ export async function POST(req: Request) {
     return safeMutationError({ route: '/api/cod-submission', requestId, errorCode: 'COD_SUBMISSION_FAILED', userMessage: 'The COD submission could not be created.', error })
   }
 }
+
+export const POST = withObservability('/api/cod-submission', postCodSubmission)

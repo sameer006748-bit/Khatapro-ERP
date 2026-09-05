@@ -4,12 +4,12 @@ import { z } from 'zod'
 import { authOptions } from '@/lib/auth/authOptions'
 import { loadSessionUser, requirePermission } from '@/lib/auth/permissions'
 import { postVendorAdvance } from '@/lib/purchases/data-access'
-import { resolveRequestId, safeMutationError } from '@/lib/observability'
+import { resolveRequestId, safeMutationError, withObservability } from '@/lib/observability'
 
 const isUuid = (s: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s)
 const Schema = z.object({ vendorId: z.string().min(1), accountId: z.string().min(1), amountPaisas: z.string().min(1), notes: z.string().optional() })
 
-export async function POST(req: Request) {
+async function postVendorAdvanceRoute(req: Request) {
   const requestId = resolveRequestId(req)
   const session = await getServerSession(authOptions)
   if (!session?.user) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
@@ -25,3 +25,5 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: true, paymentId: id })
   } catch (error) { return safeMutationError({ route: '/api/vendor-advance', requestId, errorCode: 'VENDOR_ADVANCE_FAILED', userMessage: 'The vendor advance could not be posted.', error }) }
 }
+
+export const POST = withObservability('/api/vendor-advance', postVendorAdvanceRoute)

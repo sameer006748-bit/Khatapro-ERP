@@ -4,7 +4,7 @@ import { z } from 'zod'
 import { authOptions } from '@/lib/auth/authOptions'
 import { loadSessionUser, requirePermission } from '@/lib/auth/permissions'
 import { postPurchaseReplacement } from '@/lib/purchases/data-access'
-import { resolveRequestId, safeMutationError } from '@/lib/observability'
+import { resolveRequestId, safeMutationError, withObservability } from '@/lib/observability'
 
 const ItemSchema = z.object({
   originalPurchaseItemId: z.string().min(1),
@@ -23,7 +23,7 @@ const Schema = z.object({
   notes: z.string().optional(),
 })
 
-export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
+async function postPurchasesReplacement(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const requestId = resolveRequestId(req)
   const session = await getServerSession(authOptions)
   if (!session?.user) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
@@ -54,3 +54,5 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     return NextResponse.json({ ok: true, replacementId: result.replacementId, replacementNo: result.replacementNo })
   } catch (error) { return safeMutationError({ route: '/api/purchases/[id]/replacement', requestId, errorCode: 'PURCHASE_REPLACEMENT_FAILED', userMessage: 'The purchase replacement could not be posted.', error }) }
 }
+
+export const POST = withObservability('/api/purchases/[id]/replacement', postPurchasesReplacement)

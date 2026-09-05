@@ -22,6 +22,7 @@ import { loadSessionUser, requirePermission } from '@/lib/auth/permissions'
 import { postVoucherSmart, VoucherError } from '@/lib/accounting/voucher-supabase'
 import { getAccountById, getAccountByCode } from '@/lib/accounting/data-access'
 import { parseMoney, formatMoney } from '@/lib/format'
+import { withObservability } from '@/lib/observability'
 
 const Schema = z.object({
   accountId: z.string().min(1),
@@ -31,7 +32,7 @@ const Schema = z.object({
   idempotencyKey: z.string().uuid().optional(),
 })
 
-export async function POST(req: Request) {
+async function postOpeningBalance(req: Request) {
   const session = await getServerSession(authOptions)
   if (!session?.user) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
   const loaded = await loadSessionUser((session.user as any).id)
@@ -95,3 +96,5 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: err.message, code: err.code }, { status: 400 })
   }
 }
+
+export const POST = withObservability('/api/opening-balance', postOpeningBalance)

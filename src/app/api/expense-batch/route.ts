@@ -15,7 +15,7 @@ import { authOptions } from '@/lib/auth/authOptions'
 import { loadSessionUser, requirePermission } from '@/lib/auth/permissions'
 import { postExpenseBatch } from '@/lib/vouchers/data-access'
 import { parseMoney } from '@/lib/format'
-import { resolveRequestId, safeMutationError } from '@/lib/observability'
+import { resolveRequestId, safeMutationError, withObservability } from '@/lib/observability'
 import { isSupabaseConfigured } from '@/lib/supabase/config'
 import { usesLegacyTransactionSchema } from '@/lib/identity/legacy-bridge'
 import { getAccountById } from '@/lib/accounting/data-access'
@@ -65,7 +65,7 @@ function categoryRejected(categoryId: string, resolution: CategoryLedgerResoluti
     message: notReady ? CATEGORY_NOT_READY_MESSAGE : CATEGORY_UNAVAILABLE_MESSAGE,
   }, { status: 400 })
 }
-export async function POST(req: Request) {
+async function postExpenseBatchRoute(req: Request) {
   const session = await getServerSession(authOptions)
   if (!session?.user) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
   const loaded = await loadSessionUser((session.user as any).id)
@@ -208,3 +208,5 @@ export async function POST(req: Request) {
     })
   }
 }
+
+export const POST = withObservability('/api/expense-batch', postExpenseBatchRoute)

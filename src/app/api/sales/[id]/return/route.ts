@@ -10,6 +10,7 @@ import { authOptions } from '@/lib/auth/authOptions'
 import { loadSessionUser, requirePermission } from '@/lib/auth/permissions'
 import { postLinkedSaleReturn } from '@/lib/sales/data-access'
 import { LegacyIdentityMigrationRequiredError } from '@/lib/identity/legacy-bridge'
+import { withObservability } from '@/lib/observability'
 
 const ReturnSchema = z.object({
   items: z.array(z.object({ invoiceItemId: z.string().min(1).max(80), qty: z.number().int().positive() })).min(1),
@@ -27,7 +28,7 @@ const ReturnSchema = z.object({
   }
 })
 
-export async function POST(
+async function postSalesReturn(
   req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
@@ -70,3 +71,5 @@ export async function POST(
     return NextResponse.json({ error: msg }, { status })
   }
 }
+
+export const POST = withObservability('/api/sales/[id]/return', postSalesReturn)

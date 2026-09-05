@@ -4,7 +4,7 @@ import { z } from 'zod'
 import { authOptions } from '@/lib/auth/authOptions'
 import { loadSessionUser, requirePermission, hasPermission } from '@/lib/auth/permissions'
 import { assignRider, getDeliveryOrder } from '@/lib/delivery/data-access'
-import { resolveRequestId, safeMutationError } from '@/lib/observability'
+import { resolveRequestId, safeMutationError, withObservability } from '@/lib/observability'
 
 const Schema = z.object({ riderId: z.string().min(1) })
 
@@ -20,7 +20,7 @@ const Schema = z.object({ riderId: z.string().min(1) })
  * posting; it does not grant the power to pull a rider off a delivery that is
  * already assigned or in flight, so no existing authorization is weakened.
  */
-export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
+async function postDeliveryOrdersAssign(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const requestId = resolveRequestId(req)
   const session = await getServerSession(authOptions)
   if (!session?.user) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
@@ -54,3 +54,5 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     })
   }
 }
+
+export const POST = withObservability('/api/delivery-orders/[id]/assign', postDeliveryOrdersAssign)

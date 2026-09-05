@@ -5,7 +5,7 @@ import { authOptions } from '@/lib/auth/authOptions'
 import { loadSessionUser, requirePermission } from '@/lib/auth/permissions'
 import { postReceiptVoucher } from '@/lib/vouchers/data-access'
 import { parseMoney } from '@/lib/format'
-import { resolveRequestId, safeMutationError } from '@/lib/observability'
+import { resolveRequestId, safeMutationError, withObservability } from '@/lib/observability'
 
 const isUuid = (s: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s)
 
@@ -27,7 +27,7 @@ const Schema = z.object({
   idempotencyKey: z.string().min(1).max(200).optional(),
 })
 
-export async function POST(req: Request) {
+async function postReceiptVoucherRoute(req: Request) {
   const requestId = resolveRequestId(req)
   const session = await getServerSession(authOptions)
   if (!session?.user) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
@@ -66,3 +66,5 @@ export async function POST(req: Request) {
     return safeMutationError({ route: '/api/receipt-voucher', requestId, errorCode: 'RECEIPT_VOUCHER_FAILED', userMessage: 'The receipt voucher could not be posted.', error })
   }
 }
+
+export const POST = withObservability('/api/receipt-voucher', postReceiptVoucherRoute)

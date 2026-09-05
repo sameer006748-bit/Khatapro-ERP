@@ -4,8 +4,9 @@ import { z } from 'zod'
 import { authOptions } from '@/lib/auth/authOptions'
 import { loadSessionUser, requirePermission } from '@/lib/auth/permissions'
 import { listReplacementsForPurchase } from '@/lib/purchases/data-access'
+import { withObservability } from '@/lib/observability'
 
-export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+async function getPurchasesReplacements(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const session = await getServerSession(authOptions)
   if (!session?.user) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
   const loaded = await loadSessionUser((session.user as any).id)
@@ -15,3 +16,5 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   const rows = await listReplacementsForPurchase(su.businessId, purchaseId)
   return NextResponse.json({ rows })
 }
+
+export const GET = withObservability('/api/purchases/[id]/replacements', getPurchasesReplacements)

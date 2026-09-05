@@ -4,11 +4,11 @@ import { z } from 'zod'
 import { authOptions } from '@/lib/auth/authOptions'
 import { loadSessionUser, requirePermission } from '@/lib/auth/permissions'
 import { reverseVoucher, getVoucherDetail } from '@/lib/vouchers/data-access'
-import { resolveRequestId, safeMutationError } from '@/lib/observability'
+import { resolveRequestId, safeMutationError, withObservability } from '@/lib/observability'
 
 const Schema = z.object({ reason: z.string().optional() })
 
-export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
+async function postVouchersReverse(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const requestId = resolveRequestId(req)
   const session = await getServerSession(authOptions)
   if (!session?.user) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
@@ -38,3 +38,5 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     return NextResponse.json({ ok: true, reversalVoucherId: result.reversalVoucherId })
   } catch (error) { return safeMutationError({ route: '/api/vouchers/[id]/reverse', requestId, errorCode: 'VOUCHER_REVERSE_FAILED', userMessage: 'The voucher could not be reversed.', error }) }
 }
+
+export const POST = withObservability('/api/vouchers/[id]/reverse', postVouchersReverse)

@@ -5,7 +5,7 @@ import { authOptions } from '@/lib/auth/authOptions'
 import { loadSessionUser, requirePermission } from '@/lib/auth/permissions'
 import { confirmCodSubmission } from '@/lib/delivery/data-access'
 import { parseMoney } from '@/lib/format'
-import { resolveRequestId, safeMutationError } from '@/lib/observability'
+import { resolveRequestId, safeMutationError, withObservability } from '@/lib/observability'
 
 const isUuid = (s: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s)
 const Schema = z.object({
@@ -15,7 +15,7 @@ const Schema = z.object({
   notes: z.string().optional(),
 })
 
-export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
+async function postCodSubmissionConfirm(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const requestId = resolveRequestId(req)
   const session = await getServerSession(authOptions)
   if (!session?.user) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
@@ -41,3 +41,5 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     return NextResponse.json({ ok: true, ...result })
   } catch (error) { return safeMutationError({ route: '/api/cod-submission/[id]/confirm', requestId, errorCode: 'COD_CONFIRM_FAILED', userMessage: 'The COD submission could not be confirmed.', error }) }
 }
+
+export const POST = withObservability('/api/cod-submission/[id]/confirm', postCodSubmissionConfirm)

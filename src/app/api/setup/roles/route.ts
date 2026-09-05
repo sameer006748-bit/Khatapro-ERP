@@ -82,7 +82,7 @@ async function getRoles() {
 
 export const GET = withObservability('/api/setup/roles', getRoles)
 
-export async function PUT(req: Request) {
+async function putSetupRoles(req: Request) {
   const requestId = resolveRequestId(req)
   const session = await getServerSession(authOptions)
   if (!session?.user) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
@@ -202,3 +202,5 @@ export async function PUT(req: Request) {
     })
   }
 }
+
+export const PUT = withObservability('/api/setup/roles', putSetupRoles)
