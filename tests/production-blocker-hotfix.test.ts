@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { readFile } from 'node:fs/promises'
+import { readFileSync } from 'node:fs'
+import { deniedErrorCode, deniedStatusFromError } from '../src/lib/api-denial.ts'
 import {
   INVOICE_CORE_COLUMNS,
   INVOICE_DETAIL_COLUMNS,
@@ -23,6 +25,7 @@ import {
 const read = async (path: string) => (await readFile(path, 'utf8')).replace(/\r\n/g, '\n')
 
 const ridersRoute = await read('src/app/api/riders/route.ts')
+const riderIdRoute = await read('src/app/api/riders/[id]/route.ts')
 const assignRoute = await read('src/app/api/delivery-orders/[id]/assign/route.ts')
 const deliveryAccess = await read('src/lib/delivery/data-access.ts')
 const onlineSale = await read('src/components/erp/views/online-sale-view.tsx')
@@ -109,6 +112,56 @@ test('the sale screen explains an empty rider list instead of showing nothing', 
   // The selector stays optional, and no rider is ever hardcoded.
   assert.match(onlineSale, /Assign Rider \(optional\)/)
   assert.match(onlineSale, /activeRiders\.map\(r => <SelectItem/)
+})
+
+// ---------------------------------------------------------------------------
+// BLOCKER 1b — a permission denial was reported as a server fault.
+//
+// `requirePermission` denies by throwing an Error carrying status 401/403, but
+// withObservability's catch hard-coded 500. On production a Salesman's
+// POST /api/riders and PATCH /api/riders/[id] answered 500 with an EMPTY body,
+// and GET /api/riders/available-users answered 500 REQUEST_FAILED
+// ("The request could not be completed.", requestId
+// 9bf1ab3d-3a90-46f8-a8f3-6115ce67ef31). The boundary held — nothing was
+// written — but the caller could not tell "not allowed" from "we broke", and
+// every ordinary denial was emitted as an internal error.
+// ---------------------------------------------------------------------------
+
+test('a thrown 403 is classified as FORBIDDEN and a thrown 401 as UNAUTHORIZED', () => {
+  assert.equal(deniedStatusFromError(Object.assign(new Error('FORBIDDEN'), { status: 403 })), 403)
+  assert.equal(deniedStatusFromError(Object.assign(new Error('UNAUTHORIZED'), { status: 401 })), 401)
+  assert.equal(deniedErrorCode(403), 'FORBIDDEN')
+  assert.equal(deniedErrorCode(401), 'UNAUTHORIZED')
+})
+
+test('a real internal fault is not reclassified as a denial', () => {
+  // Only the two statuses the guards set are honored, and only as numbers, so a
+  // provider or database error can never choose its own response code.
+  for (const error of [
+    Object.assign(new Error('column riders.nope does not exist'), { code: '42703' }),
+    Object.assign(new Error('boom'), { status: 500 }),
+    Object.assign(new Error('boom'), { status: 404 }),
+    Object.assign(new Error('boom'), { status: 418 }),
+    Object.assign(new Error('boom'), { status: '403' }),
+    new Error('plain'), null, undefined, 'string',
+  ]) assert.equal(deniedStatusFromError(error), null, String(error))
+})
+
+test('the wrapper answers a denial with that status and logs it as a client outcome', () => {
+  const observability = readFileSync('src/lib/observability.ts', 'utf8').replace(/\r\n/g, '\n')
+  assert.match(observability, /const denied = deniedStatusFromError\(error\)\n\s*if \(denied\) \{/)
+  assert.match(observability, /log\(requestId, route, method, denied, durationMs, categoryForStatus\(denied\)\)/)
+  assert.match(observability, /\{ error: deniedErrorCode\(denied\), requestId \},\n\s*\{ status: denied, headers: \{ 'X-Request-Id': requestId \} \},/)
+  // The generic 500 remains for everything else, and still leaks no detail.
+  assert.match(observability, /error: 'REQUEST_FAILED',\n\s*message: 'The request could not be completed\.',/)
+  assert.match(observability, /if \(status === 403\) return 'forbidden'/)
+})
+
+test('both rider mutations run inside the wrapper that maps the denial', () => {
+  assert.match(ridersRoute, /export const POST = withObservability\('\/api\/riders', createRiderRoute\)/)
+  assert.match(riderIdRoute, /export const PATCH = withObservability\('\/api\/riders\/\[id\]', patchRider\)/)
+  // The write permission itself is unchanged.
+  assert.match(riderIdRoute, /requirePermission\(loaded, 'can_manage_riders'\)/)
 })
 
 // ---------------------------------------------------------------------------

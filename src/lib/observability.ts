@@ -1,5 +1,6 @@
 import 'server-only'
 import { NextResponse } from 'next/server'
+import { deniedErrorCode, deniedStatusFromError } from '@/lib/api-denial'
 
 /**
  * Minimal server-only API observability: request timing, a request/trace ID,
@@ -197,6 +198,12 @@ function categoryForStatus(status: number): ErrorCategory | null {
   return null
 }
 
+/**
+ * `requirePermission` and `requireOwner` deny by throwing an Error that carries
+ * the HTTP status they mean. The rule that reads it lives in `api-denial` so it
+ * can be tested without Next's request runtime.
+ */
+
 function emit(fields: Record<string, unknown>): void {
   const severity = fields.severity as Severity
   const line = JSON.stringify({ event: 'api_request', ...fields })
@@ -319,6 +326,20 @@ export function withObservability(route: string, handler: RouteHandler): RouteHa
       return res
     } catch (error) {
       const durationMs = now() - start
+      // A permission denial is the guard doing its job, so it must reach the
+      // caller as 401/403 with a stable code. Production answered 500
+      // REQUEST_FAILED for every guarded route: a Salesman posting to
+      // /api/riders got an empty 500, and /api/riders/available-users returned
+      // "The request could not be completed." Each denial was also emitted as
+      // an internal error, so ordinary role boundaries looked like outages.
+      const denied = deniedStatusFromError(error)
+      if (denied) {
+        log(requestId, route, method, denied, durationMs, categoryForStatus(denied))
+        return NextResponse.json(
+          { error: deniedErrorCode(denied), requestId },
+          { status: denied, headers: { 'X-Request-Id': requestId } },
+        )
+      }
       const diag = classifyError(error)
       emit({
         requestId,

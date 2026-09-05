@@ -4,7 +4,7 @@ import { z } from 'zod'
 import { authOptions } from '@/lib/auth/authOptions'
 import { loadSessionUser, requirePermission } from '@/lib/auth/permissions'
 import { updateRider } from '@/lib/delivery/data-access'
-import { resolveRequestId, safeMutationError } from '@/lib/observability'
+import { resolveRequestId, safeMutationError, withObservability } from '@/lib/observability'
 import { isSupabaseConfigured } from '@/lib/supabase/config'
 
 const Schema = z.object({
@@ -13,7 +13,7 @@ const Schema = z.object({
   isActive: z.boolean().optional(), userId: z.string().min(1).nullable().optional(),
 })
 
-export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
+async function patchRider(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const requestId = resolveRequestId(req)
   const session = await getServerSession(authOptions)
   if (!session?.user) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
@@ -64,3 +64,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     return NextResponse.json({ ok: true })
   } catch (error) { return safeMutationError({ route: '/api/riders/[id]', requestId, errorCode: 'RIDER_UPDATE_FAILED', userMessage: 'The rider could not be updated.', error }) }
 }
+
+// Wrapped for the same reason as POST /api/riders: a Salesman's PATCH here
+// answered 500 with an empty body on production instead of 403 FORBIDDEN.
+export const PATCH = withObservability('/api/riders/[id]', patchRider)

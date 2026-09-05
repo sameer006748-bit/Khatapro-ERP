@@ -47,7 +47,7 @@ const Schema = z.object({
   vehicleType: z.string().optional(), userId: z.string().nullable().optional(),
 })
 
-export async function POST(req: Request) {
+export async function createRiderRoute(req: Request) {
   const requestId = resolveRequestId(req)
   const session = await getServerSession(authOptions)
   if (!session?.user) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
@@ -106,3 +106,8 @@ export async function POST(req: Request) {
     })
   }
 }
+
+// Wrapped so a denial from `requirePermission` becomes 403 FORBIDDEN instead of
+// the framework's bare 500: on production the Salesman's POST returned 500 with
+// an empty body.
+export const POST = withObservability('/api/riders', createRiderRoute)
