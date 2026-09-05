@@ -72,8 +72,12 @@ function boundary(date: string, end = false): string {
   return `${date}T${end ? '23:59:59.999' : '00:00:00'}+05:00`
 }
 
+/**
+ * `invoices` has no status column: cancelled and returned are separate boolean
+ * flags (migration 00004), so a posted invoice is one with neither flag set.
+ */
 function isPostedInvoice(row: any): boolean {
-  return !['cancelled', 'returned'].includes(String(row.status ?? '').toLowerCase())
+  return !row.is_cancelled && !row.is_returned
 }
 
 /**
@@ -415,7 +419,7 @@ export async function buildOwnerDashboardPayload(input: {
     legacyReports
       ? isolated('todaySales', unavailable, () => reportSalesSummary(bid, range.from, range.to))
       : isolated('todaySales', unavailable, async () => rowsOrThrow(await admin.from('invoices')
-      .select('id, invoice_type, invoice_date, customer_name, total, paid, status')
+      .select('id, invoice_type, invoice_date, customer_name, total, paid_amount, is_cancelled, is_returned')
       .eq('business_id', bid).gte('invoice_date', range.from).lte('invoice_date', range.to)
       .order('invoice_date', { ascending: false }))),
     legacyReports
@@ -523,7 +527,7 @@ export async function buildOwnerDashboardPayload(input: {
   const salesReturns = salesReturnQ.available ? sum(salesReturnQ.value ?? [], 'total') : null
   const purchaseReturns = purchaseReturnQ.available ? sum(purchaseReturnQ.value ?? [], 'total_amount') : null
   let receivablesMovement = !legacyReports && invoiceQ.available
-    ? Number(invoices.reduce((value, row) => value + BigInt(row.total ?? 0) - BigInt(row.paid ?? 0), 0n))
+    ? Number(invoices.reduce((value, row) => value + BigInt(row.total ?? 0) - BigInt(row.paid_amount ?? 0), 0n))
     : null
   let payablesMovement = purchaseQ.available ? sum(periodPurchases, 'outstanding_amount') : null
   let receivables = customerQ.available ? sum(customerQ.value ?? [], legacyReports ? 'outstanding' : 'credit') : null
@@ -735,7 +739,7 @@ export async function buildOwnerDashboardPayload(input: {
     salesByType: { counter: saleType(saleTypes.counter), online: saleType(saleTypes.online), ofc: saleType(saleTypes.ofc), other: saleType(saleTypes.other) },
     recentInvoices: invoices.slice(0, 5).map(row => ({
       id: row.id, invoiceNo: legacyReports ? row.invoice_no ?? row.id : row.id, invoiceType: row.invoice_type, invoiceDate: row.invoice_date,
-      customerName: row.customer_name, salesmanName: null, total: String(row.total ?? 0), paidAmount: String(legacyReports ? row.paid_amount ?? 0 : row.paid ?? 0),
+      customerName: row.customer_name, salesmanName: null, total: String(row.total ?? 0), paidAmount: String(row.paid_amount ?? 0),
     })),
     recentPurchases: periodPurchases.slice(0, 5).map(row => ({
       id: row.id, purchaseNo: row.purchase_no ?? row.id, vendorName: null, purchaseDate: row.purchase_date,

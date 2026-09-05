@@ -89,6 +89,17 @@ export type InvoiceCommissionRow = {
 export type PaymentAllocationRow = { id: string; accountId?: string; accountCode?: string; accountName: string; amount: string; isChange?: boolean; direction?: string | null; paymentMode?: string | null }
 
 /**
+ * `invoices` records lifecycle as two booleans (`is_cancelled`, `is_returned`);
+ * there is no status column on the table. The readable label is therefore
+ * derived on read, and the flags stay the single source of truth.
+ */
+function invoiceStatusLabel(isCancelled: boolean, isReturned: boolean): string {
+  if (isCancelled) return 'Cancelled'
+  if (isReturned) return 'Returned'
+  return 'Posted'
+}
+
+/**
  * The deployed Phase-2 trigger writes its own event vocabulary
  * (`eligibility` / `return_adjustment`, migration 00016) while the local engine
  * writes `calculated` / `reversal`. Readers must not have to know which
@@ -677,12 +688,12 @@ async function postSaleViaPrisma(
 export async function listInvoices(businessId: string, opts?: { type?: string; salesmanId?: string }): Promise<InvoiceRow[]> {
   if (await isPhase4Live()) {
     const admin = getAdminSupabase()
-    let query = admin.from('invoices').select('id, invoice_no, invoice_type, invoice_date, customer_name, subtotal, total, paid, status, salesmen(name)').eq('business_id', businessId).order('invoice_date', { ascending: false }).order('created_at', { ascending: false }).limit(100)
+    let query = admin.from('invoices').select('id, invoice_no, invoice_type, invoice_date, customer_name, subtotal, total, paid_amount, is_cancelled, is_returned, salesmen(name)').eq('business_id', businessId).order('invoice_date', { ascending: false }).order('created_at', { ascending: false }).limit(100)
     if (opts?.type) query = query.eq('invoice_type', opts.type)
     if (opts?.salesmanId) query = query.eq('salesman_id', opts.salesmanId)
     const { data, error } = await query
     if (error) throw new Error(`Supabase: ${error.message}`)
-    return (data ?? []).map((r: any) => ({ id: r.id, invoiceNo: r.invoice_no, invoiceType: r.invoice_type, invoiceDate: r.invoice_date, customerName: r.customer_name, salesmanName: r.salesmen?.name ?? null, subtotal: String(r.subtotal), total: String(r.total), paidAmount: String(r.paid), status: r.status, isCancelled: r.status === 'Cancelled', isReturned: r.status === 'Returned' }))
+    return (data ?? []).map((r: any) => ({ id: r.id, invoiceNo: r.invoice_no, invoiceType: r.invoice_type, invoiceDate: r.invoice_date, customerName: r.customer_name, salesmanName: r.salesmen?.name ?? null, subtotal: String(r.subtotal), total: String(r.total), paidAmount: String(r.paid_amount ?? 0), status: invoiceStatusLabel(Boolean(r.is_cancelled), Boolean(r.is_returned)), isCancelled: Boolean(r.is_cancelled), isReturned: Boolean(r.is_returned) }))
   }
   const invoices = await db.invoice.findMany({
     where: {
@@ -859,7 +870,7 @@ export async function getInvoice(businessId: string, invoiceId: string): Promise
     }
 
     const sourceItems = new Map(itemRows.map((it: any) => [it.id, it]))
-    return { id: r.id, invoiceNo: r.invoice_no, invoiceType: r.invoice_type, invoiceDate: r.invoice_date, customerName: r.customer_name, customerPhone: r.customer_phone ?? null, customerAddress: r.customer_address ?? null, customerCity: r.customer_city ?? null, salesmanName, subtotal: String(r.subtotal), discount: String(r.discount ?? 0), total: String(r.total), paidAmount: String(r.paid), status: r.status, isCancelled: r.status === 'Cancelled', isReturned: r.status === 'Returned', memo: r.memo ?? null, items: itemRows.map((it: any) => ({ id: it.id, productId: it.product_id, productName: it.product_name, qty: it.qty, returnedQty: it.returned_qty ?? 0, unitPrice: String(it.unit_price), lineTotal: String(it.line_total), isTemporary: it.is_temporary })), payments: (payments ?? []).map((p: any) => ({ id: p.id, accountName: p.payment_mode ?? 'Payment', amount: String(p.amount), direction: p.direction, paymentMode: p.payment_mode })), unavailableSections: unavailable, returns: (returns ?? []).map((sr: any) => ({
+    return { id: r.id, invoiceNo: r.invoice_no, invoiceType: r.invoice_type, invoiceDate: r.invoice_date, customerName: r.customer_name, customerPhone: r.customer_phone ?? null, customerAddress: r.customer_address ?? null, customerCity: r.customer_city ?? null, salesmanName, subtotal: String(r.subtotal), discount: String(r.discount ?? 0), total: String(r.total), paidAmount: String(r.paid_amount ?? 0), status: invoiceStatusLabel(Boolean(r.is_cancelled), Boolean(r.is_returned)), isCancelled: Boolean(r.is_cancelled), isReturned: Boolean(r.is_returned), memo: r.memo ?? null, items: itemRows.map((it: any) => ({ id: it.id, productId: it.product_id, productName: it.product_name, qty: it.qty, returnedQty: it.returned_qty ?? 0, unitPrice: String(it.unit_price), lineTotal: String(it.line_total), isTemporary: it.is_temporary })), payments: (payments ?? []).map((p: any) => ({ id: p.id, accountName: p.payment_mode ?? 'Payment', amount: String(p.amount), direction: p.direction, paymentMode: p.payment_mode })), unavailableSections: unavailable, returns: (returns ?? []).map((sr: any) => ({
       returnNo: sr.return_no,
       returnDate: sr.return_date,
       total: String(sr.total),

@@ -27,10 +27,28 @@ const assignRoute = await read('src/app/api/delivery-orders/[id]/assign/route.ts
 const deliveryAccess = await read('src/lib/delivery/data-access.ts')
 const onlineSale = await read('src/components/erp/views/online-sale-view.tsx')
 const salesAccess = await read('src/lib/sales/data-access.ts')
+const ownerSummary = await read('src/lib/dashboard/owner-summary.ts')
 const invoiceView = await read('src/components/erp/views/invoice-detail-view.tsx')
 const foundation = await read('supabase/migrations/00014_phase1_foundation.sql')
+const phase4Sales = await read('supabase/migrations/00004_phase4_sales.sql')
 
 const assignableRiders = /export async function listAssignableRiders[\s\S]*?\n\}/.exec(deliveryAccess)![0]
+
+/**
+ * Column names in a PostgREST select list. Compared as whole names, never as
+ * substrings: `paid_amount`.includes('paid') is true, which is exactly how a
+ * column that does not exist survived a passing test.
+ */
+const columnNames = (list: string): string[] => list.split(',').map(part => part.trim())
+
+const coreColumns = columnNames(INVOICE_CORE_COLUMNS)
+const detailColumns = columnNames(INVOICE_DETAIL_COLUMNS)
+
+/** Every literal `invoices` select in a source file, as column-name lists. */
+function invoiceSelects(source: string): string[][] {
+  return [...source.matchAll(/from\('invoices'\)[\s\S]{0,160}?\.select\('([^']*)'\)/g)]
+    .map(match => columnNames(match[1]))
+}
 
 // ---------------------------------------------------------------------------
 // BLOCKER 1 — the empty rider dropdown.
@@ -118,18 +136,62 @@ test('the invoice read embeds no related resource at all', () => {
 })
 
 test('the core read carries identity and money, and narrows before giving up', () => {
-  for (const column of ['id', 'invoice_no', 'invoice_date', 'customer_name', 'salesman_id', 'subtotal', 'total', 'paid', 'status']) {
-    assert.ok(INVOICE_CORE_COLUMNS.includes(column), `core columns must include ${column}`)
+  for (const column of ['id', 'invoice_no', 'invoice_date', 'customer_name', 'salesman_id', 'subtotal', 'total', 'paid_amount', 'is_cancelled', 'is_returned']) {
+    assert.ok(coreColumns.includes(column), `core columns must include ${column}`)
   }
   // Presentation-only columns are additive, so a database that predates them
   // still opens its own invoices on the retry.
   for (const column of ['customer_phone', 'customer_address', 'customer_city', 'discount', 'memo']) {
-    assert.ok(!INVOICE_CORE_COLUMNS.includes(column), `${column} must not be required to open an invoice`)
-    assert.ok(INVOICE_DETAIL_COLUMNS.includes(column), `${column} belongs to the detail read`)
+    assert.ok(!coreColumns.includes(column), `${column} must not be required to open an invoice`)
+    assert.ok(detailColumns.includes(column), `${column} belongs to the detail read`)
   }
   assert.match(salesAccess, /let core = await readInvoice\(INVOICE_DETAIL_COLUMNS\)/)
   assert.match(salesAccess, /if \(core\.error && isSchemaShapeError\(core\.error\)\) \{/)
   assert.match(salesAccess, /core = await readInvoice\(INVOICE_CORE_COLUMNS\)/)
+})
+
+// ---------------------------------------------------------------------------
+// BLOCKER 2b — every invoice read asked for two columns that do not exist.
+//
+// Production returned 42703 `column invoices.paid does not exist` for both
+// GET /api/sales/counter (the Sales List) and GET /api/sales/[id] (the detail),
+// and the narrowed retry carried the same two names so it failed identically.
+// `invoices` has `paid_amount` plus the `is_cancelled` / `is_returned` flags and
+// has never had `paid` or `status` — migration 00004 is the definition.
+// ---------------------------------------------------------------------------
+
+test('no invoice read asks for a paid or status column', () => {
+  for (const [name, columns] of [['core', coreColumns], ['detail', detailColumns]] as const) {
+    assert.ok(!columns.includes('paid'), `${name} columns must not read invoices.paid`)
+    assert.ok(!columns.includes('status'), `${name} columns must not read invoices.status`)
+  }
+  // The two invoices selects written inline rather than through the constants.
+  for (const select of invoiceSelects(salesAccess).concat(invoiceSelects(ownerSummary))) {
+    assert.ok(!select.includes('paid'), `select must not read invoices.paid: ${select.join(', ')}`)
+    assert.ok(!select.includes('status'), `select must not read invoices.status: ${select.join(', ')}`)
+  }
+})
+
+test('the invoices table defines paid_amount and the lifecycle flags, not paid or status', () => {
+  const table = /create table (?:if not exists )?public\.invoices \([\s\S]*?\n\);/i.exec(phase4Sales)![0]
+  assert.match(table, /\bpaid_amount\s+numeric/i)
+  assert.match(table, /\bis_cancelled\s+boolean/i)
+  assert.match(table, /\bis_returned\s+boolean/i)
+  assert.doesNotMatch(table, /^\s*paid\s+/im)
+  assert.doesNotMatch(table, /^\s*status\s+/im)
+})
+
+test('invoice lifecycle is read from the flags, and the label is derived from them', () => {
+  // The list and the detail both map the flags directly; neither infers them
+  // from a status string that the table cannot supply.
+  const mappings = salesAccess.match(/isCancelled: Boolean\(r\.is_cancelled\), isReturned: Boolean\(r\.is_returned\)/g) ?? []
+  assert.equal(mappings.length, 2, 'the list and the detail each map the flags once')
+  assert.doesNotMatch(salesAccess, /isCancelled: r\.status/)
+  assert.doesNotMatch(salesAccess, /isReturned: r\.status/)
+  assert.match(salesAccess, /paidAmount: String\(r\.paid_amount \?\? 0\)/)
+  assert.match(salesAccess, /function invoiceStatusLabel\(isCancelled: boolean, isReturned: boolean\)/)
+  // The owner dashboard filters posted invoices on the same flags.
+  assert.match(ownerSummary, /function isPostedInvoice\(row: any\): boolean \{\s*\n\s*return !row\.is_cancelled && !row\.is_returned/)
 })
 
 test('only a schema-shape failure is absorbed; anything else propagates', () => {
@@ -178,7 +240,7 @@ test('money on the document stays exact, and an unknowable balance is withheld',
   // that failed to read.
   assert.match(salesAccess, /subtotal: String\(r\.subtotal\)/)
   assert.match(salesAccess, /total: String\(r\.total\)/)
-  assert.match(salesAccess, /paidAmount: String\(r\.paid\)/)
+  assert.match(salesAccess, /paidAmount: String\(r\.paid_amount \?\? 0\)/)
   assert.match(invoiceView, /const outstandingKnown = !unavailableSections\.includes\('returns'\)/)
   assert.match(invoiceView, /outstandingKnown && outstanding > 0n/)
   assert.match(invoiceView, /Line items could not be read\./)

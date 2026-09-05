@@ -9,16 +9,23 @@
  * therefore fetched as their own business-scoped query, keyed on the same
  * (business_id, invoice_id) pair the index already covers.
  *
- * The core column list is deliberately the set `listInvoices` reads in
- * production today: whatever else an older database is missing, an invoice's
- * identity and its money (subtotal, total, paid) come back. The detail list adds
- * presentation-only columns and is dropped wholesale if the database predates
- * them, so a schema that has not caught up can still open its own invoices.
+ * The core column list is the set defined by migration 00004 and confirmed
+ * present on production: whatever else an older database is missing, an
+ * invoice's identity, its money (subtotal, total, paid_amount) and its lifecycle
+ * flags come back. The detail list adds presentation-only columns and is dropped
+ * wholesale if the database predates them, so a schema that has not caught up
+ * can still open its own invoices.
+ *
+ * There is no `paid` or `status` column on `invoices`. Both were read here until
+ * production returned 42703 (`column invoices.paid does not exist`) for every
+ * sales-list and invoice-detail request; the narrowed retry carried the same two
+ * names, so it failed identically and the invoice could not be opened at all.
+ * Money is `paid_amount`; lifecycle is the `is_cancelled` / `is_returned` flags.
  */
 
-/** Identity + money. Proven present on production by the sales list query. */
+/** Identity, money and lifecycle flags, per migration 00004_phase4_sales. */
 export const INVOICE_CORE_COLUMNS =
-  'id, invoice_no, invoice_type, invoice_date, customer_name, salesman_id, subtotal, total, paid, status'
+  'id, invoice_no, invoice_type, invoice_date, customer_name, salesman_id, subtotal, total, paid_amount, is_cancelled, is_returned'
 
 /** Core plus presentation-only columns; retried without these when absent. */
 export const INVOICE_DETAIL_COLUMNS =
