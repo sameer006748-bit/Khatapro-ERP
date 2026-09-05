@@ -158,9 +158,17 @@ export async function POST(req: Request) {
 
     // ── Create delivery order with correct COD ──
     // COD = customer_grand_total - net_customer_advance (not product + delivery)
+    //
+    // The new order's ID goes back to the caller. The sale screen assigns the
+    // rider the Salesman picked in a second, separately-authorized call, and it
+    // can only do that if it learns the ID. Production dropped this value, so
+    // every Online Sale posted with a rider selected fell through to the "no
+    // delivery order was available for rider assignment" warning and the order
+    // stayed pending with rider_id null.
+    let deliveryOrderId: string | null = null
     if (deliveryCharge > 0n) {
       try {
-        await createDeliveryOrder({
+        deliveryOrderId = await createDeliveryOrder({
           businessId: su.businessId,
           invoiceId: result.invoiceId,
           productAmount: netProductTotal,
@@ -207,6 +215,7 @@ export async function POST(req: Request) {
       ok: true,
       invoiceId: result.invoiceId,
       invoiceNo: result.invoiceNo,
+      deliveryOrderId,
       customerGrandTotal: customerGrandTotal.toString(),
       netAdvance: netCustomerAdvance.toString(),
       remainingCod: remainingCod.toString(),

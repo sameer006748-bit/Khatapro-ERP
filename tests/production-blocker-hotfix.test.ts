@@ -26,6 +26,7 @@ const read = async (path: string) => (await readFile(path, 'utf8')).replace(/\r\
 
 const ridersRoute = await read('src/app/api/riders/route.ts')
 const riderIdRoute = await read('src/app/api/riders/[id]/route.ts')
+const onlineRoute = await read('src/app/api/sales/online/route.ts')
 const assignRoute = await read('src/app/api/delivery-orders/[id]/assign/route.ts')
 const deliveryAccess = await read('src/lib/delivery/data-access.ts')
 const onlineSale = await read('src/components/erp/views/online-sale-view.tsx')
@@ -162,6 +163,44 @@ test('both rider mutations run inside the wrapper that maps the denial', () => {
   assert.match(riderIdRoute, /export const PATCH = withObservability\('\/api\/riders\/\[id\]', patchRider\)/)
   // The write permission itself is unchanged.
   assert.match(riderIdRoute, /requirePermission\(loaded, 'can_manage_riders'\)/)
+})
+
+// ---------------------------------------------------------------------------
+// BLOCKER 1c — the rider the Salesman picked was never assigned.
+//
+// POST /api/sales/online creates the delivery order and threw its ID away, so
+// the success body carried no `deliveryOrderId`. The sale screen assigns the
+// rider in a second call keyed on that ID, so it always took the "no delivery
+// order was available for rider assignment" branch. Live proof: INV-0018
+// (4b9325ba-fe10-45ac-8ecc-77e9e409aede) posted 200 from the Salesman UI with
+// Rizwan selected, and delivery order 88373fbe-847b-481f-86fd-39859c7f1c5b was
+// left status 'pending', rider_id null, assigned_at null.
+// ---------------------------------------------------------------------------
+
+test('a posted Online Sale reports the delivery order it created', () => {
+  assert.match(onlineRoute, /let deliveryOrderId: string \| null = null/)
+  assert.match(onlineRoute, /deliveryOrderId = await createDeliveryOrder\(\{/)
+  // The ID is in the success body, not only in the failure body.
+  const success = /return NextResponse\.json\(\{\n\s*ok: true,[\s\S]*?\n\s*\}\)\n/.exec(onlineRoute)
+  assert.ok(success, 'success response not found')
+  assert.match(success[0], /deliveryOrderId,/)
+  assert.match(onlineRoute, /deliveryOrderId: null,\n\s*deliveryError: 'DELIVERY_ORDER_FAILED'/)
+})
+
+test('the sale screen assigns the picked rider to that order, and says so if it cannot', () => {
+  assert.match(onlineSale, /if \(form\.riderId && j\.deliveryOrderId\) \{/)
+  assert.match(onlineSale, /\/api\/delivery-orders\/\$\{encodeURIComponent\(j\.deliveryOrderId\)\}\/assign/)
+  assert.match(onlineSale, /body: JSON\.stringify\(\{ riderId: form\.riderId \}\)/)
+  assert.match(onlineSale, /no delivery order was available for rider assignment/)
+  // A failed assignment never turns a posted sale into a failed one.
+  assert.match(onlineSale, /Sale posted, but rider assignment failed/)
+})
+
+test('assignment stays a separately authorized call on the delivery order', () => {
+  // The sale route never takes a riderId, so posting a sale cannot silently
+  // bypass the assignment permission check.
+  assert.doesNotMatch(onlineRoute, /riderId/)
+  assert.match(assignRoute, /assignRider\(/)
 })
 
 // ---------------------------------------------------------------------------
