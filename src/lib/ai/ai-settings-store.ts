@@ -39,6 +39,12 @@ export type AiConnectionTestResult = {
   status: AiConnectionStatus
   lastTestedAt: string
   errorCategory: GeminiFailureCategory | null
+  /**
+   * The Gemini model the test actually called. Absent when the test never got
+   * as far as the provider (no key stored, or a key that would not decrypt), so
+   * a reported model always means a request was really made with it.
+   */
+  model?: string
 }
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i

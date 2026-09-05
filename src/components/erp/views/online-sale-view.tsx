@@ -324,9 +324,16 @@ export function OnlineSaleView({ user }: { user: MeUser }) {
               {activeRiders.map(r => <SelectItem key={r.id} value={r.id}>{r.name}{r.phone ? ` (${r.phone})` : ''}</SelectItem>)}
             </SelectContent>
           </Select>
-          {ridersQ.isSuccess && activeRiders.length === 0 && (
+          {/* An empty dropdown must always say why. A failed rider load used to
+              render as "no riders" with no message at all, which is how the
+              production 403 stayed invisible. */}
+          {ridersQ.isError ? (
+            <div className="text-[10px] text-destructive mt-0.5">
+              The rider list could not be loaded. Retry, or post the sale and assign a rider from Deliveries.
+            </div>
+          ) : ridersQ.isSuccess && activeRiders.length === 0 ? (
             <div className="text-[10px] text-destructive mt-0.5">No active rider found. Add one before assigning.</div>
-          )}
+          ) : null}
         </div>
 
       <PaymentPanel

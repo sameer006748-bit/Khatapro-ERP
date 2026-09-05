@@ -41,6 +41,8 @@ type AiConnectionTestResult = {
   status: ConnectionStatus
   lastTestedAt: string
   errorCategory: GeminiFailureCategory | null
+  /** Model the test called. Absent when the test never reached the provider. */
+  model?: string
 }
 
 const STATUS_CONFIG: Record<ConnectionStatus, { label: string; color: 'default' | 'secondary' | 'destructive' | 'outline'; icon: React.ComponentType<{ className?: string }> }> = {
@@ -129,9 +131,16 @@ export function AiSettingsView() {
       if (data.status === 'connected') {
         toast.success('Connection successful')
       } else {
-        toast.error(data.errorCategory
-          ? FAILURE_MESSAGES[data.errorCategory]
-          : 'Connection error')
+        // Each category gets its own wording: an Owner has to be able to tell a
+        // rejected key from an unavailable model from a network failure, because
+        // the fix is different in each case. A named model is appended when the
+        // model itself is what the provider refused.
+        const base = data.errorCategory
+          ? FAILURE_MESSAGES[data.errorCategory] ?? 'Connection error'
+          : 'Connection error'
+        toast.error(data.errorCategory === 'model_not_found' && data.model
+          ? `${base}: ${data.model}`
+          : base)
       }
       void qc.invalidateQueries({ queryKey: ['ai-settings'] })
     },
@@ -157,7 +166,7 @@ export function AiSettingsView() {
   const status = settings?.status ?? 'not_configured'
   const statusCfg = STATUS_CONFIG[status]
   const statusLabel = settings?.errorCategory
-    ? FAILURE_MESSAGES[settings.errorCategory]
+    ? FAILURE_MESSAGES[settings.errorCategory] ?? statusCfg.label
     : statusCfg.label
   const StatusIcon = statusCfg.icon
   const isBusy = saveMut.isPending || testMut.isPending || removeMut.isPending

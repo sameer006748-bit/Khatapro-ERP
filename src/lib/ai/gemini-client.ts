@@ -11,9 +11,10 @@ import {
 import {
   callGeminiCore,
   GeminiClientError,
-  probeThinkingBudget,
+  resolveThinkingConfig,
   runGeminiWithSingleRetry,
   type GeminiFailureCategory,
+  type GeminiThinkingConfig,
 } from '@/lib/ai/gemini-client-core'
 export { GeminiClientError } from '@/lib/ai/gemini-client-core'
 export type { GeminiFailureCategory } from '@/lib/ai/gemini-client-core'
@@ -22,7 +23,7 @@ async function callGemini(
   apiKey: string,
   body: Record<string, unknown>,
   outputTokens: number,
-  thinkingBudget?: number,
+  thinking?: GeminiThinkingConfig,
 ): Promise<string> {
   return callGeminiCore({
     apiKey: apiKey.trim(),
@@ -30,7 +31,7 @@ async function callGemini(
     body,
     outputTokens,
     timeoutMs: AI_LIMITS.timeoutMs,
-    thinkingBudget,
+    thinking,
   })
 }
 
@@ -60,7 +61,7 @@ export async function generateGeminiAnswer(args: {
         }],
       },
       contents,
-    }, AI_LIMITS.outputTokens),
+    }, AI_LIMITS.outputTokens, resolveThinkingConfig(GEMINI_MODEL)),
     validate: (text, strict) => {
       const result = validateAiAnswer(text, strict)
       return result.valid
@@ -81,12 +82,14 @@ export async function generateGeminiAnswer(args: {
 export type GeminiProbeResult = {
   status: 'connected' | 'invalid' | 'failed'
   errorCategory: GeminiFailureCategory | null
+  /** The model the probe actually called, so a failure names the model it used. */
+  model: string
 }
 
-// Generous ceiling for the probe: when thinking is left at the model's default
-// its tokens count against this budget, and exhausting it would surface as an
-// empty response — a false "connection failed" for a perfectly good key.
-const PROBE_OUTPUT_TOKENS = 512
+// Headroom for the probe. Thinking tokens are charged against this budget even
+// though they are never returned, so the ceiling has to clear the pinned
+// thinking tier plus the two-token answer, not just the answer.
+const PROBE_OUTPUT_TOKENS = 1024
 
 export async function probeGeminiKey(
   apiKey: string,
@@ -96,10 +99,24 @@ export async function probeGeminiKey(
     await callGemini(apiKey, {
       systemInstruction: { parts: [{ text: 'Reply with only OK.' }] },
       contents: [{ role: 'user', parts: [{ text: 'Connection check.' }] }],
-    }, PROBE_OUTPUT_TOKENS, probeThinkingBudget(GEMINI_MODEL))
-    return { status: 'connected', errorCategory: null }
+    }, PROBE_OUTPUT_TOKENS, resolveThinkingConfig(GEMINI_MODEL))
+    return { status: 'connected', errorCategory: null, model: GEMINI_MODEL }
   } catch (error) {
     if (error instanceof GeminiClientError) {
+      // A truncated reply is still proof of connection: the request was
+      // authenticated, the model ID resolved, and the model produced tokens. It
+      // only means the reply outgrew the probe's budget, which says nothing about
+      // the credential the Owner is testing, so reporting it as a connection
+      // failure would be wrong.
+      if (error.category === 'truncated') {
+        console.warn(JSON.stringify({
+          event: 'gemini_connection_test_truncated',
+          requestId,
+          googleErrorCode: error.googleErrorCode,
+          severity: 'warning',
+        }))
+        return { status: 'connected', errorCategory: null, model: GEMINI_MODEL }
+      }
       console.error(JSON.stringify({
         event: 'gemini_connection_test_failed',
         requestId,
@@ -111,6 +128,7 @@ export async function probeGeminiKey(
       return {
         status: error.category === 'invalid_api_key' ? 'invalid' : 'failed',
         errorCategory: error.category,
+        model: GEMINI_MODEL,
       }
     }
     console.error(JSON.stringify({
@@ -121,6 +139,6 @@ export async function probeGeminiKey(
       category: 'provider_unavailable',
       severity: 'error',
     }))
-    return { status: 'failed', errorCategory: 'provider_unavailable' }
+    return { status: 'failed', errorCategory: 'provider_unavailable', model: GEMINI_MODEL }
   }
 }

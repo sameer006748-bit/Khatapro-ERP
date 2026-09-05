@@ -4,18 +4,39 @@ import { z } from 'zod'
 import { authOptions } from '@/lib/auth/authOptions'
 import { loadSessionUser, requirePermission, hasPermission } from '@/lib/auth/permissions'
 import { isSupabaseConfigured } from '@/lib/supabase/config'
-import { listRiders, createRider } from '@/lib/delivery/data-access'
+import { listRiders, listAssignableRiders, createRider } from '@/lib/delivery/data-access'
 import { resolveRequestId, safeMutationError, withObservability } from '@/lib/observability'
 
+/**
+ * GET /api/riders — rider roster.
+ *
+ * Two audiences, two shapes:
+ *   - Delivery managers (`can_view_delivery_orders` / `can_manage_riders`) get
+ *     the full administrative roster, active and inactive alike.
+ *   - Order creators (`can_create_online_orders`, i.e. Salesman) get only the
+ *     ACTIVE riders of their own business, with just the fields the "Assign
+ *     Rider" selector renders. Without this branch the Salesman's request was
+ *     rejected 403 and the sale screen showed an empty dropdown with no
+ *     explanation, which is the production symptom this fixes.
+ *
+ * Both branches are scoped to the caller's own `businessId`, so no roster can
+ * cross a business boundary. Anyone holding none of the three permissions
+ * still fails closed.
+ */
 async function getRiders() {
   const session = await getServerSession(authOptions)
   if (!session?.user) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
   const loaded = await loadSessionUser((session.user as any).id)
   if (!loaded) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
-  if (!hasPermission(loaded, 'can_view_delivery_orders') && !hasPermission(loaded, 'can_manage_riders')) {
+  const canManageDelivery = hasPermission(loaded, 'can_view_delivery_orders')
+    || hasPermission(loaded, 'can_manage_riders')
+  const canCreateOrders = hasPermission(loaded, 'can_create_online_orders')
+  if (!canManageDelivery && !canCreateOrders) {
     return NextResponse.json({ error: 'FORBIDDEN' }, { status: 403 })
   }
-  const rows = await listRiders(loaded.businessId)
+  const rows = canManageDelivery
+    ? await listRiders(loaded.businessId)
+    : await listAssignableRiders(loaded.businessId)
   return NextResponse.json({ rows })
 }
 

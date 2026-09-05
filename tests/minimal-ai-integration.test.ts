@@ -1,7 +1,7 @@
 import { strict as assert } from 'node:assert'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
-import { callGeminiCore, GeminiClientError, probeThinkingBudget, runGeminiWithSingleRetry } from '../src/lib/ai/gemini-client-core.ts'
+import { callGeminiCore, GeminiClientError, resolveThinkingConfig, runGeminiWithSingleRetry } from '../src/lib/ai/gemini-client-core.ts'
 import {
   buildSystemInstruction,
   canUseAiForScreen,
@@ -55,14 +55,18 @@ test('release model is centralized on stable Gemini 3.5 Flash, overridable per e
 })
 
 // The connection test in AI Settings is the first thing an Owner presses after
-// pasting a key, so it must fail only on the key. Gemini 3.x rejects the numeric
-// thinkingBudget that 2.x needs, so the probe chooses per model generation, and
-// leaves thinking unconstrained whenever it cannot be sure.
-test('connection probe never sends a thinking parameter the release model rejects', async () => {
-  assert.equal(probeThinkingBudget('gemini-3.5-flash'), undefined)
-  assert.equal(probeThinkingBudget('gemini-3.8-flash'), undefined)
-  assert.equal(probeThinkingBudget('gemini-2.5-flash'), 0)
-  assert.equal(probeThinkingBudget('gemini-1.5-flash'), 0)
+// pasting a key, so it must fail only on the key or the model ID. Gemini 3.x
+// rejects the numeric thinkingBudget that 2.x needs and takes thinkingLevel
+// instead, so the field is chosen per model generation; `low` is the lowest tier
+// every Gemini 3 Flash model accepts (3.7/3.8 refuse `minimal`). An unknown
+// family gets no thinking field at all.
+test('thinking parameter matches the model generation and is always pinned for the release model', async () => {
+  assert.deepEqual(resolveThinkingConfig('gemini-3.5-flash'), { thinkingLevel: 'low' })
+  assert.deepEqual(resolveThinkingConfig('gemini-3.8-flash'), { thinkingLevel: 'low' })
+  assert.deepEqual(resolveThinkingConfig('gemini-3-flash-preview'), { thinkingLevel: 'low' })
+  assert.deepEqual(resolveThinkingConfig('gemini-2.5-flash'), { thinkingBudget: 0 })
+  assert.deepEqual(resolveThinkingConfig('gemini-1.5-flash'), { thinkingBudget: 0 })
+  assert.equal(resolveThinkingConfig('some-future-model'), undefined)
 
   let capturedBody = ''
   const mockFetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
@@ -73,23 +77,71 @@ test('connection probe never sends a thinking parameter the release model reject
     apiKey: 'key',
     url: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent',
     body: { contents: [{ role: 'user', parts: [{ text: 'Connection check.' }] }] },
-    outputTokens: 512,
+    outputTokens: 1024,
     timeoutMs: 100,
-    thinkingBudget: probeThinkingBudget('gemini-3.5-flash'),
+    thinking: resolveThinkingConfig('gemini-3.5-flash'),
     fetchImpl: mockFetch,
   })
-  assert.deepEqual(JSON.parse(capturedBody).generationConfig, { temperature: 0.2, maxOutputTokens: 512 })
+  assert.deepEqual(JSON.parse(capturedBody).generationConfig, {
+    temperature: 0.2,
+    maxOutputTokens: 1024,
+    thinkingConfig: { thinkingLevel: 'low' },
+  })
 })
 
-// Thinking tokens count against maxOutputTokens, and an exhausted budget arrives
-// as an empty candidate - indistinguishable from a provider fault. The probe's
-// ceiling therefore has to leave room for a thinking model to still say "OK".
-test('connection probe leaves room for a thinking model to answer', async () => {
+// Thinking tokens count against maxOutputTokens and are never returned, so the
+// probe's ceiling has to cover the pinned thinking tier plus the answer. Both the
+// probe and the answer path pin thinking; leaving the 3.x default of `medium` in
+// place is what spent the whole budget on reasoning and returned no text.
+test('probe leaves room for a thinking model and every call pins a thinking tier', async () => {
   const client = await source('src/lib/ai/gemini-client.ts')
   const ceiling = client.match(/const PROBE_OUTPUT_TOKENS = (\d+)/)
   assert.ok(ceiling, 'the probe declares its output ceiling')
-  assert.ok(Number(ceiling[1]) >= 256, `probe ceiling ${ceiling?.[1]} is too small for a thinking model`)
-  assert.match(client, /\}, PROBE_OUTPUT_TOKENS, probeThinkingBudget\(GEMINI_MODEL\)\)/)
+  assert.ok(Number(ceiling[1]) >= 1024, `probe ceiling ${ceiling?.[1]} is too small for a thinking model`)
+  assert.match(client, /\}, PROBE_OUTPUT_TOKENS, resolveThinkingConfig\(GEMINI_MODEL\)\)/)
+  assert.match(client, /AI_LIMITS\.outputTokens, resolveThinkingConfig\(GEMINI_MODEL\)\)/)
+})
+
+// An exhausted budget arrives as a 200 with MAX_TOKENS and no text part. Read as
+// "empty" it looks like a provider fault, which is exactly how a working key was
+// reported as a connection failure in production.
+test('budget exhaustion is classified as truncated, not as a provider fault', async () => {
+  const mockFetch = (async () => new Response(JSON.stringify({
+    candidates: [{ content: { parts: [] }, finishReason: 'MAX_TOKENS' }],
+  }), { status: 200 })) as typeof fetch
+  await assert.rejects(
+    callGeminiCore({
+      apiKey: 'key',
+      url: 'https://example.invalid',
+      body: {},
+      outputTokens: 8,
+      timeoutMs: 100,
+      fetchImpl: mockFetch,
+    }),
+    (error: unknown) => error instanceof GeminiClientError
+      && error.category === 'truncated'
+      && error.googleErrorCode === 'MAX_TOKENS',
+  )
+})
+
+// A truncated reply still proves the key authenticated and the model ID resolved,
+// so the connection test reports success; only the reply outgrew the budget.
+test('connection test treats a truncated reply as connected and names its model', async () => {
+  const client = await source('src/lib/ai/gemini-client.ts')
+  assert.match(client, /error\.category === 'truncated'/)
+  assert.match(client, /return \{ status: 'connected', errorCategory: null, model: GEMINI_MODEL \}/)
+  assert.match(client, /status: error\.category === 'invalid_api_key' \? 'invalid' : 'failed'/)
+})
+
+// Each provider failure has a different fix, so the Owner must see which one it
+// was: a rejected key, an unavailable model, or a network failure.
+test('connection failures are reported by category rather than one generic error', async () => {
+  const view = await source('src/components/erp/views/ai-settings-view.tsx')
+  assert.match(view, /invalid_api_key: 'Invalid API key'/)
+  assert.match(view, /model_not_found: 'Model unavailable'/)
+  assert.match(view, /timeout: 'Connection timed out'/)
+  assert.match(view, /data\.errorCategory === 'model_not_found' && data\.model/)
+  assert.doesNotMatch(view, /apiKey.*console\.|console\.log\(apiKey/)
 })
 
 test('permission filtering allows only role-scoped screens', () => {
@@ -285,7 +337,7 @@ test('Gemini request contract uses JSON body and trimmed x-goog-api-key', async 
     },
     outputTokens: 16,
     timeoutMs: 100,
-    thinkingBudget: 0,
+    thinking: { thinkingBudget: 0 },
     fetchImpl: mockFetch,
   })
   assert.equal((capturedHeaders as Record<string, string>)['x-goog-api-key'], 'trimmed-key')

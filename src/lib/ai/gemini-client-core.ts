@@ -122,18 +122,30 @@ export function classifyGeminiFailure(
 }
 
 /**
- * Thinking budget for the connection probe, which is the only call that pins
- * one. Gemini 1.x/2.x accept a numeric `thinkingBudget`; Gemini 3.x replaced it
- * with `thinking_level` and rejects the old field with HTTP 400 ("thinking_budget
- * and thinking_level are not supported together"), while `thinking_level` is in
- * turn rejected by 2.x and its lowest accepted tier differs between 3.x models.
- * So the probe pins a zero budget only where that is known-good and otherwise
- * sends no thinking field at all, leaving the model's own default in place: a
- * connection test must fail on the API key, never on a parameter the model
- * dislikes.
+ * Thinking configuration pinned on every Gemini call.
+ *
+ * Gemini 1.x/2.x accept a numeric `thinkingBudget`. Gemini 3.x replaced it with
+ * `thinkingLevel` and rejects the numeric field; the accepted tiers are
+ * `minimal | low | medium | high`, and the floor differs by model — 3.5/3.6 and
+ * 3-flash-preview accept `minimal`, while 3.7/3.8 accept only `low` and above.
+ * `low` is therefore the one tier every Gemini 3 Flash model accepts.
+ *
+ * Pinning it matters: Gemini 3 Flash defaults to `medium` thinking, thinking
+ * tokens are charged against `maxOutputTokens`, and an exhausted budget comes
+ * back as a candidate with no text at all — a false "connection failed" for a
+ * perfectly good key. Leaving thinking at its default is what made the
+ * production connection test fail. Unknown model families still send no thinking
+ * field at all, because a call must fail on the API key or the model ID, never
+ * on a parameter that particular model dislikes.
  */
-export function probeThinkingBudget(model: string): number | undefined {
-  return /^gemini-[12]\./.test(model) ? 0 : undefined
+export type GeminiThinkingConfig =
+  | { thinkingBudget: number }
+  | { thinkingLevel: 'minimal' | 'low' | 'medium' | 'high' }
+
+export function resolveThinkingConfig(model: string): GeminiThinkingConfig | undefined {
+  if (/^gemini-[12]\./.test(model)) return { thinkingBudget: 0 }
+  if (/^gemini-3(\.|-)/.test(model)) return { thinkingLevel: 'low' }
+  return undefined
 }
 
 export async function callGeminiCore(args: {
@@ -142,7 +154,7 @@ export async function callGeminiCore(args: {
   body: Record<string, unknown>
   outputTokens: number
   timeoutMs: number
-  thinkingBudget?: number
+  thinking?: GeminiThinkingConfig
   fetchImpl?: typeof fetch
 }): Promise<string> {
   const apiKey = args.apiKey.trim()
@@ -165,9 +177,7 @@ export async function callGeminiCore(args: {
         generationConfig: {
           temperature: 0.2,
           maxOutputTokens: args.outputTokens,
-          ...(args.thinkingBudget !== undefined
-            ? { thinkingConfig: { thinkingBudget: args.thinkingBudget } }
-            : {}),
+          ...(args.thinking !== undefined ? { thinkingConfig: args.thinking } : {}),
         },
       }),
       cache: 'no-store',
@@ -200,12 +210,15 @@ export async function callGeminiCore(args: {
     const payload = await response.json() as GeminiResponse
     const candidate = payload.candidates?.[0]
     const text = candidate?.content?.parts?.map((part) => part.text ?? '').join('').trim()
-    if (!text) throw new GeminiClientError('provider_unavailable', 200, 'EMPTY_RESPONSE')
 
-    // Detect truncation from finishReason
+    // Budget exhaustion is checked BEFORE emptiness. A thinking model that spends
+    // its whole allowance reasoning returns MAX_TOKENS with no text at all; read
+    // the other way round that looks like a provider fault, which is how a
+    // working key was being reported as a connection failure.
     if (candidate?.finishReason === 'MAX_TOKENS') {
       throw new GeminiClientError('truncated', 200, 'MAX_TOKENS')
     }
+    if (!text) throw new GeminiClientError('provider_unavailable', 200, 'EMPTY_RESPONSE')
 
     return text
   } catch (error) {

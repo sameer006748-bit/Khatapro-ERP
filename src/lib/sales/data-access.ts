@@ -21,6 +21,12 @@ import {
 import { probeTable } from '@/lib/supabase/phase-probe'
 import { resolveSupabaseUuid } from '@/lib/accounting/voucher-supabase'
 import {
+  INVOICE_CORE_COLUMNS,
+  INVOICE_DETAIL_COLUMNS,
+  isSchemaShapeError,
+  type InvoiceDetailSection,
+} from '@/lib/sales/invoice-detail-compatibility'
+import {
   normalizeSaleLines,
   computeSaleTotals,
   validateSaleTotals,
@@ -62,7 +68,7 @@ export type InvoiceReturnRow = {
   reason: string | null
   lines: Array<{ productName: string; qty: number; unitPrice: string; lineTotal: string }>
 }
-export type InvoiceRow = { id: string; invoiceNo: string; invoiceType: string; invoiceDate: string; customerName: string | null; customerPhone?: string | null; customerAddress?: string | null; customerCity?: string | null; salesmanName: string | null; subtotal: string; discount?: string; total: string; paidAmount: string; status?: string; isCancelled: boolean; isReturned: boolean; memo?: string | null; items?: InvoiceItemRow[]; payments?: PaymentAllocationRow[]; returns?: InvoiceReturnRow[] }
+export type InvoiceRow = { id: string; invoiceNo: string; invoiceType: string; invoiceDate: string; customerName: string | null; customerPhone?: string | null; customerAddress?: string | null; customerCity?: string | null; salesmanName: string | null; subtotal: string; discount?: string; total: string; paidAmount: string; status?: string; isCancelled: boolean; isReturned: boolean; memo?: string | null; items?: InvoiceItemRow[]; payments?: PaymentAllocationRow[]; returns?: InvoiceReturnRow[]; unavailableSections?: InvoiceDetailSection[] }
 export type InvoiceItemRow = { id: string; productId: string | null; productName: string; qty: number; returnedQty?: number; unitPrice: string; lineTotal: string; isTemporary: boolean }
 export type InvoiceCommissionRow = {
   invoiceItemId: string
@@ -703,46 +709,157 @@ export async function listInvoices(businessId: string, opts?: { type?: string; s
   return invoices.map((i) => ({ id: i.id, invoiceNo: i.invoiceNo, invoiceType: i.invoiceType, invoiceDate: i.invoiceDate.toISOString(), customerName: i.customerName, salesmanName: i.salesman?.name ?? null, subtotal: i.subtotal.toString(), total: i.total.toString(), paidAmount: i.paidAmount.toString(), isCancelled: i.isCancelled, isReturned: i.isReturned }))
 }
 
+/**
+ * Log one unreadable invoice-detail section. Codes and relation names only —
+ * never row data — so a production failure is diagnosable from the logs without
+ * the invoice's contents travelling into them.
+ */
+function logInvoiceSectionUnavailable(
+  section: InvoiceDetailSection,
+  invoiceId: string,
+  error: { code?: string | null; message?: string | null } | null | undefined,
+): void {
+  console.error(JSON.stringify({
+    event: 'invoice_detail_section_unavailable',
+    section,
+    invoiceId,
+    errorCode: error?.code ?? null,
+    schemaShape: isSchemaShapeError(error),
+    severity: 'warning',
+  }))
+}
+
 export async function getInvoice(businessId: string, invoiceId: string): Promise<InvoiceRow | null> {
   if (await isPhase4Live()) {
     const admin = getAdminSupabase()
-    const { data: inv, error } = await admin.from('invoices').select('id, invoice_no, invoice_type, invoice_date, customer_name, customer_phone, customer_address, customer_city, subtotal, discount, total, paid, status, memo, salesmen(name), invoice_items(id, product_id, product_name, qty, returned_qty, unit_price, line_total, is_temporary)').eq('id', invoiceId).eq('business_id', businessId).maybeSingle()
+    const unavailable: InvoiceDetailSection[] = []
+
+    // ── Core invoice record ────────────────────────────────────────────────
+    // Base columns only, no embedded resources: this read decides whether the
+    // invoice can be opened at all, so it must not depend on a foreign key or
+    // an optional column that the production schema may not have.
+    const readInvoice = async (columns: string) => {
+      const result = await admin.from('invoices')
+        .select(columns)
+        .eq('id', invoiceId).eq('business_id', businessId)
+        .maybeSingle()
+      return { row: result.data as any, error: result.error }
+    }
+
+    let core = await readInvoice(INVOICE_DETAIL_COLUMNS)
+    if (core.error && isSchemaShapeError(core.error)) {
+      // The database predates one of the presentation-only columns. Retry with
+      // identity and money alone rather than refusing to open the invoice.
+      console.error(JSON.stringify({
+        event: 'invoice_detail_columns_narrowed',
+        invoiceId,
+        errorCode: core.error.code ?? null,
+        severity: 'warning',
+      }))
+      core = await readInvoice(INVOICE_CORE_COLUMNS)
+    }
     // A failed read is not a missing invoice. maybeSingle() reports "no such row"
     // as data: null with no error, so the two stay distinguishable: a real
     // database failure is raised (and logged with its relation/column/code)
     // instead of reaching the user as "Invoice not found".
-    if (error) throw new Error(`Supabase invoice: ${error.message}`)
-    if (!inv) return null
-    const r = inv as any
-    const { data: payments, error: paymentError } = await admin.from('payments').select('id, amount, direction, payment_mode').eq('business_id', businessId).eq('invoice_id', invoiceId).order('created_at')
-    if (paymentError) throw new Error(`Supabase invoice payments: ${paymentError.message}`)
-    // Return numbers, dates, totals and reasons live in columns the base schema
-    // always has, so the money on this document — returned total, outstanding —
-    // is always exact. `settlement_status` and the per-line breakdown arrive with
-    // a later migration and are printed detail only, so they are read separately
-    // and allowed to be absent: a database that has not caught up must still be
-    // able to open its own invoices.
-    const { data: returns, error: returnError } = await admin.from('sales_returns').select('id, return_no, return_date, total, reason').eq('business_id', businessId).eq('original_invoice_id', invoiceId).order('return_date')
-    if (returnError) throw new Error(`Supabase invoice returns: ${returnError.message}`)
+    if (core.error) throw new Error(`Supabase invoice: ${core.error.message}`)
+    if (!core.row) return null
+    const r = core.row
+
+    // ── Optional sections ──────────────────────────────────────────────────
+    // Items, salesman, payments and returns are independent of each other and
+    // of the core row, so they are read concurrently. Each is allowed to fail on
+    // its own and is reported in `unavailableSections`; none of them can prevent
+    // the invoice from opening.
+    //
+    // Line items get their own query rather than an `invoice_items(...)` embed:
+    // production invoices has a composite primary key, so PostgREST has no
+    // resolvable relationship to embed through and the embed took the whole
+    // invoice down with it. The same applies to `salesmen(name)`.
+    const itemColumns = 'id, product_id, product_name, qty, returned_qty, unit_price, line_total, is_temporary'
+    const itemColumnsWithoutReturned = 'id, product_id, product_name, qty, unit_price, line_total, is_temporary'
+    const readItems = async (columns: string) => {
+      const result = await admin.from('invoice_items')
+        .select(columns)
+        .eq('business_id', businessId).eq('invoice_id', invoiceId)
+        .order('created_at')
+      return { rows: (result.data ?? []) as any[], error: result.error }
+    }
+
+    const [itemRead, salesmanRead, paymentRead, returnRead] = await Promise.all([
+      readItems(itemColumns).then(async (first) => (
+        first.error && isSchemaShapeError(first.error)
+          ? readItems(itemColumnsWithoutReturned)
+          : first
+      )),
+      r.salesman_id
+        ? admin.from('salesmen').select('name')
+          .eq('business_id', businessId).eq('id', r.salesman_id).maybeSingle()
+        : Promise.resolve({ data: null, error: null }),
+      admin.from('payments')
+        .select('id, amount, direction, payment_mode')
+        .eq('business_id', businessId).eq('invoice_id', invoiceId).order('created_at'),
+      admin.from('sales_returns')
+        .select('id, return_no, return_date, total, reason')
+        .eq('business_id', businessId).eq('original_invoice_id', invoiceId).order('return_date'),
+    ])
+
+    if (itemRead.error) {
+      logInvoiceSectionUnavailable('items', invoiceId, itemRead.error)
+      unavailable.push('items')
+    }
+    const itemRows = itemRead.error ? [] : itemRead.rows
+
+    let salesmanName: string | null = null
+    if (salesmanRead.error) {
+      logInvoiceSectionUnavailable('salesman', invoiceId, salesmanRead.error)
+      unavailable.push('salesman')
+    } else {
+      salesmanName = (salesmanRead.data as any)?.name ?? null
+    }
+
+    const payments = paymentRead.data
+    if (paymentRead.error) {
+      logInvoiceSectionUnavailable('payments', invoiceId, paymentRead.error)
+      unavailable.push('payments')
+    }
+
+    // Return totals net off this invoice's outstanding balance, so an
+    // unreadable returns table is reported as such and the viewer withholds the
+    // outstanding figure rather than presenting an overstated one.
+    const returns = returnRead.data
+    if (returnRead.error) {
+      logInvoiceSectionUnavailable('returns', invoiceId, returnRead.error)
+      unavailable.push('returns')
+    }
+
+    // `settlement_status` and the per-line breakdown arrive with a later
+    // migration and are printed detail only, so they are read separately and
+    // allowed to be absent.
     const returnIds = (returns ?? []).map((sr: any) => sr.id)
     const settlementByReturn = new Map<string, string>()
     let returnLines: any[] = []
     if (returnIds.length > 0) {
-      const { data: settlements } = await admin.from('sales_returns')
+      const { data: settlements, error: settlementError } = await admin.from('sales_returns')
         .select('id, settlement_status')
         .eq('business_id', businessId)
         .in('id', returnIds)
       for (const row of (settlements ?? []) as any[]) {
         if (row.settlement_status) settlementByReturn.set(row.id, row.settlement_status)
       }
-      const { data: lines } = await admin.from('sales_return_lines')
+      const { data: lines, error: lineError } = await admin.from('sales_return_lines')
         .select('sales_return_id, original_invoice_item_id, returned_qty')
         .eq('business_id', businessId)
         .in('sales_return_id', returnIds)
       returnLines = lines ?? []
+      if (settlementError || lineError) {
+        logInvoiceSectionUnavailable('returnDetail', invoiceId, settlementError ?? lineError)
+        unavailable.push('returnDetail')
+      }
     }
-    const sourceItems = new Map((r.invoice_items ?? []).map((it: any) => [it.id, it]))
-    return { id: r.id, invoiceNo: r.invoice_no, invoiceType: r.invoice_type, invoiceDate: r.invoice_date, customerName: r.customer_name, customerPhone: r.customer_phone, customerAddress: r.customer_address, customerCity: r.customer_city, salesmanName: r.salesmen?.name ?? null, subtotal: String(r.subtotal), discount: String(r.discount ?? 0), total: String(r.total), paidAmount: String(r.paid), status: r.status, isCancelled: r.status === 'Cancelled', isReturned: r.status === 'Returned', memo: r.memo, items: (r.invoice_items ?? []).map((it: any) => ({ id: it.id, productId: it.product_id, productName: it.product_name, qty: it.qty, returnedQty: it.returned_qty, unitPrice: String(it.unit_price), lineTotal: String(it.line_total), isTemporary: it.is_temporary })), payments: (payments ?? []).map((p: any) => ({ id: p.id, accountName: p.payment_mode ?? 'Payment', amount: String(p.amount), direction: p.direction, paymentMode: p.payment_mode })), returns: (returns ?? []).map((sr: any) => ({
+
+    const sourceItems = new Map(itemRows.map((it: any) => [it.id, it]))
+    return { id: r.id, invoiceNo: r.invoice_no, invoiceType: r.invoice_type, invoiceDate: r.invoice_date, customerName: r.customer_name, customerPhone: r.customer_phone ?? null, customerAddress: r.customer_address ?? null, customerCity: r.customer_city ?? null, salesmanName, subtotal: String(r.subtotal), discount: String(r.discount ?? 0), total: String(r.total), paidAmount: String(r.paid), status: r.status, isCancelled: r.status === 'Cancelled', isReturned: r.status === 'Returned', memo: r.memo ?? null, items: itemRows.map((it: any) => ({ id: it.id, productId: it.product_id, productName: it.product_name, qty: it.qty, returnedQty: it.returned_qty ?? 0, unitPrice: String(it.unit_price), lineTotal: String(it.line_total), isTemporary: it.is_temporary })), payments: (payments ?? []).map((p: any) => ({ id: p.id, accountName: p.payment_mode ?? 'Payment', amount: String(p.amount), direction: p.direction, paymentMode: p.payment_mode })), unavailableSections: unavailable, returns: (returns ?? []).map((sr: any) => ({
       returnNo: sr.return_no,
       returnDate: sr.return_date,
       total: String(sr.total),

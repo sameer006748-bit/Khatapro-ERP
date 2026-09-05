@@ -33,6 +33,20 @@ type Invoice = {
   items?: Array<{ id: string; productId: string | null; productName: string; qty: number; returnedQty?: number; unitPrice: string; lineTotal: string; isTemporary: boolean }>
   payments?: Array<{ id: string; accountId?: string; accountCode?: string; accountName: string; amount: string; isChange?: boolean; direction?: string | null; paymentMode?: string | null }>
   returns?: Array<{ returnNo: string; returnDate: string; total: string; settlementStatus: string; reason: string | null; lines: Array<{ productName: string; qty: number; unitPrice: string; lineTotal: string }> }>
+  /**
+   * Sections the server could not read on this database. The invoice still
+   * opens; anything listed here is shown as unavailable rather than as empty,
+   * so a failed read is never mistaken for "there is nothing here".
+   */
+  unavailableSections?: Array<'items' | 'payments' | 'returns' | 'salesman' | 'returnDetail'>
+}
+
+const SECTION_UNAVAILABLE_LABEL: Record<string, string> = {
+  items: 'line items',
+  payments: 'payment history',
+  returns: 'returns',
+  salesman: 'salesman name',
+  returnDetail: 'return breakdown',
 }
 
 /** One commission entry as returned by GET /api/sales/:id/commission. */
@@ -225,6 +239,12 @@ export function InvoiceDetailView({ invoiceId, openReturn = false }: { invoiceId
   }
 
   const inv = q.data.invoice
+  const unavailableSections = inv.unavailableSections ?? []
+  // `paidAmount` is a column on the invoice itself, so an unreadable payment
+  // history costs only the list of receipts. Returns are different: they net off
+  // what the customer still owes, so if the returns table could not be read the
+  // outstanding balance is not knowable and is withheld rather than overstated.
+  const outstandingKnown = !unavailableSections.includes('returns')
   const returnedTotal = (inv.returns ?? []).reduce((sum, item) => sum + BigInt(item.total), 0n)
   const outstandingBeforeFloor = BigInt(inv.total) - returnedTotal - BigInt(inv.paidAmount)
   const outstanding = outstandingBeforeFloor > 0n ? outstandingBeforeFloor : 0n
@@ -267,13 +287,21 @@ export function InvoiceDetailView({ invoiceId, openReturn = false }: { invoiceId
             {/* allowInternalCopy only offers the owner an opt-in commission copy;
                 the default print stays a clean customer document. */}
             <PrintInvoiceButton invoiceId={inv.id} label="Print" size="sm" icon={Printer} allowInternalCopy />
-            {outstanding > 0n && !inv.isCancelled && !inv.isReturned && <Button variant="outline" size="sm" className="press-sm" onClick={() => setPaymentOpen(true)}>Collect payment</Button>}
+            {outstandingKnown && outstanding > 0n && !inv.isCancelled && !inv.isReturned && <Button variant="outline" size="sm" className="press-sm" onClick={() => setPaymentOpen(true)}>Collect payment</Button>}
             {!inv.isReturned && !inv.isCancelled && (
               <Button variant="outline" size="sm" className="press-sm text-amber-700" onClick={() => setReturnOpen(true)}><RotateCcw className="size-3.5" /> Return</Button>
             )}
           </div>
         </div>
         {inv.isReturned && <div className="mt-3 p-2 bg-amber-50 border border-amber-200 rounded-md text-xs text-amber-700">This invoice has been returned. Reversing voucher posted. Stock restored.</div>}
+        {/* The invoice opens even when a related section cannot be read. Say
+            which ones, so nothing missing is mistaken for nothing recorded. */}
+        {unavailableSections.length > 0 && (
+          <div className="mt-3 p-2 bg-amber-50 border border-amber-200 rounded-md text-xs text-amber-700">
+            The server could not read {unavailableSections.map(section => SECTION_UNAVAILABLE_LABEL[section] ?? section).join(', ')} for this invoice.
+            {!outstandingKnown ? ' The outstanding balance is withheld until returns can be read.' : ''} Everything shown above is exact.
+          </div>
+        )}
       </div>
 
       {/* Customer info */}
@@ -304,6 +332,9 @@ export function InvoiceDetailView({ invoiceId, openReturn = false }: { invoiceId
                 <td className="p-3.5 text-right font-medium" data-num>{formatMoney(BigInt(it.lineTotal), false)}</td>
               </tr>
             ))}
+            {unavailableSections.includes('items') && (
+              <tr><td colSpan={6} className="p-3.5 text-xs text-amber-700">Line items could not be read. The totals below come from the invoice record and are exact.</td></tr>
+            )}
           </tbody>
         </table>
         <div className="px-5 py-3 border-t border-border bg-muted/30 flex items-center justify-between text-sm">
@@ -337,7 +368,7 @@ export function InvoiceDetailView({ invoiceId, openReturn = false }: { invoiceId
           <div className="px-5 py-3 border-t border-border bg-muted/30 grid grid-cols-3 gap-2 text-sm">
             <div><div className="text-[10px] uppercase text-muted-foreground">Total</div><div className="font-semibold text-foreground" data-num>{formatMoney(BigInt(inv.total))}</div></div>
             <div><div className="text-[10px] uppercase text-muted-foreground">Paid</div><div className="font-semibold text-primary" data-num>{formatMoney(BigInt(inv.paidAmount))}</div></div>
-            <div className="text-right"><div className="text-[10px] uppercase text-muted-foreground">Outstanding</div><div className={`font-semibold ${outstanding > 0n ? 'text-amber-600' : 'text-primary'}`} data-num>{formatMoney(outstanding)}</div></div>
+            <div className="text-right"><div className="text-[10px] uppercase text-muted-foreground">Outstanding</div>{outstandingKnown ? <div className={`font-semibold ${outstanding > 0n ? 'text-amber-600' : 'text-primary'}`} data-num>{formatMoney(outstanding)}</div> : <div className="font-semibold text-amber-700 text-xs">Unavailable</div>}</div>
           </div>
         </div>
       )}

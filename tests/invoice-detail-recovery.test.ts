@@ -55,23 +55,31 @@ test('loading an invoice does not depend on migration 00037', () => {
   const critical = codeOnly(supabaseBranch.slice(0, supabaseBranch.indexOf('if (returnIds.length > 0)')))
   assert.doesNotMatch(critical, /settlement_status/)
   assert.doesNotMatch(critical, /sales_return_lines/)
-  assert.match(critical, /\.from\('sales_returns'\)\.select\('id, return_no, return_date, total, reason'\)/)
+  assert.match(critical, /\.from\('sales_returns'\)\s*\.select\('id, return_no, return_date, total, reason'\)/)
 })
 
 test('the 00037-only reads are optional enrichment that may come back empty', () => {
   const optional = codeOnly(supabaseBranch.slice(supabaseBranch.indexOf('if (returnIds.length > 0)')))
-  assert.match(optional, /const \{ data: settlements \} = await admin\.from\('sales_returns'\)/)
-  assert.match(optional, /const \{ data: lines \} = await admin\.from\('sales_return_lines'\)/)
-  // No error binding means no throw: a database without 00037 still renders.
-  assert.doesNotMatch(optional, /lineError|settlementError/)
+  assert.match(optional, /const \{ data: settlements, error: settlementError \} = await admin\.from\('sales_returns'\)/)
+  assert.match(optional, /const \{ data: lines, error: lineError \} = await admin\.from\('sales_return_lines'\)/)
+  // The errors are reported, never thrown: a database without 00037 still renders
+  // the invoice, and only the printed return breakdown is marked unavailable.
+  assert.doesNotMatch(optional, /if \((settlementError|lineError)\) throw/)
+  assert.match(optional, /unavailable\.push\('returnDetail'\)/)
   assert.match(optional, /returnLines = lines \?\? \[\]/)
   assert.match(supabaseBranch, /settlementStatus: settlementByReturn\.get\(sr\.id\) \?\? 'POSTED'/)
 })
 
-test('return totals still come from the base schema, so outstanding stays exact', () => {
-  // The money on the document must not depend on an optional migration.
-  assert.match(supabaseBranch, /if \(returnError\) throw new Error\(`Supabase invoice returns: \$\{returnError\.message\}`\)/)
+// Returns net off what the customer still owes, so an unreadable returns table
+// makes the outstanding balance unknowable. It is withheld rather than thrown
+// (the invoice still opens) and rather than shown overstated.
+test('return totals come from the base schema, and an unknown balance is withheld', () => {
+  assert.match(supabaseBranch, /\.eq\('original_invoice_id', invoiceId\)/)
+  assert.match(supabaseBranch, /logInvoiceSectionUnavailable\('returns', invoiceId, returnRead\.error\)/)
   assert.match(view, /const returnedTotal = \(inv\.returns \?\? \[\]\)\.reduce/)
+  assert.match(view, /const outstandingKnown = !unavailableSections\.includes\('returns'\)/)
+  assert.match(view, /outstandingKnown \? .*formatMoney\(outstanding\)/s)
+  assert.match(view, /Unavailable/)
 })
 
 // ---------------------------------------------------------------------------
@@ -94,8 +102,8 @@ test('return lines are filtered by the column sales_return_lines actually has', 
 
 test('getInvoice separates "no such invoice" from "the read failed"', () => {
   assert.match(supabaseBranch, /\.maybeSingle\(\)/)
-  assert.match(supabaseBranch, /if \(error\) throw new Error\(`Supabase invoice: \$\{error\.message\}`\)/)
-  assert.match(supabaseBranch, /if \(!inv\) return null/)
+  assert.match(supabaseBranch, /if \(core\.error\) throw new Error\(`Supabase invoice: \$\{core\.error\.message\}`\)/)
+  assert.match(supabaseBranch, /if \(!core\.row\) return null/)
   assert.doesNotMatch(supabaseBranch, /if \(error \|\| !inv\) return null/)
 })
 

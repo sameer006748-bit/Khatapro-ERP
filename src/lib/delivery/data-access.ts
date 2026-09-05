@@ -23,6 +23,24 @@ export async function listRiders(businessId: string): Promise<RiderRow[]> {
   return (data ?? []).map((r: any) => ({ id: r.id, name: r.name, phone: r.phone, zone: r.zone, vehicleType: r.vehicle_type, isActive: r.is_active, userId: r.user_id }))
 }
 
+/**
+ * Least-privilege rider roster for order creators (Salesman on Online/OFC sale).
+ *
+ * A Salesman needs exactly enough to pick a rider on the sale screen: the
+ * business's own ACTIVE riders, by name and phone. Zone, vehicle and the
+ * linked auth `user_id` belong to rider administration, so they are not
+ * selected here at all. Inactive riders are excluded in the query rather than
+ * in the browser, so they can never reach an order creator.
+ */
+export async function listAssignableRiders(businessId: string): Promise<Array<Pick<RiderRow, 'id' | 'name' | 'phone'> & { isActive: true }>> {
+  const admin = getAdminSupabase()
+  const { data, error } = await admin.from('riders')
+    .select('id, name, phone')
+    .eq('business_id', businessId).eq('is_active', true).order('name')
+  if (error) throw new Error(`Supabase: ${error.message}`)
+  return (data ?? []).map((r: any) => ({ id: r.id, name: r.name, phone: r.phone, isActive: true }))
+}
+
 export async function createRider(businessId: string, name: string, phone?: string, zone?: string, vehicleType?: string, userId?: string | null): Promise<RiderRow> {
   const admin = getAdminSupabase()
   const { data, error } = await admin.from('riders').insert({
