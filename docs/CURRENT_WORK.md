@@ -8,13 +8,13 @@ Last updated: 2026-09-05
 The intelligent/proactive product vision is intentionally deferred to **Version 2**, which starts only after the client receives and approves Version 1.
 
 ## Current phase
-**Final release stabilization / client handover.**
+**Manual user UAT + client approval.**
 
 ## Current objective
-Close the last verified client-facing navigation regressions, then complete final release cleanup and handover without destabilizing the accounting/rider work that already passed regression gates.
+**Manual user UAT + client approval.** All Version 1 code work is complete, committed to `main` and deployed. What remains is not code: the user manually verifies the client paths in a real browser and on mobile, completes production data setup, and hands the system to the client for approval.
 
 ## Why this is next
-The ERP is substantially implemented and deployed. The highest-value work now is not adding new product features; it is removing known release blockers and proving the client paths work on real production/mobile usage.
+Every known code blocker is closed and every gate is green. Continuing to audit the codebase cannot advance the release — only manual verification and the client's approval can. Do not open a new audit pass to answer "is it ready?"; the answer is recorded below.
 
 ## Version 1 rule
 Until client handover and approval:
@@ -34,60 +34,23 @@ Until client handover and approval:
 - Rider thumb-first UX,
 - Rider account relinking UI,
 - latest Rider hotfix deployed to production,
-- latest reported Rider regression gate: 678/678 full tests.
+- mobile `More` navigation and Online Sale → View Invoice hotfix (`e9a7a93`), deployed and verified,
+- Version 1 closeout batch (`088128a`): product-creation production blocker fixed, shell-navigation primitive, permission/lineage/print/AI test coverage, dead-spec retirement, AI model alignment,
+- latest full regression gate: 784/784 tests passing.
 
-## Active hotfix
-A separate implementation agent is currently fixing two video-confirmed regressions:
+## Closed — do not reopen
+The navigation/invoice hotfix (`e9a7a93`) and the Version 1 closeout batch (`088128a`) are both complete, committed, pushed and deployed. Their findings are settled; re-auditing them does not change release readiness.
 
-1. **Non-Rider mobile `More` navigation**
-   - Owner/Admin, Accountant, and Salesman can open `More`, but selected items may leave My Profile rendered instead of the chosen page.
-   - Primary bottom navigation works; shared `More` selection/routing synchronization is the suspected seam.
-   - Rider four-item navigation must not regress.
+Settled facts, verified by read-only production introspection on 2026-09-05:
+- Migrations `00037`, `00038`, `00039`, `00040`, `00041`, `00042` and the business-account identity migration are **applied** to production. Do not re-verify, do not re-apply.
+- Migration `00012` opening stock is **not applied**; `post_opening_stock` and `post_opening_stock_ledger` are both absent. This is an accepted Version 1 limitation, not an open task: opening quantity at product creation is refused with a message pointing to Stock Entry, and `create_stock_movement` is present, so the workaround is real.
+- The rider workflow is **schema-complete** on production: all 11 rider RPCs and all 5 rider tables the app uses exist. Earlier notes claiming otherwise were wrong. What remains is data, not schema.
+- Accepted Version 1 limitations, all failing closed with clear messages: sale discounts refused, mixed same-bill returns refused, opening stock at product creation refused, no in-app user deactivation.
 
-2. **Desktop Online Sale → View Invoice**
-   - Online Sale posts successfully.
-   - Clicking `View Invoice` after the success screen can end in `Invoice not found`.
-   - Sale posting itself must not be changed; fix the identifier/navigation contract.
+## Validation posture
+Agent-side browser automation is intentionally **not** used. Browser, mobile and print verification is manual and user-owned.
 
-## Validation for the active hotfix
-Agent-side browser automation is intentionally **not required** for this task. The user will do manual browser verification.
-
-Required code gates:
-- focused navigation tests,
-- focused sales/invoice tests,
-- Rider navigation regression tests,
-- full regression,
-- `npx tsc --noEmit`,
-- changed-file ESLint,
-- `npm run build`,
-- `git diff --check`,
-- commit/push/deploy report.
-
-## Definition of done for active hotfix
-- Mobile `More` selection renders the selected permitted page for Owner/Admin, Accountant, Salesman.
-- My Profile no longer remains stale after `More` navigation.
-- Rider nav remains exactly Home / Deliveries / Cash / Profile.
-- Online Sale success → View Invoice opens the exact created invoice.
-- Sales List → invoice detail still works.
-- No posting/accounting/permission regression.
-- Production deployment is on the hotfix commit.
-- User manually verifies the browser behavior.
-
-## Immediately after the hotfix
-Run **one final Version 1 closeout batch** rather than many small feature tasks. It should cover:
-- QA/demo production data cleanup with reference inspection before delete/deactivate,
-- Rider real-data mapping / assigned-order UAT status,
-- opening-stock `00012` reality check (no blind apply),
-- stale/obsolete test/spec cleanup where proven stale,
-- Owner/Admin, Accountant, Salesman, Rider permission/deep-link audit,
-- mobile regression sweep,
-- print source/runtime checklist and manual print UAT instructions,
-- audit/delete/reversal safety final review,
-- production schema/app/main/Vercel sync verification,
-- final client credentials / test-account handover readiness,
-- stable client URL and explicit remaining blockers.
-
-**Do not assign browser automation to that final closeout agent. Browser verification remains manual/user-owned unless the user explicitly changes this.**
+Code gates on `088128a`, all green: full regression 784/784, `npx tsc --noEmit`, changed-file ESLint, `npm run build`, `git diff --check`.
 
 ## Version 1 exit gate
 Version 1 is not considered closed until:
@@ -100,8 +63,11 @@ Version 1 is not considered closed until:
 Only then should `CURRENT_WORK.md` be advanced to a Version 2 phase from `ROADMAP.md`.
 
 ## Known blockers / data realities
-- Rider code supports mapping, but a real Rider login must be linked to the intended Rider row and real delivery orders must exist for meaningful delivery-outcome UAT.
-- Production QA/demo records must never be blind-deleted; inspect references first.
+Nothing in the code blocks handover. What remains is owner-side work:
+- **Rider data.** A real Rider login must be linked to the intended `riders` row (Delivery → Riders → Connect Account), and at least one real delivery order must exist for meaningful delivery-outcome UAT. Do not fabricate delivery data.
+- **QA/demo records.** `QA TEST FABRIC 01`, `QA TEST TEMP ITEM 01` and `QA TEST VENDOR 01` carry posted `INV-0001` / `PUR-0001`. Deactivate them; never delete posted history, and never delete by name without inspecting references first.
+- **Credentials.** The four `*@test.local` logins are reset through Setup → Users → Reset Password. Version 1 has no in-app user deactivation, so a password reset is the supported way to retire a test login.
+- **AI.** The Owner enters a Gemini API key in Settings, runs Test Connection, and asks one question. Not a release blocker.
 - Historical docs contain stale branch/migration claims. Use canonical docs + current repository/database reality.
 
 ## Do not touch / do not regress
@@ -116,9 +82,18 @@ Only then should `CURRENT_WORK.md` be advanced to a Version 2 phase from `ROADMA
 - Do not start Version 2 intelligence work before Version 1 client approval.
 
 ## Exact next task
-**Finish the current navigation/invoice hotfix, collect its final report, manually verify the affected browser paths, then run the single final Version 1 closeout/handover batch described above.**
+**Manual user UAT + client approval.**
 
-After client approval, move to the first approved Version 2 phase in `ROADMAP.md`.
+Manual UAT order (start with the first item — it is the bug that was just fixed):
+1. Add a product.
+2. One sale per channel (Counter, Online, OFC, Other), one return, invoice detail from Sales List.
+3. Print one invoice in all four modes: Half A4, Two-on-A4, Full A4, 80mm. Confirm no internal commission/accounting data appears on a customer copy.
+4. Mobile navigation for Owner/Admin, Accountant, Salesman: every `More` item opens the page it names; Rider navigation stays exactly Home / Deliveries / Cash / Profile.
+5. Link the Rider account, run one delivery and one COD submission.
+6. AI assistant: enter key, Test Connection, ask one question.
+7. Reset the four test-account passwords.
+
+No further code audits before client approval. After client approval, move to the first approved Version 2 phase in `ROADMAP.md`.
 
 ## Future agent bootstrap
 Before meaningful work, read:
