@@ -1,6 +1,6 @@
 # KhataPro ERP — Current State
 
-Last reconciled: **2026-09-06**
+Last reconciled: **2026-09-07**
 
 This is the concise factual snapshot. Use running production/database/browser evidence over this document if they ever conflict, then update this file.
 
@@ -116,11 +116,9 @@ A shared print foundation exists for:
 - deterministic shared print model,
 - internal/customer copy separation.
 
-Deep user print UAT shows:
-- visible background/transition glitch around browser printing,
-- invoice visual quality is not yet professional enough for a real business document.
+Deep user print UAT showed a visible background/transition glitch and an invoice that did not yet meet professional-document quality.
 
-Required direction: clean print isolation and one professional master invoice identity across all sale channels/formats with proper business header, customer block, ruled item table, totals hierarchy, payment/status area, footer/signature/terms where appropriate, and no app-like visual chrome on paper.
+**2026-09-07 source pass complete, live acceptance pending:** the fixed-delay cleanup and click-time style injection were replaced by lifecycle-based print isolation; application roots, portal siblings, modal/backdrop, and the off-screen measurement DOM are excluded from print. The shared document model now renders a professional header, Bill To/Supplier and document-detail blocks, ruled items, totals/payment hierarchy, status, signature line, and footer across Half A4, Two-up, Full A4, and thermal. No accounting or serialization logic changed. Claude Opus 5 must still visually and physically validate every format.
 
 ## Encoding / small UX defect
 Broken mojibake strings are visible in production, e.g. `Loading COD balancesâ€¦` and `Todayâ€™s Movement`. UTF-8 text cleanup is required.
@@ -148,8 +146,8 @@ Current blockers/priorities:
 3. Rider false-empty loading state.
 4. Roman Urdu preference enforcement + AI retry/latency UX.
 5. Mojibake/encoding cleanup.
-6. Print glitch/isolation fix.
-7. Professional invoice redesign across Half A4 / Two-up / Full A4 / 80mm.
+6. Claude Opus 5 consolidated browser/physical-print acceptance of the professional print/invoice code pass.
+7. Remaining UAT bug batch: Rider false-empty, Roman Urdu enforcement, encoding/mojibake, AI retry/loading UX.
 8. Final role/mobile/print UAT + client approval.
 
 ## Validation posture

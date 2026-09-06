@@ -1,6 +1,6 @@
 # KhataPro ERP — Current Work
 
-Last updated: **2026-09-06**
+Last updated: **2026-09-07**
 
 Read `docs/PROJECT_MEMORY.md` first for the complete A-to-Z handoff/history/future context.
 
@@ -10,7 +10,7 @@ Read `docs/PROJECT_MEMORY.md` first for the complete A-to-Z handoff/history/futu
 Version 2 intelligent/proactive product work remains deferred until the client receives and approves Version 1.
 
 ## Current phase
-**Accounting truth recovery implemented — live browser acceptance pending.**
+**Accounting truth recovery and professional print/invoice code pass implemented — live browser/physical-print acceptance pending.**
 
 The previous state recorded here — "manual UAT only / no code blockers" — is obsolete. A deep user-recorded production UAT on 2026-09-06 exposed new real client-facing problems in accounting correctness, AI units/language, performance, loading states, encoding, print isolation, and invoice professionalism.
 
@@ -91,7 +91,7 @@ Database/RPC/TypeScript stay in integer paisas. The AI boundary converts once to
 
 # Exact next step
 
-**CLAUDE OPUS 5 LIVE BROWSER VERIFICATION**
+**CLAUDE OPUS 5 FINAL CONSOLIDATED LIVE BROWSER / PRINT VERIFICATION**
 
 Verify on the stable production alias after deployment:
 - Trial Balance shows Rs 206,306.55 debit and credit on the reconciled current dataset,
@@ -99,6 +99,8 @@ Verify on the stable production alias after deployment:
 - AI answers the known sales/profit/payables examples in rupees, not paisa magnitudes,
 - snapshot answers are labelled current/as-of rather than “today's” activity,
 - Financial Reports Cash/Bank equals Accounts & Balances Total Available for the same as-of state.
+- the print transition shows only the document surface—never the app shell, sidebar, modal, backdrop, portal, or measurement DOM,
+- Half A4, Two-up, Full A4, and 80mm are physically readable, unclipped, and visually professional.
 
 ---
 
@@ -152,37 +154,12 @@ Clean source strings and verify UTF-8 output.
 
 ## P1 — print / invoice professionalism
 
-### 9. Print background/transition glitch
-User-recorded print UAT shows visible app/background glitching/ghosting around print invocation.
+### 9. Print isolation and professional invoice code pass — complete in source
+The former fragile seam used click-time `@page` injection, delayed `window.print()`, and a fixed cleanup timer beside an animated modal/backdrop, hidden print root, and off-screen measurement DOM. It is now lifecycle-based: the selected page rule is mounted before printing; the printable root is the only printable surface; app shell, modal, backdrop, portal siblings, and measurement DOM are excluded; cleanup follows `afterprint`/print-media signals; and no accounting/model values are recalculated.
 
-Current print mechanism combines animated modal/backdrop, hidden print root, body print class, dynamic `@page`, delayed `window.print()` and delayed cleanup.
+The shared document structure now provides verified business identity, document title/number/channel, conditional Bill To/Supplier and document-detail blocks, ruled Item/Qty/Rate/Amount rows, preserved Sold/Ret./Net columns, totals/payment/status hierarchy, memo, timestamp, and an authorized-signature line. Half A4 uses compact print density with conservative overflow blocking; Two-up reuses the same half design; Full A4 uses the same hierarchy with more room; thermal keeps the shared model in receipt form. Customer copies still exclude internal commission unless the explicit internal-copy option is selected. Preview now reflects the same header/table/totals/footer hierarchy.
 
-Required result:
-- printable document isolated cleanly,
-- app/sidebar/modal/background cannot leak into print experience,
-- no visible ghost/flicker during print transition,
-- all four modes still work.
-
-### 10. Professional invoice redesign
-Existing print serialization/content foundation should be preserved, but the document must look like a real professional business invoice.
-
-All sale channels/formats should share one master document identity:
-- verified business header/logo/contact,
-- invoice title/no/date,
-- Bill To/customer block,
-- contextual seller/channel/Rider fields,
-- professional ruled item grid,
-- aligned totals hierarchy,
-- payment/status block,
-- notes/terms where appropriate,
-- optional signature/authorized lines where useful,
-- professional footer,
-- no app-like cards/shadows/pills on printed paper,
-- customer copies never expose internal commission/accounting,
-- Half A4 remains compact but fully professional,
-- Two-up / Full A4 / 80mm adapt density consistently.
-
-The print preview should represent the actual final document more faithfully than the current tiny simplified mini-preview.
+**Live visual and physical printer acceptance is still pending. Do not call this visually approved from source tests.**
 
 ---
 
@@ -248,13 +225,13 @@ Do not spontaneously create the next coding prompt before the user approves the 
 
 # Exact next decision / recommended sequence
 
-The application-side performance code pass (Phase V1-B) is complete on `main`. Its browser/network acceptance is deferred to the final Claude Opus 5 consolidated UAT and must not be marked solved from source tests alone. The next implementation task is print isolation + professional invoice redesign.
+The application-side performance code pass (Phase V1-B) and the professional print/invoice code pass are complete on `main`. Their browser/network/visual acceptance is deferred to the final Claude Opus 5 consolidated UAT and must not be marked solved from source tests alone. The next implementation task is the remaining UAT bug batch.
 
 Recommended sequence:
 1. **Claude Opus 5 live browser verification** of the pushed P0 deterministic correctness fix and the performance pass (network waterfall, Vercel TTFB, Supabase query/RPC time, region latency).
 2. **Performance recovery/profile** — application-side code pass complete; browser acceptance pending.
-3. **Print isolation + professional invoice redesign** across all formats.
-4. Rider false-empty + Roman Urdu + retry/latency + mojibake cleanup.
+3. **Claude Opus 5 consolidated browser/physical-print acceptance** of all four professional print formats.
+4. **Remaining UAT bug batch:** Rider false-empty, Roman Urdu enforcement, encoding/mojibake, and AI retry/loading UX.
 5. Final all-role/mobile/print UAT.
 6. Client handover/approval.
 7. Only then advance `CURRENT_WORK.md` to Version 2.

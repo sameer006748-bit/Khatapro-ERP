@@ -1,6 +1,6 @@
 # KhataPro ERP — Canonical A-to-Z Project Memory
 
-Last reconciled: **2026-09-06**
+Last reconciled: **2026-09-07**
 
 This file is the fastest complete handoff for a new ChatGPT session, Claude/Codex agent, developer, or future maintainer. It records the durable vision, important past work, verified production architecture, current live problems, release boundary, and next priorities.
 
@@ -348,15 +348,9 @@ The shared foundation is useful and should be preserved.
 
 A user-recorded print video shows a visible background/transition glitch around opening the browser print flow.
 
-Current implementation combines:
-- animated print dialog/backdrop,
-- hidden actual print root,
-- body `printing-invoice` class,
-- dynamically injected `@page` CSS,
-- delayed `window.print()`,
-- delayed cleanup after the print dialog.
+The former implementation combined an animated dialog/backdrop, a hidden print root, click-time `@page` injection, delayed `window.print()`, and a fixed delayed cleanup. That cleanup race could restore the application while the browser was still compositing the native dialog.
 
-This seam is fragile and must be made visually clean. The print flow should isolate the printable document so app/sidebar/modal/background cannot ghost/flicker into the user experience.
+**2026-09-07 source recovery:** print sizing is now mounted with the selected document before printing; the print surface is isolated through deterministic print CSS; app roots, portal siblings, modal/backdrop, and the off-screen measurement container are excluded; and restoration follows `afterprint`/print-media lifecycle signals rather than a guessed timeout. The shared invoice serialization remains unchanged. This is code/test complete, but visual and physical-printer acceptance remains pending.
 
 ## 25. Professional invoice redesign requirement
 
@@ -405,8 +399,8 @@ The previous "manual UAT only / no code blockers" state is obsolete after the Se
 - mojibake/encoding cleanup.
 
 ### Bucket C — print / document quality
-- eliminate print background glitch/isolation problem,
-- redesign sale invoices into a professional business-document system across Half A4 / Two-up / Full A4 / 80mm.
+- professional print/invoice code pass complete: isolated lifecycle plus shared business-document structure across Half A4 / Two-up / Full A4 / 80mm,
+- live visual and physical print acceptance still pending; do not mark it visually approved from source tests.
 
 Do not combine these into another uncontrolled "audit everything" loop. Use bounded production-evidence tasks.
 
@@ -416,8 +410,8 @@ Before new coding prompts, choose a bounded task and model. Current recommended 
 
 1. Claude Opus 5 live browser verification of the accounting/AI deterministic correctness fix,
 2. performance recovery/profile,
-3. print isolation + professional invoice redesign,
-4. remaining small UX issues / smoke,
+3. final consolidated Claude Opus 5 browser/print acceptance of the professional print pass,
+4. remaining UAT bug batch: Rider false-empty, Roman Urdu enforcement, encoding/mojibake, AI retry/loading UX,
 5. client handover.
 
 The user may choose to change this order, but no agent should silently start Version 2.
@@ -516,7 +510,7 @@ Trust order:
 
 ## 35. One-paragraph state for a new agent
 
-KhataPro ERP is a substantial live Version 1 ERP on `main`, Vercel + Supabase legacy production schema, with major sales/accounting/money/Rider/audit/print/AI foundations implemented. The September 6 Trial Balance Rs 2,505 and AI 100× findings were deterministically reconciled and fixed in source without changing financial data: inactive historical money-account lines are retained, date/cancellation filters are real, AI receives explicit rupees, Today flow/snapshot semantics are separated, and Financial Reports includes custom configured money accounts. Claude Opus 5 live browser acceptance is the exact next gate. Language/retry/loading/encoding issues and print professionalism still remain Version 1 work; a bounded application-side performance pass has landed (parallel financial-report reads, longer master-data caching) but its browser/network acceptance is still pending, so the product is **not yet client-closed** and Version 2 remains deferred.
+KhataPro ERP is a substantial live Version 1 ERP on `main`, Vercel + Supabase legacy production schema, with major sales/accounting/money/Rider/audit/print/AI foundations implemented. The September 6 Trial Balance Rs 2,505 and AI 100× findings were deterministically reconciled and fixed in source without changing financial data: inactive historical money-account lines are retained, date/cancellation filters are real, AI receives explicit rupees, Today flow/snapshot semantics are separated, and Financial Reports includes custom configured money accounts. The 2026-09-07 print/invoice code pass replaces timeout-based print cleanup with lifecycle isolation and strengthens the one shared document structure across all paper formats; final Claude Opus 5 browser/physical-print acceptance is still required. Language/retry/loading/encoding issues remain Version 1 work; the bounded application-side performance pass also awaits browser/network acceptance, so the product is **not yet client-closed** and Version 2 remains deferred.
 
 ---
 

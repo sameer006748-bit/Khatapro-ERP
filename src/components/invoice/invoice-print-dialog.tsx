@@ -174,6 +174,12 @@ export function InvoicePrintDialog({
   })
   // Internal copies are opt-in per print, never sticky.
   const [internalCopy, setInternalCopy] = useState(false)
+  const printCleanupRef = useRef<(() => void) | null>(null)
+  const printInProgressRef = useRef(false)
+
+  // The native dialog can outlive this component. Always restore the normal
+  // screen if navigation closes the dialog while a print request is active.
+  useEffect(() => () => printCleanupRef.current?.(), [])
 
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -181,7 +187,9 @@ export function InvoicePrintDialog({
   }, [mode])
 
   // Real rendered-height overflow detection (hooks must be before early return)
-  const HALF_A4_PRINTABLE_PX = 516
+  // Keep a safety allowance for real printer metrics and the document footer.
+  // Half A4 must fail closed rather than trim the total or signature line.
+  const HALF_A4_PRINTABLE_PX = 490
   const printRootRef = useRef<HTMLDivElement>(null)
   const [measuredHeight, setMeasuredHeight] = useState(0)
   const [overflowDetected, setOverflowDetected] = useState(false)
@@ -217,26 +225,44 @@ export function InvoicePrintDialog({
   const twoUpInvalid = mode === 'two-up' && invoices.length === 0
 
   function handlePrint() {
-    if (twoUpInvalid || (overflowDetected && isHalfLayout)) return
-    // Add body class for reliable print isolation (no :has() dependency).
-    document.body.classList.add('printing-invoice')
-    // Inject mode-specific @page style for true physical page sizing.
-    // A4 portrait for sheet modes; 80mm continuous roll for thermal.
-    const pageStyle = document.createElement('style')
-    pageStyle.id = 'invoice-print-page-size'
-    pageStyle.textContent = mode === 'thermal'
-      ? '@page { size: 80mm auto; margin: 0; }'
-      : '@page { size: A4 portrait; margin: 0; }'
-    document.head.appendChild(pageStyle)
-    // Use setTimeout to ensure DOM updates before print dialog opens.
-    setTimeout(() => {
-      window.print()
-      // Clean up after print dialog closes.
-      setTimeout(() => {
-        document.body.classList.remove('printing-invoice')
-        pageStyle.remove()
-      }, 500)
-    }, 100)
+    if (twoUpInvalid || (overflowDetected && isHalfLayout) || printInProgressRef.current) return
+
+    // Keep the selected document mounted, isolate it with print CSS, then let
+    // the browser own the transition. The former fixed cleanup delay could
+    // restore the app while the native print dialog was still compositing.
+    printInProgressRef.current = true
+    const markPrinting = () => {
+      document.documentElement.classList.add('invoice-printing')
+      document.body.classList.add('printing-invoice')
+      document.body.classList.toggle('printing-invoice-thermal', mode === 'thermal')
+    }
+    const mediaQuery = window.matchMedia('print')
+    let cleaned = false
+    const cleanup = () => {
+      if (cleaned) return
+      cleaned = true
+      printInProgressRef.current = false
+      printCleanupRef.current = null
+      window.removeEventListener('beforeprint', markPrinting)
+      window.removeEventListener('afterprint', cleanup)
+      mediaQuery.removeEventListener('change', onMediaChange)
+      document.documentElement.classList.remove('invoice-printing')
+      document.body.classList.remove('printing-invoice', 'printing-invoice-thermal')
+    }
+    const onMediaChange = (event: MediaQueryListEvent) => {
+      if (!event.matches) cleanup()
+    }
+
+    printCleanupRef.current?.()
+    printCleanupRef.current = cleanup
+    markPrinting()
+    window.addEventListener('beforeprint', markPrinting)
+    window.addEventListener('afterprint', cleanup, { once: true })
+    mediaQuery.addEventListener('change', onMediaChange)
+
+    // Two animation frames give React/layout a deterministic paint boundary
+    // without hiding or destructively changing the normal application screen.
+    requestAnimationFrame(() => requestAnimationFrame(() => window.print()))
   }
 
   return (
@@ -383,11 +409,11 @@ export function InvoicePrintDialog({
 
           {/* Off-screen measurement container — visible (not display:none) but positioned off-screen.
               Uses MeasurementInvoice with inline styles that mimic print CSS for accurate height measurement. */}
-          <div ref={printRootRef} style={{ position: 'absolute', left: '-9999px', top: '0', width: '210mm', visibility: 'hidden' }} aria-hidden="true">
+          <div className="invoice-print-measure" ref={printRootRef} style={{ position: 'absolute', left: '-9999px', top: '0', width: '210mm', visibility: 'hidden' }} aria-hidden="true">
             {models[0] && <MeasurementInvoice model={models[0]} businessName={businessName} />}
           </div>
           {/* Actual print root for printing */}
-          <InvoicePrintStyles />
+          <InvoicePrintStyles mode={mode} />
           <InvoicePrintRoot mode={mode} models={models} businessName={businessName} businessContact={businessContact} />
         </>
       )}
@@ -442,19 +468,33 @@ function InvoicePreview({ mode, models, businessName }: { mode: InvoicePrintMode
 function MiniInvoice({ model, businessName }: { model?: PrintDocumentModel; businessName: string }) {
   if (!model) return <div className="h-full grid place-items-center text-[8px] text-muted-foreground">blank</div>
   return (
-    <div className="h-full flex flex-col text-[7px] leading-tight text-black">
-      <div className="font-bold text-[8px]">{businessName}</div>
-      <div className="text-[6px] text-muted-foreground">{model.invoiceNo}</div>
-      <div className="mt-1 flex-1 space-y-0.5">
+    <div className="h-full flex flex-col text-[6px] leading-tight text-black">
+      <div className="flex items-start justify-between gap-1 border-b border-black pb-1">
+        <div className="font-bold text-[8px] truncate">{businessName}</div>
+        <div className="text-right shrink-0">
+          <div className="font-bold text-[6px]">{model.documentTitle}</div>
+          <div className="font-medium text-[5px]">{model.invoiceNo}</div>
+        </div>
+      </div>
+      <div className="mt-1 flex justify-between gap-1 text-[5px] text-neutral-600">
+        <span className="truncate">{model.customerName ? `${model.partyLabel}: ${model.customerName}` : model.channelLabel}</span>
+        <span className="shrink-0">{bizDate(model.invoiceDate)}</span>
+      </div>
+      <div className="mt-1 border border-neutral-400">
+        <div className="grid grid-cols-[1fr_auto_auto] gap-1 border-b border-neutral-400 bg-neutral-100 px-1 py-0.5 text-[5px] font-semibold">
+          <span>ITEM</span><span>QTY</span><span>AMOUNT</span>
+        </div>
         {model.lines.slice(0, 3).map((line, i) => (
-          <div key={i} className="flex justify-between gap-1">
+          <div key={i} className="grid grid-cols-[1fr_auto_auto] gap-1 border-b border-neutral-200 px-1 py-0.5 last:border-0">
             <span className="truncate">{line.productName}</span>
             <span className="whitespace-nowrap">{model.hasReturns ? `${line.netQty} net` : `${line.soldQty}x`}</span>
+            <span className="whitespace-nowrap">{formatMoney(BigInt(line.lineTotalPaisas), false)}</span>
           </div>
         ))}
-        {model.lines.length > 3 && <div className="text-[6px] text-muted-foreground">+{model.lines.length - 3} more</div>}
+        {model.lines.length > 3 && <div className="px-1 py-0.5 text-[5px] text-muted-foreground">+{model.lines.length - 3} more items</div>}
       </div>
-      <div className="mt-1 font-bold border-t border-foreground/20 pt-0.5">Total: Rs {(Number(model.netPayablePaisas) / 100).toFixed(0)}</div>
+      <div className="mt-1 flex items-center justify-between border-y border-black py-0.5 text-[6px] font-bold"><span>NET PAYABLE</span><span>{formatMoney(BigInt(model.netPayablePaisas), false)}</span></div>
+      <div className="mt-auto pt-1 text-center text-[5px] text-neutral-500">{model.memo || 'Thank you for your business.'}</div>
     </div>
   )
 }
@@ -541,6 +581,8 @@ function MeasurementInvoice({ model, businessName }: { model: PrintDocumentModel
         <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1pt solid #000', borderBottom: '1pt solid #000', fontWeight: 700, fontSize: '10pt', padding: '1mm 0', margin: '0.5mm 0' }}><span>{model.documentKind.includes('return') ? 'Return Total' : 'Net Payable'}</span><span>{formatMoney(BigInt(model.netPayablePaisas), false)}</span></div>
         {model.showSettlement && <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.4mm 0' }}><span>Paid</span><span>{formatMoney(BigInt(model.paidPaisas), false)}</span></div>}
         {model.showSettlement && BigInt(model.balancePaisas) > 0n && <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.4mm 0', fontWeight: 600 }}><span>Balance</span><span>{formatMoney(BigInt(model.balancePaisas), false)}</span></div>}
+        {model.showSettlement && model.changePaisas && BigInt(model.changePaisas) > 0n && <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.4mm 0' }}><span>Change</span><span>{formatMoney(BigInt(model.changePaisas), false)}</span></div>}
+        {model.showSettlement && model.codAmountPaisas && BigInt(model.codAmountPaisas) > 0n && <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.4mm 0' }}><span>COD Amount</span><span>{formatMoney(BigInt(model.codAmountPaisas), false)}</span></div>}
       </div>
 
       {/* Payment summary */}
@@ -556,9 +598,26 @@ function MeasurementInvoice({ model, businessName }: { model: PrintDocumentModel
         </div>
       )}
 
+      {model.internalCommission && (
+        <div style={{ border: '0.5pt dashed #333', padding: '1mm 1.5mm', fontSize: '7.5pt', marginBottom: '1.5mm' }}>
+          <div style={{ fontWeight: 600, marginBottom: '0.5mm' }}>Internal copy — commission</div>
+          {model.internalCommission.lines.map((line, i) => (
+            <div key={i} style={{ display: 'flex', justifyContent: 'space-between', gap: '2mm' }}><span>{line.productName} × {line.netEligibleQty}</span><span>{formatMoney(BigInt(line.commissionPaisas), false)}</span></div>
+          ))}
+        </div>
+      )}
+
+      {(model.settlementLabel || model.isReturned || model.isCancelled || (model.documentKind === 'sale' && BigInt(model.balancePaisas) === 0n)) && (
+        <div style={{ border: '0.5pt solid #333', padding: '0.8mm', textAlign: 'center', fontSize: '7pt', fontWeight: 700, marginBottom: '1.5mm' }}>
+          {model.settlementLabel || (model.isCancelled ? 'CANCELLED' : model.isReturned ? 'RETURNED' : 'PAID')}
+        </div>
+      )}
+
       {/* Footer */}
-      <div style={{ marginTop: 'auto', borderTop: '0.5pt solid #999', paddingTop: '1mm', fontSize: '7.5pt', color: '#555', display: 'flex', justifyContent: 'space-between' }}>
+      <div style={{ marginTop: 'auto', borderTop: '0.5pt solid #999', paddingTop: '1mm', fontSize: '7.5pt', color: '#555', display: 'grid', gridTemplateColumns: '1fr 36mm auto', gap: '3mm', alignItems: 'end' }}>
         <span style={{ fontStyle: 'italic' }}>{model.memo || 'Thank you for your business!'}</span>
+        <span style={{ borderTop: '0.5pt solid #777', paddingTop: '1mm', textAlign: 'center', fontSize: '6.5pt' }}>Authorized Signature</span>
+        <span>{bizFormat(new Date().toISOString(), 'datetime')}</span>
       </div>
     </div>
   )
@@ -571,7 +630,7 @@ function InvoicePrintRoot({ mode, models, businessName, businessContact }: { mod
 
   if (mode === 'thermal') {
     return (
-      <div className="invoice-print-root invoice-print-root-thermal hidden print:block">
+      <div className="invoice-print-root invoice-print-root-thermal" data-print-surface="invoice">
         <ThermalReceipt model={models[0]} businessName={businessName} businessContact={businessContact} />
       </div>
     )
@@ -580,7 +639,7 @@ function InvoicePrintRoot({ mode, models, businessName, businessContact }: { mod
   if (mode === 'full-a4') {
     // Full A4 — single invoice uses entire page
     return (
-      <div className="invoice-print-root hidden print:block">
+      <div className="invoice-print-root" data-print-surface="invoice">
         <div className="a4-page a4-single">
           <InvoiceDocument model={models[0]} variant="full" businessName={businessName} businessContact={businessContact} />
         </div>
@@ -589,7 +648,7 @@ function InvoicePrintRoot({ mode, models, businessName, businessContact }: { mod
   }
 
   return (
-    <div className="invoice-print-root hidden print:block">
+    <div className="invoice-print-root" data-print-surface="invoice">
       {isHalf ? (
         <div className="a4-page">
           <div className="a4-half a4-half-top"><InvoiceDocument model={models[0]} variant="half" businessName={businessName} businessContact={businessContact} /></div>
@@ -635,34 +694,40 @@ function InvoiceDocument({
       <div className="inv-header">
         <div className="inv-business">
           <div className="inv-business-name">{businessName}</div>
-          {businessContact?.phone && <div className="inv-business-contact">{businessContact.phone}</div>}
+          {[businessContact?.phone, businessContact?.email].filter(Boolean).length > 0 && (
+            <div className="inv-business-contact">{[businessContact?.phone, businessContact?.email].filter(Boolean).join(' · ')}</div>
+          )}
           {businessContact?.address && <div className="inv-business-contact">{businessContact.address}</div>}
-          {businessContact?.email && <div className="inv-business-contact">{businessContact.email}</div>}
         </div>
         <div className="inv-title-block">
+          <div className="inv-document-kicker">BUSINESS DOCUMENT</div>
           <div className="inv-title">{model.documentTitle}</div>
-          <div className="inv-no" data-num>{model.invoiceNo}</div>
+          <div className="inv-no"><span>Document No.</span><strong data-num>{model.invoiceNo}</strong></div>
           <div className="inv-type-badge">{model.channelLabel}</div>
         </div>
       </div>
 
       <div className="inv-meta">
-        <div className="inv-meta-col">
-          <div className="inv-meta-row"><span className="inv-meta-label">Date:</span><span className="inv-meta-value" data-num>{bizFormat(model.invoiceDate, 'datetime')}</span></div>
+        {(model.customerName || model.customerPhone || model.customerAddress) && (
+          <div className="inv-meta-col inv-party-block">
+            <div className="inv-meta-heading">{model.partyLabel === 'Vendor' ? 'Supplier' : 'Bill To'}</div>
+            {model.customerName && <div className="inv-party-name">{model.customerName}</div>}
+            {model.customerPhone && <div className="inv-meta-row"><span className="inv-meta-label">Phone</span><span className="inv-meta-value" data-num>{model.customerPhone}</span></div>}
+            {model.customerAddress && <div className="inv-meta-row"><span className="inv-meta-label">Address</span><span className="inv-meta-value">{model.customerAddress}{model.customerCity ? `, ${model.customerCity}` : ''}</span></div>}
+          </div>
+        )}
+        <div className="inv-meta-col inv-document-meta">
+          <div className="inv-meta-heading">Document Details</div>
+          <div className="inv-meta-row"><span className="inv-meta-label">Date</span><span className="inv-meta-value" data-num>{bizFormat(model.invoiceDate, 'datetime')}</span></div>
           {model.sellerName && (
             <div className="inv-meta-row">
-              <span className="inv-meta-label">Seller:</span>
+              <span className="inv-meta-label">Seller</span>
               <span className="inv-meta-value">{model.sellerName}{model.sellerRoleLabel ? ` (${model.sellerRoleLabel})` : ''}</span>
             </div>
           )}
-          {model.source && <div className="inv-meta-row"><span className="inv-meta-label">Source:</span><span className="inv-meta-value">{model.source}</span></div>}
-          {model.riderName && <div className="inv-meta-row"><span className="inv-meta-label">Rider:</span><span className="inv-meta-value">{model.riderName}</span></div>}
-          {model.originalReference && <div className="inv-meta-row"><span className="inv-meta-label">{model.referenceLabel ?? 'Original document'}:</span><span className="inv-meta-value" data-num>{model.originalReference}</span></div>}
-        </div>
-        <div className="inv-meta-col">
-          {model.customerName && <div className="inv-meta-row"><span className="inv-meta-label">{model.partyLabel}:</span><span className="inv-meta-value">{model.customerName}</span></div>}
-          {model.customerPhone && <div className="inv-meta-row"><span className="inv-meta-label">Phone:</span><span className="inv-meta-value" data-num>{model.customerPhone}</span></div>}
-          {model.customerAddress && <div className="inv-meta-row"><span className="inv-meta-label">Address:</span><span className="inv-meta-value">{model.customerAddress}{model.customerCity ? `, ${model.customerCity}` : ''}</span></div>}
+          {model.source && <div className="inv-meta-row"><span className="inv-meta-label">Source</span><span className="inv-meta-value">{model.source}</span></div>}
+          {model.riderName && <div className="inv-meta-row"><span className="inv-meta-label">Rider</span><span className="inv-meta-value">{model.riderName}</span></div>}
+          {model.originalReference && <div className="inv-meta-row"><span className="inv-meta-label">{model.referenceLabel ?? 'Original document'}</span><span className="inv-meta-value" data-num>{model.originalReference}</span></div>}
         </div>
       </div>
 
@@ -729,6 +794,7 @@ function InvoiceDocument({
 
       <div className="inv-footer">
         <div className="inv-footer-message">{model.memo || 'Thank you for your business!'}</div>
+        <div className="inv-signature-line">Authorized Signature</div>
         <div className="inv-footer-timestamp" data-num>Printed: {bizFormat(new Date().toISOString(), 'datetime')}</div>
       </div>
     </div>
@@ -855,38 +921,56 @@ function ThermalReceipt({
   )
 }
 
-function InvoicePrintStyles() {
+function InvoicePrintStyles({ mode }: { mode: InvoicePrintMode }) {
+  // This style exists while the dialog is open, rather than being injected at
+  // click time. That makes the physical page rule part of the mounted print
+  // surface before the native print lifecycle starts.
+  const pageSize = mode === 'thermal' ? '80mm auto' : 'A4 portrait'
   return <style>{`
+    @page { size: ${pageSize}; margin: 0; }
+    .invoice-print-root { display: none; }
     @media print {
-      html, body { width: 210mm; min-height: 297mm; margin: 0 !important; padding: 0 !important; background: #fff !important; }
+      html.invoice-printing, html.invoice-printing body { width: 210mm; min-height: 297mm; margin: 0 !important; padding: 0 !important; background: #fff !important; }
+      html.invoice-printing body.printing-invoice-thermal { width: 80mm; min-height: 0; }
+      body.printing-invoice .no-print,
+      body.printing-invoice .invoice-print-measure { display: none !important; visibility: hidden !important; }
+      body.printing-invoice > *:not(#__next) { display: none !important; visibility: hidden !important; }
       body.printing-invoice #__next > * { visibility: hidden !important; }
       body.printing-invoice .invoice-print-root,
       body.printing-invoice .invoice-print-root * { visibility: visible !important; }
-      body.printing-invoice .invoice-print-root { display: block !important; position: fixed; inset: 0 auto auto 0; width: 210mm; color: #000; background: #fff; }
+      body.printing-invoice .invoice-print-root { display: block !important; position: fixed; inset: 0 auto auto 0; z-index: 2147483647; width: 210mm; color: #000; background: #fff; }
+      body.printing-invoice .invoice-print-root-thermal { width: 80mm; min-height: 0; }
       .invoice-print-root .a4-page { position: relative; width: 210mm; height: 297mm; padding: 0 !important; box-sizing: border-box; overflow: hidden; break-after: page; page-break-after: always; background: #fff; }
       .invoice-print-root .a4-page.a4-single { min-height: 297mm; height: auto; overflow: visible; break-after: auto; page-break-after: auto; }
       .invoice-print-root .a4-half { position: relative; width: 210mm; height: 148.5mm; padding: 0 !important; box-sizing: border-box; overflow: hidden; break-inside: avoid; page-break-inside: avoid; }
       .invoice-print-root .a4-half-top { border-bottom: 0.3mm dashed #777; }
       .invoice-print-root .a4-half-top::after { content: 'CUT HERE'; position: absolute; bottom: -2.4mm; left: 50%; transform: translateX(-50%); padding: 0 2mm; font: 6pt Arial, sans-serif; color: #555; background: #fff; }
       .invoice-print-root .a4-half-blank { background: #fff; }
-      .invoice-print-root .invoice-half { width: 100%; height: 100%; box-sizing: border-box; overflow: hidden; padding: 6mm 8mm 5mm; font: 8.5pt/1.25 Arial, sans-serif; color: #000; }
-      .invoice-print-root .invoice-full-a4 { width: 100%; min-height: 297mm; height: auto; box-sizing: border-box; overflow: visible; padding: 12mm 14mm; font: 10pt/1.35 Arial, sans-serif; color: #000; }
-      .invoice-print-root .inv-header { display: flex; justify-content: space-between; gap: 6mm; border-bottom: 0.5mm solid #000; padding-bottom: 2mm; margin-bottom: 2mm; }
-      .invoice-print-root .inv-business-name { font-size: 13pt; font-weight: 700; overflow-wrap: anywhere; }
-      .invoice-print-root .inv-business-contact { font-size: 7.5pt; color: #333; }
+      .invoice-print-root .invoice-half { width: 100%; height: 100%; box-sizing: border-box; overflow: hidden; padding: 5.5mm 7mm 4.5mm; font: 8.3pt/1.25 Arial, sans-serif; color: #111; }
+      .invoice-print-root .invoice-full-a4 { width: 100%; min-height: 297mm; height: auto; box-sizing: border-box; overflow: visible; padding: 12mm 14mm; font: 10pt/1.4 Arial, sans-serif; color: #111; }
+      .invoice-print-root .inv-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 7mm; border-top: .8mm solid #111; border-bottom: .25mm solid #555; padding: 2mm 0 2.5mm; margin-bottom: 3mm; }
+      .invoice-print-root .inv-business { min-width: 0; }
+      .invoice-print-root .inv-business-name { font-size: 14pt; font-weight: 700; letter-spacing: .1mm; overflow-wrap: anywhere; }
+      .invoice-print-root .inv-business-contact { font-size: 7.2pt; color: #444; overflow-wrap: anywhere; }
       .invoice-print-root .inv-title-block { text-align: right; }
-      .invoice-print-root .inv-title { font-size: 10pt; font-weight: 700; letter-spacing: .2mm; }
-      .invoice-print-root .inv-no { font-size: 9pt; font-weight: 700; }
-      .invoice-print-root .inv-type-badge { display: inline-block; margin-top: .5mm; border: .3mm solid #000; padding: .4mm 1.5mm; font-size: 6.5pt; font-weight: 700; }
-      .invoice-print-root .inv-meta { display: grid; grid-template-columns: 1fr 1fr; gap: 5mm; margin-bottom: 2mm; font-size: 7.5pt; }
-      .invoice-print-root .inv-meta-col:last-child { text-align: right; }
-      .invoice-print-root .inv-meta-row { margin-bottom: .4mm; overflow-wrap: anywhere; }
-      .invoice-print-root .inv-meta-label { font-weight: 700; margin-right: 1mm; }
+      .invoice-print-root .inv-document-kicker { font-size: 6.2pt; font-weight: 700; letter-spacing: .45mm; color: #555; }
+      .invoice-print-root .inv-title { font-size: 11pt; font-weight: 700; letter-spacing: .3mm; }
+      .invoice-print-root .inv-no { display: flex; justify-content: flex-end; gap: 2mm; align-items: baseline; font-size: 7pt; color: #555; }
+      .invoice-print-root .inv-no strong { font-size: 9pt; color: #111; }
+      .invoice-print-root .inv-type-badge { display: inline-block; margin-top: 1mm; border: .25mm solid #333; padding: .45mm 1.5mm; font-size: 6.5pt; font-weight: 700; letter-spacing: .15mm; }
+      .invoice-print-root .inv-meta { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 4mm; margin-bottom: 3mm; font-size: 7.4pt; }
+      .invoice-print-root .inv-meta-col { min-width: 0; border-left: .45mm solid #222; padding: 1mm 0 1mm 2mm; overflow-wrap: anywhere; }
+      .invoice-print-root .inv-document-meta { text-align: right; border-left: 0; border-right: .45mm solid #222; padding-left: 0; padding-right: 2mm; }
+      .invoice-print-root .inv-meta-heading { margin-bottom: .7mm; font-size: 6.2pt; font-weight: 700; letter-spacing: .35mm; text-transform: uppercase; color: #555; }
+      .invoice-print-root .inv-party-name { margin-bottom: .6mm; font-size: 8.5pt; font-weight: 700; }
+      .invoice-print-root .inv-meta-row { display: flex; justify-content: space-between; gap: 2mm; margin-bottom: .35mm; overflow-wrap: anywhere; }
+      .invoice-print-root .inv-document-meta .inv-meta-row { justify-content: flex-end; }
+      .invoice-print-root .inv-meta-label { font-weight: 700; color: #555; }
       .invoice-print-root .inv-items-table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 7.5pt; }
       .invoice-print-root .inv-items-table thead { display: table-header-group; }
       .invoice-print-root .inv-items-table tr { break-inside: avoid; page-break-inside: avoid; }
-      .invoice-print-root .inv-items-table th { border: .3mm solid #000; padding: 1mm; text-align: left; font-size: 7pt; }
-      .invoice-print-root .inv-items-table td { border: .2mm solid #888; padding: .8mm 1mm; vertical-align: top; overflow-wrap: anywhere; }
+      .invoice-print-root .inv-items-table th { border: .25mm solid #222; padding: 1mm; text-align: left; font-size: 6.8pt; letter-spacing: .12mm; background: #f1f1f1 !important; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+      .invoice-print-root .inv-items-table td { border: .18mm solid #999; padding: .85mm 1mm; vertical-align: top; overflow-wrap: anywhere; }
       .invoice-print-root .inv-col-item { width: 52%; text-align: left; }
       .invoice-print-root .inv-col-qty { width: 11%; text-align: right !important; }
       .invoice-print-root .inv-col-rate, .invoice-print-root .inv-col-total { width: 18.5%; text-align: right !important; }
@@ -895,18 +979,19 @@ function InvoicePrintStyles() {
       .invoice-print-root .inv-items-table-returns .inv-col-qty { width: 9%; }
       .invoice-print-root .inv-items-table-returns .inv-col-rate, .invoice-print-root .inv-items-table-returns .inv-col-total { width: 18.5%; }
       .invoice-print-root .inv-sku { color: #555; font-size: 6.5pt; }
-      .invoice-print-root .inv-totals { width: 58%; margin: 2mm 0 1.5mm auto; font-size: 7.5pt; break-inside: avoid; page-break-inside: avoid; }
-      .invoice-print-root .inv-totals-row, .invoice-print-root .inv-payment-row { display: flex; justify-content: space-between; gap: 4mm; padding: .35mm 0; }
-      .invoice-print-root .inv-totals-grand { border-top: .4mm solid #000; border-bottom: .4mm solid #000; padding: .8mm 0; font-size: 9pt; font-weight: 700; }
+      .invoice-print-root .inv-totals { width: 58%; margin: 2.5mm 0 1.8mm auto; font-size: 7.5pt; break-inside: avoid; page-break-inside: avoid; }
+      .invoice-print-root .inv-totals-row, .invoice-print-root .inv-payment-row { display: flex; justify-content: space-between; gap: 4mm; padding: .45mm 0; }
+      .invoice-print-root .inv-totals-grand { border-top: .5mm solid #111; border-bottom: .5mm solid #111; padding: 1mm 0; font-size: 9.2pt; font-weight: 700; }
       .invoice-print-root .inv-totals-discount, .invoice-print-root .inv-totals-outstanding { font-weight: 700; }
-      .invoice-print-root .inv-payments { border: .2mm solid #888; padding: 1mm; font-size: 6.8pt; break-inside: avoid; page-break-inside: avoid; }
-      .invoice-print-root .inv-payments-title { font-weight: 700; margin-bottom: .5mm; }
+      .invoice-print-root .inv-payments { border: .2mm solid #777; padding: 1.2mm; font-size: 6.8pt; break-inside: avoid; page-break-inside: avoid; }
+      .invoice-print-root .inv-payments-title { font-size: 6.3pt; font-weight: 700; letter-spacing: .25mm; text-transform: uppercase; margin-bottom: .6mm; }
       .invoice-print-root .inv-commission { border: .3mm dashed #000; padding: 1mm; margin-top: 1.5mm; font-size: 6.8pt; break-inside: avoid; page-break-inside: avoid; }
       .invoice-print-root .inv-commission-title { font-weight: 700; margin-bottom: .5mm; }
       .invoice-print-root .inv-commission-total { border-top: .2mm solid #000; margin-top: .5mm; padding-top: .5mm; font-weight: 700; }
-      .invoice-print-root .inv-status-banner { margin-top: 1.5mm; border: .3mm solid #000; padding: .7mm; text-align: center; font-size: 7pt; font-weight: 700; }
-      .invoice-print-root .inv-footer { display: flex; justify-content: space-between; gap: 4mm; border-top: .2mm solid #888; margin-top: 1.5mm; padding-top: 1mm; font-size: 6.5pt; color: #333; break-inside: avoid; page-break-inside: avoid; overflow-wrap: anywhere; }
+      .invoice-print-root .inv-status-banner { margin-top: 1.5mm; border: .3mm solid #222; padding: .8mm; text-align: center; font-size: 7pt; font-weight: 700; letter-spacing: .25mm; }
+      .invoice-print-root .inv-footer { display: grid; grid-template-columns: 1fr 38mm auto; align-items: end; gap: 4mm; border-top: .2mm solid #777; margin-top: 2mm; padding-top: 1.5mm; font-size: 6.4pt; color: #444; break-inside: avoid; page-break-inside: avoid; overflow-wrap: anywhere; }
       .invoice-print-root .inv-footer-message { font-style: italic; }
+      .invoice-print-root .inv-signature-line { border-top: .2mm solid #555; padding-top: .7mm; text-align: center; font-size: 6pt; color: #555; }
 
       /* ── 80mm thermal roll ── */
       body.printing-invoice .invoice-print-root-thermal { width: 80mm; }
