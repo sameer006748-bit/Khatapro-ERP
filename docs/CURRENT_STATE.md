@@ -1,52 +1,57 @@
 # KhataPro ERP — Current State
 
-Last reconciled: 2026-09-05
+Last reconciled: **2026-09-06**
 
-This is the concise factual snapshot. Use repository/database reality over this document if they ever conflict, then update this file.
+This is the concise factual snapshot. Use running production/database/browser evidence over this document if they ever conflict, then update this file.
+
+For the complete handoff/history/future context, read `docs/PROJECT_MEMORY.md` first.
 
 ## Repository / deployment
 - Repository: `sameer006748-bit/Khatapro-ERP`
-- Default / production branch: `main`
-- Production URL: `https://khatapro-erp.vercel.app`
+- Production/default branch: `main`
+- Stable production URL: `https://khatapro-erp.vercel.app`
 - Production Supabase project ref: `ebcebxwpddltiwrqybqc`
 - Production accounting schema: legacy/original schema rooted at `business`, not the newer UUID-ledger architecture.
+- Last live-tested application code commit before this docs refresh: `75319bc`.
 
 ## Current maturity
-KhataPro is a substantial working ERP in late handover / stabilization, not a greenfield build. Core sales, accounting, money, rider, reporting, audit, onboarding, and print foundations exist. The immediate priority is release correctness and closing client-facing regressions before broader AI-intelligence expansion.
+KhataPro is a substantial live **Version 1 ERP in deep UAT recovery / release polish**, not a greenfield build and not yet a closed client handover.
 
-AI maturity is currently closest to **Level 1–2** from `VISION.md`: read/explain/summary capability exists, while trustworthy anomaly detection and proactive owner intelligence remain a future phase.
+Major operational foundations exist across sales, purchases, accounting, money, Rider, audit, reporting, onboarding, permissions, printing, and AI. Several earlier production blockers were fixed live, but deep user UAT on 2026-09-06 exposed additional correctness, performance, loading, encoding, AI, and print/document-quality issues that must be resolved before final client approval.
+
+Version 2 proactive/intelligent expansion remains deferred until Version 1 is accepted.
 
 ## Major implemented systems
+
 ### Sales / returns / commissions
 Implemented across Counter, Online, OFC, and Other sale paths:
 - shared sale engine,
-- sold/returned/net model,
-- stock restoration and over-return protection,
-- historical sale returns linked to original invoice items,
+- historical sale returns and stock restoration,
+- over-return protection,
+- sold/returned/net print model,
 - product-level commission and attribution,
 - earned-on-collection behavior,
-- split payments / change handling,
-- invoice detail and print modes.
+- split payments/change handling,
+- Sales List + invoice detail.
+
+Accepted V1 limitations still fail closed: sale discounts, mixed same-bill returns, and opening stock at product creation.
 
 ### Money / business accounts
 Implemented:
-- client-facing Cash / Bank model,
-- unlimited user-created money accounts,
-- legacy seeded money-account bridging without duplicating ledger rows,
-- guarded delete / deactivate behavior,
-- readable persisted business-account identities separate from numeric ledger codes,
-- Accounts & Balances professional grouped view.
-
-Latest identity-persistence migration was applied and verified in production before handover work.
+- top-level Cash / Bank model,
+- unlimited business money accounts,
+- legacy seeded account bridging,
+- guarded delete/deactivate behavior,
+- readable immutable business-account identities distinct from ledger codes,
+- Accounts & Balances grouped view.
 
 ### Account categories / expense
 Implemented:
 - five fixed accounting roots,
-- simple user-defined categories under each root,
-- automatic linked ledger account creation,
-- simplified Expense Batch category selection,
-- server-side category/account validation,
-- category-aware Trial Balance / report grouping where semantically safe.
+- simple categories below each root,
+- auto-linked ledgers,
+- Expense Batch category-to-ledger server resolution,
+- category-aware report grouping where safe.
 
 ### Accounting / reports
 Implemented/recovered on legacy production:
@@ -55,73 +60,120 @@ Implemented/recovered on legacy production:
 - Accounts & Balances,
 - Business Accounts,
 - Expense Batch,
-- Vouchers consolidation,
-- financial report compatibility,
-- audit log recovery,
+- vouchers,
+- financial reports compatibility,
+- audit log,
 - readable transaction/account identities.
 
-### Dashboard
-Owner/Admin command center includes deterministic KPI foundations, attention items, recent activity, insights, trend/comparison support where the source is trustworthy, cash position, and operational pulse. Rule-based insights are intentionally separate from AI-generated accounting truth.
+**New live correctness issue:** deep UAT shows Trial Balance / Financial Reports difference of **Rs 2,505.00**. This is now an open P0 investigation and must be resolved/explained deterministically before handover.
 
 ### Rider
-Rider hotfix is deployed to production:
-- session-to-rider identity resolution handles legacy user ID/Auth UUID/profile ID safely,
-- owner can connect/change rider account mapping,
-- rider UI is mobile-first, action-first, plain-language, four-item navigation,
-- Delivered / Partial / Returned / Cash With You flows are implemented.
+Major Rider recovery is deployed:
+- legacy identity mapping/resolution,
+- Owner Connect/Change Rider account,
+- Salesman can select and first-assign same-business active Rider,
+- Rider receives assigned delivery,
+- Delivered / Partial / Returned / Cash/COD paths,
+- four-item mobile navigation: Home / Deliveries / Cash / Profile.
 
-Known production data fact from the hotfix validation: `rider@test.local` was not linked to a Rider row and production had zero delivery orders at that point. Code was not the remaining cause of the empty dashboard.
+**New live UX issue:** Riders list can briefly show a false authoritative empty state (`Riders (0) / No riders yet`) before the real roster arrives (`Riders (3)`). Loading and empty states must be separated.
 
-### Permissions / onboarding / audit
-Implemented:
-- role/permission-aware navigation and server gates,
-- onboarding tours and contextual help,
-- readable audit events for important admin/accounting mutations,
-- protected destructive-action behavior.
+### Permissions / denial behavior
+Server gates remain authoritative and fail closed. A live defect where denied guarded routes returned empty HTTP 500s was fixed in `ffc5493`; tested denials now return clean 403 responses with request IDs.
 
-## Recent production/release commits
-Recent main history includes:
-- `84953bd` — safe Rider account relinking,
-- `79675c0` — Rider data recovery + simplified mobile workflow,
-- `45df677` — verified release merge to main,
-- `029df0b` — persisted readable money account identities,
-- preceding Money / Account Categories / Expense UX and compatibility commits.
+### AI
+Live AI configuration recovery completed:
+- encrypted per-business provider setting path restored,
+- Gemini key Save passed live,
+- Test Connection passed live,
+- actual working model: `gemini-3.5-flash`,
+- basic/business-data Ask returned live 200 after recovery,
+- `75319bc` raised output-token budget from 800 to 2048 to stop `MAX_TOKENS` / `AI_RESPONSE_INCOMPLETE` truncation.
 
-Check current `main` before relying on these as the latest HEAD.
+**New deep-UAT AI defects remain:**
+- observed money figures are scaled about 100× in some answers (paisa/rupee unit interpretation bug),
+- Roman Urdu selection is not reliably honored,
+- retry/latency UX can remain visible for many seconds,
+- period scoping is suspicious and needs deterministic payload verification.
 
-## Validation status
-Most recent reported Rider hotfix gates:
-- focused Rider tests: 39/39,
-- full regression: 678/678,
-- TypeScript: pass,
-- changed-file ESLint: pass,
-- build: pass,
-- diff-check: pass,
-- production deployment: Ready.
+AI is not allowed to become the accounting calculator; unit/period values must be normalized deterministically before interpretation.
 
-A later client-found navigation hotfix is currently being worked separately; `CURRENT_WORK.md` is authoritative for the exact active task.
+## Performance / UX state
+The user reports the entire ERP feels slow, not just one module. Deep UAT shows routine screen transitions taking multiple seconds, with Financial Reports around 5–6 second class in the observed run.
 
-## Known open / deferred items
-- Client-found mobile navigation regression for non-Rider roles and desktop post-sale View Invoice route regression are active release blockers until fixed and manually verified.
-- Final QA/demo data cleanup remains pending; do not blind-delete referenced production records.
-- Rider real-data UAT requires an actual rider mapping and assigned real delivery orders.
-- Final browser/mobile/print role smoke and client credential handover remain release steps.
-- Historical documentation contains stale branch/migration status and should not override this canonical set.
-- Opening-stock migration `00012` has been repeatedly mentioned as not applied; verify against current production before any action.
+Current evidence does **not** prove free Vercel/Supabase hosting is the sole cause. The repo already contains caching work added after prior navigation refetch storms, while many screens still perform server-backed fetches on mount.
+
+A dedicated performance recovery/profile is now required before any decision to move data/hosting. Domain purchase alone does not improve speed; do not migrate Supabase to Hostinger/VPS by guess.
+
+## Print / invoice state
+A shared print foundation exists for:
+- Half A4,
+- Two-up A4,
+- Full A4,
+- 80mm thermal,
+- deterministic shared print model,
+- internal/customer copy separation.
+
+Deep user print UAT shows:
+- visible background/transition glitch around browser printing,
+- invoice visual quality is not yet professional enough for a real business document.
+
+Required direction: clean print isolation and one professional master invoice identity across all sale channels/formats with proper business header, customer block, ruled item table, totals hierarchy, payment/status area, footer/signature/terms where appropriate, and no app-like visual chrome on paper.
+
+## Encoding / small UX defect
+Broken mojibake strings are visible in production, e.g. `Loading COD balancesâ€¦` and `Todayâ€™s Movement`. UTF-8 text cleanup is required.
+
+## Settled migration facts — do not reopen without new evidence
+- `00037` applied.
+- `00038` applied.
+- `00039` applied.
+- `00040` applied.
+- `00041` applied.
+- `00042` applied.
+- `20260904161347_persist_business_account_identity.sql` applied.
+- `00012` opening stock not applied; accepted V1 limitation with Stock Entry workaround.
+
+Never broad-apply migrations.
+
+## Current release status
+**NOT YET CLIENT-CLOSED.**
+
+Previous "manual UAT only / no code blockers" status is obsolete after deep UAT.
+
+Current blockers/priorities:
+1. Trial Balance Rs 2,505 difference.
+2. AI 100× money-unit/scaling bug.
+3. Verify AI period scoping and cross-screen Cash/Bank semantics.
+4. Pervasive performance/slowness recovery.
+5. Rider false-empty loading state.
+6. Roman Urdu preference enforcement + AI retry/latency UX.
+7. Mojibake/encoding cleanup.
+8. Print glitch/isolation fix.
+9. Professional invoice redesign across Half A4 / Two-up / Full A4 / 80mm.
+10. Final role/mobile/print UAT + client approval.
+
+## Validation posture
+For runtime-sensitive tasks, live browser evidence is the acceptance authority. Use:
+
+**observe live → capture network/log evidence → root cause → bounded fix → tests/gates → deploy → verify stable alias → retest live.**
+
+Static/unit/source tests remain necessary but are not sufficient.
 
 ## Important production rules
 - Never broad-apply migrations.
 - Never assume UUID-ledger migrations match production.
 - Configured Supabase production must not silently fall back to Prisma/SQLite.
 - Posted financial history is not casually hard-deleted.
-- Numeric ledger codes are not the user-facing immutable identity.
-- Browser/source-contract/testing evidence must be described accurately; implemented does not automatically mean production-verified.
+- Numeric ledger codes are not user-facing immutable identities.
+- AI is interpretation, not authoritative accounting truth.
+- Do not start Version 2 before Version 1 client approval.
+- Do not claim production readiness from green tests alone.
 
 ## Read next
-For ongoing work read, in order:
-1. `docs/VISION.md`
-2. `docs/ARCHITECTURE.md`
-3. this file
-4. `docs/CURRENT_WORK.md`
-5. relevant `docs/ROADMAP.md` section
-6. task-specific code / historical docs only as needed
+1. `docs/PROJECT_MEMORY.md`
+2. `docs/VISION.md`
+3. `docs/ARCHITECTURE.md`
+4. this file
+5. `docs/CURRENT_WORK.md`
+6. relevant `docs/ROADMAP.md` section
+7. task-specific code / recent Git history only as needed
