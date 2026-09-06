@@ -241,15 +241,17 @@ Do **not** tell the user/client "everything is ready" merely because test/build 
 
 ## 18. Confirmed issues from the deep UAT video
 
-### P0 / accounting correctness
-1. **Trial Balance is out of balance by Rs 2,505.00.**
-   - Financial Reports also exposes the same difference.
-   - This must be explained from deterministic posting/data evidence before handover.
+### P0 / accounting correctness — source fixes complete, live acceptance pending
+1. **Trial Balance Rs 2,505.00 root cause was proven and fixed in the reader.**
+   - Day Book and the 95 posted production ledger lines were balanced at Rs 206,306.55 per side.
+   - Legacy `trial_balance` excluded inactive accounts even when they retained posted history. It omitted Easypaisa 1040 (INV-0002, Rs 2,250 debit) and CASH 1060 (INV-0007/8/9, Rs 25 + Rs 150 + Rs 80 debit).
+   - The same RPC also failed to apply cancellation/date filters because the voucher predicates were on a `LEFT JOIN` while unfiltered lines were summed.
+   - The shared legacy reader now selects posted in-period lines directly, retains inactive accounts with history, and produces Rs 206,306.55 debit = credit on the reconciled production data. No financial data was changed.
 
-2. **AI money scaling / paisa-to-rupee interpretation is wrong by roughly 100× in observed answers.**
-   Examples observed in the video include amounts such as Rs 20,000 being described as PKR 2,000,000 and similar scaling mistakes for profit/payables.
-   - AI must receive/display normalized rupee values or explicit unit metadata.
-   - Never patch this by letting the LLM guess units.
+2. **AI money scaling was proven and fixed at the deterministic boundary.**
+   - Database/RPC/TypeScript amounts remain integer paisas.
+   - AI context now receives only explicit `*Rupees` decimal strings and `amountRupees` allow-list values; raw paisa magnitudes are no longer accepted as PKR answers.
+   - Period flows, selected-period-end snapshots, and current snapshots are separated and labelled in the AI fact object.
 
 ### P1 / functional + UX
 3. **Roman Urdu selected but a fresh AI answer appears in English.**
@@ -272,13 +274,11 @@ Do **not** tell the user/client "everything is ready" merely because test/build 
    - Video shows routine navigation with multiple-second waits; Financial Reports was especially slow (~5–6 second class in the observed run), with other screens also taking several seconds.
    - This is a Version 1 UX/release issue, not something to dismiss as "free hosting is normal".
 
-## 19. Strong suspicious inconsistencies requiring deterministic verification
+## 19. Previously suspicious semantics — resolved in source, live acceptance pending
 
-These are not yet classified as proven accounting bugs solely from the video:
+8. **AI Today scoping:** sales, expenses, cash movement, profit and Trial Balance activity are selected-period flows. Receivables, payables and inventory are current snapshots; Balance Sheet is an as-of-period-end snapshot. The AI context now exposes these scopes separately instead of attaching every figure ambiguously to Today.
 
-8. **AI period scoping may be inconsistent.** A "Today"-style context may be mixing period/current-snapshot figures. Verify the deterministic payload sent to AI.
-
-9. **Cross-screen Cash/Bank figures may use different semantics.** Financial Reports and Accounts & Balances showed figures that look inconsistent. Verify whether they intentionally represent different definitions before changing calculations.
+9. **Cross-screen Cash/Bank:** both screens intend current available configured business money. Financial Reports used a stale fixed code list (`1010`–`1040`) and omitted custom active accounts such as UBL 1061; Accounts & Balances used all active Asset business accounts. Financial Reports now uses the configured-account definition too.
 
 ---
 
@@ -386,10 +386,8 @@ The previous "manual UAT only / no code blockers" state is obsolete after the Se
 ## 27. Current priority buckets
 
 ### Bucket A — correctness / trust (highest priority)
-- explain/fix Trial Balance Rs 2,505 difference,
-- fix AI 100× money-unit/scaling error deterministically,
-- verify AI period scoping,
-- verify cross-screen Cash/Bank semantics before changing accounting.
+- source/data reconciliation and bounded fixes are complete,
+- **next: Claude Opus 5 live browser verification** of Trial Balance, AI rupee answers, Today labels and Cash/Bank equality on the stable production URL.
 
 ### Bucket B — runtime / UX quality
 - full performance recovery/profile,
@@ -408,7 +406,7 @@ Do not combine these into another uncontrolled "audit everything" loop. Use boun
 
 Before new coding prompts, choose a bounded task and model. Current recommended sequence is:
 
-1. accounting/AI deterministic correctness (Rs 2,505 + money scaling),
+1. Claude Opus 5 live browser verification of the accounting/AI deterministic correctness fix,
 2. performance recovery/profile,
 3. print isolation + professional invoice redesign,
 4. remaining small UX issues / smoke,
@@ -510,7 +508,7 @@ Trust order:
 
 ## 35. One-paragraph state for a new agent
 
-KhataPro ERP is a substantial live Version 1 ERP on `main`, Vercel + Supabase legacy production schema, with major sales/accounting/money/Rider/audit/print/AI foundations implemented. Several high-profile production blockers were recovered live through September 6, including Rider assignment, invoice reads, permission 500→403 behavior, and AI key/connectivity/truncation. However, a subsequent deep manual UAT video reopened release work: Trial Balance is visibly Rs 2,505 out of balance, AI is showing ~100× money-unit errors, language/retry/loading/encoding issues remain, the whole ERP feels too slow, and print UX/invoice design are not yet professional enough. Version 1 is therefore **not yet client-closed**. The next work must be bounded production-evidence recovery: correctness first, then performance, then print/document polish, followed by final role/mobile/print UAT and client approval. Version 2 proactive intelligence remains deferred.
+KhataPro ERP is a substantial live Version 1 ERP on `main`, Vercel + Supabase legacy production schema, with major sales/accounting/money/Rider/audit/print/AI foundations implemented. The September 6 Trial Balance Rs 2,505 and AI 100× findings were deterministically reconciled and fixed in source without changing financial data: inactive historical money-account lines are retained, date/cancellation filters are real, AI receives explicit rupees, Today flow/snapshot semantics are separated, and Financial Reports includes custom configured money accounts. Claude Opus 5 live browser acceptance is the exact next gate. Language/retry/loading/encoding issues, broad performance, and print professionalism still remain Version 1 work, so the product is **not yet client-closed** and Version 2 remains deferred.
 
 ---
 

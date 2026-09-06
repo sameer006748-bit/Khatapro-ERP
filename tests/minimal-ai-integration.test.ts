@@ -664,9 +664,9 @@ test('user-facing assistant UI is English, branded, and contains no provider ter
 // Output token limit verification
 // ---------------------------------------------------------------------------
 
-test('output token limit is increased to 800 for production quality', async () => {
+test('output token limit is increased to 2048 for complete production answers', async () => {
   const config = await source('src/lib/ai/config.ts')
-  assert.match(config, /outputTokens: 800/)
+  assert.match(config, /outputTokens: 2048/)
 })
 
 test('response character limit is increased to 2400', async () => {

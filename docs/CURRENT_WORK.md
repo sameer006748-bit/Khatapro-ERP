@@ -10,7 +10,7 @@ Read `docs/PROJECT_MEMORY.md` first for the complete A-to-Z handoff/history/futu
 Version 2 intelligent/proactive product work remains deferred until the client receives and approves Version 1.
 
 ## Current phase
-**Production-evidence recovery after deep manual UAT.**
+**Accounting truth recovery implemented — live browser acceptance pending.**
 
 The previous state recorded here — "manual UAT only / no code blockers" — is obsolete. A deep user-recorded production UAT on 2026-09-06 exposed new real client-facing problems in accounting correctness, AI units/language, performance, loading states, encoding, print isolation, and invoice professionalism.
 
@@ -71,41 +71,34 @@ Live recovery achieved:
 
 Do not reopen AI configuration/decryption/model-access unless live evidence shows that path failed again.
 
-The current AI defects are **not connectivity**; they are data-unit/language/period/latency behavior described below.
+The remaining AI defects are **not connectivity**; Roman Urdu enforcement and retry/latency UX remain after the money-unit and period-semantics fixes below.
 
 ---
 
-# Current blockers / priorities
+# Completed in this recovery
 
 ## P0 — accounting and deterministic trust
 
-### 1. Trial Balance difference Rs 2,505.00
-Deep UAT shows Trial Balance/Financial Reports out of balance by **Rs 2,505.00**.
+### 1. Trial Balance difference Rs 2,505.00 — fixed in source
+Production evidence proved Day Book/source ledger balance. The legacy RPC omitted four debit lines held by inactive accounts: INV-0002 on Easypaisa 1040 for Rs 2,250 and INV-0007/8/9 on CASH 1060 for Rs 25/Rs 150/Rs 80. The replacement reader includes inactive accounts with posted history and applies cancellation/date filters to voucher lines before aggregation. Expected all-time result: Rs 206,306.55 debit = Rs 206,306.55 credit. No database rows changed.
 
-Required approach:
-- reproduce on stable production,
-- identify exact ledger/journal/posting rows causing the difference,
-- compare Trial Balance reader vs Day Book/ledger truth,
-- determine whether this is bad UAT data, a posting defect, or a report/query defect,
-- fix only the real root cause,
-- never force-balance totals cosmetically.
+### 2. AI money-unit scaling ~100× — fixed in source
+Database/RPC/TypeScript stay in integer paisas. The AI boundary converts once to exact two-decimal rupee strings, uses explicit `*Rupees`/`amountRupees` names, and no longer allows raw paisa magnitudes as PKR answers. Exact regressions cover Rs 20,000.00, Rs 21,313.45 and Rs 150,100.00.
 
-### 2. AI money-unit scaling ~100×
-Observed AI answers treat rupee/paisa values incorrectly, e.g. amounts around Rs 20,000 being explained as ~PKR 2,000,000 and similar 100× errors for profit/payables.
+### 3. Today and Cash/Bank semantics — fixed in source
+- Today sales/expenses/cash movement/profit/Trial Balance are period flows; Balance Sheet is as-of period end; receivables/payables/inventory are current snapshots.
+- Financial Reports and Accounts & Balances both intend active configured business money. The report's stale fixed-code list omitted custom UBL 1061; it now uses the configured active Asset business-account set.
 
-Required approach:
-- inspect deterministic AI fact payload,
-- make currency units explicit/normalized before the LLM,
-- reuse trusted money-format/serialization logic,
-- add tests that prove exact rupee values,
-- never ask the LLM to infer whether a raw integer means paisas or rupees.
+# Exact next step
 
-### 3. Verify suspicious semantics before changing accounting
-Not yet proven solely from video:
-- AI period scoping may mix Today/current/period facts,
-- Financial Reports Cash/Bank figure vs Accounts & Balances total may represent different definitions.
+**CLAUDE OPUS 5 LIVE BROWSER VERIFICATION**
 
-Verify definitions and source payloads first. Do not "fix" a deliberate semantic difference by visual guess.
+Verify on the stable production alias after deployment:
+- Trial Balance shows Rs 206,306.55 debit and credit on the reconciled current dataset,
+- Today-filtered Trial Balance/activity uses only the selected business dates,
+- AI answers the known sales/profit/payables examples in rupees, not paisa magnitudes,
+- snapshot answers are labelled current/as-of rather than “today's” activity,
+- Financial Reports Cash/Bank equals Accounts & Balances Total Available for the same as-of state.
 
 ---
 
@@ -258,7 +251,7 @@ Do not spontaneously create the next coding prompt before the user approves the 
 No coding task is currently authorized merely by this document refresh. The next step is to choose the first bounded recovery task with the user.
 
 Recommended sequence:
-1. **P0 deterministic correctness:** Trial Balance Rs 2,505 + AI 100× unit bug (may be split into two prompts if evidence surfaces different roots).
+1. **Claude Opus 5 live browser verification** of the pushed P0 deterministic correctness fix.
 2. **Performance recovery/profile** across representative major screens.
 3. **Print isolation + professional invoice redesign** across all formats.
 4. Rider false-empty + Roman Urdu + retry/latency + mojibake cleanup.

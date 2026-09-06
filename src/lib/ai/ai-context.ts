@@ -3,6 +3,7 @@ import type { SessionUser } from '@/lib/auth/permissions'
 import type { AiFieldMetadata, AiMode, AiScreen } from '@/lib/ai/safety-core'
 import type { ResolvedAiPeriod } from '@/lib/ai/ai-period'
 import type { AllowedFinancialValue } from '@/lib/ai/financial-safety'
+import { paisasToRupees } from '@/lib/ai/money-units'
 import { getAdminSupabase } from '@/lib/supabase/admin'
 import {
   reportBalanceSheet,
@@ -77,7 +78,31 @@ async function buildSalesmanContext(session: SessionUser, screen: AiScreen, peri
 
   if (error || !salesman) return { scope: 'own_sales_only', linked: false, screen }
   const summary = await reportMySalesSummary(session.businessId, salesman.id, period.from, period.to)
-  return { scope: 'own_sales_only', linked: true, period, summary }
+  const total = BigInt(summary.totalAmount)
+  const paid = BigInt(summary.paidAmount)
+  const outstanding = BigInt(summary.outstandingAmount)
+  const returned = BigInt(summary.returnedAmount)
+  return {
+    scope: 'own_sales_only',
+    linked: true,
+    period,
+    periodActivity: {
+      scope: 'selected_business_date_range',
+      sales: {
+        invoiceCount: summary.invoiceCount,
+        totalRupees: paisasToRupees(total),
+        paidRupees: paisasToRupees(paid),
+        outstandingOnPeriodSalesRupees: paisasToRupees(outstanding),
+        returnedRupees: paisasToRupees(returned),
+      },
+    },
+    allowedFinancialValues: [
+      { label: 'Own sales', amountRupees: paisasToRupees(total), classification: 'period_activity' },
+      { label: 'Own sales paid', amountRupees: paisasToRupees(paid), classification: 'period_activity' },
+      { label: 'Own sales outstanding', amountRupees: paisasToRupees(outstanding), classification: 'period_activity' },
+      { label: 'Own sales returned', amountRupees: paisasToRupees(returned), classification: 'period_activity' },
+    ] satisfies AllowedFinancialValue[],
+  }
 }
 
 async function buildRiderContext(session: SessionUser, period: ResolvedAiPeriod) {
@@ -105,11 +130,18 @@ async function buildRiderContext(session: SessionUser, period: ResolvedAiPeriod)
   return {
     scope: 'assigned_deliveries_only',
     linked: true,
-    assignedCount: orders.length,
-    statusCounts,
-    codAssigned: sum(orders, 'total_cod_amount').toString(),
-    codCollected: sum(orders, 'cod_collected_amount').toString(),
     period,
+    currentSnapshot: {
+      scope: 'current_database_state_not_selected_period_activity',
+      assignedCount: orders.length,
+      statusCounts,
+      codAssignedRupees: paisasToRupees(sum(orders, 'total_cod_amount')),
+      codCollectedRupees: paisasToRupees(sum(orders, 'cod_collected_amount')),
+    },
+    allowedFinancialValues: [
+      { label: 'Current assigned COD', amountRupees: paisasToRupees(sum(orders, 'total_cod_amount')), classification: 'current_snapshot' },
+      { label: 'Current collected COD', amountRupees: paisasToRupees(sum(orders, 'cod_collected_amount')), classification: 'current_snapshot' },
+    ] satisfies AllowedFinancialValue[],
   }
 }
 
@@ -154,7 +186,7 @@ async function buildBusinessContext(session: SessionUser, screen: AiScreen, prom
     tasks.push(['balanceSheet', reportBalanceSheet(session.businessId, toDate)])
   }
   if (selected.has('trialBalance') && permissions.has('can_view_trial_balance')) {
-    tasks.push(['trialBalance', reportTrialBalance(session.businessId)])
+    tasks.push(['trialBalance', reportTrialBalance(session.businessId, fromDate, toDate)])
   }
   if (selected.has('inventory') && (permissions.has('can_view_inventory_reports') || permissions.has('can_view_products'))) {
     tasks.push(['inventory', reportInventoryValuation(session.businessId)])
@@ -167,9 +199,26 @@ async function buildBusinessContext(session: SessionUser, screen: AiScreen, prom
   }
 
   const settled = await Promise.allSettled(tasks.map(([, task]) => task))
-  const context: Record<string, unknown> = { period }
+  const periodActivity: Record<string, unknown> = { scope: 'selected_business_date_range' }
+  const asOfSnapshot: Record<string, unknown> = { scope: 'position_at_selected_period_end', asOfDate: toDate }
+  const currentSnapshot: Record<string, unknown> = { scope: 'current_database_state_not_selected_period_activity' }
+  const context: Record<string, unknown> = {
+    period,
+    metricSemantics: {
+      periodActivity: 'Flows computed only from the selected from/to dates.',
+      asOfSnapshot: 'Balances measured at the selected period end date.',
+      currentSnapshot: 'Current balances/state; not activity created inside the selected period.',
+    },
+    periodActivity,
+    asOfSnapshot,
+    currentSnapshot,
+  }
   const financialValues: AllowedFinancialValue[] = []
-  const addValue = (label: string, value: bigint, classification: AllowedFinancialValue['classification']) => financialValues.push({ label, value: value.toString(), classification })
+  const addValue = (label: string, value: bigint, classification: AllowedFinancialValue['classification']) => financialValues.push({
+    label,
+    amountRupees: paisasToRupees(value),
+    classification,
+  })
   const unavailable: string[] = []
 
   settled.forEach((result, index) => {
@@ -179,22 +228,36 @@ async function buildBusinessContext(session: SessionUser, screen: AiScreen, prom
       return
     }
     const rows = Array.isArray(result.value) ? result.value as any[] : []
-    if (name === 'sales') context.sales = {
+    if (name === 'sales') periodActivity.sales = {
       invoiceCount: Number(sum(rows, 'invoice_count')),
-      billed: sum(rows, 'total_subtotal').toString(),
-      received: sum(rows, 'total_paid').toString(),
-      outstanding: sum(rows, 'total_outstanding').toString(),
+      billedRupees: paisasToRupees(sum(rows, 'total_subtotal')),
+      receivedRupees: paisasToRupees(sum(rows, 'total_paid')),
+      outstandingOnPeriodSalesRupees: paisasToRupees(sum(rows, 'total_outstanding')),
       returns: Number(sum(rows, 'returned_count')),
     }
-    if (name === 'sales') { addValue('Sales billed', sum(rows, 'total_subtotal'), 'period_activity'); addValue('Amount received', sum(rows, 'total_paid'), 'period_activity') }
-    if (name === 'expenses') { const total = sum(rows, 'total_amount'); context.expenses = { total: total.toString(), categories: rows.length }; addValue('Expenses', total, 'period_activity') }
-    if (name === 'cash') context.cash = {
-      opening: sum(rows, 'opening_balance').toString(),
-      inflow: sum(rows, 'total_debit').toString(),
-      outflow: sum(rows, 'total_credit').toString(),
-      closing: sum(rows, 'closing_balance').toString(),
+    if (name === 'sales') {
+      addValue('Sales billed', sum(rows, 'total_subtotal'), 'period_activity')
+      addValue('Amount received', sum(rows, 'total_paid'), 'period_activity')
+      addValue('Outstanding on period sales', sum(rows, 'total_outstanding'), 'period_activity')
     }
-    if (name === 'cash') { addValue('Cash inflow', sum(rows, 'total_debit'), 'period_activity'); addValue('Cash outflow', sum(rows, 'total_credit'), 'period_activity') }
+    if (name === 'expenses') {
+      const total = sum(rows, 'total_amount')
+      periodActivity.expenses = { totalRupees: paisasToRupees(total), categories: rows.length }
+      addValue('Expenses', total, 'period_activity')
+    }
+    if (name === 'cash') periodActivity.cashFlow = {
+      scope: 'period_flow_with_opening_and_closing_balances',
+      openingBalanceRupees: paisasToRupees(sum(rows, 'opening_balance')),
+      inflowRupees: paisasToRupees(sum(rows, 'total_debit')),
+      outflowRupees: paisasToRupees(sum(rows, 'total_credit')),
+      closingBalanceRupees: paisasToRupees(sum(rows, 'closing_balance')),
+    }
+    if (name === 'cash') {
+      addValue('Cash opening balance', sum(rows, 'opening_balance'), 'as_of_snapshot')
+      addValue('Cash inflow', sum(rows, 'total_debit'), 'period_activity')
+      addValue('Cash outflow', sum(rows, 'total_credit'), 'period_activity')
+      addValue('Cash closing balance', sum(rows, 'closing_balance'), 'as_of_snapshot')
+    }
     if (name === 'profitLoss') {
       const revenue = rows.filter((row) => row.section === 'REVENUE')
       const costOfGoodsSold = rows.filter((row) => row.section === 'COST_OF_GOODS_SOLD')
@@ -203,42 +266,62 @@ async function buildBusinessContext(session: SessionUser, screen: AiScreen, prom
       const cogsTotal = sum(costOfGoodsSold, 'amount')
       const operatingExpenseTotal = sum(expenses, 'amount')
       const totalExpense = cogsTotal + operatingExpenseTotal
-      context.profitLoss = {
-        revenue: revenueTotal.toString(),
-        costOfGoodsSold: cogsTotal.toString(),
-        expenses: operatingExpenseTotal.toString(),
-        netProfit: (revenueTotal - totalExpense).toString(),
+      periodActivity.profitLoss = {
+        revenueRupees: paisasToRupees(revenueTotal),
+        costOfGoodsSoldRupees: paisasToRupees(cogsTotal),
+        expensesRupees: paisasToRupees(operatingExpenseTotal),
+        netProfitRupees: paisasToRupees(revenueTotal - totalExpense),
       }
+      addValue('Revenue', revenueTotal, 'period_activity')
+      addValue('Cost of goods sold', cogsTotal, 'period_activity')
+      addValue('Operating expenses', operatingExpenseTotal, 'period_activity')
       addValue('Profit or loss', revenueTotal - totalExpense, 'period_activity')
     }
     if (name === 'balanceSheet') {
       const assets = sum(rows.filter((row) => row.section === 'ASSET'), 'balance')
       const liabilities = sum(rows.filter((row) => row.section === 'LIABILITY'), 'balance')
       const equity = sum(rows.filter((row) => row.section === 'EQUITY'), 'balance')
-      context.balanceSheet = { assets: assets.toString(), liabilities: liabilities.toString(), equity: equity.toString(), balanced: assets === liabilities + equity }
+      asOfSnapshot.balanceSheet = {
+        assetsRupees: paisasToRupees(assets),
+        liabilitiesRupees: paisasToRupees(liabilities),
+        equityRupees: paisasToRupees(equity),
+        balanced: assets === liabilities + equity,
+      }
+      addValue('Assets', assets, 'as_of_snapshot')
+      addValue('Liabilities', liabilities, 'as_of_snapshot')
+      addValue('Equity', equity, 'as_of_snapshot')
     }
     if (name === 'trialBalance') {
       const debit = sum(rows, 'total_debit')
       const credit = sum(rows, 'total_credit')
-      context.trialBalance = { debit: debit.toString(), credit: credit.toString(), difference: (debit - credit).toString(), accountsWithActivity: rows.length }
+      periodActivity.trialBalance = {
+        debitRupees: paisasToRupees(debit),
+        creditRupees: paisasToRupees(credit),
+        differenceRupees: paisasToRupees(debit - credit),
+        accountsShown: rows.length,
+      }
+      addValue('Trial Balance debit', debit, 'period_activity')
+      addValue('Trial Balance credit', credit, 'period_activity')
+      addValue('Trial Balance difference', debit - credit, 'period_activity')
     }
-    if (name === 'inventory') context.inventory = {
+    if (name === 'inventory') currentSnapshot.inventory = {
       products: rows.length,
       quantity: rows.reduce((total, row) => total + Number(row.current_stock ?? 0), 0),
-      value: sum(rows, 'stock_value').toString(),
+      valueRupees: paisasToRupees(sum(rows, 'stock_value')),
       lowStock: rows.filter((row) => Number(row.current_stock ?? 0) >= 0 && Number(row.current_stock ?? 0) <= Number(row.low_stock_threshold ?? 5)).length,
       negativeStock: rows.filter((row) => Number(row.current_stock ?? 0) < 0).length,
     }
-    if (name === 'receivables') context.receivables = {
+    if (name === 'inventory') addValue('Current inventory value', sum(rows, 'stock_value'), 'current_snapshot')
+    if (name === 'receivables') currentSnapshot.receivables = {
       parties: rows.length,
-      total: sum(rows, 'outstanding').toString(),
-      ...(wantsPartyNames(prompt) ? { top: rows.slice(0, 5).map((row) => ({ name: String(row.customer_name ?? 'Customer'), outstanding: String(row.outstanding ?? 0) })) } : {}),
+      totalRupees: paisasToRupees(sum(rows, 'outstanding')),
+      ...(wantsPartyNames(prompt) ? { top: rows.slice(0, 5).map((row) => ({ name: String(row.customer_name ?? 'Customer'), outstandingRupees: paisasToRupees(BigInt(row.outstanding ?? 0)) })) } : {}),
     }
     if (name === 'receivables') addValue('Receivables', sum(rows, 'outstanding'), 'current_snapshot')
-    if (name === 'payables') context.payables = {
+    if (name === 'payables') currentSnapshot.payables = {
       parties: rows.length,
-      total: sum(rows, 'outstanding').toString(),
-      ...(wantsPartyNames(prompt) ? { top: rows.slice(0, 5).map((row) => ({ name: String(row.vendor_name ?? 'Supplier'), outstanding: String(row.outstanding ?? 0) })) } : {}),
+      totalRupees: paisasToRupees(sum(rows, 'outstanding')),
+      ...(wantsPartyNames(prompt) ? { top: rows.slice(0, 5).map((row) => ({ name: String(row.vendor_name ?? 'Supplier'), outstandingRupees: paisasToRupees(BigInt(row.outstanding ?? 0)) })) } : {}),
     }
     if (name === 'payables') addValue('Payables', sum(rows, 'outstanding'), 'current_snapshot')
   })
@@ -253,7 +336,7 @@ export async function buildAiContext(args: ContextArgs): Promise<Record<string, 
     role: args.session.roleName,
     screen: args.screen,
     readOnly: true,
-    currency: 'PKR paisas unless stated otherwise',
+    moneyUnit: 'PKR rupees; exact decimal strings with two fractional digits',
     period: args.period,
     screenGuide: SCREEN_GUIDES[args.screen] ?? { purpose: 'Explain only the authorized screen and supplied context.' },
   }

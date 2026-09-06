@@ -23,6 +23,7 @@ import { bizDateString } from '@/lib/dates'
 import type { VoucherLineInput, PostVoucherInput } from '@/lib/accounting/voucher'
 import { VoucherError } from '@/lib/accounting/voucher'
 import { usesLegacyTransactionSchema } from '@/lib/identity/legacy-bridge'
+import { readLegacyTrialBalance } from '@/lib/accounting/legacy-trial-balance-reader'
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
@@ -235,37 +236,11 @@ export async function trialBalanceViaLegacySupabase(
   totalCredit: bigint
   balance: bigint
 }>> {
-  const admin = getAdminSupabase()
-  const { data, error } = await admin.rpc('trial_balance', {
-    p_business_id: businessId,
-    p_from_date: fromDate ? bizDateString(fromDate) : null,
-    p_to_date: toDate ? bizDateString(toDate) : null,
-  })
-
-  if (error) throw new VoucherError(error.message, 'RPC_ERROR')
-  if (!data) return []
-
-  return (data as Array<{
-    account_id: string
-    account_code: string
-    account_name: string
-    category_code: string
-    category_name: string
-    category_type: string
-    total_debit: string | number
-    total_credit: string | number
-    balance: string | number
-  }>).map((r) => ({
-    account: {
-      id: r.account_id,
-      code: r.account_code,
-      name: r.account_name,
-      category: { code: r.category_code, name: r.category_name, type: r.category_type },
-    },
-    totalDebit: BigInt(r.total_debit),
-    totalCredit: BigInt(r.total_credit),
-    balance: BigInt(r.balance),
-  }))
+  return readLegacyTrialBalance(
+    businessId,
+    fromDate ? bizDateString(fromDate) : null,
+    toDate ? bizDateString(toDate) : null,
+  )
 }
 
 /**

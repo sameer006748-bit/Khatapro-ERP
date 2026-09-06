@@ -2,7 +2,8 @@ import { NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth/authOptions'
 import { loadSessionUser, hasPermission } from '@/lib/auth/permissions'
-import { reportProfitLoss, reportBalanceSheet, reportSalesSummary, reportInventoryValuation, reportCashFlow, reportExpenseSummary, reportCustomerOutstanding, reportVendorOutstanding, reportSalesDetail, reportPurchaseDetail, reportStockMovements, reportDeliverySummary, reportCodSettlements, reportProductProfitability, reportTrialBalance, reportExceptions } from '@/lib/reports/data-access'
+import { reportProfitLoss, reportBalanceSheet, reportSalesSummary, reportInventoryValuation, reportCashFlow, reportExpenseSummary, reportCustomerOutstanding, reportVendorOutstanding, reportSalesDetail, reportPurchaseDetail, reportStockMovements, reportDeliverySummary, reportCodSettlements, reportProductProfitability, reportTrialBalance, reportExceptions, reportMoneyAccountCodes } from '@/lib/reports/data-access'
+import { sumMoneyAccountBalances } from '@/lib/reports/money-account-balance'
 import { resolveRequestId, safeApiError, withObservability } from '@/lib/observability'
 import { bizDateString } from '@/lib/dates'
 import { isSchemaUnavailableError } from '@/lib/dashboard/compatibility'
@@ -149,9 +150,10 @@ export const GET = withObservability('/api/reports', async (req: Request) => {
       case 'delivery-summary': return NextResponse.json({ rows: await reportDeliverySummary(bid) })
       case 'cod-settlements': return NextResponse.json({ rows: await reportCodSettlements(bid) })
       case 'overview': {
-        const [pl, bs] = await Promise.all([
+        const [pl, bs, moneyAccountCodes] = await Promise.all([
           reportProfitLoss(bid, fromDate, toDate),
           reportBalanceSheet(bid, toDate),
+          reportMoneyAccountCodes(bid),
         ])
         const sumAmount = (rows: any[]) => rows.reduce((sum, row) => sum + BigInt(row.amount ?? 0), 0n)
         const sumBalance = (rows: any[]) => rows.reduce((sum, row) => sum + BigInt(row.balance ?? 0), 0n)
@@ -161,7 +163,10 @@ export const GET = withObservability('/api/reports', async (req: Request) => {
         const assets = sumBalance(bs.filter(r => r.section === 'ASSET'))
         const liabilities = sumBalance(bs.filter(r => r.section === 'LIABILITY'))
         const equity = sumBalance(bs.filter(r => r.section === 'EQUITY'))
-        const cashBalance = sumBalance(bs.filter(r => ['1010', '1020', '1030', '1040'].includes(r.account_code)))
+        // This is the same concept as Accounts & Balances → Total Available:
+        // every active Asset ledger explicitly configured as a business money
+        // account, including user-created accounts whose code is not 1010-1040.
+        const cashBalance = sumMoneyAccountBalances(bs, moneyAccountCodes)
         const custRecv = BigInt(bs.find(r => r.account_code === '1200')?.balance ?? 0)
         const vendorPay = BigInt(bs.find(r => r.account_code === '2010')?.balance ?? 0)
         const invValue = BigInt(bs.find(r => r.account_code === '1100')?.balance ?? 0)

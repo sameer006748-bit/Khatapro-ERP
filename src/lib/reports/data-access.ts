@@ -5,6 +5,7 @@ import 'server-only'
 import { getAdminSupabase } from '@/lib/supabase/admin'
 import { bizDateString } from '@/lib/dates'
 import { usesLegacyTransactionSchema } from '@/lib/identity/legacy-bridge'
+import { readLegacyTrialBalance } from '@/lib/accounting/legacy-trial-balance-reader'
 
 /**
  * The production legacy schema keeps its financial reports under their
@@ -459,11 +460,52 @@ export async function reportProductProfitability(
 // Phase 8 completion: Trial Balance (uses existing RPC)
 // ─────────────────────────────────────────────────────────────
 export async function reportTrialBalance(businessId: string, fromDate?: string, toDate?: string) {
+  if (await usesLegacyTransactionSchema()) {
+    const rows = await readLegacyTrialBalance(businessId, fromDate, toDate)
+    return rows.map((row) => ({
+      account_id: row.account.id,
+      account_code: row.account.code,
+      account_name: row.account.name,
+      category_code: row.account.category.code,
+      category_name: row.account.category.name,
+      category_type: row.account.category.type,
+      total_debit: row.totalDebit.toString(),
+      total_credit: row.totalCredit.toString(),
+      balance: row.balance.toString(),
+    }))
+  }
   return financialReportRpc<any[]>('ledger_trial_balance', 'trial_balance', {
     p_business_id: businessId,
     p_from_date: fromDate ?? null,
     p_to_date: toDate ?? null,
   })
+}
+
+/** Account codes represented by Accounts & Balances → Total Available. */
+export async function reportMoneyAccountCodes(businessId: string): Promise<string[]> {
+  if (!await usesLegacyTransactionSchema()) return ['1010', '1020', '1030', '1040']
+
+  const admin = getAdminSupabase()
+  const [accountResult, categoryResult] = await Promise.all([
+    admin
+      .from('accounts')
+      .select('code, category_id')
+      .eq('business_id', businessId)
+      .eq('is_active', true)
+      .eq('is_business_account', true),
+    admin
+      .from('account_categories')
+      .select('id')
+      .eq('business_id', businessId)
+      .eq('type', 'Asset'),
+  ])
+  if (accountResult.error) throw new Error(`Money account lookup failed: ${accountResult.error.message}`)
+  if (categoryResult.error) throw new Error(`Money account category lookup failed: ${categoryResult.error.message}`)
+
+  const assetCategoryIds = new Set((categoryResult.data ?? []).map((category) => category.id))
+  return (accountResult.data ?? [])
+    .filter((account) => assetCategoryIds.has(account.category_id))
+    .map((account) => account.code)
 }
 
 // ─────────────────────────────────────────────────────────────

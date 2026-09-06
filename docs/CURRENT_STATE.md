@@ -65,7 +65,7 @@ Implemented/recovered on legacy production:
 - audit log,
 - readable transaction/account identities.
 
-**New live correctness issue:** deep UAT shows Trial Balance / Financial Reports difference of **Rs 2,505.00**. This is now an open P0 investigation and must be resolved/explained deterministically before handover.
+**Accounting truth recovery implemented; live acceptance pending:** the Rs 2,505 difference was exactly the posted debit history of inactive Easypaisa 1040 (Rs 2,250) and CASH 1060 (Rs 255). Day Book/source lines were balanced. The legacy Trial Balance reader now retains inactive accounts with history and correctly filters posted vouchers by cancellation/date. Reconciled production source rows total Rs 206,306.55 debit and credit; no data was changed.
 
 ### Rider
 Major Rider recovery is deployed:
@@ -90,11 +90,11 @@ Live AI configuration recovery completed:
 - basic/business-data Ask returned live 200 after recovery,
 - `75319bc` raised output-token budget from 800 to 2048 to stop `MAX_TOKENS` / `AI_RESPONSE_INCOMPLETE` truncation.
 
-**New deep-UAT AI defects remain:**
-- observed money figures are scaled about 100× in some answers (paisa/rupee unit interpretation bug),
+**Deep-UAT AI status:**
+- the observed ~100× paisa/rupee defect is fixed in source with explicit rupee-decimal AI facts and a rupee-only financial allow-list; live acceptance remains,
 - Roman Urdu selection is not reliably honored,
 - retry/latency UX can remain visible for many seconds,
-- period scoping is suspicious and needs deterministic payload verification.
+- Today semantics are now explicit: period flows are separated from as-of and current snapshots.
 
 AI is not allowed to become the accounting calculator; unit/period values must be normalized deterministically before interpretation.
 
@@ -141,16 +141,14 @@ Never broad-apply migrations.
 Previous "manual UAT only / no code blockers" status is obsolete after deep UAT.
 
 Current blockers/priorities:
-1. Trial Balance Rs 2,505 difference.
-2. AI 100× money-unit/scaling bug.
-3. Verify AI period scoping and cross-screen Cash/Bank semantics.
-4. Pervasive performance/slowness recovery.
-5. Rider false-empty loading state.
-6. Roman Urdu preference enforcement + AI retry/latency UX.
-7. Mojibake/encoding cleanup.
-8. Print glitch/isolation fix.
-9. Professional invoice redesign across Half A4 / Two-up / Full A4 / 80mm.
-10. Final role/mobile/print UAT + client approval.
+1. **Claude Opus 5 live browser verification** of Trial Balance balance, AI rupee values, Today semantics and Financial Reports/Accounts money totals.
+2. Pervasive performance/slowness recovery.
+3. Rider false-empty loading state.
+4. Roman Urdu preference enforcement + AI retry/latency UX.
+5. Mojibake/encoding cleanup.
+6. Print glitch/isolation fix.
+7. Professional invoice redesign across Half A4 / Two-up / Full A4 / 80mm.
+8. Final role/mobile/print UAT + client approval.
 
 ## Validation posture
 For runtime-sensitive tasks, live browser evidence is the acceptance authority. Use:
