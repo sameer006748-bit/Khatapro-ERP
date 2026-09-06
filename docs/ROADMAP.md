@@ -1,46 +1,139 @@
 # KhataPro ERP — Roadmap
 
+Last reconciled: **2026-09-06**
+
 This roadmap is dependency-driven. It does not assign arbitrary dates and it does not imply that every listed idea is already approved for implementation.
+
+Read `docs/PROJECT_MEMORY.md` for the complete A-to-Z handoff before using this roadmap.
 
 ## Release boundary
 KhataPro development is intentionally split into two product versions:
 
-- **Version 1:** finish, stabilize, hand over and obtain client approval for the current ERP.
+- **Version 1:** finish, stabilize, professionalize, hand over and obtain client approval for the current ERP.
 - **Version 2:** only after Version 1 approval, evolve KhataPro toward the intelligent/proactive product vision in `docs/VISION.md`.
 
-Do not begin Version 2 intelligence work while Version 1 still has unresolved client-facing bugs or handover tasks.
+Do not begin Version 2 intelligence work while Version 1 still has unresolved client-facing correctness, performance, print, role, UX, or handover work.
 
-## Version 1 — Phase 1: Release correctness and client handover
-### Objective
-Deliver a stable ERP that a real client can use without known navigation, posting, role, mobile, print, or data-integrity blockers.
+---
 
-### Why it matters
-The client must receive a dependable Version 1 before broader product evolution begins.
+# Version 1 — Deep UAT recovery and professional handover
 
-### Major deliverables
-- close current navigation / invoice-detail regressions,
-- finish role-specific mobile and desktop smoke,
-- verify Rider real-data mapping / assignment path,
-- safely clean QA/demo data,
-- verify production/main/deployment commit sync,
-- validate print outputs,
-- prepare final client credentials and handover checklist.
+## Objective
+Deliver a dependable, responsive, financially trustworthy and professionally presented ERP that a real client can use without known P0/P1 workflow, accounting, performance, print, role/mobile, or data-integrity blockers.
+
+## Current reality
+Earlier release closeout and live recovery fixed several serious production defects, including Rider assignment, invoice reads, AI configuration/connectivity, and permission-denial response behavior.
+
+However, deep manual UAT on 2026-09-06 exposed additional real release issues. Version 1 is therefore **not yet client-closed**.
+
+## Phase V1-A — Deterministic correctness / trust
+
+### Deliverables
+- resolve/explain Trial Balance **Rs 2,505.00** difference from actual ledger/posting/report evidence,
+- fix AI money-unit/paisa→rupee scaling so observed ~100× errors cannot occur,
+- verify AI period scoping with explicit deterministic period/unit metadata,
+- verify apparent Cash/Bank cross-screen difference is either intentional semantics or a real defect before changing accounting,
+- preserve deterministic ERP/accounting truth as authoritative.
 
 ### Exit criteria
-- no known P0/P1 client workflow blocker,
-- Owner/Admin, Accountant, Salesman, Rider role flows manually verified,
-- core posting workflows work on production,
-- final print formats visually approved,
+- Trial Balance/report truth is explainably consistent,
+- AI receives exact normalized values/units and does not multiply money accidentally,
+- period semantics are explicit and tested,
+- no cosmetic force-balancing or LLM guessing is used.
+
+## Phase V1-B — Performance / perceived quality recovery
+
+### Deliverables
+- measure click-to-usable timings across representative major screens,
+- capture browser network waterfall and slow API timings,
+- separate client rendering, Vercel function TTFB, Supabase query/RPC time, serial waterfalls, refetches and region latency,
+- optimize heavy/common server readers and repeated shared-data requests,
+- use cache/prefetch where financially safe,
+- eliminate false-empty loading states (including Riders list race),
+- use progressive/skeleton loading instead of blank or misleading states,
+- verify realistic performance on the stable production alias.
+
+### Infrastructure decision gate
+Do **not** migrate Supabase/hosting to Hostinger/VPS by assumption.
+
+Before infrastructure migration, prove with measurements whether the bottleneck is:
+- client/render architecture,
+- server/API orchestration,
+- database/query performance,
+- region/network latency,
+- serverless cold starts/free-tier resource limits,
+- or a combination.
+
+A domain purchase is not a performance fix.
+
+### Exit criteria
+- routine navigation feels responsive,
+- common cached/safe screens are near-instant where practical,
+- routine server-backed screens no longer routinely take several seconds,
+- heavy reports have measured/understood latency rather than unexplained 5–6 second waits,
+- no false authoritative empty state while data is still loading.
+
+## Phase V1-C — AI UX / text-quality cleanup
+
+### Deliverables
+- Roman Urdu selection reliably controls fresh and retried answers,
+- retry/timeout states are bounded and clearly communicated,
+- no duplicate requests caused by retry UI,
+- mojibake/encoding strings removed (`â€¦`, `â€™`, etc.),
+- existing AI connectivity remains stable (`gemini-3.5-flash` live path unless deliberately changed with evidence).
+
+### Exit criteria
+- selected language is honored,
+- transient provider failures degrade clearly,
+- UI text renders clean UTF-8,
+- no return to `AI_NOT_CONFIGURED`/decryption/model-access failures.
+
+## Phase V1-D — Print isolation and professional documents
+
+### Deliverables
+- remove visible background/modal ghosting around `window.print()`,
+- isolate printable DOM cleanly from application/sidebar/backdrop,
+- preserve shared deterministic invoice print serialization,
+- redesign sale invoices into one professional document identity across Counter / Online / OFC / Other,
+- support Half A4, Two-up A4, Full A4, and 80mm with consistent brand/document hierarchy,
+- professional business header, customer/Bill To block, ruled item table, totals, payments/status, footer, and optional signature/terms where appropriate,
+- customer copies never expose internal commission/accounting,
+- preview represents the real final document more faithfully.
+
+### Exit criteria
+- no print transition glitch,
+- all four formats visually approved by the user,
+- invoices look like professional business documents rather than ERP UI output,
+- printed figures match deterministic invoice detail data.
+
+## Phase V1-E — Final role/mobile/data handover
+
+### Deliverables
+- final Owner/Admin, Accountant, Salesman, Rider desktop/mobile smoke,
+- final sale → invoice → Sales List → print paths,
+- final Rider assignment/delivery/COD smoke,
+- safe QA/demo record archive/deactivation,
+- reset/retire test credentials through supported flow,
+- verify intended Ready deployment serves `https://khatapro-erp.vercel.app`,
+- client handover checklist and approval.
+
+### Version 1 exit criteria
+- no known P0/P1 client workflow/accounting blocker,
+- current deep-UAT issues resolved or explicitly accepted by the user/client,
+- Owner/Admin, Accountant, Salesman, Rider role flows verified,
+- core posting/reporting workflows work on production,
+- performance is acceptable for real daily use,
+- final print formats are visually approved,
 - no unsafe test/demo data exposed to client,
-- production URL and `main` are in sync,
-- handover credentials and role access confirmed,
-- **client receives Version 1 and approves it for the next phase.**
+- production stable alias and intended `main` commit are in sync,
+- handover credentials/role access confirmed,
+- **client receives Version 1 and approves it for Version 2.**
 
 ### Hard gate
-Until the Version 1 exit criteria and client approval are reached:
-- do not start the Version 2 AI roadmap,
+Until these exit criteria and client approval are reached:
+- do not start Version 2 proactive/intelligence work,
 - do not destabilize accepted ERP workflows for future architecture,
-- prioritize bug fixing, correctness, cleanup, handover and client feedback only.
+- prioritize deterministic correctness, performance, print professionalism, bug fixing, cleanup and handover.
 
 ---
 
@@ -54,7 +147,7 @@ Make deterministic business facts consistently available through stable server/d
 
 ### Deliverables
 - resolve remaining schema-debt decisions only when needed,
-- document authoritative readers for sales, collections, expenses, returns, stock, receivables, payables, cash, rider COD, commission,
+- document authoritative readers for sales, collections, expenses, returns, stock, receivables, payables, cash, Rider COD, commission,
 - remove unsafe fallbacks and duplicate calculation paths,
 - strengthen audit/source traceability,
 - improve performance of commonly reused business summaries.
@@ -100,7 +193,7 @@ Potentially, where data supports them:
 - unusual returns,
 - unusual expense movement,
 - delayed receivables,
-- rider cash/settlement exceptions,
+- Rider cash/settlement exceptions,
 - collection-vs-sales weakness,
 - duplicate/suspicious entries,
 - stock/sales mismatches.
@@ -163,9 +256,11 @@ KhataPro can be operated and supported as a product, not only as a single custom
 
 ## Roadmap rules
 - Version 1 client approval is the gate before Version 2 starts.
+- Correctness/trust precedes performance polish when they conflict, but performance is a real Version 1 requirement.
+- Do not migrate infrastructure based on guesswork; profile first.
 - Do not start a later phase merely because it is more exciting.
 - Trustworthy ERP data precedes AI interpretation.
 - AI read/explain precedes proactive alerts.
 - Proactive alerts precede controlled action execution.
-- A roadmap item is not “complete” because code exists; validation/deployment state matters.
+- A roadmap item is not “complete” because code/tests exist; live validation/deployment state matters.
 - Update this roadmap only when phase reality or sequencing meaningfully changes.
