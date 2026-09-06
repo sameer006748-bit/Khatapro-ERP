@@ -17,7 +17,7 @@ export const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta
 export const AI_LIMITS = {
   promptCharacters: 1200,
   responseCharacters: 2400,
-  outputTokens: 800,
+  outputTokens: 2048,
   timeoutMs: 15_000,
   requestsPerMinute: 8,
 } as const
