@@ -10,7 +10,7 @@ Read `docs/PROJECT_MEMORY.md` first for the complete A-to-Z handoff/history/futu
 Version 2 intelligent/proactive product work remains deferred until the client receives and approves Version 1.
 
 ## Current phase
-**Accounting truth recovery and professional print/invoice code pass implemented — live browser/physical-print acceptance pending.**
+**Accounting recovery, performance, professional print/invoice, and remaining UAT bug-batch code passes complete — final consolidated Claude Opus 5 live browser/print/performance acceptance pending.**
 
 The previous state recorded here — "manual UAT only / no code blockers" — is obsolete. A deep user-recorded production UAT on 2026-09-06 exposed new real client-facing problems in accounting correctness, AI units/language, performance, loading states, encoding, print isolation, and invoice professionalism.
 
@@ -225,13 +225,13 @@ Do not spontaneously create the next coding prompt before the user approves the 
 
 # Exact next decision / recommended sequence
 
-The application-side performance code pass (Phase V1-B) and the professional print/invoice code pass are complete on `main`. Their browser/network/visual acceptance is deferred to the final Claude Opus 5 consolidated UAT and must not be marked solved from source tests alone. The next implementation task is the remaining UAT bug batch.
+Accounting recovery, performance, professional print/invoice, and the remaining UAT bug batch (Rider false-empty, Roman Urdu enforcement, mojibake cleanup, AI retry/loading UX) are complete on `main`. None of these are marked solved from source tests alone. The final consolidated Claude Opus 5 live browser/print/performance acceptance is the next gate.
 
 Recommended sequence:
 1. **Claude Opus 5 live browser verification** of the pushed P0 deterministic correctness fix and the performance pass (network waterfall, Vercel TTFB, Supabase query/RPC time, region latency).
 2. **Performance recovery/profile** — application-side code pass complete; browser acceptance pending.
 3. **Claude Opus 5 consolidated browser/physical-print acceptance** of all four professional print formats.
-4. **Remaining UAT bug batch:** Rider false-empty, Roman Urdu enforcement, encoding/mojibake, and AI retry/loading UX.
+4. **Remaining UAT bug batch** — code pass complete (Rider false-empty, Roman Urdu, mojibake, AI retry/loading UX); browser acceptance pending.
 5. Final all-role/mobile/print UAT.
 6. Client handover/approval.
 7. Only then advance `CURRENT_WORK.md` to Version 2.

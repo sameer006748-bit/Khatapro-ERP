@@ -215,7 +215,7 @@ export function AiAssistant({ user, activeScreen }: { user: MeUser; activeScreen
               <div className="flex items-center gap-2 text-sm text-muted-foreground">
                 <Loader2 className="size-4 animate-spin" />
                 {showRetryingState
-                  ? 'The response could not be completed. Retrying...'
+                  ? 'Still working — a slow connection can make this take a little longer.'
                   : 'KhataPro AI is reviewing your business data...'}
               </div>
             )}

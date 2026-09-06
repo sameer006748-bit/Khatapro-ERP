@@ -224,7 +224,7 @@ export function AccountsView({ user }: { user: MeUser }) {
 
       {/* Daily summary */}
       <section className="overflow-hidden rounded-lg border border-border bg-card" aria-label="Today movement">
-        <div className="border-b border-border px-4 py-2.5"><h2 className="text-sm font-semibold text-foreground">Todayâ€™s Movement</h2></div>
+        <div className="border-b border-border px-4 py-2.5"><h2 className="text-sm font-semibold text-foreground">Today’s Movement</h2></div>
         <div className="grid grid-cols-2 divide-x divide-y divide-border md:grid-cols-4 md:divide-y-0">
           <SummaryCard icon={TrendingUp} label="Money In Today" value={activitySummary(moneyInToday)} color="text-emerald-700" />
           <SummaryCard icon={TrendingDown} label="Money Out Today" value={activitySummary(moneyOutToday)} color="text-amber-700" />

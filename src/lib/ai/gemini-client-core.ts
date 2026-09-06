@@ -33,6 +33,9 @@ export type GeminiRetryValidation<T> =
   | { valid: true; value: T }
   | { valid: false; retryable: boolean; reason: string }
 
+/** Categories a single automatic retry can plausibly recover from. */
+const TRANSIENT_RETRY_CATEGORIES = new Set<GeminiFailureCategory>(['timeout', 'provider_unavailable'])
+
 export async function runGeminiWithSingleRetry<T>(args: {
   call: (strict: boolean) => Promise<string>
   validate: (text: string, strict: boolean) => GeminiRetryValidation<T>
@@ -52,7 +55,15 @@ export async function runGeminiWithSingleRetry<T>(args: {
       }
       args.onRetry?.(validation.reason)
     } catch (error) {
-      if (!(error instanceof GeminiClientError) || error.category !== 'truncated') throw error
+      const category = error instanceof GeminiClientError ? error.category : null
+      // One automatic retry also covers genuinely transient network/provider
+      // failures (timeout, provider unavailable). Never retry auth, permission,
+      // quota or rate-limit failures — a retry cannot fix those.
+      if (!strict && category && TRANSIENT_RETRY_CATEGORIES.has(category)) {
+        args.onRetry?.(category)
+        continue
+      }
+      if (!category || category !== 'truncated') throw error
       if (strict) throw error
       args.onRetry?.('truncated')
     }

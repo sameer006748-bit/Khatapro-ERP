@@ -516,10 +516,14 @@ test('system instruction requests concise structured output and professional Rom
   assert.match(sys, /Do not repeat the question/)
 })
 
-test('English and Roman Urdu questions resolve to the requested professional language', () => {
+test('explicit language selection is authoritative unless the prompt asks otherwise', () => {
   const sys = buildSystemInstruction('simple-english')
-  assert.equal(resolveAnswerLanguage('Please explain this Trial Balance report.', 'roman-urdu'), 'simple-english')
-  assert.equal(resolveAnswerLanguage('Aaj business ki position kya hai?', 'simple-english'), 'roman-urdu')
+  // Selection wins even when the question is typed in the other language.
+  assert.equal(resolveAnswerLanguage('Please explain this Trial Balance report.', 'roman-urdu'), 'roman-urdu')
+  assert.equal(resolveAnswerLanguage('Aaj business ki position kya hai?', 'simple-english'), 'simple-english')
+  // Only an explicit in-prompt request for the other language overrides it.
+  assert.equal(resolveAnswerLanguage('Please answer in English.', 'roman-urdu'), 'simple-english')
+  assert.equal(resolveAnswerLanguage('Roman Urdu mein batao.', 'simple-english'), 'roman-urdu')
   assert.match(sys, /simple, professional English/i)
 })
 
@@ -648,7 +652,7 @@ test('user-facing assistant UI is English, branded, and contains no provider ter
   const assistant = await source('src/components/erp/ai-assistant.tsx')
   const actions = await source('src/components/erp/ai-actions.tsx')
   assert.match(assistant, /KhataPro AI is reviewing your business data/)
-  assert.match(assistant, /The response could not be completed\. Retrying/)
+  assert.match(assistant, /Still working — a slow connection can make this take a little longer/)
   assert.match(assistant, /Read-only business and accounting assistance/)
   assert.match(assistant, />Summary</)
   assert.match(assistant, />Accounting Impact</)

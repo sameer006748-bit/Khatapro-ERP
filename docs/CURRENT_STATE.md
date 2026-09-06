@@ -120,8 +120,8 @@ Deep user print UAT showed a visible background/transition glitch and an invoice
 
 **2026-09-07 source pass complete, live acceptance pending:** the fixed-delay cleanup and click-time style injection were replaced by lifecycle-based print isolation; application roots, portal siblings, modal/backdrop, and the off-screen measurement DOM are excluded from print. The shared document model now renders a professional header, Bill To/Supplier and document-detail blocks, ruled items, totals/payment hierarchy, status, signature line, and footer across Half A4, Two-up, Full A4, and thermal. No accounting or serialization logic changed. Claude Opus 5 must still visually and physically validate every format.
 
-## Encoding / small UX defect
-Broken mojibake strings are visible in production, e.g. `Loading COD balancesâ€¦` and `Todayâ€™s Movement`. UTF-8 text cleanup is required.
+## Encoding / mojibake (fixed)
+Fixed in the remaining-UAT bug batch: the broken mojibake strings (`Loading COD balances…`, `Settling…`, `Today’s Movement`) were replaced with proper Unicode characters. No mojibake remains in client-facing source.
 
 ## Settled migration facts — do not reopen without new evidence
 - `00037` applied.
@@ -143,11 +143,11 @@ Previous "manual UAT only / no code blockers" status is obsolete after deep UAT.
 Current blockers/priorities:
 1. **Claude Opus 5 live browser verification** of Trial Balance balance, AI rupee values, Today semantics and Financial Reports/Accounts money totals.
 2. Pervasive performance/slowness recovery — application-side code pass complete; browser/network acceptance pending.
-3. Rider false-empty loading state.
-4. Roman Urdu preference enforcement + AI retry/latency UX.
-5. Mojibake/encoding cleanup.
+3. Rider false-empty loading state — code pass complete; browser acceptance pending.
+4. Roman Urdu preference enforcement + AI retry/latency UX — code pass complete; browser acceptance pending.
+5. Mojibake/encoding cleanup — code pass complete.
 6. Claude Opus 5 consolidated browser/physical-print acceptance of the professional print/invoice code pass.
-7. Remaining UAT bug batch: Rider false-empty, Roman Urdu enforcement, encoding/mojibake, AI retry/loading UX.
+7. Remaining UAT bug batch — code pass complete; browser acceptance pending.
 8. Final role/mobile/print UAT + client approval.
 
 ## Validation posture

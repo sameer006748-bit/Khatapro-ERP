@@ -133,14 +133,17 @@ export function canUseAiForScreen(subject: AiAccessSubject, screen: AiScreen): b
   return required.some((permission) => permissions.has(permission))
 }
 
-const ROMAN_URDU_MARKERS = /\b(kya|kyun|kaise|hai|hain|tha|thi|mein|main|ka|ki|ke|ko|se|aur|lekin|batao|batayein|samjhao|samjhayein|karein|karun|aaj|kal|yeh|is|mera|meri|mujhe)\b/gi
-const ENGLISH_MARKERS = /\b(what|why|how|is|are|was|were|the|this|that|please|explain|show|check|business|accounting|report|screen|balance)\b/gi
+/**
+ * The user's explicit selection is authoritative. A prompt may only override
+ * it when it explicitly asks for the other language — never merely because the
+ * question happens to be typed in that language.
+ */
+const EXPLICIT_ENGLISH_REQUEST = /english\s+(?:mein|main)\b|\b(?:answer|reply)\s+in\s+(?:simple\s+)?english\b/i
+const EXPLICIT_ROMAN_URDU_REQUEST = /(?:roman urdu|urdu)\s+(?:mein|main)\b|\b(?:answer|reply)\s+in\s+(?:roman\s+)?urdu\b/i
 
 export function resolveAnswerLanguage(prompt: string, selected: AiLanguage): AiLanguage {
-  const romanCount = prompt.match(ROMAN_URDU_MARKERS)?.length ?? 0
-  const englishCount = prompt.match(ENGLISH_MARKERS)?.length ?? 0
-  if (romanCount > englishCount) return 'roman-urdu'
-  if (englishCount > romanCount) return 'simple-english'
+  if (EXPLICIT_ENGLISH_REQUEST.test(prompt)) return 'simple-english'
+  if (EXPLICIT_ROMAN_URDU_REQUEST.test(prompt)) return 'roman-urdu'
   return selected
 }
 
