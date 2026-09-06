@@ -92,10 +92,12 @@ export function CounterSaleView({ user }: { user: MeUser }) {
   )
 
   const paymentAccountsQ = usePaymentAccounts()
+  // Shared master data. Every posting/return/product edit invalidates
+  // ['products'], so a longer staleTime only skips plain navigation refetches.
   const productsQ = useQuery<{ rows: Product[] }>({
     queryKey: ['products'],
     queryFn: ({ signal }) => apiFetchJson('/api/products', { signal }),
-    staleTime: 30_000,
+    staleTime: 300_000,
   })
   const salesmenQ = useQuery<{ rows: Salesman[] }>({
     queryKey: ['salesmen'],

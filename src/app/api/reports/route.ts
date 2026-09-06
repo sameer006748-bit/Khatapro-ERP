@@ -124,22 +124,33 @@ export const GET = withObservability('/api/reports', async (req: Request) => {
       }
     }
     switch (type) {
-      case 'profit-loss': return NextResponse.json({
-        rows: await reportProfitLoss(bid, fromDate, toDate),
-        classification: await reportClassification(type, bid, loaded.profileId),
-      })
-      case 'balance-sheet': return NextResponse.json({
-        rows: await reportBalanceSheet(bid, toDate),
-        classification: await reportClassification(type, bid, loaded.profileId),
-      })
+      case 'profit-loss': {
+        // The report rows and the classification overlay are independent reads;
+        // run them in parallel so label enrichment never serializes behind the RPC.
+        const [rows, classification] = await Promise.all([
+          reportProfitLoss(bid, fromDate, toDate),
+          reportClassification(type, bid, loaded.profileId),
+        ])
+        return NextResponse.json({ rows, classification })
+      }
+      case 'balance-sheet': {
+        const [rows, classification] = await Promise.all([
+          reportBalanceSheet(bid, toDate),
+          reportClassification(type, bid, loaded.profileId),
+        ])
+        return NextResponse.json({ rows, classification })
+      }
       case 'trial-balance': return NextResponse.json({ rows: await reportTrialBalance(bid, fromDate, toDate) })
       case 'sales-summary': return NextResponse.json({ rows: await reportSalesSummary(bid, fromDate, toDate) })
       case 'inventory-valuation': return NextResponse.json({ rows: await reportInventoryValuation(bid) })
       case 'cash-flow': return NextResponse.json({ rows: await reportCashFlow(bid, fromDate, toDate) })
-      case 'expense': return NextResponse.json({
-        rows: await reportExpenseSummary(bid, fromDate, toDate),
-        classification: await reportClassification(type, bid, loaded.profileId),
-      })
+      case 'expense': {
+        const [rows, classification] = await Promise.all([
+          reportExpenseSummary(bid, fromDate, toDate),
+          reportClassification(type, bid, loaded.profileId),
+        ])
+        return NextResponse.json({ rows, classification })
+      }
       case 'customer-outstanding': return NextResponse.json({ rows: await reportCustomerOutstanding(bid) })
       case 'vendor-outstanding': return NextResponse.json({ rows: await reportVendorOutstanding(bid) })
       case 'sales-detail': return NextResponse.json({ rows: await reportSalesDetail(bid, fromDate, toDate) })

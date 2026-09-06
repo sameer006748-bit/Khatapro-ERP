@@ -52,7 +52,8 @@ export function InventoryView({ user }: { user: MeUser }) {
     | null
   >(null)
 
-  const productsQ = useQuery<{ rows: Product[] }>({ queryKey: ['products'], queryFn: ({ signal }) => apiFetchJson('/api/products', { signal }) })
+  // Shared master data; invalidated on product/stock mutations.
+  const productsQ = useQuery<{ rows: Product[] }>({ queryKey: ['products'], queryFn: ({ signal }) => apiFetchJson('/api/products', { signal }), staleTime: 300_000 })
   const catQ = useQuery<{ rows: Category[] }>({ queryKey: ['product-categories'], queryFn: ({ signal }) => apiFetchJson('/api/product-categories', { signal }) })
   const movementsQ = useQuery<{ rows: Movement[] }>({ queryKey: ['stock-movements'], queryFn: ({ signal }) => apiFetchJson('/api/stock-movements', { signal }) })
 

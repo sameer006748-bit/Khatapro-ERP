@@ -248,11 +248,11 @@ Do not spontaneously create the next coding prompt before the user approves the 
 
 # Exact next decision / recommended sequence
 
-No coding task is currently authorized merely by this document refresh. The next step is to choose the first bounded recovery task with the user.
+The application-side performance code pass (Phase V1-B) is complete on `main`. Its browser/network acceptance is deferred to the final Claude Opus 5 consolidated UAT and must not be marked solved from source tests alone. The next implementation task is print isolation + professional invoice redesign.
 
 Recommended sequence:
-1. **Claude Opus 5 live browser verification** of the pushed P0 deterministic correctness fix.
-2. **Performance recovery/profile** across representative major screens.
+1. **Claude Opus 5 live browser verification** of the pushed P0 deterministic correctness fix and the performance pass (network waterfall, Vercel TTFB, Supabase query/RPC time, region latency).
+2. **Performance recovery/profile** — application-side code pass complete; browser acceptance pending.
 3. **Print isolation + professional invoice redesign** across all formats.
 4. Rider false-empty + Roman Urdu + retry/latency + mojibake cleanup.
 5. Final all-role/mobile/print UAT.

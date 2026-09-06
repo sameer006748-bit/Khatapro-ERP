@@ -43,7 +43,8 @@ export function OnlineSaleView({ user }: { user: MeUser }) {
   const [idempotencyKey, setIdempotencyKey] = useState(() => crypto.randomUUID())
 
   const paymentAccountsQ = usePaymentAccounts()
-  const productsQ = useQuery<{ rows: Product[] }>({ queryKey: ['products'], queryFn: ({ signal }) => apiFetchJson('/api/products', { signal }), staleTime: 30_000 })
+  // Shared master data; invalidated on posting/returns/product edits.
+  const productsQ = useQuery<{ rows: Product[] }>({ queryKey: ['products'], queryFn: ({ signal }) => apiFetchJson('/api/products', { signal }), staleTime: 300_000 })
   const salesmenQ = useQuery<{ rows: Salesman[] }>({ queryKey: ['salesmen'], queryFn: ({ signal }) => apiFetchJson('/api/salesmen', { signal }), staleTime: 300_000, enabled: mustPickSalesman })
 
   const activeSalesmen = useMemo(() => (salesmenQ.data?.rows ?? []).filter(s => s.isActive !== false), [salesmenQ.data])

@@ -319,6 +319,14 @@ Performance target direction:
 
 Current recommendation: optimize/profile the existing stack first; make an infrastructure decision only from measurements.
 
+### Application-side performance pass — completed (code-only)
+
+A bounded source-level performance pass landed on `main` (Phase V1-B, application side), without any infrastructure change:
+- Financial Reports (`/api/reports`) now runs the report RPC and the account-classification overlay in parallel (previously serialized) for profit-loss, balance-sheet and expense.
+- Products master data is cached longer (5 min) across Counter/Online/OFC/Other sale and Inventory; stock correctness is preserved because every posting/return/product edit still invalidates the shared `['products']` key.
+
+This is a code-level change only. It has **not** been browser/network-profiled and does not establish the root cause of the observed 5–6s Financial Reports / 3–4s Counter Sale latencies. The remaining bottleneck classification (client vs API/server vs database/query vs hosting/region) is unverified until the final Claude Opus 5 consolidated browser UAT.
+
 ---
 
 # PART G — PRINT / INVOICE CURRENT POSITION
@@ -508,7 +516,7 @@ Trust order:
 
 ## 35. One-paragraph state for a new agent
 
-KhataPro ERP is a substantial live Version 1 ERP on `main`, Vercel + Supabase legacy production schema, with major sales/accounting/money/Rider/audit/print/AI foundations implemented. The September 6 Trial Balance Rs 2,505 and AI 100× findings were deterministically reconciled and fixed in source without changing financial data: inactive historical money-account lines are retained, date/cancellation filters are real, AI receives explicit rupees, Today flow/snapshot semantics are separated, and Financial Reports includes custom configured money accounts. Claude Opus 5 live browser acceptance is the exact next gate. Language/retry/loading/encoding issues, broad performance, and print professionalism still remain Version 1 work, so the product is **not yet client-closed** and Version 2 remains deferred.
+KhataPro ERP is a substantial live Version 1 ERP on `main`, Vercel + Supabase legacy production schema, with major sales/accounting/money/Rider/audit/print/AI foundations implemented. The September 6 Trial Balance Rs 2,505 and AI 100× findings were deterministically reconciled and fixed in source without changing financial data: inactive historical money-account lines are retained, date/cancellation filters are real, AI receives explicit rupees, Today flow/snapshot semantics are separated, and Financial Reports includes custom configured money accounts. Claude Opus 5 live browser acceptance is the exact next gate. Language/retry/loading/encoding issues and print professionalism still remain Version 1 work; a bounded application-side performance pass has landed (parallel financial-report reads, longer master-data caching) but its browser/network acceptance is still pending, so the product is **not yet client-closed** and Version 2 remains deferred.
 
 ---
 

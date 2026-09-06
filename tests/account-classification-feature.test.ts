@@ -379,9 +379,9 @@ test('only account-level financial reports receive classification labels', () =>
 })
 
 test('report rows and totals are returned exactly as the report RPC produced them', () => {
-  assert.match(reportsApi, /rows: await reportProfitLoss\(bid, fromDate, toDate\)/)
-  assert.match(reportsApi, /rows: await reportBalanceSheet\(bid, toDate\)/)
-  assert.match(reportsApi, /rows: await reportExpenseSummary\(bid, fromDate, toDate\)/)
+  assert.match(reportsApi, /Promise\.all\(\[\s*reportProfitLoss\(bid, fromDate, toDate\)/)
+  assert.match(reportsApi, /Promise\.all\(\[\s*reportBalanceSheet\(bid, toDate\)/)
+  assert.match(reportsApi, /Promise\.all\(\[\s*reportExpenseSummary\(bid, fromDate, toDate\)/)
   // The overview KPIs and the statement sections keep reading the fixed codes.
   assert.match(reportsApi, /r\.section === 'REVENUE'/)
   assert.match(reportsApi, /r\.section === 'ASSET'/)
@@ -415,7 +415,7 @@ test('the Expense report is the one financial report that can be filtered', () =
 })
 
 test('Cash Flow and the in-report Trial Balance were left alone', () => {
-  assert.doesNotMatch(reportsApi, /case 'cash-flow': return NextResponse\.json\(\{[\s\S]{0,120}classification/)
+  assert.match(reportsApi, /case 'cash-flow': return NextResponse\.json\(\{ rows: await reportCashFlow\(bid, fromDate, toDate\) \}\)/)
   assert.match(reportsApi, /case 'trial-balance': return NextResponse\.json\(\{ rows: await reportTrialBalance\(bid, fromDate, toDate\) \}\)/)
 })
 

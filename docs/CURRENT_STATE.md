@@ -105,6 +105,8 @@ Current evidence does **not** prove free Vercel/Supabase hosting is the sole cau
 
 A dedicated performance recovery/profile is now required before any decision to move data/hosting. Domain purchase alone does not improve speed; do not migrate Supabase to Hostinger/VPS by guess.
 
+A bounded application-side performance code pass is complete on `main` (parallel financial-report reads, longer master-data caching). Browser/network performance acceptance is still pending for the final Claude Opus 5 consolidated UAT, so performance is not yet marked solved.
+
 ## Print / invoice state
 A shared print foundation exists for:
 - Half A4,
@@ -142,7 +144,7 @@ Previous "manual UAT only / no code blockers" status is obsolete after deep UAT.
 
 Current blockers/priorities:
 1. **Claude Opus 5 live browser verification** of Trial Balance balance, AI rupee values, Today semantics and Financial Reports/Accounts money totals.
-2. Pervasive performance/slowness recovery.
+2. Pervasive performance/slowness recovery — application-side code pass complete; browser/network acceptance pending.
 3. Rider false-empty loading state.
 4. Roman Urdu preference enforcement + AI retry/latency UX.
 5. Mojibake/encoding cleanup.

@@ -61,20 +61,21 @@ export function OtherSaleView({ user }: { user: MeUser }) {
   const postingRef = useRef(false)
 
   const paymentAccountsQ = usePaymentAccounts()
+  // Shared master data; invalidated on posting/returns/product edits.
   const productsQ = useQuery<{ rows: Product[] }>({
     queryKey: ['products'],
     queryFn: ({ signal }) => apiFetchJson('/api/products', { signal }),
-    staleTime: 30_000,
+    staleTime: 300_000,
   })
   const salesmenQ = useQuery<{ rows: Salesman[] }>({
     queryKey: ['salesmen'],
     queryFn: ({ signal }) => apiFetchJson('/api/salesmen', { signal }),
-    staleTime: 60_000,
+    staleTime: 300_000,
   })
   const customersQ = useQuery<{ rows: Customer[] }>({
     queryKey: ['customers'],
     queryFn: ({ signal }) => apiFetchJson('/api/customers', { signal }),
-    staleTime: 60_000,
+    staleTime: 300_000,
   })
 
   const accounts: PaymentAccountOption[] = paymentAccountsQ.accounts
