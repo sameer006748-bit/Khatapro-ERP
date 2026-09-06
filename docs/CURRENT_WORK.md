@@ -1,107 +1,283 @@
 # KhataPro ERP — Current Work
 
-Last updated: 2026-09-05
+Last updated: **2026-09-06**
+
+Read `docs/PROJECT_MEMORY.md` first for the complete A-to-Z handoff/history/future context.
 
 ## Current version
-**Version 1 — final client stabilization and handover.**
+**Version 1 — deep UAT recovery / professional release polish.**
 
-The intelligent/proactive product vision is intentionally deferred to **Version 2**, which starts only after the client receives and approves Version 1.
+Version 2 intelligent/proactive product work remains deferred until the client receives and approves Version 1.
 
 ## Current phase
-**Manual user UAT + client approval.**
+**Production-evidence recovery after deep manual UAT.**
+
+The previous state recorded here — "manual UAT only / no code blockers" — is obsolete. A deep user-recorded production UAT on 2026-09-06 exposed new real client-facing problems in accounting correctness, AI units/language, performance, loading states, encoding, print isolation, and invoice professionalism.
 
 ## Current objective
-**Manual user UAT + client approval.** All Version 1 code work is complete, committed to `main` and deployed. What remains is not code: the user manually verifies the client paths in a real browser and on mobile, completes production data setup, and hands the system to the client for approval.
+Make Version 1 genuinely client-ready by resolving the newly proven/suspected issues with bounded production-evidence tasks, not another broad "audit everything" loop.
+
+The acceptance standard is not merely green tests. The live stable URL must behave correctly:
+
+`https://khatapro-erp.vercel.app`
 
 ## Why this is next
-Every known code blocker is closed and every gate is green. Continuing to audit the codebase cannot advance the release — only manual verification and the client's approval can. Do not open a new audit pass to answer "is it ready?"; the answer is recorded below.
+Earlier closeout/recovery work successfully fixed several blockers live, but the user's latest deep UAT shows the product still does not feel/behave like a finished professional ERP in all important areas.
 
-## Version 1 rule
-Until client handover and approval:
-- fix bugs before adding features,
-- do not begin Version 2 AI/intelligence implementation,
-- do not refactor accepted workflows solely for future architecture,
-- do not expand scope beyond production correctness, cleanup, role/mobile/print verification and handover readiness unless the client requests it.
+No agent should now claim "READY FOR CLIENT HANDOVER" until the current list is closed or deliberately accepted by the user/client.
 
-## Already complete in this phase
-- verified release branch merged to `main`,
-- production money-account identity persistence applied and verified,
-- Cash/Bank business-account simplification,
-- legacy money-account bridge,
-- simple user account categories + auto-linked ledgers,
-- Expense Batch simplification/posting recovery,
-- Rider session identity recovery,
-- Rider thumb-first UX,
-- Rider account relinking UI,
-- latest Rider hotfix deployed to production,
-- mobile `More` navigation and Online Sale → View Invoice hotfix (`e9a7a93`), deployed and verified,
-- Version 1 closeout batch (`088128a`): product-creation production blocker fixed, shell-navigation primitive, permission/lineage/print/AI test coverage, dead-spec retirement, AI model alignment,
-- latest full regression gate: 784/784 tests passing.
+---
 
-## Closed — do not reopen
-The navigation/invoice hotfix (`e9a7a93`) and the Version 1 closeout batch (`088128a`) are both complete, committed, pushed and deployed. Their findings are settled; re-auditing them does not change release readiness.
+# Already complete / do not re-audit by default
 
-Settled facts, verified by read-only production introspection on 2026-09-05:
-- Migrations `00037`, `00038`, `00039`, `00040`, `00041`, `00042` and the business-account identity migration are **applied** to production. Do not re-verify, do not re-apply.
-- Migration `00012` opening stock is **not applied**; `post_opening_stock` and `post_opening_stock_ledger` are both absent. This is an accepted Version 1 limitation, not an open task: opening quantity at product creation is refused with a message pointing to Stock Entry, and `create_stock_movement` is present, so the workaround is real.
-- The rider workflow is **schema-complete** on production: all 11 rider RPCs and all 5 rider tables the app uses exist. Earlier notes claiming otherwise were wrong. What remains is data, not schema.
-- Accepted Version 1 limitations, all failing closed with clear messages: sale discounts refused, mixed same-bill returns refused, opening stock at product creation refused, no in-app user deactivation.
+## Core release foundation
+- sales/returns/commissions foundations,
+- Cash/Bank business-account model,
+- readable business-account identities,
+- simple account categories + auto-linked ledgers,
+- Expense Batch recovery,
+- Rider identity/relinking and thumb-first UX,
+- navigation/invoice recovery,
+- permission denial response recovery,
+- AI encryption/connectivity recovery,
+- shared invoice print foundation.
 
-## Validation posture
-Agent-side browser automation is intentionally **not** used. Browser, mobile and print verification is manual and user-owned.
+## Settled production migration facts
+Verified previously; do not re-verify/re-apply without new directly relevant evidence:
+- `00037` applied,
+- `00038` applied,
+- `00039` applied,
+- `00040` applied,
+- `00041` applied,
+- `00042` applied,
+- business-account identity migration applied,
+- `00012` opening stock not applied and remains an accepted Version 1 limitation with Stock Entry workaround.
 
-Code gates on `088128a`, all green: full regression 784/784, `npx tsc --noEmit`, changed-file ESLint, `npm run build`, `git diff --check`.
+## Recent important recovery commits
+- `e9a7a93` — mobile More / invoice-navigation recovery work.
+- `088128a` — Version 1 closeout batch / product-create recovery and broader release gates.
+- `ffc5493` — guarded API denial 500→clean 403 recovery.
+- `75319bc` — AI output-token budget 800→2048 to stop `MAX_TOKENS` truncation.
 
-## Version 1 exit gate
-Version 1 is not considered closed until:
-- known P0/P1 client blockers are resolved,
-- manual user browser checks pass,
-- final production data/role/print/handover checks are complete,
-- the client receives the system,
-- and the client approves the delivered Version 1.
+Check current `main` before treating these as HEAD; documentation commits may follow without changing application behavior.
 
-Only then should `CURRENT_WORK.md` be advanced to a Version 2 phase from `ROADMAP.md`.
+## AI connectivity state
+Live recovery achieved:
+- Save Key PASS,
+- Test Connection PASS,
+- model `gemini-3.5-flash`,
+- basic Ask PASS,
+- business-data Ask PASS.
 
-## Known blockers / data realities
-Nothing in the code blocks handover. What remains is owner-side work:
-- **Rider data.** A real Rider login must be linked to the intended `riders` row (Delivery → Riders → Connect Account), and at least one real delivery order must exist for meaningful delivery-outcome UAT. Do not fabricate delivery data.
-- **QA/demo records.** `QA TEST FABRIC 01`, `QA TEST TEMP ITEM 01` and `QA TEST VENDOR 01` carry posted `INV-0001` / `PUR-0001`. Deactivate them; never delete posted history, and never delete by name without inspecting references first.
-- **Credentials.** The four `*@test.local` logins are reset through Setup → Users → Reset Password. Version 1 has no in-app user deactivation, so a password reset is the supported way to retire a test login.
-- **AI.** The Owner enters a Gemini API key in Settings, runs Test Connection, and asks one question. Not a release blocker.
-- Historical docs contain stale branch/migration claims. Use canonical docs + current repository/database reality.
+Do not reopen AI configuration/decryption/model-access unless live evidence shows that path failed again.
 
-## Do not touch / do not regress
-- Do not broad-apply migrations.
-- Do not move production toward the incompatible UUID-ledger architecture casually.
-- Do not change sales posting while fixing invoice navigation.
-- Do not disturb Rider four-item navigation or thumb-first UX.
-- Do not weaken server permissions to fix UI navigation.
-- Do not remove audit history for posted/used records.
-- Do not replace readable account identities with numeric ledger codes.
-- Do not let AI become the authoritative accounting calculator.
-- Do not start Version 2 intelligence work before Version 1 client approval.
+The current AI defects are **not connectivity**; they are data-unit/language/period/latency behavior described below.
 
-## Exact next task
-**Manual user UAT + client approval.**
+---
 
-Manual UAT order (start with the first item — it is the bug that was just fixed):
-1. Add a product.
-2. One sale per channel (Counter, Online, OFC, Other), one return, invoice detail from Sales List.
-3. Print one invoice in all four modes: Half A4, Two-on-A4, Full A4, 80mm. Confirm no internal commission/accounting data appears on a customer copy.
-4. Mobile navigation for Owner/Admin, Accountant, Salesman: every `More` item opens the page it names; Rider navigation stays exactly Home / Deliveries / Cash / Profile.
-5. Link the Rider account, run one delivery and one COD submission.
-6. AI assistant: enter key, Test Connection, ask one question.
-7. Reset the four test-account passwords.
+# Current blockers / priorities
 
-No further code audits before client approval. After client approval, move to the first approved Version 2 phase in `ROADMAP.md`.
+## P0 — accounting and deterministic trust
 
-## Future agent bootstrap
-Before meaningful work, read:
-1. `docs/VISION.md`
-2. `docs/ARCHITECTURE.md`
-3. `docs/CURRENT_STATE.md`
-4. this file
-5. relevant section of `docs/ROADMAP.md`
-6. task-specific code/docs and recent Git history only as needed.
+### 1. Trial Balance difference Rs 2,505.00
+Deep UAT shows Trial Balance/Financial Reports out of balance by **Rs 2,505.00**.
 
-After every meaningful task, update whichever canonical docs changed in reality before declaring the task complete.
+Required approach:
+- reproduce on stable production,
+- identify exact ledger/journal/posting rows causing the difference,
+- compare Trial Balance reader vs Day Book/ledger truth,
+- determine whether this is bad UAT data, a posting defect, or a report/query defect,
+- fix only the real root cause,
+- never force-balance totals cosmetically.
+
+### 2. AI money-unit scaling ~100×
+Observed AI answers treat rupee/paisa values incorrectly, e.g. amounts around Rs 20,000 being explained as ~PKR 2,000,000 and similar 100× errors for profit/payables.
+
+Required approach:
+- inspect deterministic AI fact payload,
+- make currency units explicit/normalized before the LLM,
+- reuse trusted money-format/serialization logic,
+- add tests that prove exact rupee values,
+- never ask the LLM to infer whether a raw integer means paisas or rupees.
+
+### 3. Verify suspicious semantics before changing accounting
+Not yet proven solely from video:
+- AI period scoping may mix Today/current/period facts,
+- Financial Reports Cash/Bank figure vs Accounts & Balances total may represent different definitions.
+
+Verify definitions and source payloads first. Do not "fix" a deliberate semantic difference by visual guess.
+
+---
+
+## P1 — performance / perceived quality
+
+### 4. Pervasive ERP slowness
+User reports essentially A-to-Z navigation/actions are slow. Video confirms multi-second waits; Financial Reports was roughly 5–6 second class in the observed run.
+
+Do not blame free Vercel/Supabase without measurements.
+
+Performance recovery must measure:
+- click-to-usable times across major screens,
+- browser Network waterfall,
+- Vercel/API TTFB and function time,
+- Supabase query/RPC time,
+- serial waterfalls,
+- repeated shared-data refetches,
+- region/connection latency,
+- heavy report query plans where applicable,
+- client render/loading-state time.
+
+Use caching/prefetch only where correctness permits. Loading states must not lie about empty data.
+
+No Hostinger/Supabase data migration should be proposed as the primary fix until profiling proves infrastructure is the bottleneck.
+
+### 5. Riders false-empty loading state
+Observed transition:
+- `Riders (0)` / "No riders yet"
+- moments later `Riders (3)` with actual records.
+
+Fix loading/empty-state race so unresolved fetch state never renders as authoritative empty data.
+
+### 6. Roman Urdu preference not honored
+With Roman Urdu selected, a fresh AI answer appeared in English.
+
+Ensure user-selected language is included/enforced in the generation contract and preserved on retry.
+
+### 7. AI retry/latency UX
+Observed long "response could not be completed, retrying" state before completion. Existing provider latency can also transiently timeout.
+
+Improve bounded retry/status messaging without hiding real provider errors or creating duplicate requests.
+
+### 8. Mojibake / encoding
+Observed corrupted strings include:
+- `Loading COD balancesâ€¦`
+- `Todayâ€™s Movement`
+
+Clean source strings and verify UTF-8 output.
+
+---
+
+## P1 — print / invoice professionalism
+
+### 9. Print background/transition glitch
+User-recorded print UAT shows visible app/background glitching/ghosting around print invocation.
+
+Current print mechanism combines animated modal/backdrop, hidden print root, body print class, dynamic `@page`, delayed `window.print()` and delayed cleanup.
+
+Required result:
+- printable document isolated cleanly,
+- app/sidebar/modal/background cannot leak into print experience,
+- no visible ghost/flicker during print transition,
+- all four modes still work.
+
+### 10. Professional invoice redesign
+Existing print serialization/content foundation should be preserved, but the document must look like a real professional business invoice.
+
+All sale channels/formats should share one master document identity:
+- verified business header/logo/contact,
+- invoice title/no/date,
+- Bill To/customer block,
+- contextual seller/channel/Rider fields,
+- professional ruled item grid,
+- aligned totals hierarchy,
+- payment/status block,
+- notes/terms where appropriate,
+- optional signature/authorized lines where useful,
+- professional footer,
+- no app-like cards/shadows/pills on printed paper,
+- customer copies never expose internal commission/accounting,
+- Half A4 remains compact but fully professional,
+- Two-up / Full A4 / 80mm adapt density consistently.
+
+The print preview should represent the actual final document more faithfully than the current tiny simplified mini-preview.
+
+---
+
+# Current infrastructure position
+
+## Vercel / Supabase / Hostinger
+Current stack remains Vercel + Supabase.
+
+Known position:
+- free/serverless tier/cold-start/region latency may contribute,
+- current evidence does not establish infrastructure as the primary cause,
+- domain purchase does not make the ERP faster,
+- generic Hostinger shared hosting is not an automatic improvement for this Next.js/API/Supabase architecture,
+- a managed VPS/colocated DB may be faster but creates operational/security/backup/migration responsibilities,
+- do not migrate production data until profiling proves benefit and auth/RLS/RPC/accounting behavior can be preserved.
+
+---
+
+# Version 1 rule
+Until client approval:
+- correctness before cosmetics,
+- fix live bugs before adding features,
+- performance/print professionalism are now valid V1 release work,
+- do not begin Version 2 proactive AI,
+- do not refactor stable accounting/posting paths without root-cause evidence,
+- do not broad-apply migrations,
+- do not weaken permissions,
+- do not delete posted history,
+- do not let AI become the calculator of record.
+
+---
+
+# Validation protocol
+
+For runtime/visual tasks, use live production evidence:
+
+**OBSERVE LIVE → NETWORK/LOG EVIDENCE → ROOT CAUSE → SMALLEST BOUNDED FIX → FOCUSED TESTS → FULL GATES → PUSH/DEPLOY → VERIFY STABLE ALIAS → RETEST LIVE.**
+
+Required gates according to risk:
+- focused tests,
+- full `npm test` for cross-cutting/release work,
+- `npx tsc --noEmit`,
+- changed-file ESLint,
+- `npm run build`,
+- `git diff --check`,
+- live browser/print UAT.
+
+Never call a runtime-sensitive item PASS solely because source tests are green.
+
+---
+
+# Agent/model workflow requested by user
+Before a coding prompt:
+1. discuss direction,
+2. state criticality,
+3. recommend a suitable model,
+4. user chooses/provides the model,
+5. only then write the coding-agent prompt.
+
+Do not spontaneously create the next coding prompt before the user approves the direction/model.
+
+---
+
+# Exact next decision / recommended sequence
+
+No coding task is currently authorized merely by this document refresh. The next step is to choose the first bounded recovery task with the user.
+
+Recommended sequence:
+1. **P0 deterministic correctness:** Trial Balance Rs 2,505 + AI 100× unit bug (may be split into two prompts if evidence surfaces different roots).
+2. **Performance recovery/profile** across representative major screens.
+3. **Print isolation + professional invoice redesign** across all formats.
+4. Rider false-empty + Roman Urdu + retry/latency + mojibake cleanup.
+5. Final all-role/mobile/print UAT.
+6. Client handover/approval.
+7. Only then advance `CURRENT_WORK.md` to Version 2.
+
+Do not start another whole-repo audit.
+
+---
+
+# Future agent bootstrap
+Before meaningful work read:
+1. `docs/PROJECT_MEMORY.md`
+2. `docs/VISION.md`
+3. `docs/ARCHITECTURE.md`
+4. `docs/CURRENT_STATE.md`
+5. this file
+6. relevant `docs/ROADMAP.md` section
+7. task-specific code/recent Git history only as needed.
+
+After every meaningful milestone, update the canonical docs that changed in reality before declaring the task complete.
