@@ -50,12 +50,21 @@ test('P&L and Balance Sheet have no active app-side accounting patches', () => {
   assert.doesNotMatch(profitLoss, /\.filter\(/)
   assert.match(balanceSheet, /ledger_balance_sheet/)
   assert.doesNotMatch(balanceSheet, /voucher_lines|Current Earnings fallback|correctBalances/)
+  // The legacy branch delegates to the same audited reader the Trial Balance
+  // uses instead of patching balances inline.
+  assert.match(balanceSheet, /aggregateLegacyBalanceSheet\(await readLegacyTrialBalance\(/)
   assert.match(reportsView, /section === 'COST_OF_GOODS_SOLD'/)
   assert.match(reportsView, /BigInt\(row\.amount/)
   assert.doesNotMatch(reportsView, /account_code === '5010'/)
   assert.match(reportsRoute, /section === 'COST_OF_GOODS_SOLD'/)
-  assert.match(reportsRoute, /account_code === '1300'/)
-  assert.doesNotMatch(reportsRoute, /account_code === '1310'|account_code === '5010'/)
+  // Rider COD is '1310' on the legacy production chart and '1300' on the UUID
+  // ledger chart. The legacy chart also has a '1300' salesman control account,
+  // so the lookup must prefer '1310' and never the reverse.
+  assert.match(
+    reportsRoute,
+    /bs\.find\(r => r\.account_code === '1310'\) \?\? bs\.find\(r => r\.account_code === '1300'\)/,
+  )
+  assert.doesNotMatch(reportsRoute, /account_code === '5010'/)
   assert.match(ownerDashboardRoute, /buildOwnerDashboardPayload/)
   assert.match(ownerDashboardSummary, /getAccountByCode\(bid, '4000'\)/)
   assert.doesNotMatch(ownerDashboardSummary, /getAccountByCode\(bid, '4010'\)/)

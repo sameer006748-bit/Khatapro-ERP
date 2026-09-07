@@ -181,7 +181,13 @@ export const GET = withObservability('/api/reports', async (req: Request) => {
         const custRecv = BigInt(bs.find(r => r.account_code === '1200')?.balance ?? 0)
         const vendorPay = BigInt(bs.find(r => r.account_code === '2010')?.balance ?? 0)
         const invValue = BigInt(bs.find(r => r.account_code === '1100')?.balance ?? 0)
-        const riderCod = BigInt(bs.find(r => r.account_code === '1300')?.balance ?? 0)
+        // Rider COD sits at '1310' (Rider COD Receivable) in the legacy
+        // production chart and at '1300' (Rider Held COD) in the UUID ledger
+        // chart. Prefer the legacy code where it exists — the legacy chart also
+        // carries a '1300' salesman control account, so a first-match lookup
+        // across both codes would report Rs 0.00 on production.
+        const riderCodRow = bs.find(r => r.account_code === '1310') ?? bs.find(r => r.account_code === '1300')
+        const riderCod = BigInt(riderCodRow?.balance ?? 0)
         return NextResponse.json({
           kpis: {
             netSales: String(revenue),

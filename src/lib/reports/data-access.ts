@@ -6,6 +6,7 @@ import { getAdminSupabase } from '@/lib/supabase/admin'
 import { bizDateString } from '@/lib/dates'
 import { usesLegacyTransactionSchema } from '@/lib/identity/legacy-bridge'
 import { readLegacyTrialBalance } from '@/lib/accounting/legacy-trial-balance-reader'
+import { aggregateLegacyBalanceSheet } from '@/lib/accounting/legacy-balance-sheet'
 
 /**
  * The production legacy schema keeps its financial reports under their
@@ -32,6 +33,13 @@ export async function reportProfitLoss(businessId: string, fromDate: string, toD
 }
 
 export async function reportBalanceSheet(businessId: string, asOfDate: string) {
+  if (await usesLegacyTransactionSchema()) {
+    // Read the same posted lines the Trial Balance reads. The deployed
+    // `report_balance_sheet` RPC drops deactivated accounts that still carry
+    // posted history, which loses one side of the double entry and leaves the
+    // statement out of balance.
+    return aggregateLegacyBalanceSheet(await readLegacyTrialBalance(businessId, undefined, asOfDate))
+  }
   return financialReportRpc<any[]>('ledger_balance_sheet', 'report_balance_sheet', {
     p_business_id: businessId,
     p_as_of_date: asOfDate,
