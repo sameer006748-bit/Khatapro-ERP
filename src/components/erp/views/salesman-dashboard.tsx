@@ -107,7 +107,7 @@ export function SalesmanDashboard({ user }: { user: any }) {
                 <span className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium">
                   {format(new Date(), 'EEEE, MMMM d, yyyy')}
                 </span>
-                <span className="text-[11px] text-muted-foreground/60">\u00B7</span>
+                <span className="text-[11px] text-muted-foreground/60">·</span>
                 <span className="text-[11px] text-muted-foreground/60" data-num>{karachiTime} PKT</span>
               </div>
               <h1 className="text-3xl sm:text-4xl font-semibold tracking-tight text-foreground mb-2">
@@ -155,7 +155,7 @@ export function SalesmanDashboard({ user }: { user: any }) {
                     <div className="size-9 rounded-lg bg-primary/10 flex items-center justify-center shrink-0"><FileText className="size-4 text-primary" /></div>
                     <div className="min-w-0">
                       <div className="text-sm font-medium text-foreground truncate">{inv.invoice_no}</div>
-                      <div className="text-xs text-muted-foreground truncate">{inv.customer_name || 'Walk-in'} \u00B7 {formatDateTime(inv.invoice_date)}</div>
+                      <div className="text-xs text-muted-foreground truncate">{inv.customer_name || 'Walk-in'} · {formatDateTime(inv.invoice_date)}</div>
                     </div>
                   </div>
                   <div className="text-right shrink-0 ml-2">

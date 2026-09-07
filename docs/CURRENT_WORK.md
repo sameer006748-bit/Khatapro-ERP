@@ -159,6 +159,9 @@ The former fragile seam used click-time `@page` injection, delayed `window.print
 
 Manual post-fix UI evidence found a separate Print Document workspace defect: the interactive dialog was mounted inside the animated invoice view, so its in-tree fixed backdrop did not own the shell viewport. The UI now portals to `document.body` as a solid, viewport-level workspace above the shell, locks background scrolling, and keeps its existing close/reset path. This does not alter the print engine or print-media CSS.
 
+### 10. Salesman history / invoice settlement recovery — complete in source
+Salesman `My Sales` now reaches Sales List through the shell’s own-sales permission path without receiving business-wide visibility; the existing server ownership checks remain authoritative. Invoice detail now shows Net Payable, Paid and Outstanding for paid, unpaid and partial invoices even when no payment-history table exists, while preserving return/net withholding behavior. The Salesman dashboard middle-dot literal is corrected. Manual user verification remains required; AI reliability and final consolidated UAT remain deferred.
+
 The shared document structure now provides verified business identity, document title/number/channel, conditional Bill To/Supplier and document-detail blocks, ruled Item/Qty/Rate/Amount rows, preserved Sold/Ret./Net columns, totals/payment/status hierarchy, memo, timestamp, and an authorized-signature line. Half A4 uses compact print density with conservative overflow blocking; Two-up reuses the same half design; Full A4 uses the same hierarchy with more room; thermal keeps the shared model in receipt form. Customer copies still exclude internal commission unless the explicit internal-copy option is selected. Preview now reflects the same header/table/totals/footer hierarchy.
 
 **Live visual and physical printer acceptance is still pending. Do not call this visually approved from source tests.**

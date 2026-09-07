@@ -36,6 +36,8 @@ Implemented across Counter, Online, OFC, and Other sale paths:
 
 Accepted V1 limitations still fail closed: sale discounts, mixed same-bill returns, and opening stock at product creation.
 
+**2026-09-07 Salesman workflow / invoice summary recovery:** Salesman `My Sales` had an allowed destination but the shell page registry required business-wide `can_view_sales`, so it rewrote the own-sales user to Home. Sales List now permits `can_view_own_sales` as well; its existing API and invoice-detail API ownership checks continue to return only the linked Salesman’s invoices. Invoice detail now always renders deterministic Net Payable, Paid and Outstanding values even when payment history is empty; return-unavailable cases still withhold derived net/outstanding values. The Salesman dashboard now uses an actual middle-dot separator rather than literal `\u00B7`. Manual user verification remains required.
+
 ### Money / business accounts
 Implemented:
 - top-level Cash / Bank model,

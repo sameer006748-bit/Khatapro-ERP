@@ -354,6 +354,8 @@ The former implementation combined an animated dialog/backdrop, a hidden print r
 
 **2026-09-07 print-workspace recovery:** the interactive Print Document UI was still mounted inside the animated invoice view and shell scroll container, so its in-tree `fixed z-50` backdrop could be constrained by that local stacking context while the shell header/sidebar remained visible. The interactive workspace now renders through a `document.body` portal as an opaque, viewport-level `z-[100]` surface with body-scroll lock; the print document DOM and print-media rules were not changed. Manual UI acceptance remains pending.
 
+**2026-09-07 sales workflow recovery:** Salesman `My Sales` correctly requested `sales-list`, but the shell registry admitted that page only for `can_view_sales` and rewrote an own-sales user back to Home. The registry now permits either `can_view_sales` or `can_view_own_sales`; the existing sales-list and invoice-detail API ownership checks continue to restrict a Salesman to their linked records. Invoice settlement totals were incorrectly rendered only when payment-history rows existed, hiding the summary for unpaid invoices; the deterministic invoice fields now render an always-present Net Payable / Paid / Outstanding summary while retaining return-unavailable withholding. Literal `\u00B7` dashboard text was replaced with the actual middle dot. Manual verification remains required.
+
 ## 25. Professional invoice redesign requirement
 
 The existing invoice is functionally structured but not yet at the visual standard expected of a professional business document.

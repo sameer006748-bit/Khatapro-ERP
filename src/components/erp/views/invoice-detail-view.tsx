@@ -246,7 +246,9 @@ export function InvoiceDetailView({ invoiceId, openReturn = false }: { invoiceId
   // outstanding balance is not knowable and is withheld rather than overstated.
   const outstandingKnown = !unavailableSections.includes('returns')
   const returnedTotal = (inv.returns ?? []).reduce((sum, item) => sum + BigInt(item.total), 0n)
-  const outstandingBeforeFloor = BigInt(inv.total) - returnedTotal - BigInt(inv.paidAmount)
+  const netPayableBeforeFloor = BigInt(inv.total) - returnedTotal
+  const netPayable = netPayableBeforeFloor > 0n ? netPayableBeforeFloor : 0n
+  const outstandingBeforeFloor = netPayable - BigInt(inv.paidAmount)
   const outstanding = outstandingBeforeFloor > 0n ? outstandingBeforeFloor : 0n
   const business = q.data.business ?? null
 
@@ -365,13 +367,19 @@ export function InvoiceDetailView({ invoiceId, openReturn = false }: { invoiceId
               ))}
             </tbody>
           </table>
-          <div className="px-5 py-3 border-t border-border bg-muted/30 grid grid-cols-3 gap-2 text-sm">
-            <div><div className="text-[10px] uppercase text-muted-foreground">Total</div><div className="font-semibold text-foreground" data-num>{formatMoney(BigInt(inv.total))}</div></div>
-            <div><div className="text-[10px] uppercase text-muted-foreground">Paid</div><div className="font-semibold text-primary" data-num>{formatMoney(BigInt(inv.paidAmount))}</div></div>
-            <div className="text-right"><div className="text-[10px] uppercase text-muted-foreground">Outstanding</div>{outstandingKnown ? <div className={`font-semibold ${outstanding > 0n ? 'text-amber-600' : 'text-primary'}`} data-num>{formatMoney(outstanding)}</div> : <div className="font-semibold text-amber-700 text-xs">Unavailable</div>}</div>
-          </div>
         </div>
       )}
+
+      {/* Payment history can be empty on an unpaid sale. The deterministic
+          invoice fields must still state what is due. */}
+      <div className="card-3d overflow-hidden" data-settlement-summary>
+        <div className="px-5 py-3.5 border-b border-border"><h2 className="text-sm font-semibold text-foreground">Settlement Summary</h2></div>
+        <div className="px-5 py-3 border-t border-border bg-muted/30 grid grid-cols-3 gap-2 text-sm">
+          <div><div className="text-[10px] uppercase text-muted-foreground">Net Payable</div>{outstandingKnown ? <div className="font-semibold text-foreground" data-num>{formatMoney(netPayable)}</div> : <div className="font-semibold text-amber-700 text-xs">Unavailable</div>}</div>
+          <div><div className="text-[10px] uppercase text-muted-foreground">Paid</div><div className="font-semibold text-primary" data-num>{formatMoney(BigInt(inv.paidAmount))}</div></div>
+          <div className="text-right"><div className="text-[10px] uppercase text-muted-foreground">Outstanding</div>{outstandingKnown ? <div className={`font-semibold ${outstanding > 0n ? 'text-amber-600' : 'text-primary'}`} data-num>{formatMoney(outstanding)}</div> : <div className="font-semibold text-amber-700 text-xs">Unavailable</div>}</div>
+        </div>
+      </div>
 
       {inv.returns && inv.returns.length > 0 && (
         <div className="card-3d overflow-hidden">

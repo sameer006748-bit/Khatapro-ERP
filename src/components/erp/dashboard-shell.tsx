@@ -114,7 +114,8 @@ type SubItem = {
   label: string
   short: string
   icon: LucideIcon
-  perm?: string
+  /** Any listed permission may expose this page; server routes still scope data. */
+  perm?: string | string[]
   ownerOnly?: boolean
   riderOnly?: boolean
 }
@@ -146,7 +147,7 @@ const NAV_CATEGORIES: NavCategory[] = [
       { key: 'online-sale', label: 'Online Sale', short: 'Online', icon: Globe2, perm: 'can_create_sales' },
       { key: 'ofc-sale', label: 'Out-of-City Sale', short: 'Out-of-City', icon: Truck, perm: 'can_create_sales' },
       { key: 'other-sale', label: 'Other Sale', short: 'Other', icon: ShoppingBag, perm: 'can_create_sales' },
-      { key: 'sales-list', label: 'Sales List', short: 'Sales', icon: ReceiptText, perm: 'can_view_sales' },
+      { key: 'sales-list', label: 'Sales List', short: 'Sales', icon: ReceiptText, perm: ['can_view_sales', 'can_view_own_sales'] },
       { key: 'delivery', label: 'Deliveries & Riders', short: 'Delivery', icon: PackageCheck, perm: 'can_view_delivery_orders' },
       { key: 'purchases', label: 'Purchases', short: 'Purchases', icon: PackagePlus, perm: 'can_view_purchases' },
       { key: 'vendors', label: 'Vendors', short: 'Vendors', icon: Store, perm: 'can_view_purchases' },
@@ -264,7 +265,10 @@ function isItemVisible(user: MeUser, item: SubItem): boolean {
   if (item.key === 'delivery' && user.roleName === 'Rider') {
     return user.permissions.includes('can_view_own_orders') || user.permissions.includes('can_view_delivery_orders')
   }
-  if (item.perm) return user.permissions.includes(item.perm)
+  if (item.perm) {
+    const permissions = Array.isArray(item.perm) ? item.perm : [item.perm]
+    return permissions.some((permission) => user.permissions.includes(permission))
+  }
   return true
 }
 
