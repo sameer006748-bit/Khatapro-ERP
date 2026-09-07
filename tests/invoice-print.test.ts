@@ -113,7 +113,7 @@ test('long invoices warn and block half-A4 printing after rendered measurement',
 })
 
 test('the mobile preview and print trigger remain usable', () => {
-  assert.ok(dialog.includes('max-h-[90vh]'))
+  assert.ok(dialog.includes('max-h-[calc(100dvh-1.5rem)]'))
   assert.ok(dialog.includes('overflow-y-auto'))
   assert.ok(button.includes('disabled?: boolean'))
   assert.ok(button.includes('disabled={disabled || loading || ids.length === 0}'))
@@ -156,6 +156,26 @@ test('all four release print formats are offered and each sizes its own page', (
   assert.ok(dialog.includes('<InvoiceDocument model={models[0]} variant="full"'))
   assert.ok(dialog.includes('<InvoiceDocument model={models[0]} variant="half"'))
   assert.ok(dialog.includes('<ThermalReceipt model={models[0]}'))
+})
+
+test('Print Document is a viewport-level workspace, not an in-tree invoice modal', () => {
+  assert.ok(dialog.includes("import { createPortal } from 'react-dom'"))
+  assert.ok(dialog.includes('createPortal('))
+  assert.ok(dialog.includes('document.body'))
+  assert.ok(dialog.includes('data-print-workspace'))
+  assert.ok(dialog.includes('fixed inset-0 z-[100] isolate overflow-y-auto bg-background'))
+  assert.ok(dialog.includes('role="dialog"'))
+  assert.ok(dialog.includes('aria-modal="true"'))
+})
+
+test('Print Document blocks app-shell layers and restores the page after close', () => {
+  assert.ok(dialog.includes("document.body.style.overflow = 'hidden'"))
+  assert.ok(dialog.includes('document.body.style.overflow = previousOverflow'))
+  assert.ok(dialog.includes('z-[100]'), 'the portal must exceed shell header and mobile-nav stacking levels')
+  assert.ok(dialog.includes('pointer-events-none'), 'the workspace must block the invoice behind it')
+  assert.ok(dialog.includes('pointer-events-auto'), 'mode controls remain interactive inside the workspace')
+  assert.ok(dialog.includes('onClick={onClose}'), 'Close and Cancel keep the existing restore path')
+  assert.ok(dialog.includes("if (!open) return null"), 'open/close can remount the workspace repeatedly')
 })
 
 test('shared professional document structure supplies header, party, table, totals, and footer across sheet formats', () => {

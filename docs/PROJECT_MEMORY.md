@@ -352,6 +352,8 @@ The former implementation combined an animated dialog/backdrop, a hidden print r
 
 **2026-09-07 source recovery:** print sizing is now mounted with the selected document before printing; the print surface is isolated through deterministic print CSS; app roots, portal siblings, modal/backdrop, and the off-screen measurement container are excluded; and restoration follows `afterprint`/print-media lifecycle signals rather than a guessed timeout. The final recovery removed the nested animation-frame deferral that could lose Chromium's click user activation, made print-media visibility explicitly reverse the screen-hidden root, and replaced invalid thermal `80mm auto` sizing (which falls back to Letter) with explicit `80mm 297mm`. Owner-only commission now loads only if an internal copy is requested, so customer print selection is not delayed. The shared invoice serialization remains unchanged. This is code/test complete, but visual and physical-printer acceptance remains pending.
 
+**2026-09-07 print-workspace recovery:** the interactive Print Document UI was still mounted inside the animated invoice view and shell scroll container, so its in-tree `fixed z-50` backdrop could be constrained by that local stacking context while the shell header/sidebar remained visible. The interactive workspace now renders through a `document.body` portal as an opaque, viewport-level `z-[100]` surface with body-scroll lock; the print document DOM and print-media rules were not changed. Manual UI acceptance remains pending.
+
 ## 25. Professional invoice redesign requirement
 
 The existing invoice is functionally structured but not yet at the visual standard expected of a professional business document.

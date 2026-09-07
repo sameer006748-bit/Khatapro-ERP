@@ -1,7 +1,8 @@
 'use client'
 
 import { useState, useEffect, useRef, useMemo } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
+import { createPortal } from 'react-dom'
+import { motion } from 'framer-motion'
 import { X, Printer } from 'lucide-react'
 import { formatMoney } from '@/lib/format'
 import { bizDate, bizFormat } from '@/lib/dates'
@@ -190,6 +191,16 @@ export function InvoicePrintDialog({
     localStorage.setItem(STORAGE_KEY, mode)
   }, [mode])
 
+  // The interactive workspace lives in a body portal, but it still needs to
+  // own scrolling while open so the invoice underneath cannot move or receive
+  // pointer input through a nested page container.
+  useEffect(() => {
+    if (!open) return
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => { document.body.style.overflow = previousOverflow }
+  }, [open])
+
   // Real rendered-height overflow detection (hooks must be before early return)
   // Keep a safety allowance for real printer metrics and the document footer.
   // Half A4 must fail closed rather than trim the total or signature line.
@@ -296,19 +307,21 @@ export function InvoicePrintDialog({
   }
 
   return (
-    <AnimatePresence>
-      {open && (
-        <>
-          <motion.div
-            className="no-print fixed inset-0 z-50 bg-foreground/30 backdrop-blur-sm"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            onClick={onClose}
-          />
-          <div className="no-print fixed inset-0 z-50 grid place-items-center p-4 pointer-events-none">
+    <>
+      {createPortal(
+        <motion.div
+          className="no-print fixed inset-0 z-[100] isolate overflow-y-auto bg-background p-3 sm:p-6"
+          data-print-workspace
+          role="dialog"
+          aria-modal="true"
+          aria-label="Print Document"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.16 }}
+        >
+          <div className="grid min-h-full place-items-center pointer-events-none">
             <motion.div
-              className="bg-card border border-border rounded-xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col pointer-events-auto"
+              className="bg-card border border-border rounded-xl shadow-2xl w-full max-w-3xl max-h-[calc(100dvh-1.5rem)] sm:max-h-[calc(100dvh-3rem)] flex flex-col pointer-events-auto"
               initial={{ scale: 0.95, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.95, opacity: 0 }}
@@ -437,18 +450,19 @@ export function InvoicePrintDialog({
               </div>
             </motion.div>
           </div>
-
-          {/* Off-screen measurement container — visible (not display:none) but positioned off-screen.
-              Uses MeasurementInvoice with inline styles that mimic print CSS for accurate height measurement. */}
-          <div className="invoice-print-measure" ref={printRootRef} style={{ position: 'absolute', left: '-9999px', top: '0', width: '210mm', visibility: 'hidden' }} aria-hidden="true">
-            {models[0] && <MeasurementInvoice model={models[0]} businessName={businessName} />}
-          </div>
-          {/* Actual print root for printing */}
-          <InvoicePrintStyles mode={mode} />
-          <InvoicePrintRoot mode={mode} models={models} businessName={businessName} businessContact={businessContact} />
-        </>
+        </motion.div>,
+        document.body,
       )}
-    </AnimatePresence>
+
+      {/* Off-screen measurement container — visible (not display:none) but positioned off-screen.
+          Uses MeasurementInvoice with inline styles that mimic print CSS for accurate height measurement. */}
+      <div className="invoice-print-measure" ref={printRootRef} style={{ position: 'absolute', left: '-9999px', top: '0', width: '210mm', visibility: 'hidden' }} aria-hidden="true">
+        {models[0] && <MeasurementInvoice model={models[0]} businessName={businessName} />}
+      </div>
+      {/* Actual print root for printing */}
+      <InvoicePrintStyles mode={mode} />
+      <InvoicePrintRoot mode={mode} models={models} businessName={businessName} businessContact={businessContact} />
+    </>
   )
 }
 
