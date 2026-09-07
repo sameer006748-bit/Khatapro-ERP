@@ -26,7 +26,7 @@ test('shared template supports Counter, Online, and OFC document titles', () => 
 
 test('half-A4 mode occupies one bounded half of an A4 portrait page', () => {
   assert.ok(dialog.includes("'single': 'Print Half A4'"))
-  assert.ok(dialog.includes("const pageSize = mode === 'thermal' ? '80mm auto' : 'A4 portrait'"))
+  assert.ok(dialog.includes("const pageSize = mode === 'thermal' ? '80mm 297mm' : 'A4 portrait'"))
   assert.ok(dialog.includes('height: 148.5mm'))
   assert.ok(dialog.includes('a4-half-top'))
   assert.ok(dialog.includes('a4-half-bottom a4-half-blank'))
@@ -65,7 +65,7 @@ test('print CSS keeps top and bottom halves separate with a cut line', () => {
 })
 
 test('print isolation hides application navigation, modal chrome, and measurement content', () => {
-  assert.ok(dialog.includes('body.printing-invoice #__next > * { visibility: hidden !important; }'))
+  assert.ok(dialog.includes('body.printing-invoice #__next * { visibility: hidden !important; }'))
   assert.ok(dialog.includes('.invoice-print-root * { visibility: visible !important; }'))
   assert.ok(dialog.includes('body.printing-invoice .no-print'))
   assert.ok(dialog.includes('body.printing-invoice .invoice-print-measure'))
@@ -76,11 +76,24 @@ test('print isolation hides application navigation, modal chrome, and measuremen
   assert.ok(dialog.includes('className="no-print'))
 })
 
+test('print CSS has a positive, mode-scoped visibility contract for the invoice surface', () => {
+  const printCss = dialog.slice(dialog.indexOf('@media print {'), dialog.indexOf('    }\n  `}</style>'))
+  // Screen media deliberately hides the mounted source; print media must
+  // explicitly reverse both display and visibility on the selected surface.
+  assert.ok(dialog.includes('.invoice-print-root { display: none; visibility: hidden; }'))
+  assert.ok(printCss.includes('body.printing-invoice .invoice-print-root,\n      body.printing-invoice .invoice-print-root * { visibility: visible !important; }'))
+  assert.ok(printCss.includes('body.printing-invoice .invoice-print-root { display: block !important;'))
+  assert.ok(!printCss.includes('.invoice-print-root { display: none; }'))
+  assert.ok(!printCss.includes('.invoice-print-root { visibility: hidden; }'))
+})
+
 test('print lifecycle waits for the native print lifecycle instead of a timed cleanup race', () => {
-  for (const token of ['printCleanupRef', "window.addEventListener('beforeprint', markPrinting)", "window.addEventListener('afterprint', cleanup", "window.matchMedia('print')", "mediaQuery.addEventListener('change', onMediaChange)", 'requestAnimationFrame(() => requestAnimationFrame(() => window.print()))']) {
+  for (const token of ['printCleanupRef', "window.addEventListener('beforeprint', markPrinting)", "window.addEventListener('afterprint', cleanup", "window.matchMedia('print')", "mediaQuery.addEventListener('change', onMediaChange)", 'window.print()']) {
     assert.ok(dialog.includes(token), `missing lifecycle isolation token ${token}`)
   }
   assert.ok(!dialog.includes("setTimeout(() => {\n      window.print()"), 'printing must not depend on the old print/cleanup timers')
+  assert.ok(!dialog.includes('requestAnimationFrame(() => requestAnimationFrame(() => window.print()))'), 'printing must retain the click user activation')
+  assert.match(dialog, /markPrinting\(\)[\s\S]*?window\.print\(\)/, 'the root is marked before the one native print invocation')
 })
 
 test('totals, optional customer fields, payment status, and return status remain conditional', () => {
@@ -126,8 +139,9 @@ test('all four release print formats are offered and each sizes its own page', (
   // Thermal is a continuous roll, the sheet modes are A4 portrait. The page
   // rule is mounted with the document before print begins, not injected during
   // the browser's print transition.
-  assert.ok(dialog.includes("const pageSize = mode === 'thermal' ? '80mm auto' : 'A4 portrait'"))
+  assert.ok(dialog.includes("const pageSize = mode === 'thermal' ? '80mm 297mm' : 'A4 portrait'"))
   assert.ok(dialog.includes('@page { size: ${pageSize}; margin: 0; }'))
+  assert.ok(!dialog.includes("'80mm auto'"), 'thermal must not fall back through an invalid mixed auto page size')
   assert.ok(dialog.includes('invoice-print-root-thermal { width: 80mm; }'))
   assert.ok(dialog.includes('.thermal-receipt { width: 80mm;'))
   assert.ok(dialog.includes('.a4-page.a4-single'))
@@ -169,7 +183,10 @@ test('a customer copy never carries commission on any format', () => {
   assert.ok(dialog.includes('Never give a copy printed with this option to a customer.'))
   // The rate itself is only fetched when the caller opted in, and only the
   // invoice screen offers that; the server still decides who may read it.
-  assert.ok(button.includes('commission: allowInternalCopy ? await loadCommission(id) : null'))
+  assert.ok(button.includes('commission: null'))
+  assert.ok(button.includes('onRequestInternalCopy={allowInternalCopy ? loadInternalCommissions : undefined}'))
+  const openFlow = button.slice(button.indexOf('async function handleOpen'), button.indexOf('async function loadInternalCommissions'))
+  assert.ok(!openFlow.includes('loadCommission('), 'opening a customer print dialog must not await commission data')
   assert.ok(button.includes("fetch(`/api/sales/${id}/commission`)"))
   assert.ok(invoiceDetail.includes('allowInternalCopy'))
   assert.ok(salesList.includes('<PrintInvoiceButton'))

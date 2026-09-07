@@ -159,12 +159,15 @@ export function InvoicePrintDialog({
   invoices,
   businessName,
   businessContact,
+  onRequestInternalCopy,
 }: {
   open: boolean
   onClose: () => void
   invoices: PrintableInvoice[]
   businessName: string
   businessContact?: { phone?: string; address?: string; email?: string } | null
+  /** Loads owner-only commission data only when an internal copy is requested. */
+  onRequestInternalCopy?: () => Promise<boolean>
 }) {
   const [mode, setMode] = useState<InvoicePrintMode>(() => {
     if (typeof window === 'undefined') return 'single'
@@ -174,6 +177,7 @@ export function InvoicePrintDialog({
   })
   // Internal copies are opt-in per print, never sticky.
   const [internalCopy, setInternalCopy] = useState(false)
+  const [internalCopyLoading, setInternalCopyLoading] = useState(false)
   const printCleanupRef = useRef<(() => void) | null>(null)
   const printInProgressRef = useRef(false)
 
@@ -195,6 +199,7 @@ export function InvoicePrintDialog({
   const [overflowDetected, setOverflowDetected] = useState(false)
 
   const commissionAvailable = invoices.some(inv => (inv.commission?.lines.length ?? 0) > 0)
+  const canRequestInternalCopy = commissionAvailable || Boolean(onRequestInternalCopy)
   const models = useMemo(
     () => invoices.map(inv => toModel(inv, internalCopy && commissionAvailable)),
     [invoices, internalCopy, commissionAvailable],
@@ -233,6 +238,7 @@ export function InvoicePrintDialog({
     printInProgressRef.current = true
     const markPrinting = () => {
       document.documentElement.classList.add('invoice-printing')
+      document.documentElement.classList.toggle('invoice-printing-thermal', mode === 'thermal')
       document.body.classList.add('printing-invoice')
       document.body.classList.toggle('printing-invoice-thermal', mode === 'thermal')
     }
@@ -247,6 +253,7 @@ export function InvoicePrintDialog({
       window.removeEventListener('afterprint', cleanup)
       mediaQuery.removeEventListener('change', onMediaChange)
       document.documentElement.classList.remove('invoice-printing')
+      document.documentElement.classList.remove('invoice-printing-thermal')
       document.body.classList.remove('printing-invoice', 'printing-invoice-thermal')
     }
     const onMediaChange = (event: MediaQueryListEvent) => {
@@ -260,9 +267,32 @@ export function InvoicePrintDialog({
     window.addEventListener('afterprint', cleanup, { once: true })
     mediaQuery.addEventListener('change', onMediaChange)
 
-    // Two animation frames give React/layout a deterministic paint boundary
-    // without hiding or destructively changing the normal application screen.
-    requestAnimationFrame(() => requestAnimationFrame(() => window.print()))
+    // Keep the native print call in the button event. Deferring it through
+    // requestAnimationFrame can lose the browser's user activation, which
+    // silently suppresses the print UI in Chromium. The dialog and its page
+    // rule are already mounted before this user can click this button.
+    try {
+      window.print()
+    } catch (error) {
+      cleanup()
+      throw error
+    }
+  }
+
+  async function enableInternalCopy() {
+    if (internalCopy) {
+      setInternalCopy(false)
+      return
+    }
+    if (!commissionAvailable && onRequestInternalCopy) {
+      setInternalCopyLoading(true)
+      try {
+        if (!(await onRequestInternalCopy())) return
+      } finally {
+        setInternalCopyLoading(false)
+      }
+    }
+    setInternalCopy(true)
   }
 
   return (
@@ -315,16 +345,17 @@ export function InvoicePrintDialog({
                   </div>
                 </div>
 
-                {commissionAvailable && (
+                {canRequestInternalCopy && (
                   <label className="flex items-start gap-2 p-3 rounded-lg border border-border bg-muted/30 cursor-pointer">
                     <input
                       type="checkbox"
                       checked={internalCopy}
-                      onChange={e => setInternalCopy(e.target.checked)}
+                      onChange={() => void enableInternalCopy()}
+                      disabled={internalCopyLoading}
                       className="mt-0.5"
                     />
                     <span className="text-xs">
-                      <span className="font-medium text-foreground">Internal copy — include commission</span>
+                      <span className="font-medium text-foreground">{internalCopyLoading ? 'Loading internal commission details…' : 'Internal copy — include commission'}</span>
                       <span className="block text-[10px] text-muted-foreground mt-0.5">
                         Off by default. Never give a copy printed with this option to a customer.
                       </span>
@@ -925,17 +956,20 @@ function InvoicePrintStyles({ mode }: { mode: InvoicePrintMode }) {
   // This style exists while the dialog is open, rather than being injected at
   // click time. That makes the physical page rule part of the mounted print
   // surface before the native print lifecycle starts.
-  const pageSize = mode === 'thermal' ? '80mm auto' : 'A4 portrait'
+  // CSS paged-media does not accept a mixed length/`auto` value. Chromium
+  // discards `80mm auto` and falls back to its default Letter page instead.
+  // A real 80mm-wide custom sheet keeps the receipt out of both Letter and A4.
+  const pageSize = mode === 'thermal' ? '80mm 297mm' : 'A4 portrait'
   return <style>{`
     @page { size: ${pageSize}; margin: 0; }
-    .invoice-print-root { display: none; }
+    .invoice-print-root { display: none; visibility: hidden; }
     @media print {
-      html.invoice-printing, html.invoice-printing body { width: 210mm; min-height: 297mm; margin: 0 !important; padding: 0 !important; background: #fff !important; }
-      html.invoice-printing body.printing-invoice-thermal { width: 80mm; min-height: 0; }
+      html.invoice-printing:not(.invoice-printing-thermal), html.invoice-printing:not(.invoice-printing-thermal) body { width: 210mm; min-height: 297mm; margin: 0 !important; padding: 0 !important; background: #fff !important; }
+      html.invoice-printing.invoice-printing-thermal, html.invoice-printing.invoice-printing-thermal body { width: 80mm; min-height: 0; margin: 0 !important; padding: 0 !important; background: #fff !important; }
       body.printing-invoice .no-print,
       body.printing-invoice .invoice-print-measure { display: none !important; visibility: hidden !important; }
       body.printing-invoice > *:not(#__next) { display: none !important; visibility: hidden !important; }
-      body.printing-invoice #__next > * { visibility: hidden !important; }
+      body.printing-invoice #__next * { visibility: hidden !important; }
       body.printing-invoice .invoice-print-root,
       body.printing-invoice .invoice-print-root * { visibility: visible !important; }
       body.printing-invoice .invoice-print-root { display: block !important; position: fixed; inset: 0 auto auto 0; z-index: 2147483647; width: 210mm; color: #000; background: #fff; }

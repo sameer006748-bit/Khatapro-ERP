@@ -71,8 +71,7 @@ export function PrintInvoiceButton({
     if (ids.length === 0) return
     setLoading(true)
     try {
-      const fetched: PrintableInvoice[] = []
-      for (const id of ids) {
+      const fetched = await Promise.all(ids.map(async id => {
         const r = await fetch(`/api/sales/${id}`)
         if (!r.ok) {
           const e = await r.json()
@@ -84,7 +83,7 @@ export function PrintInvoiceButton({
           setBusinessName(data.business.name)
           setBusinessContact({ phone: data.business.phone ?? undefined, address: data.business.address ?? undefined })
         }
-        fetched.push({
+        return {
           id: inv.id,
           invoiceNo: inv.invoiceNo,
           invoiceType: inv.invoiceType,
@@ -123,9 +122,10 @@ export function PrintInvoiceButton({
             amount: p.amount,
             isChange: p.isChange,
           })),
-          commission: allowInternalCopy ? await loadCommission(id) : null,
-        })
-      }
+          // Customer printing must never wait for owner-only commission data.
+          commission: null,
+        }
+      }))
       setInvoices(fetched)
       setOpen(true)
     } catch (e) {
@@ -133,6 +133,16 @@ export function PrintInvoiceButton({
     } finally {
       setLoading(false)
     }
+  }
+
+  async function loadInternalCommissions() {
+    const commissions = await Promise.all(invoices.map(async invoice => [invoice.id, await loadCommission(invoice.id)] as const))
+    const byInvoiceId = new Map(commissions)
+    setInvoices(current => current.map(invoice => ({
+      ...invoice,
+      commission: byInvoiceId.get(invoice.id) ?? null,
+    })))
+    return commissions.some(([, commission]) => commission !== null)
   }
 
   const variantClass = variant === 'default' ? 'bg-primary text-primary-foreground' : variant === 'ghost' ? 'hover:bg-muted' : 'border border-border'
@@ -154,6 +164,7 @@ export function PrintInvoiceButton({
         invoices={invoices}
         businessName={businessName}
         businessContact={businessContact}
+        onRequestInternalCopy={allowInternalCopy ? loadInternalCommissions : undefined}
       />
     </>
   )
