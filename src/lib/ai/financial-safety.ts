@@ -27,3 +27,12 @@ export function financialAnswerIsSupported(answer: string, values: AllowedFinanc
   }
   return true
 }
+
+export function financialAnswerUsesSupportedValue(answer: string, values: AllowedFinancialValue[]): boolean {
+  const allowed = new Set(values.map(({ amountRupees }) => normalizedRupees(amountRupees)).filter(Boolean))
+  for (const match of answer.matchAll(MONEY)) {
+    const stated = normalizedRupees(match[1] ?? match[2])
+    if (stated && allowed.has(stated)) return true
+  }
+  return false
+}

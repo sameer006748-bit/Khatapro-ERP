@@ -94,8 +94,13 @@ Live AI configuration recovery completed:
 
 **Deep-UAT AI status:**
 - the observed ~100× paisa/rupee defect is fixed in source with explicit rupee-decimal AI facts and a rupee-only financial allow-list; live acceptance remains,
-- Roman Urdu selection is not reliably honored,
-- retry/latency UX can remain visible for many seconds,
+- final user UAT produced six `AI_TEMPORARILY_UNAVAILABLE` 429s, one `AI_RESPONSE_INCOMPLETE` 502 and one English no-data answer despite Roman Urdu selection,
+- the observed 429 code can only come from Gemini `RESOURCE_EXHAUSTED` in the current route; the local eight-per-minute limiter returns the distinct `RATE_LIMITED` code. Historical logs did not safely retain the exact provider quota/rate sub-bucket, so provider-side quota health remains manually unresolved,
+- the historical 502 was also not uniquely diagnosable because the prior wrapper conflated provider `MAX_TOKENS`, local incomplete validation and other unusable output. Those paths now have distinct safe codes/log classifications,
+- one normal Ask now makes one provider attempt; only timeout/network/provider-unavailable receives one backend-owned retry. Auth, quota/rate limit, `MAX_TOKENS`, blocked/malformed and locally invalid output do not retry,
+- specific Home financial questions load only their relevant deterministic reports. Missing/denied requested facts return an explicit application error before any provider request, and available zero-valued facts cannot be treated as absent,
+- Roman Urdu now remains Latin-script end to end, has a Roman Urdu missing-data sentence instead of the previous hard-coded English instruction, and preserves exact numbers/entity names/codes,
+- Ask requests now request schema-constrained JSON output; Test Connection remains a separate one-call tiny `OK` probe,
 - Today semantics are now explicit: period flows are separated from as-of and current snapshots.
 
 AI is not allowed to become the accounting calculator; unit/period values must be normalized deterministically before interpretation.
@@ -148,7 +153,7 @@ Current blockers/priorities:
 1. **Claude Opus 5 live browser verification** of Trial Balance balance, AI rupee values, Today semantics and Financial Reports/Accounts money totals.
 2. Pervasive performance/slowness recovery — application-side code pass complete; browser/network acceptance pending.
 3. Rider false-empty loading state — code pass complete; browser acceptance pending.
-4. Roman Urdu preference enforcement + AI retry/latency UX — code pass complete; browser acceptance pending.
+4. AI financial answer reliability, Roman Urdu and retry ownership — bounded code pass complete; user-run manual answer/quota acceptance pending.
 5. Mojibake/encoding cleanup — code pass complete.
 6. Claude Opus 5 consolidated browser/physical-print acceptance of the professional print/invoice code pass.
 7. Remaining UAT bug batch — code pass complete; browser acceptance pending.

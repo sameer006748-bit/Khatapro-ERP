@@ -68,6 +68,7 @@ const GEMINI_FAILURE_CATEGORY_SET = new Set<GeminiFailureCategory>([
   'timeout',
   'malformed_request',
   'provider_unavailable',
+  'invalid_response',
 ])
 
 function normalizeFailureCategory(value: string | null): GeminiFailureCategory | null {

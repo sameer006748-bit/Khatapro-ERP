@@ -512,13 +512,19 @@ Trust order:
 
 # PART L — HANDOFF SUMMARY
 
-## 35. One-paragraph state for a new agent
+## 35. 2026-09-07 AI answer-contract recovery
+
+Final user-run AI UAT established that Test Connection can pass while real Ask requests still fail: six Ask responses were upstream-style `AI_TEMPORARILY_UNAVAILABLE` 429s, one was the conflated `AI_RESPONSE_INCOMPLETE` 502, and one Roman Urdu request returned the hard-coded English missing-data sentence. The local limiter uses the distinct `RATE_LIMITED` code, so the observed 429 class originated at Gemini as `RESOURCE_EXHAUSTED`; the prior route did not retain enough safe detail to distinguish the historical project quota bucket from a provider rate bucket. Test Connection sends one tiny `OK` probe; Ask loads business aggregates and sends a much larger structured financial prompt.
+
+The bounded source recovery makes the backend the only automatic retry owner: a normal Ask uses one provider attempt, with one extra attempt only for timeout/network/provider-unavailable failures; 429, auth, `MAX_TOKENS`, blocked, malformed and locally invalid outputs do not retry. Structured JSON response configuration and safe failure observability distinguish `MAX_TOKENS`, malformed/blocked output and local completeness failures. Specific Home financial questions now load only relevant reports; missing or denied requested facts stop before the model with an explicit application error, while present zero values count as data. The provider is forbidden from returning a missing-data fallback when the requested deterministic facts exist. Roman Urdu now has its own Latin-script missing-data response and preserves numbers, names and codes. Existing exact paisa-to-rupee conversion and 100× rejection remain unchanged and covered. No accounting formula, posting path, model, timeout or credential changed. Manual user verification of real answers and provider quota health remains required.
+
+## 36. One-paragraph state for a new agent
 
 KhataPro ERP is a substantial live Version 1 ERP on `main`, Vercel + Supabase legacy production schema, with major sales/accounting/money/Rider/audit/print/AI foundations implemented. The September 6 Trial Balance Rs 2,505 and AI 100× findings were deterministically reconciled and fixed in source without changing financial data: inactive historical money-account lines are retained, date/cancellation filters are real, AI receives explicit rupees, Today flow/snapshot semantics are separated, and Financial Reports includes custom configured money accounts. The 2026-09-07 print/invoice code pass replaces timeout-based print cleanup with lifecycle isolation and strengthens the one shared document structure across all paper formats; final Claude Opus 5 browser/physical-print acceptance is still required. The 2026-09-07 UAT bug batch also fixed the Rider false-empty loading state, Roman Urdu enforcement, mojibake cleanup, and AI retry/loading UX; final consolidated Claude Opus 5 live browser/print/performance acceptance is still required, so the product is **not yet client-closed** and Version 2 remains deferred.
 
 ---
 
-## 36. Update discipline
+## 37. Update discipline
 
 After every meaningful milestone:
 - update `PROJECT_MEMORY.md` if overall project reality changed,

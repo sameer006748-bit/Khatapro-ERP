@@ -12,6 +12,6 @@ for (const [name, pattern] of [
   ['Valid Custom range', /isBusinessDateRange\(range\)/], ['Invalid end-before-start', /INVALID_AI_PERIOD/], ['Malformed range rejection', /INVALID_PERIOD/],
   ['Home-selected range reaches AI', /khatapro-ai-period/], ['Elsewhere default is labelled', /preset: 'this-month'/], ['Owner business isolation', /session\.businessId/],
   ['Salesman scope', /own_sales_only/], ['Rider scope', /assigned_deliveries_only/], ['restricted/inactive denial', /canUseAiForScreen/],
-  ['client business override rejected', /\)\.strict\(\)/], ['unsupported figure refusal', /figure available nahi hai/], ['invented money rejected', /financialAnswerIsSupported/],
+  ['client business override rejected', /\)\.strict\(\)/], ['unsupported figure refusal', /AI_RESPONSE_INVALID/], ['invented money rejected', /financialAnswerIsSupported/],
   ['current snapshot labels', /current_snapshot/], ['read-only request rejection', /READ_ONLY_REQUEST/], ['no stale cross-period context', /period: args\.period/], ['no stale cross-business context', /session\.businessId/],
 ]) test(name, () => assert.match(`${period}\n${route}\n${context}\n${assistant}\n${home}\n${safety}\n${numbers}`, pattern))

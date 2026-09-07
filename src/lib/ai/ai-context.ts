@@ -4,6 +4,7 @@ import type { AiFieldMetadata, AiMode, AiScreen } from '@/lib/ai/safety-core'
 import type { ResolvedAiPeriod } from '@/lib/ai/ai-period'
 import type { AllowedFinancialValue } from '@/lib/ai/financial-safety'
 import { paisasToRupees } from '@/lib/ai/money-units'
+import { financialContextContract, requestedFinancialFacts } from '@/lib/ai/financial-context-contract'
 import { getAdminSupabase } from '@/lib/supabase/admin'
 import {
   reportBalanceSheet,
@@ -150,7 +151,11 @@ type LoaderName = 'sales' | 'expenses' | 'cash' | 'profitLoss' | 'balanceSheet' 
 function selectedLoaders(screen: AiScreen, prompt: string): Set<LoaderName> {
   const names = new Set<LoaderName>()
   const text = `${screen} ${prompt}`.toLowerCase()
-  if (screen === 'home') ['sales', 'expenses', 'cash', 'profitLoss', 'inventory', 'receivables', 'payables'].forEach((x) => names.add(x as LoaderName))
+  const requestedFacts = requestedFinancialFacts(prompt)
+  if (screen === 'home' && requestedFacts.length === 0) {
+    ['sales', 'expenses', 'cash', 'profitLoss', 'inventory', 'receivables', 'payables'].forEach((x) => names.add(x as LoaderName))
+  }
+  requestedFacts.forEach((name) => names.add(name))
   if (/sale|revenue|recovery|collection|customer/.test(text)) names.add('sales')
   if (/expense|kharcha|gaya/.test(text)) names.add('expenses')
   if (/cash|bank|paisa|flow|contra|receipt|payment|petty/.test(text)) names.add('cash')
@@ -198,6 +203,8 @@ async function buildBusinessContext(session: SessionUser, screen: AiScreen, prom
     tasks.push(['payables', reportVendorOutstanding(session.businessId)])
   }
 
+  const scheduled = new Set(tasks.map(([name]) => name))
+  const denied = [...selected].filter((name) => !scheduled.has(name))
   const settled = await Promise.allSettled(tasks.map(([, task]) => task))
   const periodActivity: Record<string, unknown> = { scope: 'selected_business_date_range' }
   const asOfSnapshot: Record<string, unknown> = { scope: 'position_at_selected_period_end', asOfDate: toDate }
@@ -328,6 +335,8 @@ async function buildBusinessContext(session: SessionUser, screen: AiScreen, prom
 
   context.allowedFinancialValues = financialValues
   if (unavailable.length) context.unavailableSections = unavailable
+  if (denied.length) context.deniedSections = denied
+  context.requestedFinancialFacts = financialContextContract(prompt, context)
   return context
 }
 

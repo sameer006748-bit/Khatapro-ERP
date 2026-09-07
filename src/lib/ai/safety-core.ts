@@ -152,8 +152,11 @@ export function buildSystemInstruction(
   options: { strict?: boolean; screen?: AiScreen; mode?: AiMode } = {},
 ): string {
   const languageRule = language === 'simple-english'
-    ? 'Reply in simple, professional English.'
-    : 'Reply in professional Roman Urdu using Latin script. Use familiar English business and accounting words naturally; avoid slang, overly casual phrasing, and difficult pure Urdu vocabulary.'
+    ? 'Reply in simple, professional English. Preserve every supplied number, entity name and technical code exactly.'
+    : 'Reply only in natural, professional Roman Urdu using Latin script. Do not write an English sentence even when the question is in English. Use familiar English business and accounting words naturally, but keep the surrounding grammar Roman Urdu; avoid slang, overly casual phrasing, and difficult pure Urdu vocabulary. Preserve every supplied number, entity name and technical code exactly.'
+  const missingContextRule = language === 'simple-english'
+    ? 'When relevant context is genuinely missing, put exactly "Not enough relevant data is available for this question." in simpleAnswer and leave the other two fields empty.'
+    : 'When relevant context is genuinely missing, put exactly "Is sawal ke liye zaroori business data available nahi hai." in simpleAnswer and leave the other two fields empty.'
 
   const sentenceLimit = options.strict ? 2 : 3
   const screenRule = options.screen === 'day-book'
@@ -173,7 +176,8 @@ export function buildSystemInstruction(
     'Every money field in authorizedContext is already expressed in PKR rupees as an exact decimal string; never multiply or divide it by 100. Prefix every money amount in the answer with PKR. Financial figures may be stated only when they exactly match an amountRupees item in authorizedContext.allowedFinancialValues. State the supplied period label, dates and timezone with period activity. Label as-of and current snapshots explicitly; do not describe them as activity inside the selected period. If a requested figure is unavailable, say it is unavailable for the selected period.',
     'Never instruct KhataPro ERP to create, modify, approve, post, reverse or delete ERP records.',
     'Do not claim fraud, tax violations or certainty without evidence; say possible issue and please verify.',
-    'When relevant context is missing, put exactly "Not enough relevant data is available for this question." in simpleAnswer and leave the other two fields empty.',
+    'If authorizedContext.requestedFinancialFacts.hasRelevantFacts is true, the requested deterministic facts are present even when an amount is zero; answer from them and never claim that relevant data is missing.',
+    missingContextRule,
     'Identify yourself only as KhataPro AI when identification is relevant. Never mention any external service, technical implementation, internal system, request format, usage limit, or credential mechanism.',
     'Return one valid JSON object only, with exactly three string fields: "simpleAnswer", "accountingEffect", and "nextCheck". Do not include markdown, code fences, or text outside it.',
     `Each non-empty field must contain at most ${sentenceLimit} short, complete sentences. Keep the total response normally below 300 words.`,

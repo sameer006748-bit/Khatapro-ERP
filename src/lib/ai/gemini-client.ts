@@ -16,6 +16,7 @@ import {
   type GeminiFailureCategory,
   type GeminiThinkingConfig,
 } from '@/lib/ai/gemini-client-core'
+import { isMissingContextAnswer } from '@/lib/ai/financial-context-contract'
 export { GeminiClientError } from '@/lib/ai/gemini-client-core'
 export type { GeminiFailureCategory } from '@/lib/ai/gemini-client-core'
 
@@ -44,6 +45,13 @@ export async function generateGeminiAnswer(args: {
   mode: AiMode
   requestId: string
 }): Promise<string> {
+  const requestedContract = args.context.requestedFinancialFacts
+  const hasRelevantFinancialFacts = Boolean(
+    requestedContract
+    && typeof requestedContract === 'object'
+    && 'hasRelevantFacts' in requestedContract
+    && requestedContract.hasRelevantFacts,
+  )
   const contents = [{
     role: 'user',
     parts: [{ text: JSON.stringify({ question: args.prompt, authorizedContext: args.context }) }],
@@ -61,9 +69,25 @@ export async function generateGeminiAnswer(args: {
         }],
       },
       contents,
+      generationConfig: {
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: 'OBJECT',
+          properties: {
+            simpleAnswer: { type: 'STRING' },
+            accountingEffect: { type: 'STRING' },
+            nextCheck: { type: 'STRING' },
+          },
+          required: ['simpleAnswer', 'accountingEffect', 'nextCheck'],
+          propertyOrdering: ['simpleAnswer', 'accountingEffect', 'nextCheck'],
+        },
+      },
     }, AI_LIMITS.outputTokens, resolveThinkingConfig(GEMINI_MODEL)),
     validate: (text, strict) => {
       const result = validateAiAnswer(text, strict)
+      if (result.valid && hasRelevantFinancialFacts && isMissingContextAnswer(text)) {
+        return { valid: false, retryable: false, reason: 'context_rejected' }
+      }
       return result.valid
         ? { valid: true, value: serializeStructuredAnswer(result.answer) }
         : result

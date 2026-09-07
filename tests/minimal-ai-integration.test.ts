@@ -480,7 +480,7 @@ test('callGeminiCore succeeds on STOP finishReason even if short', async () => {
   assert.equal(result, 'Short OK.')
 })
 
-test('callGeminiCore throws on empty response despite 200 status', async () => {
+test('callGeminiCore classifies an empty 200 response as invalid, not transient', async () => {
   const mockFetch = (async () => new Response(JSON.stringify({
     candidates: [{
       content: { parts: [] },
@@ -496,7 +496,7 @@ test('callGeminiCore throws on empty response despite 200 status', async () => {
       timeoutMs: 100,
       fetchImpl: mockFetch,
     }),
-    (error: unknown) => error instanceof GeminiClientError && error.category === 'provider_unavailable',
+    (error: unknown) => error instanceof GeminiClientError && error.category === 'invalid_response',
   )
 })
 
@@ -546,27 +546,30 @@ test('API route hides truncation and technical details behind a safe message', a
   assert.doesNotMatch(route, /answer was too long|ask a more specific question/i)
 })
 
-test('MAX_TOKENS triggers exactly one stricter retry and successful recovery', async () => {
+test('MAX_TOKENS is classified accurately and does not consume a second provider attempt', async () => {
   let calls = 0
   const strictAttempts: boolean[] = []
-  const result = await runGeminiWithSingleRetry({
-    call: async (strict) => {
-      calls += 1
-      strictAttempts.push(strict)
-      if (calls === 1) throw new GeminiClientError('truncated', 200, 'MAX_TOKENS')
-      return '{"simpleAnswer":"Business position stable hai.","accountingEffect":"Cash movement verify karna zaroori hai.","nextCheck":"Recent entries check karein."}'
-    },
-    validate: (text, strict) => {
-      const checked = validateAiAnswer(text, strict)
-      return checked.valid ? { valid: true, value: checked.answer } : checked
-    },
-  })
-  assert.equal(calls, 2)
-  assert.deepEqual(strictAttempts, [false, true])
-  assert.equal(result.simpleAnswer, 'Business position stable hai.')
+  await assert.rejects(
+    runGeminiWithSingleRetry({
+      call: async (strict) => {
+        calls += 1
+        strictAttempts.push(strict)
+        throw new GeminiClientError('truncated', 200, 'MAX_TOKENS')
+      },
+      validate: (text, strict) => {
+        const checked = validateAiAnswer(text, strict)
+        return checked.valid ? { valid: true, value: checked.answer } : checked
+      },
+    }),
+    (error: unknown) => error instanceof GeminiClientError
+      && error.category === 'truncated'
+      && error.googleErrorCode === 'MAX_TOKENS',
+  )
+  assert.equal(calls, 1)
+  assert.deepEqual(strictAttempts, [false])
 })
 
-test('incomplete structured output retries once and never loops', async () => {
+test('incomplete structured output is final and never creates a duplicate provider call', async () => {
   let calls = 0
   await assert.rejects(
     runGeminiWithSingleRetry({
@@ -581,7 +584,7 @@ test('incomplete structured output retries once and never loops', async () => {
     }),
     (error: unknown) => error instanceof GeminiClientError && error.category === 'truncated',
   )
-  assert.equal(calls, 2)
+  assert.equal(calls, 1)
 })
 
 test('permanent provider failures do not retry', async () => {

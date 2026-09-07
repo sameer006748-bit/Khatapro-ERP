@@ -230,10 +230,12 @@ Do not spontaneously create the next coding prompt before the user approves the 
 
 # Exact next decision / recommended sequence
 
-Accounting recovery, performance, professional print/invoice, and the remaining UAT bug batch (Rider false-empty, Roman Urdu enforcement, mojibake cleanup, AI retry/loading UX) are complete on `main`. None of these are marked solved from source tests alone. The final consolidated Claude Opus 5 live browser/print/performance acceptance is the next gate.
+The bounded AI reliability/answer-contract recovery is complete in source. The six observed `AI_TEMPORARILY_UNAVAILABLE` responses map to upstream Gemini `RESOURCE_EXHAUSTED`, not the distinct local `RATE_LIMITED` path; the exact historical provider quota/rate sub-bucket was not retained. The previous incomplete path also conflated `MAX_TOKENS` and local response validation. Retry ownership is now backend-only and limited to one retry for timeout/network/provider-unavailable. Specific financial questions load relevant aggregates only, missing/denied facts fail explicitly before generation, present facts cannot silently become “not enough data,” schema-constrained JSON is requested, and the Roman Urdu no-data contract is no longer hard-coded in English. Paisa-to-rupee conversion and 100× rejection are preserved. No model, timeout, credential, accounting formula or posting code changed.
+
+**Exact next task:** the user must manually run the five prescribed real AI questions after deployment and confirm provider quota availability, Roman Urdu, exact amounts and snapshot/Today semantics. Do not mark Version 1 ready from automated gates.
 
 Recommended sequence:
-1. **Claude Opus 5 live browser verification** of the pushed P0 deterministic correctness fix and the performance pass (network waterfall, Vercel TTFB, Supabase query/RPC time, region latency).
+1. **User manual AI verification** of Today sales, Today expense, Today profit/loss, current payables and current receivables, including provider quota health and exact rupee values.
 2. **Performance recovery/profile** — application-side code pass complete; browser acceptance pending.
 3. **Claude Opus 5 consolidated browser/physical-print acceptance** of all four professional print formats.
 4. **Remaining UAT bug batch** — code pass complete (Rider false-empty, Roman Urdu, mojibake, AI retry/loading UX); browser acceptance pending.

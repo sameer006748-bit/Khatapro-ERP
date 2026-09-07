@@ -8,7 +8,8 @@ import { getAiApiKey } from '@/lib/ai/ai-settings-store'
 import { AI_LIMITS, AI_PROVIDER } from '@/lib/ai/config'
 import { buildAiContext } from '@/lib/ai/ai-context'
 import { AI_PERIOD_PRESETS, resolveAiPeriod } from '@/lib/ai/ai-period'
-import { financialAnswerIsSupported, type AllowedFinancialValue } from '@/lib/ai/financial-safety'
+import { financialAnswerIsSupported, financialAnswerUsesSupportedValue, type AllowedFinancialValue } from '@/lib/ai/financial-safety'
+import { financialContextContract } from '@/lib/ai/financial-context-contract'
 import { generateGeminiAnswer, GeminiClientError } from '@/lib/ai/gemini-client'
 import { consumeAiRequest } from '@/lib/ai/rate-limit'
 import {
@@ -89,6 +90,14 @@ async function post(req: NextRequest) {
       field,
       period,
     })
+    const contextContract = financialContextContract(parsed.data.prompt, context)
+    if (contextContract.missing.length > 0) {
+      const denied = Array.isArray(context.deniedSections) ? context.deniedSections : []
+      const permissionDenied = contextContract.missing.some((name) => denied.includes(name))
+      return permissionDenied
+        ? response('AI_DATA_FORBIDDEN', 'The requested business figure is not available for this role.', 403, requestId)
+        : response('AI_DATA_UNAVAILABLE', 'The requested business figure could not be loaded. Please try again.', 503, requestId)
+    }
     const generated = await generateGeminiAnswer({
       apiKey,
       language: answerLanguage,
@@ -99,25 +108,38 @@ async function post(req: NextRequest) {
       requestId,
     })
     const values = Array.isArray(context.allowedFinancialValues) ? context.allowedFinancialValues as AllowedFinancialValue[] : []
-    const answer = financialAnswerIsSupported(generated, values)
-      ? generated
-      : JSON.stringify({
-        simpleAnswer: answerLanguage === 'roman-urdu' ? 'Is period ke liye yeh figure available nahi hai.' : 'This figure is not available for the selected period.',
-        accountingEffect: '',
-        nextCheck: answerLanguage === 'roman-urdu' ? 'Period aur available business data check karein.' : 'Check the selected period and available business data.',
-      })
+    const supportedMoney = financialAnswerIsSupported(generated, values)
+    const includesRequestedFigure = !contextContract.hasRelevantFacts || financialAnswerUsesSupportedValue(generated, values)
+    if (!supportedMoney || !includesRequestedFigure) {
+      console.error(JSON.stringify({
+        event: 'ai_ask_financial_contract_rejected',
+        requestId,
+        category: !supportedMoney ? 'unsupported_money' : 'missing_requested_figure',
+        severity: 'error',
+      }))
+      return response('AI_RESPONSE_INVALID', 'KhataPro AI returned an unusable explanation. Please try again.', 502, requestId)
+    }
 
     return NextResponse.json(
-      { answer, language: answerLanguage, readOnly: true, period },
+      { answer: generated, language: answerLanguage, readOnly: true, period },
       { headers: { 'Cache-Control': 'no-store', 'X-Request-Id': requestId } },
     )
   } catch (error) {
     if (error instanceof GeminiClientError) {
+      console.error(JSON.stringify({
+        event: 'ai_ask_provider_failed',
+        requestId,
+        httpStatus: error.httpStatus,
+        googleErrorCode: error.googleErrorCode,
+        category: error.category,
+        severity: 'error',
+      }))
       if (error.category === 'invalid_api_key') return response('AI_INVALID_KEY', 'AI connection is not authorized. Please update the AI settings.', 502, requestId)
       if (error.category === 'permission_denied') return response('AI_ACCESS_DENIED', 'You do not have permission to use this feature.', 502, requestId)
       if (error.category === 'quota_exceeded' || error.category === 'rate_limited') return response('AI_TEMPORARILY_UNAVAILABLE', 'KhataPro AI is temporarily unavailable. Please try again later.', 429, requestId)
       if (error.category === 'timeout' || error.category === 'model_not_found' || error.category === 'provider_unavailable') return response('AI_CONNECTION_ERROR', 'KhataPro AI could not respond right now. Please try again.', 502, requestId)
       if (error.category === 'truncated') return response('AI_RESPONSE_INCOMPLETE', 'KhataPro AI could not complete this explanation. Please try again.', 502, requestId)
+      if (error.category === 'invalid_response') return response('AI_RESPONSE_INVALID', 'KhataPro AI returned an unusable explanation. Please try again.', 502, requestId)
       return response('AI_REQUEST_FAILED', 'Something went wrong. Please try again.', 502, requestId)
     }
     return safeApiError({

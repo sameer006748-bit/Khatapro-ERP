@@ -8,6 +8,7 @@ export const GEMINI_FAILURE_CATEGORIES = [
   'malformed_request',
   'provider_unavailable',
   'truncated',
+  'invalid_response',
 ] as const
 
 export type GeminiFailureCategory = typeof GEMINI_FAILURE_CATEGORIES[number]
@@ -43,33 +44,32 @@ export async function runGeminiWithSingleRetry<T>(args: {
 }): Promise<T> {
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const strict = attempt === 1
+    let text: string
     try {
-      const text = await args.call(strict)
-      const validation = args.validate(text, strict)
-      if (validation.valid) return validation.value
-      if (!validation.retryable) {
-        throw new GeminiClientError('provider_unavailable', 200, 'UNSAFE_OUTPUT')
-      }
-      if (strict) {
-        throw new GeminiClientError('truncated', 200, 'INCOMPLETE_AFTER_RETRY')
-      }
-      args.onRetry?.(validation.reason)
+      text = await args.call(strict)
     } catch (error) {
       const category = error instanceof GeminiClientError ? error.category : null
-      // One automatic retry also covers genuinely transient network/provider
-      // failures (timeout, provider unavailable). Never retry auth, permission,
-      // quota or rate-limit failures — a retry cannot fix those.
+      // The backend owns exactly one retry, and only for a transport/provider
+      // failure that can plausibly recover. Output, auth, quota and rate-limit
+      // failures are final so one user Ask never fans out unexpectedly.
       if (!strict && category && TRANSIENT_RETRY_CATEGORIES.has(category)) {
         args.onRetry?.(category)
         continue
       }
-      if (!category || category !== 'truncated') throw error
-      if (strict) throw error
-      args.onRetry?.('truncated')
+      throw error
     }
+
+    const validation = args.validate(text, strict)
+    if (validation.valid) return validation.value
+    const incomplete = validation.reason === 'incomplete' || validation.reason === 'empty'
+    throw new GeminiClientError(
+      incomplete ? 'truncated' : 'invalid_response',
+      200,
+      incomplete ? 'LOCAL_INCOMPLETE_RESPONSE' : 'LOCAL_INVALID_RESPONSE',
+    )
   }
 
-  throw new GeminiClientError('truncated', 200, 'INCOMPLETE_AFTER_RETRY')
+  throw new GeminiClientError('provider_unavailable', null, 'RETRY_EXHAUSTED')
 }
 
 type GeminiResponse = {
@@ -84,6 +84,7 @@ type GeminiResponse = {
     candidatesTokenCount?: number
     totalTokenCount?: number
   }
+  promptFeedback?: { blockReason?: string }
 }
 
 type GeminiErrorResponse = {
@@ -177,6 +178,9 @@ export async function callGeminiCore(args: {
   const timeout = setTimeout(() => controller.abort(), args.timeoutMs)
 
   try {
+    const suppliedGenerationConfig = args.body.generationConfig
+    const body = { ...args.body }
+    delete body.generationConfig
     const response = await (args.fetchImpl ?? fetch)(args.url, {
       method: 'POST',
       headers: {
@@ -184,8 +188,9 @@ export async function callGeminiCore(args: {
         'x-goog-api-key': apiKey,
       },
       body: JSON.stringify({
-        ...args.body,
+        ...body,
         generationConfig: {
+          ...(suppliedGenerationConfig && typeof suppliedGenerationConfig === 'object' ? suppliedGenerationConfig : {}),
           temperature: 0.2,
           maxOutputTokens: args.outputTokens,
           ...(args.thinking !== undefined ? { thinkingConfig: args.thinking } : {}),
@@ -218,7 +223,12 @@ export async function callGeminiCore(args: {
       )
     }
 
-    const payload = await response.json() as GeminiResponse
+    let payload: GeminiResponse
+    try {
+      payload = await response.json() as GeminiResponse
+    } catch {
+      throw new GeminiClientError('invalid_response', 200, 'MALFORMED_JSON_RESPONSE')
+    }
     const candidate = payload.candidates?.[0]
     const text = candidate?.content?.parts?.map((part) => part.text ?? '').join('').trim()
 
@@ -229,7 +239,10 @@ export async function callGeminiCore(args: {
     if (candidate?.finishReason === 'MAX_TOKENS') {
       throw new GeminiClientError('truncated', 200, 'MAX_TOKENS')
     }
-    if (!text) throw new GeminiClientError('provider_unavailable', 200, 'EMPTY_RESPONSE')
+    if (payload.promptFeedback?.blockReason || (candidate?.finishReason && candidate.finishReason !== 'STOP')) {
+      throw new GeminiClientError('invalid_response', 200, 'BLOCKED_OR_INVALID_RESPONSE')
+    }
+    if (!text) throw new GeminiClientError('invalid_response', 200, 'EMPTY_RESPONSE')
 
     return text
   } catch (error) {
