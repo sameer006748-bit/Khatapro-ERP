@@ -1,6 +1,6 @@
 # KhataPro ERP — Roadmap
 
-Last reconciled: **2026-09-06**
+Last reconciled: **2026-09-08**
 
 This roadmap is dependency-driven. It does not assign arbitrary dates and it does not imply that every listed idea is already approved for implementation.
 
@@ -12,11 +12,11 @@ KhataPro development is intentionally split into two product versions:
 - **Version 1:** finish, stabilize, professionalize, hand over and obtain client approval for the current ERP.
 - **Version 2:** only after Version 1 approval, evolve KhataPro toward the intelligent/proactive product vision in `docs/VISION.md`.
 
-Do not begin Version 2 intelligence work while Version 1 still has unresolved client-facing correctness, performance, print, role, UX, or handover work.
+Do not begin Version 2 intelligence work until explicit client approval of Version 1.
 
 ---
 
-# Version 1 — Deep UAT recovery and professional handover
+# Version 1 — Client UAT / Handover
 
 ## Objective
 Deliver a dependable, responsive, financially trustworthy and professionally presented ERP that a real client can use without known P0/P1 workflow, accounting, performance, print, role/mobile, or data-integrity blockers.
@@ -24,7 +24,7 @@ Deliver a dependable, responsive, financially trustworthy and professionally pre
 ## Current reality
 Earlier release closeout and live recovery fixed several serious production defects, including Rider assignment, invoice reads, AI configuration/connectivity, and permission-denial response behavior.
 
-However, deep manual UAT on 2026-09-06 exposed additional real release issues. Version 1 is therefore **not yet client-closed**.
+The deep-UAT recovery cycle is complete and user manual verification passed for final AI and print fixes. Version 1 is now in **Client UAT / Handover**, tagged `v1.0.0-client-uat`; it is not final client-approved. Client feedback may receive bounded V1 hotfixes only—no V1 feature expansion during the freeze.
 
 ## Phase V1-A — Deterministic correctness / trust
 

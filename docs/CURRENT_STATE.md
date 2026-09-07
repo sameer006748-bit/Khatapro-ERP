@@ -1,6 +1,6 @@
 # KhataPro ERP — Current State
 
-Last reconciled: **2026-09-07**
+Last reconciled: **2026-09-08**
 
 This is the concise factual snapshot. Use running production/database/browser evidence over this document if they ever conflict, then update this file.
 
@@ -12,12 +12,12 @@ For the complete handoff/history/future context, read `docs/PROJECT_MEMORY.md` f
 - Stable production URL: `https://khatapro-erp.vercel.app`
 - Production Supabase project ref: `ebcebxwpddltiwrqybqc`
 - Production accounting schema: legacy/original schema rooted at `business`, not the newer UUID-ledger architecture.
-- Last live-tested application code commit before this docs refresh: `75319bc`.
+- Version 1 client-UAT checkpoint: `v1.0.0-client-uat` at the final clean `main` commit for this documentation update.
 
 ## Current maturity
-KhataPro is a substantial live **Version 1 ERP in deep UAT recovery / release polish**, not a greenfield build and not yet a closed client handover.
+KhataPro is a substantial live **Version 1 ERP in Client UAT / Handover**, not a greenfield build and not yet a final client-approved release.
 
-Major operational foundations exist across sales, purchases, accounting, money, Rider, audit, reporting, onboarding, permissions, printing, and AI. Several earlier production blockers were fixed live, but deep user UAT on 2026-09-06 exposed additional correctness, performance, loading, encoding, AI, and print/document-quality issues that must be resolved before final client approval.
+Major operational foundations exist across sales, purchases, accounting, money, Rider, audit, reporting, onboarding, permissions, printing, and AI. The recovery cycle closed the known deep-UAT release blockers; user manual verification passed for final AI and print fixes. Client feedback can still produce bounded Version 1 hotfixes.
 
 Version 2 proactive/intelligent expansion remains deferred until Version 1 is accepted.
 
@@ -36,7 +36,7 @@ Implemented across Counter, Online, OFC, and Other sale paths:
 
 Accepted V1 limitations still fail closed: sale discounts, mixed same-bill returns, and opening stock at product creation.
 
-**2026-09-07 Salesman workflow / invoice summary recovery:** Salesman `My Sales` had an allowed destination but the shell page registry required business-wide `can_view_sales`, so it rewrote the own-sales user to Home. Sales List now permits `can_view_own_sales` as well; its existing API and invoice-detail API ownership checks continue to return only the linked Salesman’s invoices. Invoice detail now always renders deterministic Net Payable, Paid and Outstanding values even when payment history is empty; return-unavailable cases still withhold derived net/outstanding values. The Salesman dashboard now uses an actual middle-dot separator rather than literal `\u00B7`. Manual user verification remains required.
+**2026-09-07 Salesman workflow / invoice summary recovery:** Salesman `My Sales` had an allowed destination but the shell page registry required business-wide `can_view_sales`, so it rewrote the own-sales user to Home. Sales List now permits `can_view_own_sales` as well; its existing API and invoice-detail API ownership checks continue to return only the linked Salesman’s invoices. Invoice detail now always renders deterministic Net Payable, Paid and Outstanding values even when payment history is empty; return-unavailable cases still withhold derived net/outstanding values. The Salesman dashboard now uses an actual middle-dot separator rather than literal `\u00B7`. User verification passed.
 
 ### Money / business accounts
 Implemented:
@@ -67,7 +67,7 @@ Implemented/recovered on legacy production:
 - audit log,
 - readable transaction/account identities.
 
-**Accounting truth recovery implemented; live acceptance pending:** the Rs 2,505 difference was exactly the posted debit history of inactive Easypaisa 1040 (Rs 2,250) and CASH 1060 (Rs 255). Day Book/source lines were balanced. The legacy Trial Balance reader now retains inactive accounts with history and correctly filters posted vouchers by cancellation/date. Reconciled production source rows total Rs 206,306.55 debit and credit; no data was changed.
+**Accounting truth recovery verified:** the Rs 2,505 difference was exactly the posted debit history of inactive Easypaisa 1040 (Rs 2,250) and CASH 1060 (Rs 255). Day Book/source lines were balanced. The legacy Trial Balance reader now retains inactive accounts with history and correctly filters posted vouchers by cancellation/date. Reconciled production source rows total Rs 206,306.55 debit and credit; no data was changed.
 
 ### Rider
 Major Rider recovery is deployed:
@@ -78,7 +78,7 @@ Major Rider recovery is deployed:
 - Delivered / Partial / Returned / Cash/COD paths,
 - four-item mobile navigation: Home / Deliveries / Cash / Profile.
 
-**New live UX issue:** Riders list can briefly show a false authoritative empty state (`Riders (0) / No riders yet`) before the real roster arrives (`Riders (3)`). Loading and empty states must be separated.
+**Rider loading recovery:** the false authoritative empty state was fixed and manually verified during the recovery cycle.
 
 ### Permissions / denial behavior
 Server gates remain authoritative and fail closed. A live defect where denied guarded routes returned empty HTTP 500s was fixed in `ffc5493`; tested denials now return clean 403 responses with request IDs.
@@ -92,10 +92,10 @@ Live AI configuration recovery completed:
 - basic/business-data Ask returned live 200 after recovery,
 - `75319bc` raised output-token budget from 800 to 2048 to stop `MAX_TOKENS` / `AI_RESPONSE_INCOMPLETE` truncation.
 
-**Deep-UAT AI status:**
+**AI recovery status:**
 - the observed ~100× paisa/rupee defect is fixed in source with explicit rupee-decimal AI facts and a rupee-only financial allow-list; live acceptance remains,
-- final user UAT produced six `AI_TEMPORARILY_UNAVAILABLE` 429s, one `AI_RESPONSE_INCOMPLETE` 502 and one English no-data answer despite Roman Urdu selection,
-- the observed 429 code can only come from Gemini `RESOURCE_EXHAUSTED` in the current route; the local eight-per-minute limiter returns the distinct `RATE_LIMITED` code. Historical logs did not safely retain the exact provider quota/rate sub-bucket, so provider-side quota health remains manually unresolved,
+- final user UAT initially produced six `AI_TEMPORARILY_UNAVAILABLE` 429s, one `AI_RESPONSE_INCOMPLETE` 502 and one English no-data answer despite Roman Urdu selection; the bounded recovery was then manually verified with correct answers,
+- the observed 429 code can only come from Gemini `RESOURCE_EXHAUSTED` in the current route; the local eight-per-minute limiter returns the distinct `RATE_LIMITED` code. Free-provider quota/rate-limit/latency remains an operational limitation; a paid production key is planned and this is not an application-code blocker,
 - the historical 502 was also not uniquely diagnosable because the prior wrapper conflated provider `MAX_TOKENS`, local incomplete validation and other unusable output. Those paths now have distinct safe codes/log classifications,
 - one normal Ask now makes one provider attempt; only timeout/network/provider-unavailable receives one backend-owned retry. Auth, quota/rate limit, `MAX_TOKENS`, blocked/malformed and locally invalid output do not retry,
 - specific Home financial questions load only their relevant deterministic reports. Missing/denied requested facts return an explicit application error before any provider request, and available zero-valued facts cannot be treated as absent,
@@ -112,7 +112,7 @@ Current evidence does **not** prove free Vercel/Supabase hosting is the sole cau
 
 A dedicated performance recovery/profile is now required before any decision to move data/hosting. Domain purchase alone does not improve speed; do not migrate Supabase to Hostinger/VPS by guess.
 
-A bounded application-side performance code pass is complete on `main` (parallel financial-report reads, longer master-data caching). Browser/network performance acceptance is still pending for the final Claude Opus 5 consolidated UAT, so performance is not yet marked solved.
+A bounded application-side performance code pass is complete on `main` (parallel financial-report reads, longer master-data caching) and is closed for this client-UAT checkpoint; later client feedback may reopen a bounded V1 hotfix.
 
 ## Print / invoice state
 A shared print foundation exists for:
@@ -125,9 +125,9 @@ A shared print foundation exists for:
 
 Deep user print UAT showed a visible background/transition glitch and an invoice that did not yet meet professional-document quality.
 
-**2026-09-07 source pass complete, live acceptance pending:** the fixed-delay cleanup and click-time style injection were replaced by lifecycle-based print isolation; application roots, portal siblings, modal/backdrop, and the off-screen measurement DOM are excluded from print. The final blocker recovery calls `window.print()` directly from the Print click instead of after nested animation frames, gives the print root an explicit screen-hidden/print-visible CSS contract, and uses valid explicit thermal `80mm 297mm` sizing instead of invalid `80mm auto` (which Chromium discarded to Letter). Customer selection no longer waits for optional owner commission data; it loads only after the internal-copy option is selected. The shared document model still renders the same deterministic header, Bill To/Supplier and document-detail blocks, ruled items, totals/payment hierarchy, status, signature line, and footer across Half A4, Two-up, Full A4, and thermal. No accounting or serialization logic changed. Manual visual and physical-printer validation remains required for every format.
+**2026-09-07 print recovery, user-verified:** the fixed-delay cleanup and click-time style injection were replaced by lifecycle-based print isolation; application roots, portal siblings, modal/backdrop, and the off-screen measurement DOM are excluded from print. The final blocker recovery calls `window.print()` directly from the Print click instead of after nested animation frames, gives the print root an explicit screen-hidden/print-visible CSS contract, and uses valid explicit thermal `80mm 297mm` sizing instead of invalid `80mm auto` (which Chromium discarded to Letter). Customer selection no longer waits for optional owner commission data; it loads only after the internal-copy option is selected. The shared document model still renders the same deterministic header, Bill To/Supplier and document-detail blocks, ruled items, totals/payment hierarchy, status, signature line, and footer across Half A4, Two-up, Full A4, and thermal. No accounting or serialization logic changed.
 
-**2026-09-07 Print Document UI recovery:** manual verification found the dialog was visibly layered over the invoice/shell because it was mounted inside the animated invoice view and shell scrolling container. The interactive UI now uses a solid, viewport-level `document.body` portal above shell layers with body-scroll lock. The print engine, document content, CSS print isolation, and page sizing are unchanged. Manual UI verification remains required.
+**2026-09-07 Print Document UI recovery:** manual verification confirmed the solid, viewport-level `document.body` portal resolves the former invoice/shell layering. The print engine, document content, CSS print isolation, and page sizing are unchanged.
 
 ## Encoding / mojibake (fixed)
 Fixed in the remaining-UAT bug batch: the broken mojibake strings (`Loading COD balances…`, `Settling…`, `Today’s Movement`) were replaced with proper Unicode characters. No mojibake remains in client-facing source.
@@ -145,19 +145,11 @@ Fixed in the remaining-UAT bug batch: the broken mojibake strings (`Loading COD 
 Never broad-apply migrations.
 
 ## Current release status
-**NOT YET CLIENT-CLOSED.**
+**CLIENT UAT / HANDOVER — NOT YET CLIENT-APPROVED.**
 
 Previous "manual UAT only / no code blockers" status is obsolete after deep UAT.
 
-Current blockers/priorities:
-1. **Claude Opus 5 live browser verification** of Trial Balance balance, AI rupee values, Today semantics and Financial Reports/Accounts money totals.
-2. Pervasive performance/slowness recovery — application-side code pass complete; browser/network acceptance pending.
-3. Rider false-empty loading state — code pass complete; browser acceptance pending.
-4. AI financial answer reliability, Roman Urdu and retry ownership — bounded code pass complete; user-run manual answer/quota acceptance pending.
-5. Mojibake/encoding cleanup — code pass complete.
-6. Claude Opus 5 consolidated browser/physical-print acceptance of the professional print/invoice code pass.
-7. Remaining UAT bug batch — code pass complete; browser acceptance pending.
-8. Final role/mobile/print UAT + client approval.
+Recovery implementation and known deep-UAT release blockers are closed. During this freeze, accept only bounded client-reported V1 hotfixes; do not expand V1 features or begin Version 2 before explicit client approval.
 
 ## Validation posture
 For runtime-sensitive tasks, live browser evidence is the acceptance authority. Use:

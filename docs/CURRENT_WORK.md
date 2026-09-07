@@ -1,30 +1,30 @@
 # KhataPro ERP — Current Work
 
-Last updated: **2026-09-07**
+Last updated: **2026-09-08**
 
 Read `docs/PROJECT_MEMORY.md` first for the complete A-to-Z handoff/history/future context.
 
 ## Current version
-**Version 1 — deep UAT recovery / professional release polish.**
+**Version 1 — Client UAT / Handover.**
 
 Version 2 intelligent/proactive product work remains deferred until the client receives and approves Version 1.
 
 ## Current phase
-**Accounting recovery, performance, professional print/invoice, and remaining UAT bug-batch code passes complete — final consolidated Claude Opus 5 live browser/print/performance acceptance pending.**
+**Client UAT / Handover freeze. Recovery implementation is complete and final user manual AI/print verification has passed.**
 
-The previous state recorded here — "manual UAT only / no code blockers" — is obsolete. A deep user-recorded production UAT on 2026-09-06 exposed new real client-facing problems in accounting correctness, AI units/language, performance, loading states, encoding, print isolation, and invoice professionalism.
+The deep-UAT recovery cycle closed its known release blockers: Trial Balance/report reconciliation, AI units/language/reliability, Rider false-empty loading, encoding, source-level performance, invoice/print output and isolation, Salesman access, and invoice settlement summaries. The official checkpoint is `v1.0.0-client-uat` on the final clean `main` commit for this documentation update. This is not final client approval.
 
 ## Current objective
-Make Version 1 genuinely client-ready by resolving the newly proven/suspected issues with bounded production-evidence tasks, not another broad "audit everything" loop.
+Support Client UAT and handover. Handle client-reported defects only as bounded Version 1 hotfixes; do not add V1 features during the freeze.
 
 The acceptance standard is not merely green tests. The live stable URL must behave correctly:
 
 `https://khatapro-erp.vercel.app`
 
 ## Why this is next
-Earlier closeout/recovery work successfully fixed several blockers live, but the user's latest deep UAT shows the product still does not feel/behave like a finished professional ERP in all important areas.
+The user confirmed the final AI and print fixes. Free AI-provider quota/rate-limit/latency remains an operational follow-up; a paid production key is planned, but it is not an application-code release blocker.
 
-No agent should now claim "READY FOR CLIENT HANDOVER" until the current list is closed or deliberately accepted by the user/client.
+No agent should claim final client approval or create `v1.0.0` until explicit client acceptance.
 
 ---
 
@@ -160,11 +160,11 @@ The former fragile seam used click-time `@page` injection, delayed `window.print
 Manual post-fix UI evidence found a separate Print Document workspace defect: the interactive dialog was mounted inside the animated invoice view, so its in-tree fixed backdrop did not own the shell viewport. The UI now portals to `document.body` as a solid, viewport-level workspace above the shell, locks background scrolling, and keeps its existing close/reset path. This does not alter the print engine or print-media CSS.
 
 ### 10. Salesman history / invoice settlement recovery — complete in source
-Salesman `My Sales` now reaches Sales List through the shell’s own-sales permission path without receiving business-wide visibility; the existing server ownership checks remain authoritative. Invoice detail now shows Net Payable, Paid and Outstanding for paid, unpaid and partial invoices even when no payment-history table exists, while preserving return/net withholding behavior. The Salesman dashboard middle-dot literal is corrected. Manual user verification remains required; AI reliability and final consolidated UAT remain deferred.
+Salesman `My Sales` now reaches Sales List through the shell’s own-sales permission path without receiving business-wide visibility; the existing server ownership checks remain authoritative. Invoice detail now shows Net Payable, Paid and Outstanding for paid, unpaid and partial invoices even when no payment-history table exists, while preserving return/net withholding behavior. The Salesman dashboard middle-dot literal is corrected. User verification passed.
 
 The shared document structure now provides verified business identity, document title/number/channel, conditional Bill To/Supplier and document-detail blocks, ruled Item/Qty/Rate/Amount rows, preserved Sold/Ret./Net columns, totals/payment/status hierarchy, memo, timestamp, and an authorized-signature line. Half A4 uses compact print density with conservative overflow blocking; Two-up reuses the same half design; Full A4 uses the same hierarchy with more room; thermal keeps the shared model in receipt form. Customer copies still exclude internal commission unless the explicit internal-copy option is selected. Preview now reflects the same header/table/totals/footer hierarchy.
 
-**Live visual and physical printer acceptance is still pending. Do not call this visually approved from source tests.**
+**Final user print verification passed. This is client-UAT status, not final client approval.**
 
 ---
 
@@ -230,18 +230,9 @@ Do not spontaneously create the next coding prompt before the user approves the 
 
 # Exact next decision / recommended sequence
 
-The bounded AI reliability/answer-contract recovery is complete in source. The six observed `AI_TEMPORARILY_UNAVAILABLE` responses map to upstream Gemini `RESOURCE_EXHAUSTED`, not the distinct local `RATE_LIMITED` path; the exact historical provider quota/rate sub-bucket was not retained. The previous incomplete path also conflated `MAX_TOKENS` and local response validation. Retry ownership is now backend-only and limited to one retry for timeout/network/provider-unavailable. Specific financial questions load relevant aggregates only, missing/denied facts fail explicitly before generation, present facts cannot silently become “not enough data,” schema-constrained JSON is requested, and the Roman Urdu no-data contract is no longer hard-coded in English. Paisa-to-rupee conversion and 100× rejection are preserved. No model, timeout, credential, accounting formula or posting code changed.
+The bounded AI reliability/answer-contract recovery is complete and user-verified. The free provider can still impose quota/rate-limit/latency; the planned paid production key is an operational improvement, not an application-code blocker.
 
-**Exact next task:** the user must manually run the five prescribed real AI questions after deployment and confirm provider quota availability, Roman Urdu, exact amounts and snapshot/Today semantics. Do not mark Version 1 ready from automated gates.
-
-Recommended sequence:
-1. **User manual AI verification** of Today sales, Today expense, Today profit/loss, current payables and current receivables, including provider quota health and exact rupee values.
-2. **Performance recovery/profile** — application-side code pass complete; browser acceptance pending.
-3. **Claude Opus 5 consolidated browser/physical-print acceptance** of all four professional print formats.
-4. **Remaining UAT bug batch** — code pass complete (Rider false-empty, Roman Urdu, mojibake, AI retry/loading UX); browser acceptance pending.
-5. Final all-role/mobile/print UAT.
-6. Client handover/approval.
-7. Only then advance `CURRENT_WORK.md` to Version 2.
+**Exact next task:** collect Client UAT feedback. Apply only bounded V1 hotfixes for proven client defects, then obtain explicit client approval before final `v1.0.0` and any Version 2 work.
 
 Do not start another whole-repo audit.
 

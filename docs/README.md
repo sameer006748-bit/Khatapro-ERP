@@ -1,6 +1,6 @@
 # KhataPro ERP Documentation Index
 
-Last reconciled: **2026-09-06**
+Last reconciled: **2026-09-08**
 
 ## Read these first
 
@@ -19,7 +19,7 @@ Task-specific authoritative policies may also live in dedicated files such as:
 
 ## Current release reality
 
-Version 1 is **not yet client-closed**. A deep production UAT on 2026-09-06 reopened release work after earlier green test/closeout reports. The canonical files now record the current blockers, including accounting/AI correctness issues, pervasive slowness, false-empty/loading UX, encoding problems, print glitching, and the requirement for a more professional invoice system.
+Version 1 is in **Client UAT / Handover** at the `v1.0.0-client-uat` checkpoint. The deep-UAT recovery blockers are closed and final AI/print manual verification passed; this is not final client approval. Client feedback may receive bounded V1 hotfixes only, and Version 2 remains deferred until explicit approval.
 
 Do not use an older "manual UAT only / no code blockers" note as the current state.
 
