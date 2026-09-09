@@ -19,6 +19,7 @@ import {
   salePostingRpcName,
 } from '@/lib/supabase/rpc-compatibility'
 import { probeTable } from '@/lib/supabase/phase-probe'
+import { measurePerformanceStage } from '@/lib/observability'
 import { resolveSupabaseUuid } from '@/lib/accounting/voucher-supabase'
 import {
   INVOICE_CORE_COLUMNS,
@@ -141,7 +142,10 @@ export type PostSaleInput = {
 export async function listSalesmen(businessId: string): Promise<SalesmanRow[]> {
   if (await isPhase4Live()) {
     const admin = getAdminSupabase()
-    const { data, error } = await admin.from('salesmen').select('id, name, phone, commission_pct, is_active').eq('business_id', businessId).order('name')
+    const { data, error } = await measurePerformanceStage(
+      'endpoint.salesmenQuery',
+      () => admin.from('salesmen').select('id, name, phone, commission_pct, is_active').eq('business_id', businessId).order('name'),
+    )
     if (error) throw new Error(`Supabase: ${error.message}`)
     return (data ?? []).map((s: any) => ({ id: s.id, name: s.name, phone: s.phone, commissionPct: Number(s.commission_pct), isActive: s.is_active }))
   }
@@ -156,7 +160,10 @@ export async function resolveSalesmanIdForUser(businessId: string, supabaseUserU
     // file). A missing row simply means "no linked salesman" → return null.
     if (supabaseUserUuid) {
       const admin = getAdminSupabase()
-      const { data, error } = await admin.from('salesmen').select('id').eq('business_id', businessId).eq('user_id', supabaseUserUuid).maybeSingle()
+      const { data, error } = await measurePerformanceStage(
+        'endpoint.salesmanIdentity',
+        () => admin.from('salesmen').select('id').eq('business_id', businessId).eq('user_id', supabaseUserUuid).maybeSingle(),
+      )
       if (!error && data) return data.id
     }
     return null
@@ -691,7 +698,10 @@ export async function listInvoices(businessId: string, opts?: { type?: string; s
     let query = admin.from('invoices').select('id, invoice_no, invoice_type, invoice_date, customer_name, subtotal, total, paid_amount, is_cancelled, is_returned, salesmen(name)').eq('business_id', businessId).order('invoice_date', { ascending: false }).order('created_at', { ascending: false }).limit(100)
     if (opts?.type) query = query.eq('invoice_type', opts.type)
     if (opts?.salesmanId) query = query.eq('salesman_id', opts.salesmanId)
-    const { data, error } = await query
+    const { data, error } = await measurePerformanceStage(
+      'endpoint.invoiceQuery',
+      () => query,
+    )
     if (error) throw new Error(`Supabase: ${error.message}`)
     return (data ?? []).map((r: any) => ({ id: r.id, invoiceNo: r.invoice_no, invoiceType: r.invoice_type, invoiceDate: r.invoice_date, customerName: r.customer_name, salesmanName: r.salesmen?.name ?? null, subtotal: String(r.subtotal), total: String(r.total), paidAmount: String(r.paid_amount ?? 0), status: invoiceStatusLabel(Boolean(r.is_cancelled), Boolean(r.is_returned)), isCancelled: Boolean(r.is_cancelled), isReturned: Boolean(r.is_returned) }))
   }
@@ -1586,12 +1596,15 @@ async function receiveInvoicePaymentViaPrisma(input: {
 export async function listCustomers(businessId: string): Promise<CustomerRow[]> {
   if (await isPhase4Live()) {
     const admin = getAdminSupabase()
-    const { data, error } = await admin
-      .from('customers')
-      .select('id, name, phone, address, city, is_active')
-      .eq('business_id', businessId)
-      .eq('is_active', true)
-      .order('name')
+    const { data, error } = await measurePerformanceStage(
+      'endpoint.customersQuery',
+      () => admin
+        .from('customers')
+        .select('id, name, phone, address, city, is_active')
+        .eq('business_id', businessId)
+        .eq('is_active', true)
+        .order('name'),
+    )
     if (error) throw error
     return (data ?? []).map((customer: any) => ({
       id: customer.id,

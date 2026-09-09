@@ -1,3 +1,5 @@
+import { measurePerformanceStage } from '@/lib/observability'
+
 export type PostgrestLikeError = {
   code?: string | null
   message?: string | null
@@ -116,7 +118,10 @@ export async function detectLedgerCapability(
   if (cachedCapability && cachedCapability.expiresAt > now) return cachedCapability.value
   if (capabilityPromise) return capabilityPromise
 
-  capabilityPromise = probeLedgerCapability(client, businessId, asOfDate)
+  capabilityPromise = measurePerformanceStage(
+    'preflight.dashboardCapability',
+    () => probeLedgerCapability(client, businessId, asOfDate),
+  )
     .then((value) => {
       const ttl = value.path === 'uuid-ledger' ? POSITIVE_CACHE_TTL_MS : NEGATIVE_CACHE_TTL_MS
       cachedCapability = { value, expiresAt: now + ttl }

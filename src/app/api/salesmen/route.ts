@@ -6,14 +6,21 @@ import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth/authOptions'
 import { hasPermission, loadSessionUser } from '@/lib/auth/permissions'
 import { listSalesmen } from '@/lib/sales/data-access'
+import { measurePerformanceStage, withObservability } from '@/lib/observability'
 
-export async function GET() {
-  const session = await getServerSession(authOptions)
+export const GET = withObservability('/api/salesmen', async () => {
+  const session = await measurePerformanceStage(
+    'session.getServerSession',
+    () => getServerSession(authOptions),
+  )
   if (!session?.user) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
   const su = await loadSessionUser((session.user as any).id)
   if (!su) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
 
-  const rows = await listSalesmen(su.businessId)
+  const rows = await measurePerformanceStage(
+    'endpoint.salesmenList',
+    () => listSalesmen(su.businessId),
+  )
 
   // Every sale form uses this route to attribute a bill, so the names stay
   // available to anyone who can create a sale. The commission rate is a
@@ -35,4 +42,4 @@ export async function GET() {
       ...(canSeeRates ? { commissionPct: r.commissionPct } : {}),
     })),
   })
-}
+}, { performanceTiming: true })

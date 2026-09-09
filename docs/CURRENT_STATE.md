@@ -112,6 +112,8 @@ Current evidence does **not** prove free Vercel/Supabase hosting is the sole cau
 
 A dedicated performance recovery/profile is now required before any decision to move data/hosting. Domain purchase alone does not improve speed; do not migrate Supabase to Hostinger/VPS by guess.
 
+Bounded request-correlated server timing is available for the seven measured GET paths. It records fixed, non-sensitive session/load/auth/profile/permission, actual compatibility probe, endpoint workload, and total-route durations plus duplicate `loadSessionUser` detection. This is instrumentation availability only: no latency root cause is proven until the change is deployed and stable-alias requests are matched to production timing logs.
+
 A bounded application-side performance code pass is complete on `main` (parallel financial-report reads, longer master-data caching) and is closed for this client-UAT checkpoint; later client feedback may reopen a bounded V1 hotfix.
 
 ## Print / invoice state

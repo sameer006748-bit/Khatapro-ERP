@@ -12,6 +12,7 @@
 import 'server-only'
 import { isSupabaseConfigured } from '@/lib/supabase/config'
 import { getAdminSupabase } from '@/lib/supabase/admin'
+import { measurePerformanceStage } from '@/lib/observability'
 
 const PROBE_TTL_MS = 30_000
 
@@ -45,7 +46,10 @@ export async function probeTable(
   cache.lastChecked = now
   try {
     const admin = getAdminSupabase()
-    const { data, error } = await admin.from(table).select('id').limit(1)
+    const { data, error } = await measurePerformanceStage(
+      'preflight.phaseTable',
+      () => admin.from(table).select('id').limit(1),
+    )
     cache.lastResult = !error && Array.isArray(data)
   } catch {
     cache.lastResult = false

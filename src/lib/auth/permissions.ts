@@ -14,6 +14,7 @@ import { db } from '@/lib/db'
 import { isSupabaseConfigured } from '@/lib/supabase/config'
 import { createAuthClient } from '@/lib/supabase/auth'
 import { getAdminClient } from '@/lib/supabase/server-admin'
+import { countLoadSessionUserInvocation, measurePerformanceStage } from '@/lib/observability'
 
 export type SessionUser = {
   userId: string
@@ -35,7 +36,12 @@ export type SessionUser = {
  * callback and the route handler that both call this within one request
  * resolve it only once (previously two full auth+profile lookups per request).
  */
-export const loadSessionUser = cache(_loadSessionUser)
+const cachedLoadSessionUser = cache(_loadSessionUser)
+
+export async function loadSessionUser(userId: string): Promise<SessionUser | null> {
+  countLoadSessionUserInvocation()
+  return measurePerformanceStage('session.loadSessionUser', () => cachedLoadSessionUser(userId))
+}
 
 async function _loadSessionUser(userId: string): Promise<SessionUser | null> {
   if (!isSupabaseConfigured()) {
@@ -80,7 +86,10 @@ async function _loadSessionUser(userId: string): Promise<SessionUser | null> {
     return null
   }
 
-  const { data: authData, error: authError } = await supabase.auth.admin.getUserById(userId)
+  const { data: authData, error: authError } = await measurePerformanceStage(
+    'session.authAdminUser',
+    () => supabase.auth.admin.getUserById(userId),
+  )
   if (authError || !authData.user) {
     return null
   }
@@ -88,11 +97,14 @@ async function _loadSessionUser(userId: string): Promise<SessionUser | null> {
   const supaUserId = authData.user.id
 
   // Fetch public profile
-  const { data: profile, error: profileError } = await supabase
-    .from('profiles')
-    .select('*')
-    .eq('user_id', supaUserId)
-    .single()
+  const { data: profile, error: profileError } = await measurePerformanceStage(
+    'session.profileLookup',
+    () => supabase
+      .from('profiles')
+      .select('*')
+      .eq('user_id', supaUserId)
+      .single(),
+  )
 
   if (profileError || !profile || !profile.is_active) {
     return null
@@ -100,10 +112,13 @@ async function _loadSessionUser(userId: string): Promise<SessionUser | null> {
 
   // Role and its permission-id mappings are independent given the role_id —
   // fetch them concurrently instead of sequentially.
-  const [roleRes, rolePermsRes] = await Promise.all([
-    supabase.from('roles').select('id, name').eq('id', profile.role_id).single(),
-    supabase.from('role_permissions').select('permission_id').eq('role_id', profile.role_id),
-  ])
+  const [roleRes, rolePermsRes] = await measurePerformanceStage(
+    'session.rolePermissionWave',
+    () => Promise.all([
+      supabase.from('roles').select('id, name').eq('id', profile.role_id).single(),
+      supabase.from('role_permissions').select('permission_id').eq('role_id', profile.role_id),
+    ]),
+  )
 
   const { data: role, error: roleError } = roleRes
   if (roleError || !role) {
@@ -117,10 +132,13 @@ async function _loadSessionUser(userId: string): Promise<SessionUser | null> {
 
   const permIds = (rolePerms || []).map((rp: any) => rp.permission_id)
 
-  const { data: permissions, error: permError } = await supabase
-    .from('permissions')
-    .select('code')
-    .in('id', permIds)
+  const { data: permissions, error: permError } = await measurePerformanceStage(
+    'session.permissionCodes',
+    () => supabase
+      .from('permissions')
+      .select('code')
+      .in('id', permIds),
+  )
 
   if (permError) {
     return null

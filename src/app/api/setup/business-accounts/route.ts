@@ -43,7 +43,7 @@ import {
   listLegacyBusinessAccounts,
   type BusinessAccountRecord,
 } from '@/lib/accounting/legacy-business-accounts'
-import { withObservability } from '@/lib/observability'
+import { withObservability, measurePerformanceStage } from '@/lib/observability'
 
 const CreateSchema = z.object({
   name: z.string().trim().min(1).max(80).refine(hasReadableMoneyIdentitySource, {
@@ -179,7 +179,10 @@ function withIdentities(rows: MoneyAccountIdentitySource[]): MoneyAccountRow[] {
 }
 
 async function getSetupBusinessAccounts() {
-  const session = await getServerSession(authOptions)
+  const session = await measurePerformanceStage(
+    'session.getServerSession',
+    () => getServerSession(authOptions),
+  )
   if (!session?.user) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
   const su = await loadSessionUser((session.user as any).id)
   if (!su) {
@@ -189,10 +192,16 @@ async function getSetupBusinessAccounts() {
   if (isSupabaseConfigured()) {
     if (!await usesLegacyTransactionSchema()) return unavailableResponse()
     try {
-      const managed = (await listLegacyBusinessAccounts(su.businessId, su.profileId)).map(serializeLegacy)
-      const unlinked = await listUnlinkedLedgerMoneyAccounts(
-        su.businessId,
-        new Set(managed.map((row) => row.ledger.id)),
+      const managed = (await measurePerformanceStage(
+        'endpoint.businessAccountsRpc',
+        () => listLegacyBusinessAccounts(su.businessId, su.profileId),
+      )).map(serializeLegacy)
+      const unlinked = await measurePerformanceStage(
+        'endpoint.businessAccountsChart',
+        () => listUnlinkedLedgerMoneyAccounts(
+          su.businessId,
+          new Set(managed.map((row) => row.ledger.id)),
+        ),
       )
       return NextResponse.json({ rows: withIdentities([...managed, ...unlinked]) })
     } catch (error) {
@@ -359,5 +368,5 @@ async function postSetupBusinessAccounts(req: Request) {
   })
 }
 
-export const GET = withObservability('/api/setup/business-accounts', getSetupBusinessAccounts)
+export const GET = withObservability('/api/setup/business-accounts', getSetupBusinessAccounts, { performanceTiming: true })
 export const POST = withObservability('/api/setup/business-accounts', postSetupBusinessAccounts)

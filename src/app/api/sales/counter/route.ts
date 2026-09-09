@@ -16,7 +16,7 @@ import { SaleLineError } from '@/lib/sales/sale-engine'
 import { parseMoney } from '@/lib/format'
 import { assertPhase9SaleFeatures, UnsupportedDatabaseFeatureError } from '@/lib/supabase/rpc-compatibility'
 import { isSupabaseConfigured } from '@/lib/supabase/config'
-import { resolveRequestId, newRequestId, withObservability } from '@/lib/observability'
+import { resolveRequestId, newRequestId, withObservability, measurePerformanceStage } from '@/lib/observability'
 
 const ItemSchema = z.object({
   productId: z.string().nullable().optional(),
@@ -208,7 +208,10 @@ async function postSalesCounter(req: Request) {
 }
 
 const getSales = async (req: Request) => {
-  const session = await getServerSession(authOptions)
+  const session = await measurePerformanceStage(
+    'session.getServerSession',
+    () => getServerSession(authOptions),
+  )
   if (!session?.user) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
   const su = await loadSessionUser((session.user as any).id)
   if (!su) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
@@ -231,10 +234,13 @@ const getSales = async (req: Request) => {
     salesmanId = smId
   }
 
-  const rows = await listInvoices(su.businessId, { type, salesmanId })
+  const rows = await measurePerformanceStage(
+    'endpoint.invoiceList',
+    () => listInvoices(su.businessId, { type, salesmanId }),
+  )
   return NextResponse.json({ rows })
 }
 
-export const GET = withObservability('/api/sales/counter', getSales)
+export const GET = withObservability('/api/sales/counter', getSales, { performanceTiming: true })
 
 export const POST = withObservability('/api/sales/counter', postSalesCounter)

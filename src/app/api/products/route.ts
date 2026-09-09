@@ -9,10 +9,13 @@ import { authOptions } from '@/lib/auth/authOptions'
 import { loadSessionUser, requirePermission } from '@/lib/auth/permissions'
 import { listProducts, createProduct } from '@/lib/products/data-access'
 import { SafeProductError } from '@/lib/products/opening-stock'
-import { withObservability, resolveRequestId, safeMutationError } from '@/lib/observability'
+import { withObservability, resolveRequestId, safeMutationError, measurePerformanceStage } from '@/lib/observability'
 
 export const GET = withObservability('/api/products', async (req: Request) => {
-  const session = await getServerSession(authOptions)
+  const session = await measurePerformanceStage(
+    'session.getServerSession',
+    () => getServerSession(authOptions),
+  )
   if (!session?.user) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
   const su = await loadSessionUser((session.user as any).id)
   if (!su) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
@@ -21,9 +24,12 @@ export const GET = withObservability('/api/products', async (req: Request) => {
   const temporaryOnly = url.searchParams.get('temporary') === 'true'
   const search = url.searchParams.get('search') || undefined
 
-  const rows = await listProducts(su.businessId, { temporaryOnly, search })
+  const rows = await measurePerformanceStage(
+    'endpoint.productList',
+    () => listProducts(su.businessId, { temporaryOnly, search }),
+  )
   return NextResponse.json({ rows })
-})
+}, { performanceTiming: true })
 
 const CreateSchema = z.object({
   name: z.string().min(1).max(120),

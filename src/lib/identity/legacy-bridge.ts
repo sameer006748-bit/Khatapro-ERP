@@ -1,6 +1,7 @@
 import 'server-only'
 
 import { getAdminSupabase } from '@/lib/supabase/admin'
+import { measurePerformanceStage } from '@/lib/observability'
 import {
   classifyPostgrestCompatibilityError,
   isSchemaUnavailableError,
@@ -18,7 +19,10 @@ let cachedLegacySchema: { expiresAt: number; value: boolean } | null = null
 export async function usesLegacyTransactionSchema(now = Date.now()): Promise<boolean> {
   if (cachedLegacySchema && cachedLegacySchema.expiresAt > now) return cachedLegacySchema.value
 
-  const { error } = await getAdminSupabase().from('ledger_vouchers').select('id').limit(1)
+  const { error } = await measurePerformanceStage(
+    'preflight.legacySchema',
+    () => getAdminSupabase().from('ledger_vouchers').select('id').limit(1),
+  )
   if (!error) {
     cachedLegacySchema = { value: false, expiresAt: now + LEGACY_PROBE_TTL_MS }
     return false

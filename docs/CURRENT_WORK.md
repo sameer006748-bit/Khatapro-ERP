@@ -1,6 +1,6 @@
 # KhataPro ERP — Current Work
 
-Last updated: **2026-09-08**
+Last updated: **2026-09-10**
 
 Read `docs/PROJECT_MEMORY.md` first for the complete A-to-Z handoff/history/future context.
 
@@ -91,16 +91,16 @@ Database/RPC/TypeScript stay in integer paisas. The AI boundary converts once to
 
 # Exact next step
 
-**CLAUDE OPUS 5 FINAL CONSOLIDATED LIVE BROWSER / PRINT VERIFICATION**
+**DEPLOY THE BOUNDED API TIMING CHANGE, VERIFY THE STABLE PRODUCTION ALIAS, AND CAPTURE CORRELATED SERVER LOGS.**
 
-Verify on the stable production alias after deployment:
-- Trial Balance shows Rs 206,306.55 debit and credit on the reconciled current dataset,
-- Today-filtered Trial Balance/activity uses only the selected business dates,
-- AI answers the known sales/profit/payables examples in rupees, not paisa magnitudes,
-- snapshot answers are labelled current/as-of rather than “today's” activity,
-- Financial Reports Cash/Bank equals Accounts & Balances Total Available for the same as-of state.
-- the print transition shows only the document surface—never the app shell, sidebar, modal, backdrop, portal, or measurement DOM,
-- Half A4, Two-up, Full A4, and 80mm are physically readable, unclipped, and visually professional.
+For each measured GET route (`/api/dashboard/owner`, `/api/sales/counter`, `/api/setup/business-accounts`, `/api/products`, `/api/salesmen`, `/api/customers`, and `/api/reports` overview/Profit & Loss):
+- issue the already-known production request through `https://khatapro-erp.vercel.app`,
+- retain the response `X-Request-Id`,
+- locate its single `api_performance_timing` event,
+- compare total route duration with session, each `loadSessionUser`, auth/profile/permission, compatibility/preflight, and endpoint workload stages,
+- record `loadSessionUserCount`, `duplicateLoadSessionUser`, and any unexplained residual duration.
+
+This instrumentation does not prove the latency root cause until those live correlated logs are captured. Do not remove duplicate hydration or begin a second optimization batch from source evidence alone.
 
 ---
 
@@ -125,6 +125,8 @@ Performance recovery must measure:
 Use caching/prefetch only where correctness permits. Loading states must not lie about empty data.
 
 No Hostinger/Supabase data migration should be proposed as the primary fix until profiling proves infrastructure is the bottleneck.
+
+Bounded server-side instrumentation is now available for the seven measured GET routes. It emits one safe, request-correlated timing event with fixed stage names, per-call `loadSessionUser` timing/count, compatibility/preflight timing when a remote probe occurs, endpoint workload timing, and total server duration. It changes no session, cache, authorization, database, or response-body semantics. Live deployment/log capture is still required before assigning cause.
 
 ### 5. Riders false-empty loading state
 Observed transition:

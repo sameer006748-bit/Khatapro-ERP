@@ -1,6 +1,14 @@
 import 'server-only'
 import { NextResponse } from 'next/server'
 import { deniedErrorCode, deniedStatusFromError } from '@/lib/api-denial'
+import {
+  countLoadSessionUserInvocation,
+  measurePerformanceStage,
+  runWithPerformanceTiming,
+  type PerformanceTimingSnapshot,
+} from '@/lib/performance-timing'
+
+export { countLoadSessionUserInvocation, measurePerformanceStage }
 
 /**
  * Minimal server-only API observability: request timing, a request/trace ID,
@@ -183,6 +191,19 @@ function now(): number {
   }
 }
 
+function emitPerformanceTiming(snapshot: PerformanceTimingSnapshot): void {
+  const severity = severityFor(snapshot.status, snapshot.durationMs)
+  const line = JSON.stringify({
+    event: 'api_performance_timing',
+    ...snapshot,
+    severity,
+    environment: environment(),
+  })
+  if (severity === 'error' || severity === 'critical') console.error(line)
+  else if (severity === 'slow') console.warn(line)
+  else console.log(line)
+}
+
 function severityFor(status: number, durationMs: number): Severity {
   if (status >= 500) return 'error'
   if (durationMs >= CRITICAL_MS) return 'critical'
@@ -299,6 +320,7 @@ export function safeMutationError(opts: {
 }
 
 type RouteHandler = (...args: any[]) => Promise<Response> | Response
+type ObservabilityOptions = { performanceTiming?: boolean }
 
 /**
  * Wrap a read-only route handler with timing, a request/trace ID, and slow
@@ -307,66 +329,80 @@ type RouteHandler = (...args: any[]) => Promise<Response> | Response
  * database error is converted to one generic response so framework output can
  * never expose the internal message.
  */
-export function withObservability(route: string, handler: RouteHandler): RouteHandler {
+export function withObservability(
+  route: string,
+  handler: RouteHandler,
+  options: ObservabilityOptions = {},
+): RouteHandler {
   return async (...args: any[]): Promise<Response> => {
     const req = args[0] instanceof Request ? (args[0] as Request) : undefined
     const requestId = resolveRequestId(req)
     const method = req?.method || 'GET'
     const start = now()
 
-    try {
-      const res = await handler(...args)
-      const durationMs = now() - start
-      log(requestId, route, method, res.status, durationMs, categoryForStatus(res.status))
+    const execute = async (): Promise<Response> => {
       try {
-        res.headers.set('X-Request-Id', requestId)
-      } catch {
-        /* immutable headers — return unchanged */
-      }
-      return res
-    } catch (error) {
-      const durationMs = now() - start
-      // A permission denial is the guard doing its job, so it must reach the
-      // caller as 401/403 with a stable code. Production answered 500
-      // REQUEST_FAILED for every guarded route: a Salesman posting to
-      // /api/riders got an empty 500, and /api/riders/available-users returned
-      // "The request could not be completed." Each denial was also emitted as
-      // an internal error, so ordinary role boundaries looked like outages.
-      const denied = deniedStatusFromError(error)
-      if (denied) {
-        log(requestId, route, method, denied, durationMs, categoryForStatus(denied))
+        const res = await handler(...args)
+        const durationMs = now() - start
+        log(requestId, route, method, res.status, durationMs, categoryForStatus(res.status))
+        try {
+          res.headers.set('X-Request-Id', requestId)
+        } catch {
+          /* immutable headers — return unchanged */
+        }
+        return res
+      } catch (error) {
+        const durationMs = now() - start
+        // A permission denial is the guard doing its job, so it must reach the
+        // caller as 401/403 with a stable code. Production answered 500
+        // REQUEST_FAILED for every guarded route: a Salesman posting to
+        // /api/riders got an empty 500, and /api/riders/available-users returned
+        // "The request could not be completed." Each denial was also emitted as
+        // an internal error, so ordinary role boundaries looked like outages.
+        const denied = deniedStatusFromError(error)
+        if (denied) {
+          log(requestId, route, method, denied, durationMs, categoryForStatus(denied))
+          return NextResponse.json(
+            { error: deniedErrorCode(denied), requestId },
+            { status: denied, headers: { 'X-Request-Id': requestId } },
+          )
+        }
+        const diag = classifyError(error)
+        emit({
+          requestId,
+          route,
+          method,
+          status: 500,
+          durationMs: Math.round(durationMs),
+          severity: 'error',
+          environment: environment(),
+          errorCategory: 'internal',
+          errorCode: 'REQUEST_FAILED',
+          errorClass: diag.errorClass,
+          ...(diag.code ? { dbCode: diag.code } : {}),
+          ...(diag.relation ? { relation: diag.relation } : {}),
+          ...(diag.rpc ? { rpc: diag.rpc } : {}),
+          ...(diag.column ? { column: diag.column } : {}),
+          ...(diag.sourceFile ? { sourceFile: diag.sourceFile } : {}),
+          ...(diag.stackLocation ? { stackLocation: diag.stackLocation } : {}),
+        })
         return NextResponse.json(
-          { error: deniedErrorCode(denied), requestId },
-          { status: denied, headers: { 'X-Request-Id': requestId } },
+          {
+            error: 'REQUEST_FAILED',
+            message: 'The request could not be completed.',
+            requestId,
+          },
+          { status: 500, headers: { 'X-Request-Id': requestId } },
         )
       }
-      const diag = classifyError(error)
-      emit({
-        requestId,
-        route,
-        method,
-        status: 500,
-        durationMs: Math.round(durationMs),
-        severity: 'error',
-        environment: environment(),
-        errorCategory: 'internal',
-        errorCode: 'REQUEST_FAILED',
-        errorClass: diag.errorClass,
-        ...(diag.code ? { dbCode: diag.code } : {}),
-        ...(diag.relation ? { relation: diag.relation } : {}),
-        ...(diag.rpc ? { rpc: diag.rpc } : {}),
-        ...(diag.column ? { column: diag.column } : {}),
-        ...(diag.sourceFile ? { sourceFile: diag.sourceFile } : {}),
-        ...(diag.stackLocation ? { stackLocation: diag.stackLocation } : {}),
-      })
-      return NextResponse.json(
-        {
-          error: 'REQUEST_FAILED',
-          message: 'The request could not be completed.',
-          requestId,
-        },
-        { status: 500, headers: { 'X-Request-Id': requestId } },
-      )
     }
+
+    if (!options.performanceTiming) return execute()
+    return runWithPerformanceTiming(
+      { requestId, route, method, startedAt: start },
+      execute,
+      (response) => response.status,
+      emitPerformanceTiming,
+    )
   }
 }

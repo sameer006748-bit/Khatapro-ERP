@@ -3,10 +3,13 @@ import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth/authOptions'
 import { hasPermission, loadSessionUser } from '@/lib/auth/permissions'
 import { listCustomers } from '@/lib/sales/data-access'
-import { withObservability } from '@/lib/observability'
+import { withObservability, measurePerformanceStage } from '@/lib/observability'
 
 export const GET = withObservability('/api/customers', async () => {
-  const session = await getServerSession(authOptions)
+  const session = await measurePerformanceStage(
+    'session.getServerSession',
+    () => getServerSession(authOptions),
+  )
   if (!session?.user) {
     return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
   }
@@ -20,5 +23,9 @@ export const GET = withObservability('/api/customers', async () => {
   if (!allowed) {
     return NextResponse.json({ error: 'FORBIDDEN' }, { status: 403 })
   }
-  return NextResponse.json({ rows: await listCustomers(user.businessId) })
-})
+  const rows = await measurePerformanceStage(
+    'endpoint.customersList',
+    () => listCustomers(user.businessId),
+  )
+  return NextResponse.json({ rows })
+}, { performanceTiming: true })

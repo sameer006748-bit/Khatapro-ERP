@@ -4,7 +4,7 @@ import { authOptions } from '@/lib/auth/authOptions'
 import { loadSessionUser, hasPermission } from '@/lib/auth/permissions'
 import { reportProfitLoss, reportBalanceSheet, reportSalesSummary, reportInventoryValuation, reportCashFlow, reportExpenseSummary, reportCustomerOutstanding, reportVendorOutstanding, reportSalesDetail, reportPurchaseDetail, reportStockMovements, reportDeliverySummary, reportCodSettlements, reportProductProfitability, reportTrialBalance, reportExceptions, reportMoneyAccountCodes } from '@/lib/reports/data-access'
 import { sumMoneyAccountBalances } from '@/lib/reports/money-account-balance'
-import { resolveRequestId, safeApiError, withObservability } from '@/lib/observability'
+import { resolveRequestId, safeApiError, withObservability, measurePerformanceStage } from '@/lib/observability'
 import { bizDateString } from '@/lib/dates'
 import { isSchemaUnavailableError } from '@/lib/dashboard/compatibility'
 import { getAccountingAvailability, unavailableAccountingPayload } from '@/lib/accounting/availability'
@@ -68,7 +68,10 @@ async function reportClassification(
 
 export const GET = withObservability('/api/reports', async (req: Request) => {
   const requestId = resolveRequestId(req)
-  const session = await getServerSession(authOptions)
+  const session = await measurePerformanceStage(
+    'session.getServerSession',
+    () => getServerSession(authOptions),
+  )
   if (!session?.user) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
   const loaded = await loadSessionUser((session.user as any).id)
   if (!loaded) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
@@ -112,19 +115,28 @@ export const GET = withObservability('/api/reports', async (req: Request) => {
       'product-profitability',
     ])
     if (accountingTypes.has(type)) {
-      const capability = await getAccountingAvailability(bid)
-      const legacyReportsSupported = capability.path === 'operational-fallback'
-        && isSupabaseConfigured()
-        && await usesLegacyTransactionSchema()
-      if (capability.path === 'operational-fallback' && !legacyReportsSupported) {
+      const unavailable = await measurePerformanceStage(
+        'preflight.accountingAvailability',
+        async () => {
+          const capability = await getAccountingAvailability(bid)
+          const legacyReportsSupported = capability.path === 'operational-fallback'
+            && isSupabaseConfigured()
+            && await usesLegacyTransactionSchema()
+          return capability.path === 'operational-fallback' && !legacyReportsSupported
+            ? capability.reason
+            : null
+        },
+      )
+      if (unavailable) {
         return NextResponse.json(unavailableAccountingPayload(
           { rows: [] },
-          capability.reason,
+          unavailable,
         ))
       }
     }
-    switch (type) {
-      case 'profit-loss': {
+    return await measurePerformanceStage('endpoint.reportWorkload', async () => {
+      switch (type) {
+        case 'profit-loss': {
         // The report rows and the classification overlay are independent reads;
         // run them in parallel so label enrichment never serializes behind the RPC.
         const [rows, classification] = await Promise.all([
@@ -206,8 +218,9 @@ export const GET = withObservability('/api/reports', async (req: Request) => {
           balanced: assets === liabilities + equity,
         })
       }
-      default: return NextResponse.json({ error: 'UNKNOWN_REPORT_TYPE' }, { status: 400 })
-    }
+        default: return NextResponse.json({ error: 'UNKNOWN_REPORT_TYPE' }, { status: 400 })
+      }
+    })
   } catch (error) {
     if (isSchemaUnavailableError(error instanceof Error ? error : { message: String(error) })) {
       return NextResponse.json(unavailableAccountingPayload(
@@ -223,4 +236,4 @@ export const GET = withObservability('/api/reports', async (req: Request) => {
       error,
     })
   }
-})
+}, { performanceTiming: true })

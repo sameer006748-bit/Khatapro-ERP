@@ -4,12 +4,15 @@ import { authOptions } from '@/lib/auth/authOptions'
 import { loadSessionUser, requirePermission } from '@/lib/auth/permissions'
 import { bizDateString, resolveDashboardDateRange } from '@/lib/dates'
 import { buildOwnerDashboardPayload } from '@/lib/dashboard/owner-summary'
-import { resolveRequestId, safeApiError, withObservability } from '@/lib/observability'
+import { resolveRequestId, safeApiError, withObservability, measurePerformanceStage } from '@/lib/observability'
 
 export const GET = withObservability('/api/dashboard/owner', async (req: Request) => {
   const requestId = resolveRequestId(req)
   try {
-    const session = await getServerSession(authOptions)
+    const session = await measurePerformanceStage(
+      'session.getServerSession',
+      () => getServerSession(authOptions),
+    )
     if (!session?.user) {
       return NextResponse.json({ error: 'DASHBOARD_LOAD_FAILED' }, { status: 401 })
     }
@@ -34,13 +37,17 @@ export const GET = withObservability('/api/dashboard/owner', async (req: Request
       return NextResponse.json({ error: 'INVALID_DATE_RANGE' }, { status: 400 })
     }
 
-    return NextResponse.json(await buildOwnerDashboardPayload({
-      businessId: loaded.businessId,
-      profileId: loaded.profileId,
-      range,
-      today,
-      requestId,
-    }))
+    const payload = await measurePerformanceStage(
+      'endpoint.dashboardPayload',
+      () => buildOwnerDashboardPayload({
+        businessId: loaded.businessId,
+        profileId: loaded.profileId,
+        range,
+        today,
+        requestId,
+      }),
+    )
+    return NextResponse.json(payload)
   } catch (error) {
     return safeApiError({
       route: '/api/dashboard/owner',
@@ -50,4 +57,4 @@ export const GET = withObservability('/api/dashboard/owner', async (req: Request
       error,
     })
   }
-})
+}, { performanceTiming: true })

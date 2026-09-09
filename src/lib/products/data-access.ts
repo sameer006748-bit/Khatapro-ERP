@@ -12,6 +12,7 @@ import 'server-only'
 import { db } from '@/lib/db'
 import { getAdminSupabase } from '@/lib/supabase/admin'
 import { probeTable } from '@/lib/supabase/phase-probe'
+import { measurePerformanceStage } from '@/lib/observability'
 import { resolveSupabaseUuid } from '@/lib/accounting/voucher-supabase'
 import { planOpeningStock, SafeProductError } from '@/lib/products/opening-stock'
 import {
@@ -168,7 +169,10 @@ export async function listProducts(
       ].filter(Boolean).join(', ')
       let query: any = admin.from('products').select(fields).eq('business_id', businessId).order('name')
       if (opts?.temporaryOnly) query = query.eq('is_temporary', true)
-      const attempt = await query as NonNullable<typeof result>
+      const attempt = await measurePerformanceStage(
+        'endpoint.productQuery',
+        () => query as Promise<NonNullable<typeof result>>,
+      )
       result = attempt
       if (!attempt.error) {
         selected = optional
