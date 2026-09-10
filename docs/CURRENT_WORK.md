@@ -91,16 +91,11 @@ Database/RPC/TypeScript stay in integer paisas. The AI boundary converts once to
 
 # Exact next step
 
-**DEPLOY THE BOUNDED API TIMING CHANGE, VERIFY THE STABLE PRODUCTION ALIAS, AND CAPTURE CORRELATED SERVER LOGS.**
+**DEPLOY THE SUCCESS-PATH TIMING FINALIZER FIX, THEN VERIFY ONLY PRODUCTS AND REPORTS.**
 
-For each measured GET route (`/api/dashboard/owner`, `/api/sales/counter`, `/api/setup/business-accounts`, `/api/products`, `/api/salesmen`, `/api/customers`, and `/api/reports` overview/Profit & Loss):
-- issue the already-known production request through `https://khatapro-erp.vercel.app`,
-- retain the response `X-Request-Id`,
-- locate its single `api_performance_timing` event,
-- compare total route duration with session, each `loadSessionUser`, auth/profile/permission, compatibility/preflight, and endpoint workload stages,
-- record `loadSessionUserCount`, `duplicateLoadSessionUser`, and any unexplained residual duration.
+Production evidence from instrumentation commit `00a6b42` showed successful authenticated 200 requests emitting `api_request` but no `api_performance_timing`, while a 401 Dashboard request emitted timing. The bounded fix replaces completion from the async `finally` return path with an explicit, idempotent `finish(status)` call on both success and error paths. No auth/session/permission/cache behavior changes.
 
-This instrumentation does not prove the latency root cause until those live correlated logs are captured. Do not remove duplicate hydration or begin a second optimization batch from source evidence alone.
+**Exact next step after deployment:** issue one authenticated 200 request each to `/api/products` and `/api/reports`, retain each `X-Request-Id`, and confirm exactly one matching `api_performance_timing` event containing total duration, `session.getServerSession`, `loadSessionUserCount`, `duplicateLoadSessionUser`, and stage timings. Stop after those two checks; do not begin Batch 2 or full seven-route verification yet.
 
 ---
 

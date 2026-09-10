@@ -110,12 +110,10 @@ export async function runWithPerformanceTiming<T>(
   }
 
   return performanceContext.run(context, async () => {
-    let status = 500
-    try {
-      const value = await operation()
-      status = statusOf(value)
-      return value
-    } finally {
+    let completed = false
+    const finish = (status: number) => {
+      if (completed) return
+      completed = true
       complete({
         requestId: context.requestId,
         route: context.route,
@@ -126,6 +124,15 @@ export async function runWithPerformanceTiming<T>(
         duplicateLoadSessionUser: context.loadSessionUserCount > 1,
         stages: [...context.stages],
       })
+    }
+
+    try {
+      const value = await operation()
+      finish(statusOf(value))
+      return value
+    } catch (error) {
+      finish(500)
+      throw error
     }
   })
 }

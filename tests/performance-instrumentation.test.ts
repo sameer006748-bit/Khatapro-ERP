@@ -14,22 +14,42 @@ const read = (path: string) => readFile(new URL(path, root), 'utf8')
 async function capture(
   requestId: string,
   operation: () => Promise<number>,
-): Promise<{ value?: number; error?: unknown; snapshot: PerformanceTimingSnapshot }> {
-  let snapshot: PerformanceTimingSnapshot | undefined
+): Promise<{ value?: number; error?: unknown; snapshots: PerformanceTimingSnapshot[] }> {
+  const snapshots: PerformanceTimingSnapshot[] = []
   try {
     const value = await runWithPerformanceTiming(
       { requestId, route: '/api/test', method: 'GET', startedAt: performance.now() },
       operation,
-      () => 200,
-      (completed) => { snapshot = completed },
+      (status) => status,
+      (completed) => { snapshots.push(completed) },
     )
-    assert.ok(snapshot)
-    return { value, snapshot }
+    assert.equal(snapshots.length, 1)
+    return { value, snapshots }
   } catch (error) {
-    assert.ok(snapshot)
-    return { error, snapshot }
+    assert.equal(snapshots.length, 1)
+    return { error, snapshots }
   }
 }
+
+test('successful 200 timing completes exactly once with the safe schema', async () => {
+  const result = await capture('successful-request', async () => {
+    countLoadSessionUserInvocation()
+    await measurePerformanceStage('session.getServerSession', async () => undefined)
+    return 200
+  })
+
+  assert.equal(result.value, 200)
+  assert.equal(result.snapshots.length, 1)
+  const snapshot = result.snapshots[0]
+  assert.equal(snapshot.status, 200)
+  assert.equal(snapshot.loadSessionUserCount, 1)
+  assert.equal(snapshot.duplicateLoadSessionUser, false)
+  assert.deepEqual(snapshot.stages.map(({ stage }) => stage), ['session.getServerSession'])
+  assert.deepEqual(Object.keys(snapshot).sort(), [
+    'duplicateLoadSessionUser', 'durationMs', 'loadSessionUserCount', 'method',
+    'requestId', 'route', 'stages', 'status',
+  ])
+})
 
 test('request timing isolates concurrent nested stages and load counts', async () => {
   const [first, second] = await Promise.all([
@@ -49,16 +69,23 @@ test('request timing isolates concurrent nested stages and load counts', async (
   ])
 
   assert.equal(first.value, 1)
-  assert.equal(first.snapshot.loadSessionUserCount, 2)
-  assert.equal(first.snapshot.duplicateLoadSessionUser, true)
-  assert.deepEqual(first.snapshot.stages.map(({ stage, occurrence }) => ({ stage, occurrence })), [
+  assert.equal(first.snapshots[0].loadSessionUserCount, 2)
+  assert.equal(first.snapshots[0].duplicateLoadSessionUser, true)
+  assert.deepEqual(first.snapshots[0].stages.map(({ stage, occurrence }) => ({ stage, occurrence })), [
     { stage: 'session.profileLookup', occurrence: 1 },
     { stage: 'session.loadSessionUser', occurrence: 1 },
   ])
   assert.equal(second.value, 2)
-  assert.equal(second.snapshot.loadSessionUserCount, 1)
-  assert.equal(second.snapshot.duplicateLoadSessionUser, false)
-  assert.deepEqual(second.snapshot.stages.map(({ stage }) => stage), ['endpoint.productList'])
+  assert.equal(second.snapshots[0].loadSessionUserCount, 1)
+  assert.equal(second.snapshots[0].duplicateLoadSessionUser, false)
+  assert.deepEqual(second.snapshots[0].stages.map(({ stage }) => stage), ['endpoint.productList'])
+})
+
+test('401 completion emits exactly one timing snapshot', async () => {
+  const result = await capture('unauthorized-request', async () => 401)
+  assert.equal(result.value, 401)
+  assert.equal(result.snapshots.length, 1)
+  assert.equal(result.snapshots[0].status, 401)
 })
 
 test('completion snapshot is emitted for an error with safe fixed fields only', async () => {
@@ -74,15 +101,17 @@ test('completion snapshot is emitted for an error with safe fixed fields only', 
   })
 
   assert.ok(result.error)
-  assert.equal(result.snapshot.status, 500)
-  assert.equal(result.snapshot.stages[0]?.outcome, 'error')
-  const serialized = JSON.stringify(result.snapshot)
+  assert.equal(result.snapshots.length, 1)
+  const snapshot = result.snapshots[0]
+  assert.equal(snapshot.status, 500)
+  assert.equal(snapshot.stages[0]?.outcome, 'error')
+  const serialized = JSON.stringify(snapshot)
   for (const fragment of secretFragments) assert.doesNotMatch(serialized, new RegExp(fragment))
-  assert.deepEqual(Object.keys(result.snapshot).sort(), [
+  assert.deepEqual(Object.keys(snapshot).sort(), [
     'duplicateLoadSessionUser', 'durationMs', 'loadSessionUserCount', 'method',
     'requestId', 'route', 'stages', 'status',
   ])
-  assert.deepEqual(Object.keys(result.snapshot.stages[0] ?? {}).sort(), [
+  assert.deepEqual(Object.keys(snapshot.stages[0] ?? {}).sort(), [
     'durationMs', 'occurrence', 'outcome', 'stage',
   ])
 })
