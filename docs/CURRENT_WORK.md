@@ -91,11 +91,15 @@ Database/RPC/TypeScript stay in integer paisas. The AI boundary converts once to
 
 # Exact next step
 
-**DEPLOY THE SUCCESS-PATH TIMING FINALIZER FIX, THEN VERIFY ONLY PRODUCTS AND REPORTS.**
+**STOP AFTER THE TWO-ROUTE TIMING VERIFICATION; DO NOT BEGIN BATCH 2.**
 
-Production evidence from instrumentation commit `00a6b42` showed successful authenticated 200 requests emitting `api_request` but no `api_performance_timing`, while a 401 Dashboard request emitted timing. The bounded fix replaces completion from the async `finally` return path with an explicit, idempotent `finish(status)` call on both success and error paths. No auth/session/permission/cache behavior changes.
+Production log evidence from deployment `dpl_7jiHbTYaUYzAuJUJXM9QfqTm75tX` confirms commit `a615e29` emits exactly one `api_performance_timing` event for each verified authenticated 200 request. Vercel groups the event inside the invocation record's nested `logs` array rather than returning it as a separate top-level search result, which caused the false missing-event conclusion.
 
-**Exact next step after deployment:** issue one authenticated 200 request each to `/api/products` and `/api/reports`, retain each `X-Request-Id`, and confirm exactly one matching `api_performance_timing` event containing total duration, `session.getServerSession`, `loadSessionUserCount`, `duplicateLoadSessionUser`, and stage timings. Stop after those two checks; do not begin Batch 2 or full seven-route verification yet.
+Verified request correlations:
+- `/api/products` request `fca82b28-db14-4385-9546-eed967779918`: `api_request` 200 at 3,775 ms and one matching timing event at 3,776 ms.
+- `/api/reports` request `27c092de-1a25-43b2-a9e6-0e61173244e1`: `api_request` 200 and one matching timing event at 3,911 ms.
+
+Both timing events contain total duration, `session.getServerSession`, `loadSessionUserCount`, `duplicateLoadSessionUser`, and fixed stage timings. No further source fix is justified. Await explicit direction before full seven-route verification, duplicate-hydration work, performance optimization, or Batch 2.
 
 ---
 
