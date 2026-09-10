@@ -114,6 +114,8 @@ A dedicated performance recovery/profile is now required before any decision to 
 
 Bounded request-correlated server timing is available for the seven measured GET paths. It records fixed, non-sensitive session/load/auth/context, actual compatibility probe, endpoint workload, and total-route durations plus duplicate `loadSessionUser` detection. Batch 3A is deployed at commit `66c4cd0`: Supabase Auth Admin `getUserById` remains authoritative, followed by one additive service-role-only RPC that resolves the active, same-business profile/role/permission context. Manual Products/Reports requests and Vercel timing-log comparison remain required before claiming a measured latency improvement.
 
+Batch 3B is deployed at commit `407b159`. The Reports hot path removed its redundant UUID-ledger availability probe and deduplicates concurrent legacy-schema probes. The Products hot path removed its separate table probe and the production-only guaranteed failure on absent `commission_rate`, while retaining optional-column fallback behavior. No auth, permission, accounting calculation, database schema, RLS, or migration changed. Manual stable-alias timing verification remains required; no further Batch 3 work has started.
+
 A bounded application-side performance code pass is complete on `main` (parallel financial-report reads, longer master-data caching) and is closed for this client-UAT checkpoint; later client feedback may reopen a bounded V1 hotfix.
 
 ## Print / invoice state

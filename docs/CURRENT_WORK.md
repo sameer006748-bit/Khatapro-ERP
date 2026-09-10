@@ -91,13 +91,15 @@ Database/RPC/TypeScript stay in integer paisas. The AI boundary converts once to
 
 # Exact next step
 
-**Manually verify Performance Batch 3A timing on Products and Reports; do not begin Batch 3B.**
+**Manually verify Performance Batch 3B timing on Products and Reports; do not begin further Batch 3 work.**
 
 Batch 3A commit `66c4cd0` is deployed Ready at Vercel deployment `dpl_Fadnd32m1nfLAFiW1ZmV9QDAvsFZ`, and the stable alias points to it. Exact migration `20260910093415_consolidate_session_user_context.sql` is applied and recorded only on production project `ebcebxwpddltiwrqybqc`. Readback confirmed `SECURITY INVOKER`, service-role-only execution, active context resolution, required fields, and permission-count equivalence.
 
 The server hydration chain is now `auth.admin.getUserById` followed by one `load_session_user_context` RPC. The old profile, role/role-permission, and permission-code stages are replaced by `session.contextLookup`; request-scoped refresh/caching behavior is unchanged. Required focused tests, TypeScript, changed-file ESLint, diff check, and production build passed. A precautionary full-suite run still has three unrelated baseline failures in untouched print/compatibility tests; they are outside this bounded auth change.
 
-Manual production verification must open Products and Reports and confirm in `api_performance_timing` that `loadSessionUserCount` stays 1, `duplicateLoadSessionUser` stays false, only the consolidated context stage appears, and hydration duration is materially lower. Batch 3B has not started.
+Batch 3B code commit `407b159` reached Ready at Vercel deployment `dpl_5PKRuBc8tJD1XzuFRDcaznyU1KM1` and is included in production `main`. Reports no longer performs the redundant UUID-ledger capability probe before readers that already select the legacy/UUID path; concurrent report readers share one in-flight legacy-schema probe. Products no longer performs a separate products-table probe, and project `ebcebxwpddltiwrqybqc` now starts with its measured optional-column shape (`low_stock_threshold` present, `commission_rate` absent) instead of issuing a guaranteed-failing full-list query first. Compatibility fallbacks remain.
+
+Manual production verification must open Products and Reports and compare `api_performance_timing` with the recorded baselines. No browser automation was used. No further Batch 3 work has started.
 
 Historical Batch 1/2 timing evidence follows.
 
@@ -107,7 +109,7 @@ Verified request correlations:
 - `/api/products` request `fca82b28-db14-4385-9546-eed967779918`: `api_request` 200 at 3,775 ms and one matching timing event at 3,776 ms.
 - `/api/reports` request `27c092de-1a25-43b2-a9e6-0e61173244e1`: `api_request` 200 and one matching timing event at 3,911 ms.
 
-Both timing events contain total duration, `session.getServerSession`, `loadSessionUserCount`, `duplicateLoadSessionUser`, and fixed stage timings. No further source fix is justified. Await explicit direction before full seven-route verification, duplicate-hydration work, performance optimization, or Batch 2.
+Both timing events contain total duration, `session.getServerSession`, `loadSessionUserCount`, `duplicateLoadSessionUser`, and fixed stage timings.
 
 ---
 
