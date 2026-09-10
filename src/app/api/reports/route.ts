@@ -8,10 +8,8 @@ import { sumMoneyAccountBalances } from '@/lib/reports/money-account-balance'
 import { resolveRequestId, safeApiError, withObservability, measurePerformanceStage } from '@/lib/observability'
 import { bizDateString } from '@/lib/dates'
 import { isSchemaUnavailableError } from '@/lib/dashboard/compatibility'
-import { getAccountingAvailability, unavailableAccountingPayload } from '@/lib/accounting/availability'
+import { unavailableAccountingPayload } from '@/lib/accounting/availability'
 import { buildClassificationOverlay, tryListAccountClassification } from '@/lib/accounting/legacy-account-classification'
-import { usesLegacyTransactionSchema } from '@/lib/identity/legacy-bridge'
-import { isSupabaseConfigured } from '@/lib/supabase/config'
 
 /**
  * Reports whose rows are one-per-ledger-account, so the custom classification
@@ -110,31 +108,6 @@ export const GET = withObservability('/api/reports', async (req: Request) => {
 
   try {
     const bid = loaded.businessId
-    const accountingTypes = new Set([
-      'overview', 'profit-loss', 'balance-sheet', 'trial-balance',
-      'cash-flow', 'expense', 'customer-outstanding', 'vendor-outstanding',
-      'product-profitability',
-    ])
-    if (accountingTypes.has(type)) {
-      const unavailable = await measurePerformanceStage(
-        'preflight.accountingAvailability',
-        async () => {
-          const capability = await getAccountingAvailability(bid)
-          const legacyReportsSupported = capability.path === 'operational-fallback'
-            && isSupabaseConfigured()
-            && await usesLegacyTransactionSchema()
-          return capability.path === 'operational-fallback' && !legacyReportsSupported
-            ? capability.reason
-            : null
-        },
-      )
-      if (unavailable) {
-        return NextResponse.json(unavailableAccountingPayload(
-          { rows: [] },
-          unavailable,
-        ))
-      }
-    }
     return await measurePerformanceStage('endpoint.reportWorkload', async () => {
       switch (type) {
         case 'profit-loss': {

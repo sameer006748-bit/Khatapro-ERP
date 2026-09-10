@@ -29,11 +29,18 @@ export function missingProductOptionalColumn(
 export function productColumnCandidates(
   cached: ProductOptionalColumns | null,
 ): ProductOptionalColumns[] {
-  if (cached) return [cached]
-  return [
+  const candidates = [
     PRODUCT_OPTIONAL_COLUMNS_ALL,
     { lowStockThreshold: true, commissionRate: false },
     { lowStockThreshold: false, commissionRate: true },
     { lowStockThreshold: false, commissionRate: false },
+  ]
+  if (!cached) return candidates
+  return [
+    cached,
+    ...candidates.filter(candidate => (
+      candidate.lowStockThreshold !== cached.lowStockThreshold
+      || candidate.commissionRate !== cached.commissionRate
+    )),
   ]
 }

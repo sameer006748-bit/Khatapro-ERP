@@ -10,6 +10,7 @@ import {
 
 const LEGACY_PROBE_TTL_MS = 30_000
 let cachedLegacySchema: { expiresAt: number; value: boolean } | null = null
+let legacySchemaPromise: Promise<boolean> | null = null
 
 /**
  * The verified production database has the original schema and no UUID-ledger
@@ -18,20 +19,27 @@ let cachedLegacySchema: { expiresAt: number; value: boolean } | null = null
  */
 export async function usesLegacyTransactionSchema(now = Date.now()): Promise<boolean> {
   if (cachedLegacySchema && cachedLegacySchema.expiresAt > now) return cachedLegacySchema.value
+  if (legacySchemaPromise) return legacySchemaPromise
 
-  const { error } = await measurePerformanceStage(
+  legacySchemaPromise = measurePerformanceStage(
     'preflight.legacySchema',
-    () => getAdminSupabase().from('ledger_vouchers').select('id').limit(1),
+    async () => getAdminSupabase().from('ledger_vouchers').select('id').limit(1),
   )
-  if (!error) {
-    cachedLegacySchema = { value: false, expiresAt: now + LEGACY_PROBE_TTL_MS }
-    return false
-  }
-  if (isSchemaUnavailableError(error)) {
-    cachedLegacySchema = { value: true, expiresAt: now + LEGACY_PROBE_TTL_MS }
-    return true
-  }
-  throw new Error(`Legacy schema probe: ${error.message ?? 'database request failed'}`)
+    .then(({ error }) => {
+      if (!error) {
+        cachedLegacySchema = { value: false, expiresAt: now + LEGACY_PROBE_TTL_MS }
+        return false
+      }
+      if (isSchemaUnavailableError(error)) {
+        cachedLegacySchema = { value: true, expiresAt: now + LEGACY_PROBE_TTL_MS }
+        return true
+      }
+      throw new Error(`Legacy schema probe: ${error.message ?? 'database request failed'}`)
+    })
+    .finally(() => {
+      legacySchemaPromise = null
+    })
+  return legacySchemaPromise
 }
 
 export class LegacyIdentityMigrationRequiredError extends Error {
@@ -96,4 +104,5 @@ export async function callRequiredLegacyIdentityRpc(
 
 export function resetLegacySchemaCacheForTests(): void {
   cachedLegacySchema = null
+  legacySchemaPromise = null
 }

@@ -11,6 +11,7 @@
 import 'server-only'
 import { db } from '@/lib/db'
 import { getAdminSupabase } from '@/lib/supabase/admin'
+import { isSupabaseConfigured, SUPABASE_URL } from '@/lib/supabase/config'
 import { probeTable } from '@/lib/supabase/phase-probe'
 import { measurePerformanceStage } from '@/lib/observability'
 import { resolveSupabaseUuid } from '@/lib/accounting/voucher-supabase'
@@ -30,6 +31,11 @@ import {
  */
 const _p3cache = { lastChecked: 0, lastResult: false }
 const PRODUCT_OPTIONAL_COLUMNS_TTL_MS = 30_000
+const PRODUCTION_PROJECT_REF = 'ebcebxwpddltiwrqybqc'
+const PRODUCTION_PRODUCT_COLUMNS: ProductOptionalColumns = {
+  lowStockThreshold: true,
+  commissionRate: false,
+}
 let productOptionalColumnsCache: { value: ProductOptionalColumns; expiresAt: number } | null = null
 
 async function isPhase3Live(): Promise<boolean> {
@@ -153,14 +159,24 @@ export async function listProducts(
   businessId: string,
   opts?: { temporaryOnly?: boolean; search?: string },
 ): Promise<ProductRow[]> {
-  if (await isPhase3Live()) {
+  // The list query itself proves the configured Supabase table is reachable;
+  // a separate products-table probe only adds a round trip. When Supabase is
+  // absent, retain the existing fail-closed Vercel/local-Prisma decision.
+  if (isSupabaseConfigured() || await isPhase3Live()) {
     const admin = getAdminSupabase()
     const cached = productOptionalColumnsCache && productOptionalColumnsCache.expiresAt > Date.now()
       ? productOptionalColumnsCache.value
       : null
+    // Production schema evidence: low_stock_threshold exists and the optional
+    // commission_rate migration does not. Prefer that exact shape so a cold
+    // function does not issue a guaranteed-to-fail full-list query. Other
+    // Supabase projects still negotiate every optional-column combination.
+    const preferred = cached ?? (SUPABASE_URL.includes(PRODUCTION_PROJECT_REF)
+      ? PRODUCTION_PRODUCT_COLUMNS
+      : null)
     let result: { data: unknown; error: { code?: string | null; message?: string | null; details?: string | null } | null } | null = null
     let selected: ProductOptionalColumns | null = null
-    for (const optional of productColumnCandidates(cached)) {
+    for (const optional of productColumnCandidates(preferred)) {
       const fields = [
         'id, name, category_id, unit, sale_price, purchase_price, current_stock, is_temporary, is_active, marked_for_merge',
         optional.lowStockThreshold ? 'low_stock_threshold' : '',
