@@ -73,7 +73,7 @@ test('request timing isolates concurrent nested stages and load counts', async (
       countLoadSessionUserInvocation()
       countLoadSessionUserInvocation()
       await measurePerformanceStage('session.loadSessionUser', async () => {
-        await measurePerformanceStage('session.profileLookup', async () => undefined)
+        await measurePerformanceStage('session.contextLookup', async () => undefined)
       })
       return 1
     }),
@@ -88,7 +88,7 @@ test('request timing isolates concurrent nested stages and load counts', async (
   assert.equal(first.snapshots[0].loadSessionUserCount, 2)
   assert.equal(first.snapshots[0].duplicateLoadSessionUser, true)
   assert.deepEqual(first.snapshots[0].stages.map(({ stage, occurrence }) => ({ stage, occurrence })), [
-    { stage: 'session.profileLookup', occurrence: 1 },
+    { stage: 'session.contextLookup', occurrence: 1 },
     { stage: 'session.loadSessionUser', occurrence: 1 },
   ])
   assert.equal(second.value, 2)
@@ -167,9 +167,8 @@ test('loadSessionUser still delegates through React cache and counts each caller
   assert.match(permissions, /const cachedLoadSessionUser = cache\(_loadSessionUser\)/)
   assert.match(permissions, /countLoadSessionUserInvocation\(\)[\s\S]{0,120}measurePerformanceStage\('session\.loadSessionUser',[\s\S]{0,120}cachedLoadSessionUser\(userId\)/)
   assert.match(permissions, /session\.authAdminUser/)
-  assert.match(permissions, /session\.profileLookup/)
-  assert.match(permissions, /session\.rolePermissionWave/)
-  assert.match(permissions, /session\.permissionCodes/)
+  assert.match(permissions, /session\.contextLookup/)
+  assert.doesNotMatch(permissions, /session\.profileLookup|session\.rolePermissionWave|session\.permissionCodes/)
 })
 
 test('fresh session hydration stays per request and is not stored in the JWT', async () => {

@@ -11,6 +11,16 @@ export type SessionUser = {
   permissions: Set<string>
 }
 
+type DatabaseSessionContext = {
+  profile_id: string
+  business_id: string
+  role_id: string
+  role_name: string
+  display_name: string
+  phone: string | null
+  permission_codes: string[]
+}
+
 type HydratedSessionUser = {
   id: string
   supabaseUserUuid: string | null
@@ -30,6 +40,56 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0
+}
+
+/**
+ * Convert the single database-context RPC row into the same SessionUser shape
+ * used by the former profile/role/permission query chain. Every authority
+ * field is required and malformed database output fails closed.
+ */
+export function sessionUserFromDatabaseContext(
+  identity: { id: string; email: string },
+  value: unknown,
+): SessionUser | null {
+  if (!isNonEmptyString(identity.id) || typeof identity.email !== 'string' || !isRecord(value)) {
+    return null
+  }
+
+  const candidate: DatabaseSessionContext = {
+    profile_id: isNonEmptyString(value.profile_id) ? value.profile_id : '',
+    business_id: isNonEmptyString(value.business_id) ? value.business_id : '',
+    role_id: isNonEmptyString(value.role_id) ? value.role_id : '',
+    role_name: isNonEmptyString(value.role_name) ? value.role_name : '',
+    display_name: isNonEmptyString(value.display_name) ? value.display_name : '',
+    phone: value.phone === null || typeof value.phone === 'string' ? value.phone : null,
+    permission_codes: Array.isArray(value.permission_codes) && value.permission_codes.every(isNonEmptyString)
+      ? value.permission_codes
+      : [],
+  }
+
+  if (
+    !candidate.profile_id
+    || !candidate.business_id
+    || !candidate.role_id
+    || !candidate.role_name
+    || !candidate.display_name
+    || (value.phone !== null && typeof value.phone !== 'string')
+    || !Array.isArray(value.permission_codes)
+    || !value.permission_codes.every(isNonEmptyString)
+  ) return null
+
+  return {
+    userId: identity.id,
+    supabaseUserUuid: identity.id,
+    profileId: candidate.profile_id,
+    businessId: candidate.business_id,
+    roleId: candidate.role_id,
+    roleName: candidate.role_name,
+    displayName: candidate.display_name,
+    email: identity.email,
+    phone: candidate.phone,
+    permissions: new Set(candidate.permission_codes),
+  }
 }
 
 /**

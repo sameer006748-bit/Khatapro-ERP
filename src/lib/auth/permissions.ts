@@ -15,7 +15,7 @@ import { isSupabaseConfigured } from '@/lib/supabase/config'
 import { createAuthClient } from '@/lib/supabase/auth'
 import { getAdminClient } from '@/lib/supabase/server-admin'
 import { countLoadSessionUserInvocation, measurePerformanceStage } from '@/lib/observability'
-import type { SessionUser } from '@/lib/auth/session-user'
+import { sessionUserFromDatabaseContext, type SessionUser } from '@/lib/auth/session-user'
 
 export type { SessionUser } from '@/lib/auth/session-user'
 
@@ -86,71 +86,19 @@ async function _loadSessionUser(userId: string): Promise<SessionUser | null> {
 
   const supaUserId = authData.user.id
 
-  // Fetch public profile
-  const { data: profile, error: profileError } = await measurePerformanceStage(
-    'session.profileLookup',
+  const { data: context, error: contextError } = await measurePerformanceStage(
+    'session.contextLookup',
     () => supabase
-      .from('profiles')
-      .select('*')
-      .eq('user_id', supaUserId)
-      .single(),
+      .rpc('load_session_user_context', { p_user_id: supaUserId })
+      .maybeSingle(),
   )
 
-  if (profileError || !profile || !profile.is_active) {
-    return null
-  }
+  if (contextError || !context) return null
 
-  // Role and its permission-id mappings are independent given the role_id —
-  // fetch them concurrently instead of sequentially.
-  const [roleRes, rolePermsRes] = await measurePerformanceStage(
-    'session.rolePermissionWave',
-    () => Promise.all([
-      supabase.from('roles').select('id, name').eq('id', profile.role_id).single(),
-      supabase.from('role_permissions').select('permission_id').eq('role_id', profile.role_id),
-    ]),
+  return sessionUserFromDatabaseContext(
+    { id: supaUserId, email: authData.user.email ?? '' },
+    context,
   )
-
-  const { data: role, error: roleError } = roleRes
-  if (roleError || !role) {
-    return null
-  }
-
-  const { data: rolePerms, error: rpError } = rolePermsRes
-  if (rpError) {
-    return null
-  }
-
-  const permIds = (rolePerms || []).map((rp: any) => rp.permission_id)
-
-  const { data: permissions, error: permError } = await measurePerformanceStage(
-    'session.permissionCodes',
-    () => supabase
-      .from('permissions')
-      .select('code')
-      .in('id', permIds),
-  )
-
-  if (permError) {
-    return null
-  }
-
-  const permissionCodes = new Set<string>()
-  for (const p of permissions || []) {
-    permissionCodes.add(p.code)
-  }
-
-  return {
-    userId: supaUserId,
-    supabaseUserUuid: supaUserId,
-    profileId: profile.id,
-    businessId: profile.business_id,
-    roleId: role.id,
-    roleName: role.name,
-      displayName: profile.display_name,
-      email: authData.user.email ?? '',
-      phone: profile.phone ?? null,
-      permissions: permissionCodes,
-  }
 }
 
 export function hasPermission(s: SessionUser | null, code: string): boolean {
