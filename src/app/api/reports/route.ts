@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth/authOptions'
-import { loadSessionUser, hasPermission } from '@/lib/auth/permissions'
+import { hasPermission } from '@/lib/auth/permissions'
+import { sessionUserFromHydratedUser } from '@/lib/auth/session-user'
 import { reportProfitLoss, reportBalanceSheet, reportSalesSummary, reportInventoryValuation, reportCashFlow, reportExpenseSummary, reportCustomerOutstanding, reportVendorOutstanding, reportSalesDetail, reportPurchaseDetail, reportStockMovements, reportDeliverySummary, reportCodSettlements, reportProductProfitability, reportTrialBalance, reportExceptions, reportMoneyAccountCodes } from '@/lib/reports/data-access'
 import { sumMoneyAccountBalances } from '@/lib/reports/money-account-balance'
 import { resolveRequestId, safeApiError, withObservability, measurePerformanceStage } from '@/lib/observability'
@@ -73,7 +74,7 @@ export const GET = withObservability('/api/reports', async (req: Request) => {
     () => getServerSession(authOptions),
   )
   if (!session?.user) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
-  const loaded = await loadSessionUser((session.user as any).id)
+  const loaded = sessionUserFromHydratedUser(session.user)
   if (!loaded) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
 
   const url = new URL(req.url)

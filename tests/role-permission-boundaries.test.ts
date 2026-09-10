@@ -41,7 +41,7 @@ test('every API route either is a declared public route or loads the session', a
     const source = await read(`src/app/api/${file}`)
     assert.match(
       source,
-      /loadSessionUser|requireAiSettingsOwner/,
+      /loadSessionUser|sessionUserFromHydratedUser|requireAiSettingsOwner/,
       `${file} must resolve the caller before answering`,
     )
   }

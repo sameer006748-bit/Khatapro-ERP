@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth/authOptions'
-import { hasPermission, loadSessionUser } from '@/lib/auth/permissions'
+import { hasPermission } from '@/lib/auth/permissions'
+import { sessionUserFromHydratedUser } from '@/lib/auth/session-user'
 import { listCustomers } from '@/lib/sales/data-access'
 import { withObservability, measurePerformanceStage } from '@/lib/observability'
 
@@ -13,7 +14,7 @@ export const GET = withObservability('/api/customers', async () => {
   if (!session?.user) {
     return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
   }
-  const user = await loadSessionUser((session.user as any).id)
+  const user = sessionUserFromHydratedUser(session.user)
   if (!user) {
     return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
   }

@@ -15,19 +15,9 @@ import { isSupabaseConfigured } from '@/lib/supabase/config'
 import { createAuthClient } from '@/lib/supabase/auth'
 import { getAdminClient } from '@/lib/supabase/server-admin'
 import { countLoadSessionUserInvocation, measurePerformanceStage } from '@/lib/observability'
+import type { SessionUser } from '@/lib/auth/session-user'
 
-export type SessionUser = {
-  userId: string
-  supabaseUserUuid: string | null
-  profileId: string
-  businessId: string
-  roleId: string
-  roleName: string
-  displayName: string
-  email: string
-  phone: string | null
-  permissions: Set<string>
-}
+export type { SessionUser } from '@/lib/auth/session-user'
 
 /**
  * Load a SessionUser (with resolved permission set) by userId.

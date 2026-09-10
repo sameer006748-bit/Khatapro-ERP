@@ -7,6 +7,7 @@ import { getServerSession } from 'next-auth'
 import { z } from 'zod'
 import { authOptions } from '@/lib/auth/authOptions'
 import { loadSessionUser, requirePermission } from '@/lib/auth/permissions'
+import { sessionUserFromHydratedUser } from '@/lib/auth/session-user'
 import { listProducts, createProduct } from '@/lib/products/data-access'
 import { SafeProductError } from '@/lib/products/opening-stock'
 import { withObservability, resolveRequestId, safeMutationError, measurePerformanceStage } from '@/lib/observability'
@@ -17,7 +18,7 @@ export const GET = withObservability('/api/products', async (req: Request) => {
     () => getServerSession(authOptions),
   )
   if (!session?.user) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
-  const su = await loadSessionUser((session.user as any).id)
+  const su = sessionUserFromHydratedUser(session.user)
   if (!su) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
 
   const url = new URL(req.url)

@@ -24,6 +24,7 @@ import { z } from 'zod'
 import { db } from '@/lib/db'
 import { authOptions } from '@/lib/auth/authOptions'
 import { loadSessionUser, requirePermission, writeAudit } from '@/lib/auth/permissions'
+import { sessionUserFromHydratedUser } from '@/lib/auth/session-user'
 import {
   BUSINESS_ACCOUNT_TYPES,
   moneyTypeFromLedgerAccount,
@@ -184,7 +185,7 @@ async function getSetupBusinessAccounts() {
     () => getServerSession(authOptions),
   )
   if (!session?.user) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
-  const su = await loadSessionUser((session.user as any).id)
+  const su = sessionUserFromHydratedUser(session.user)
   if (!su) {
     return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
   }

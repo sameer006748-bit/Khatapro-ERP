@@ -94,6 +94,8 @@ export const authOptions: NextAuthOptions = {
           ;(session.user as any).roleId = su.roleId
           ;(session.user as any).roleName = su.roleName
           ;(session.user as any).displayName = su.displayName
+          ;(session.user as any).email = su.email
+          ;(session.user as any).phone = su.phone
           ;(session.user as any).permissions = Array.from(su.permissions)
         }
       }
@@ -113,6 +115,7 @@ export type AppSession = {
     roleId: string
     roleName: string
     displayName: string
+    phone: string | null
     permissions: string[]
   }
 }

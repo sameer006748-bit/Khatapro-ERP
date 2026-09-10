@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth/authOptions'
-import { loadSessionUser, requirePermission } from '@/lib/auth/permissions'
+import { requirePermission } from '@/lib/auth/permissions'
+import { sessionUserFromHydratedUser } from '@/lib/auth/session-user'
 import { bizDateString, resolveDashboardDateRange } from '@/lib/dates'
 import { buildOwnerDashboardPayload } from '@/lib/dashboard/owner-summary'
 import { resolveRequestId, safeApiError, withObservability, measurePerformanceStage } from '@/lib/observability'
@@ -16,7 +17,7 @@ export const GET = withObservability('/api/dashboard/owner', async (req: Request
     if (!session?.user) {
       return NextResponse.json({ error: 'DASHBOARD_LOAD_FAILED' }, { status: 401 })
     }
-    const loaded = await loadSessionUser((session.user as any).id)
+    const loaded = sessionUserFromHydratedUser(session.user)
     if (!loaded) {
       return NextResponse.json({ error: 'DASHBOARD_LOAD_FAILED' }, { status: 401 })
     }

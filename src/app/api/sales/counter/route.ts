@@ -11,6 +11,7 @@ import { getServerSession } from 'next-auth'
 import { z } from 'zod'
 import { authOptions } from '@/lib/auth/authOptions'
 import { loadSessionUser, requirePermission, hasPermission } from '@/lib/auth/permissions'
+import { sessionUserFromHydratedUser } from '@/lib/auth/session-user'
 import { postSale, listInvoices, resolveSalesmanIdForUser, resolveSaleSeller } from '@/lib/sales/data-access'
 import { SaleLineError } from '@/lib/sales/sale-engine'
 import { parseMoney } from '@/lib/format'
@@ -213,7 +214,7 @@ const getSales = async (req: Request) => {
     () => getServerSession(authOptions),
   )
   if (!session?.user) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
-  const su = await loadSessionUser((session.user as any).id)
+  const su = sessionUserFromHydratedUser(session.user)
   if (!su) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 })
 
   const canViewAll = hasPermission(su, 'can_view_sales')
