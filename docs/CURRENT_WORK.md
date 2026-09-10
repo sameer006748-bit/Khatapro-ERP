@@ -91,7 +91,15 @@ Database/RPC/TypeScript stay in integer paisas. The AI boundary converts once to
 
 # Exact next step
 
-**STOP AFTER THE TWO-ROUTE TIMING VERIFICATION; DO NOT BEGIN BATCH 2.**
+**Manually verify Performance Batch 3A timing on Products and Reports; do not begin Batch 3B.**
+
+Batch 3A commit `66c4cd0` is deployed Ready at Vercel deployment `dpl_Fadnd32m1nfLAFiW1ZmV9QDAvsFZ`, and the stable alias points to it. Exact migration `20260910093415_consolidate_session_user_context.sql` is applied and recorded only on production project `ebcebxwpddltiwrqybqc`. Readback confirmed `SECURITY INVOKER`, service-role-only execution, active context resolution, required fields, and permission-count equivalence.
+
+The server hydration chain is now `auth.admin.getUserById` followed by one `load_session_user_context` RPC. The old profile, role/role-permission, and permission-code stages are replaced by `session.contextLookup`; request-scoped refresh/caching behavior is unchanged. Required focused tests, TypeScript, changed-file ESLint, diff check, and production build passed. A precautionary full-suite run still has three unrelated baseline failures in untouched print/compatibility tests; they are outside this bounded auth change.
+
+Manual production verification must open Products and Reports and confirm in `api_performance_timing` that `loadSessionUserCount` stays 1, `duplicateLoadSessionUser` stays false, only the consolidated context stage appears, and hydration duration is materially lower. Batch 3B has not started.
+
+Historical Batch 1/2 timing evidence follows.
 
 Production log evidence from deployment `dpl_7jiHbTYaUYzAuJUJXM9QfqTm75tX` confirms commit `a615e29` emits exactly one `api_performance_timing` event for each verified authenticated 200 request. Vercel groups the event inside the invocation record's nested `logs` array rather than returning it as a separate top-level search result, which caused the false missing-event conclusion.
 
